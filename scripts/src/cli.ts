@@ -124,7 +124,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       checks: {
         status: status.ok === true,
         scores: scores.ok === true,
-        refresh: refreshed.ok === true,
+        refresh: refreshed.ok === true && refreshed.snapshotOk === true,
         ranking: ranking.ok === true,
         lottery: lottery.ok === true,
       },
