@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111412" />
+  <title>用户用量 | ApiState</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/app.js" type="module"></script>
+</head>
+<body data-page="ranking">
+  <div data-shell></div>
+  <main class="workspace">
+    <header class="page-head"><div><p class="eyebrow">USER FLOW / DAILY</p><h1>用户用量</h1></div><span id="ranking-range" class="state-badge">读取中</span></header>
+    <section class="metric-strip"><div><span>标准 API 用量</span><strong id="ranking-cost">—</strong></div><div><span>请求</span><strong id="ranking-requests">—</strong></div><div><span>Token</span><strong id="ranking-tokens">—</strong></div></section>
+    <section class="table-section"><div class="table-wrap"><table class="data-table"><thead><tr><th>名次</th><th>用户</th><th>API USD</th><th>请求</th><th>Token</th></tr></thead><tbody id="ranking-body"><tr><td colspan="5" class="empty">正在读取用量...</td></tr></tbody></table></div></section>
+  </main>
+</body>
+</html>

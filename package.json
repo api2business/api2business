@@ -1,10 +1,10 @@
 {
-  "name": "sub2rank",
+  "name": "apistate",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "cli": "bun scripts/sub2rank-cli.ts --config config/sub2rank.yaml",
+    "cli": "bun scripts/apistate-cli.ts --config config/sub2rank.yaml",
     "server": "bun src/server.ts --config config/sub2rank.yaml --runtime k8s",
     "check": "bunx tsc --noEmit"
   },

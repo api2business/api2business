@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111412" />
+  <title>账号评分 | ApiState</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/app.js" type="module"></script>
+</head>
+<body data-page="scores">
+  <div data-shell></div>
+  <main class="workspace">
+    <header class="page-head">
+      <div><p class="eyebrow">ACCOUNT QUALITY / ALL GROUPS</p><h1>上游账号评分</h1></div>
+      <div class="page-actions">
+        <span id="score-state" class="state-badge">读取中</span>
+        <button id="refresh-scores" class="icon-command" type="button" title="立即刷新" aria-label="立即刷新">↻</button>
+      </div>
+    </header>
+    <section class="metric-strip" aria-label="评分概要">
+      <div><span>账号</span><strong id="metric-accounts">—</strong></div>
+      <div><span>分组</span><strong id="metric-groups">—</strong></div>
+      <div><span>优质</span><strong id="metric-good">—</strong></div>
+      <div><span>需关注</span><strong id="metric-risk">—</strong></div>
+      <div><span>评分窗口</span><strong id="metric-window">—</strong></div>
+    </section>
+    <section class="table-section">
+      <div class="table-toolbar">
+        <div class="filter-field"><span>筛选</span><input id="score-filter" type="search" placeholder="账号或分组" /></div>
+        <p id="score-updated">尚无成功快照</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" aria-label="所有分组账号评分">
+          <thead><tr><th>账号</th><th>分组</th><th>优先级</th><th>评分</th><th>等级</th><th>置信度</th><th>尝试</th><th>失败率</th><th>TTFT P95</th><th>请求</th><th>Token</th><th>API USD</th><th>切号恢复</th><th>可用</th></tr></thead>
+          <tbody id="score-body"><tr><td colspan="14" class="empty">正在读取评分快照...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

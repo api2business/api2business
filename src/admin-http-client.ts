@@ -18,7 +18,7 @@ export class AdminHttpClient {
       signal: AbortSignal.timeout(this.config.sub2api.requestTimeoutMs),
     });
     const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
-    if (!response.ok || !payload) throw new Error(payload?.error ?? `Sub2Rank admin API failed with HTTP ${response.status}`);
+    if (!response.ok || !payload) throw new Error(payload?.error ?? `ApiState API failed with HTTP ${response.status}`);
     return payload as T;
   }
 
@@ -31,4 +31,9 @@ export class AdminHttpClient {
   records(limit: number): Promise<Record<string, unknown>> { return this.request(`/api/admin/records?limit=${limit}`); }
   deleteRecord(id: string): Promise<Record<string, unknown>> { return this.request(`/api/admin/records/${encodeURIComponent(id)}`, { method: "DELETE" }); }
   creditTest(execute: boolean): Promise<Record<string, unknown>> { return this.request("/api/admin/credit-test", { method: "POST", body: JSON.stringify({ execute }) }); }
+  serviceStatus(): Promise<Record<string, unknown>> { return this.request("/api/status"); }
+  scores(): Promise<Record<string, unknown>> { return this.request("/api/scores"); }
+  refreshScores(): Promise<Record<string, unknown>> { return this.request("/api/scores/refresh", { method: "POST", body: "{}" }); }
+  ranking(): Promise<Record<string, unknown>> { return this.request("/api/ranking"); }
+  lottery(): Promise<Record<string, unknown>> { return this.request("/api/lottery"); }
 }

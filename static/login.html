@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111412" />
+  <title>登录 | ApiState</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/app.js" type="module"></script>
+</head>
+<body data-page="login" class="login-page">
+  <main class="login-layout">
+    <section class="login-brand" aria-label="ApiState">
+      <span class="brand-mark">AS</span>
+      <p>SUB2API OPERATIONS</p>
+      <h1>ApiState</h1>
+      <div class="signal-line"><i></i><span>PK01 / ACCOUNT QUALITY</span></div>
+    </section>
+    <section class="login-panel">
+      <form id="login-form" autocomplete="on">
+        <header><p class="eyebrow">CONTROL ROOM ACCESS</p><h2>运维登录</h2></header>
+        <label>用户名<input id="username" name="username" autocomplete="username" required /></label>
+        <label>密码<input id="password" name="password" type="password" autocomplete="current-password" required /></label>
+        <p id="login-error" class="form-error" role="alert"></p>
+        <button class="primary-command" type="submit">登录</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
