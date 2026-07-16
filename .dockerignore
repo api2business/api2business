@@ -1,0 +1,5 @@
+.git
+.state
+node_modules
+scripts
+*.log

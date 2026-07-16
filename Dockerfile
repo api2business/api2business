@@ -1,0 +1,15 @@
+FROM oven/bun:1.2.21-slim
+
+WORKDIR /app
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production
+
+COPY config ./config
+COPY src ./src
+COPY static ./static
+
+ENV NODE_ENV=production
+EXPOSE 8080
+
+CMD ["bun", "src/server.ts", "--config", "config/sub2rank.yaml", "--runtime", "k8s"]
