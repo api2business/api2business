@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { AppConfig } from "./config";
 
@@ -79,14 +79,14 @@ export class AccountScoreService {
     this.snapshot = { ...this.snapshot, status: "refreshing", refreshStartedAt: startedAt.toISOString(), error: null };
     try {
       const overview = await this.invoke(["--all-groups"]);
-      const groups = records(nested(overview, "data", "runtime", "allGroups", "groups"));
+      const groups = records(nested(overview, "data", "parsed", "allGroups", "groups"));
       const details = await pooled(groups, 2, async (group) => {
         const id = String(group.groupId ?? "");
         if (!id) return { group, accounts: [] as Array<Record<string, unknown>> };
         const payload = await this.invoke(["--group", id]);
         return {
           group,
-          accounts: records(nested(payload, "data", "runtime", "errors", "nativeOps", "accountQuality", "accounts")),
+          accounts: records(nested(payload, "data", "parsed", "errors", "nativeOps", "accountQuality", "accounts")),
         };
       });
       const refreshedAt = new Date();
@@ -149,9 +149,20 @@ export class AccountScoreService {
     ]).finally(() => clearTimeout(timeout));
     if (timedOut) throw new Error(`评分 CLI 在 ${this.config.monitor.cli.timeoutMs}ms 后超时`);
     if (exitCode !== 0) throw new Error(`评分 CLI 退出码 ${exitCode}: ${stderr.trim().slice(-600)}`);
-    const payload = record(JSON.parse(stdout));
+    let payload = record(JSON.parse(stdout));
     if (!payload || payload.ok !== true) throw new Error("评分 CLI 返回无效结果");
-    if (nested(payload, "data", "outputTruncated")) throw new Error("评分 CLI 输出被截断");
+    if (nested(payload, "data", "outputTruncated")) {
+      const dumpPath = nested(payload, "data", "dump", "path");
+      if (typeof dumpPath !== "string" || !dumpPath.startsWith("/tmp/unidesk-cli-output/")) {
+        throw new Error("评分 CLI 渐进披露结果缺少受保护 dump");
+      }
+      try {
+        payload = record(JSON.parse(readFileSync(dumpPath, "utf8")));
+      } finally {
+        try { unlinkSync(dumpPath); } catch { /* The CLI may clean up its own temporary output. */ }
+      }
+      if (!payload || payload.ok !== true) throw new Error("评分 CLI dump 返回无效结果");
+    }
     return payload;
   }
 
