@@ -8,14 +8,14 @@ export class AdminHttpClient {
     this.token = readSecret(config, target.adminToken);
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  private async request<T>(path: string, init: RequestInit = {}, timeoutMs = this.config.sub2api.requestTimeoutMs): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${this.token}`);
     if (init.body) headers.set("content-type", "application/json");
     const response = await fetch(`${this.target.baseUrl.replace(/\/$/u, "")}${path}`, {
       ...init,
       headers,
-      signal: AbortSignal.timeout(this.config.sub2api.requestTimeoutMs),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
     if (!response.ok || !payload) throw new Error(payload?.error ?? `ApiState API failed with HTTP ${response.status}`);
@@ -33,7 +33,9 @@ export class AdminHttpClient {
   creditTest(execute: boolean): Promise<Record<string, unknown>> { return this.request("/api/admin/credit-test", { method: "POST", body: JSON.stringify({ execute }) }); }
   serviceStatus(): Promise<Record<string, unknown>> { return this.request("/api/status"); }
   scores(): Promise<Record<string, unknown>> { return this.request("/api/scores"); }
-  refreshScores(): Promise<Record<string, unknown>> { return this.request("/api/scores/refresh", { method: "POST", body: "{}" }); }
+  refreshScores(): Promise<Record<string, unknown>> {
+    return this.request("/api/scores/refresh", { method: "POST", body: "{}" }, this.config.monitor.cli.timeoutMs + 5_000);
+  }
   ranking(): Promise<Record<string, unknown>> { return this.request("/api/ranking"); }
   lottery(): Promise<Record<string, unknown>> { return this.request("/api/lottery"); }
 }
