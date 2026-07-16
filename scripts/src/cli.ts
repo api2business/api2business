@@ -1,4 +1,5 @@
 import { AdminHttpClient } from "../../src/admin-http-client";
+import { mergeAccountScores } from "../../src/account-score-aggregation";
 import { createEmbeddedContext } from "../../src/bootstrap";
 import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget } from "../../src/config";
 
@@ -11,6 +12,10 @@ interface Parsed {
   id: string | null;
   limit: number | null;
   draws: number | null;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
 function value(args: string[], name: string): string | null {
@@ -60,6 +65,7 @@ function help(): Record<string, unknown> {
     commands: [
       "config validate",
       "backend check",
+      "scores aggregate-smoke",
       "lottery status",
       "lottery draw [--confirm]",
       "lottery reset [--draws N] [--include-records] --confirm",
@@ -153,6 +159,53 @@ export async function runCli(args: string[]): Promise<void> {
         automaticCreditEnabled: config.lottery.automaticCredit.enabled,
         excludedIdentities: config.lottery.eligibility.excludedIdentities,
         valuesPrinted: false,
+      }, null, 2));
+      return;
+    }
+    if (parsed.command.join(" ") === "scores aggregate-smoke") {
+      const account = (groupId: number, groupName: string, successRequests: number, failureRequests: number, ttftP95Ms: number, apiAmountUsd: number) => ({
+        accountId: 15,
+        accountName: "lyon9801 0.0",
+        groupId,
+        groupName,
+        status: "active",
+        currentlyAvailable: true,
+        priority: 1,
+        successRequests,
+        failureRequests,
+        observedAttempts: successRequests + failureRequests,
+        streamSuccessRequests: successRequests,
+        firstTokenSamples: successRequests,
+        ttftP95Ms,
+        usage: { requestCount: successRequests, tokenCount: successRequests * 1000, apiAmountUsd },
+      });
+      const rows = mergeAccountScores([
+        account(3, "自用", 100, 0, 10_591, 1),
+        account(2, "unidesk-codex-pool", 50, 1, 13_206, 0.5),
+      ]);
+      const row = rows[0] ?? {};
+      const checks = {
+        uniqueAccount: rows.length === 1,
+        groupsMerged: Array.isArray(row.groupNames) && row.groupNames.length === 2,
+        attemptsMerged: row.observedAttempts === 151,
+        usageMerged: record(row.usage)?.requestCount === 150 && record(row.usage)?.apiAmountUsd === 1.5,
+        decimalScore: typeof row.score === "number" && !Number.isInteger(row.score),
+        conservativeTtft: row.ttftP95Ms === 13_206,
+      };
+      console.log(JSON.stringify({
+        ok: Object.values(checks).every(Boolean),
+        action: "account-score-aggregate-smoke",
+        checks,
+        result: {
+          accountId: row.accountId,
+          accountName: row.accountName,
+          groupNames: row.groupNames,
+          observedAttempts: row.observedAttempts,
+          score: row.score,
+          ttftP95Ms: row.ttftP95Ms,
+          usage: row.usage,
+        },
+        mutation: false,
       }, null, 2));
       return;
     }
