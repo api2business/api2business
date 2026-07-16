@@ -28,7 +28,11 @@
     <section class="table-section">
       <div class="table-toolbar">
         <div class="filter-field"><span>筛选</span><input id="score-filter" type="search" placeholder="账号或分组" /></div>
-        <p id="score-updated">尚无成功快照</p>
+        <div id="score-updated" class="refresh-clock">
+          <span>上次更新时间</span>
+          <strong id="score-updated-time">尚无成功快照</strong>
+          <small>距离下次更新 <b id="score-countdown">--:--</b></small>
+        </div>
       </div>
       <div class="table-wrap">
         <table class="data-table" aria-label="所有分组账号评分">

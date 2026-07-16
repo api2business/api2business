@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { mergeAccountScores } from "./account-score-aggregation";
 import type { AppConfig } from "./config";
 
 interface ScoreSnapshot {
@@ -90,12 +91,12 @@ export class AccountScoreService {
         };
       });
       const refreshedAt = new Date();
-      const accounts: Array<Record<string, unknown>> = details.flatMap(({ group, accounts }) => accounts.map((account): Record<string, unknown> => ({
+      const accounts = mergeAccountScores(details.flatMap(({ group, accounts }) => accounts.map((account): Record<string, unknown> => ({
         groupId: group.groupId ?? null,
         groupName: group.groupName ?? null,
         platform: group.platform ?? null,
         ...account,
-      }))).sort((left, right) => Number(right.score ?? -1) - Number(left.score ?? -1));
+      }))));
       this.snapshot = {
         ok: true,
         status: "ready",
@@ -170,7 +171,7 @@ export class AccountScoreService {
     if (existsSync(this.cachePath)) {
       try {
         const cached = record(JSON.parse(readFileSync(this.cachePath, "utf8"))) as ScoreSnapshot | null;
-        if (cached) return { ...cached, status: "stale" };
+        if (cached) return { ...cached, status: "stale", accounts: mergeAccountScores(records(cached.accounts)) };
       } catch {
         // Invalid cache is replaced by the next successful refresh.
       }

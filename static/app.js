@@ -87,12 +87,34 @@ async function loginPage() {
 }
 
 let scoreRows = []
+let scoreRefreshedAt = null
+let scoreNextRefreshAt = null
 
 function gradeClass(value) {
   const grade = String(value ?? '').toLowerCase()
-  if (grade === 'excellent' || grade === 'good') return 'grade-good'
-  if (grade === 'poor' || grade === 'critical' || grade === 'insufficient') return 'grade-risk'
+  if (grade === 'a' || grade === 'b' || grade === 'excellent' || grade === 'good') return 'grade-good'
+  if (grade === 'd' || grade === 'e' || grade === 'poor' || grade === 'critical' || grade === 'insufficient') return 'grade-risk'
   return 'grade-mid'
+}
+
+function groupLabels(row) {
+  const groups = Array.isArray(row.groupNames) && row.groupNames.length ? row.groupNames : [row.groupName].filter(Boolean)
+  return `<div class="group-list">${groups.map((group) => `<span>${escapeHtml(group)}</span>`).join('')}</div>`
+}
+
+function countdown(value) {
+  if (!value) return '--:--'
+  const remaining = Math.max(0, new Date(value).getTime() - Date.now())
+  if (remaining === 0) return '等待刷新'
+  const totalSeconds = Math.ceil(remaining / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+function renderRefreshClock() {
+  $('#score-updated-time').textContent = scoreRefreshedAt ? `北京时间 ${time(scoreRefreshedAt)}` : '尚无成功快照'
+  $('#score-countdown').textContent = countdown(scoreNextRefreshAt)
 }
 
 function renderScoreRows() {
@@ -102,9 +124,9 @@ function renderScoreRows() {
     const usage = row.usage ?? {}
     return `<tr>
       <td class="account-cell"><b>${escapeHtml(row.accountName)}</b><small>#${escapeHtml(row.accountId)}</small></td>
-      <td>${escapeHtml(row.groupName)}</td>
+      <td>${groupLabels(row)}</td>
       <td>${number(row.priority)}</td>
-      <td><span class="score-value ${gradeClass(row.grade)}">${number(row.score)}</span></td>
+      <td><span class="score-value ${gradeClass(row.grade)}">${number(row.score, 1)}</span></td>
       <td>${escapeHtml(row.grade ?? '—')}</td>
       <td>${escapeHtml(row.confidence ?? '—')}</td>
       <td>${number(row.observedAttempts)}</td>
@@ -128,7 +150,9 @@ function renderScores(data) {
   $('#metric-window').textContent = data.window ?? '—'
   $('#score-state').textContent = ({ ready: '已更新', refreshing: '刷新中', stale: '使用旧快照', unavailable: '暂无快照' })[data.status] ?? data.status
   $('#score-state').dataset.state = data.status
-  $('#score-updated').textContent = data.refreshedAt ? `北京时间 ${time(data.refreshedAt)} · 下次 ${time(data.nextRefreshAt)}` : (data.error ?? '尚无成功快照')
+  scoreRefreshedAt = data.refreshedAt ?? scoreRefreshedAt
+  scoreNextRefreshAt = data.nextRefreshAt ?? scoreNextRefreshAt
+  renderRefreshClock()
   renderScoreRows()
 }
 
@@ -139,12 +163,16 @@ async function scoresPage() {
     button.disabled = true
     $('#score-state').textContent = '刷新中'
     try { renderScores(await requestJson('/api/scores/refresh', { method: 'POST', body: '{}' }, 200000)) }
-    catch (error) { $('#score-updated').textContent = error instanceof Error ? error.message : String(error) }
+    catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }
   })
   renderScores(await requestJson('/api/scores'))
+  setInterval(renderRefreshClock, 1000)
   setInterval(async () => {
-    if (!document.hidden) renderScores(await requestJson('/api/scores').catch(() => ({ ok: false, accounts: scoreRows })))
+    if (!document.hidden) {
+      const data = await requestJson('/api/scores').catch(() => null)
+      if (data) renderScores(data)
+    }
   }, 30000)
 }
 
