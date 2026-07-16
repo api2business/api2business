@@ -56,7 +56,7 @@ function parseArgs(args: string[]): Parsed {
 function help(): Record<string, unknown> {
   return {
     ok: true,
-    usage: "bun scripts/sub2rank-cli.ts --config config/sub2rank.yaml [--target local|production] <command>",
+    usage: "bun scripts/apistate-cli.ts --config config/sub2rank.yaml [--target local|production] <command>",
     commands: [
       "config validate",
       "backend check",
@@ -66,6 +66,7 @@ function help(): Record<string, unknown> {
       "records list [--limit N]",
       "records delete --id <record-id> --confirm",
       "credit test [--confirm]",
+      "api smoke",
     ],
   };
 }
@@ -109,6 +110,27 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return parsed.confirm ? await client.deleteRecord(parsed.id) : { ok: true, mutation: false, action: "record-delete", id: parsed.id, hint: "add --confirm to execute" };
   }
   if (group === "credit" && action === "test") return await client.creditTest(parsed.confirm);
+  if (group === "api" && action === "smoke") {
+    const [status, scores, ranking, lottery] = await Promise.all([
+      client.serviceStatus(),
+      client.scores(),
+      client.ranking(),
+      client.lottery(),
+    ]);
+    const refreshed = await client.refreshScores();
+    return {
+      ok: true,
+      action: "apistate-api-smoke",
+      checks: {
+        status: status.ok === true,
+        scores: scores.ok === true,
+        refresh: refreshed.ok === true,
+        ranking: ranking.ok === true,
+        lottery: lottery.ok === true,
+      },
+      valuesPrinted: false,
+    };
+  }
   throw new Error(`unknown command: ${parsed.command.join(" ")}`);
 }
 
@@ -121,7 +143,17 @@ export async function runCli(args: string[]): Promise<void> {
     const parsed = parseArgs(args);
     const config = loadConfig(parsed.configPath);
     if (parsed.command.join(" ") === "config validate") {
-      console.log(JSON.stringify({ ok: true, configPath: config.configPath, kind: config.kind, automaticCreditEnabled: config.lottery.automaticCredit.enabled, excludedIdentities: config.lottery.eligibility.excludedIdentities }, null, 2));
+      console.log(JSON.stringify({
+        ok: true,
+        configPath: config.configPath,
+        kind: config.kind,
+        service: config.metadata.name,
+        refreshIntervalMinutes: config.monitor.refreshIntervalMinutes,
+        scoreWindow: config.monitor.scoreWindow,
+        automaticCreditEnabled: config.lottery.automaticCredit.enabled,
+        excludedIdentities: config.lottery.eligibility.excludedIdentities,
+        valuesPrinted: false,
+      }, null, 2));
       return;
     }
     const targetId = parsed.targetId ?? config.runtime.defaultCliTarget;

@@ -19,8 +19,10 @@ const context = createServerContext(config, target);
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(context.service, adminToken),
+  fetch: createHandler(context.service, context.monitor, config, context.auth, adminToken),
 });
+
+context.monitor.start();
 
 console.log(JSON.stringify({ ok: true, service: config.metadata.name, runtime: runtimeId, listen: server.url.toString(), automaticCreditEnabled: config.lottery.automaticCredit.enabled }));
 

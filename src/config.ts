@@ -14,6 +14,14 @@ export interface AppConfig {
   apiVersion: string;
   kind: string;
   metadata: { name: string; owner: string };
+  monitor: {
+    timezone: string;
+    refreshIntervalMinutes: number;
+    scoreWindow: string;
+    target: string;
+    cli: { workDir: string; executable: string; entrypoint: string; mainServerHost: string; timeoutMs: number };
+  };
+  webAuth: { username: string; cookieName: string; sessionTtlSeconds: number };
   sub2api: {
     baseUrl: string;
     requestTimeoutMs: number;
@@ -71,6 +79,9 @@ export interface ServerTarget {
   adminTokenEnv: string;
   sub2apiAdminEmailEnv: string;
   sub2apiAdminPasswordEnv: string;
+  webPasswordEnv: string;
+  apiKeyEnv: string;
+  sessionSecretEnv: string;
 }
 
 type ObjectValue = Record<string, unknown>;
@@ -134,6 +145,9 @@ export function loadConfig(path: string): AppConfig {
   const raw = object(parse(readFileSync(configPath, "utf8")), "config");
   const metadata = object(raw.metadata, "metadata");
   const sub2api = object(raw.sub2api, "sub2api");
+  const monitor = object(raw.monitor, "monitor");
+  const monitorCli = object(monitor.cli, "monitor.cli");
+  const webAuth = object(raw.webAuth, "webAuth");
   const adminCredentials = object(sub2api.adminCredentials, "sub2api.adminCredentials");
   const lottery = object(raw.lottery, "lottery");
   const dailyGrant = object(lottery.dailyGrant, "lottery.dailyGrant");
@@ -165,6 +179,9 @@ export function loadConfig(path: string): AppConfig {
       adminTokenEnv: stringValue(target, "adminTokenEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminEmailEnv: stringValue(target, "sub2apiAdminEmailEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminPasswordEnv: stringValue(target, "sub2apiAdminPasswordEnv", `runtime.serverTargets.${id}`),
+      webPasswordEnv: stringValue(target, "webPasswordEnv", `runtime.serverTargets.${id}`),
+      apiKeyEnv: stringValue(target, "apiKeyEnv", `runtime.serverTargets.${id}`),
+      sessionSecretEnv: stringValue(target, "sessionSecretEnv", `runtime.serverTargets.${id}`),
     };
   }
   const automaticMode = stringValue(automaticCredit, "mode", "lottery.automaticCredit");
@@ -175,6 +192,24 @@ export function loadConfig(path: string): AppConfig {
     apiVersion: stringValue(raw, "apiVersion", "config"),
     kind: stringValue(raw, "kind", "config"),
     metadata: { name: stringValue(metadata, "name", "metadata"), owner: stringValue(metadata, "owner", "metadata") },
+    monitor: {
+      timezone: timezoneValue(monitor, "timezone", "monitor"),
+      refreshIntervalMinutes: integerValue(monitor, "refreshIntervalMinutes", "monitor", 1, 1440),
+      scoreWindow: stringValue(monitor, "scoreWindow", "monitor"),
+      target: stringValue(monitor, "target", "monitor"),
+      cli: {
+        workDir: stringValue(monitorCli, "workDir", "monitor.cli"),
+        executable: stringValue(monitorCli, "executable", "monitor.cli"),
+        entrypoint: stringValue(monitorCli, "entrypoint", "monitor.cli"),
+        mainServerHost: stringValue(monitorCli, "mainServerHost", "monitor.cli"),
+        timeoutMs: integerValue(monitorCli, "timeoutMs", "monitor.cli", 1000),
+      },
+    },
+    webAuth: {
+      username: stringValue(webAuth, "username", "webAuth"),
+      cookieName: stringValue(webAuth, "cookieName", "webAuth"),
+      sessionTtlSeconds: integerValue(webAuth, "sessionTtlSeconds", "webAuth", 300),
+    },
     sub2api: {
       baseUrl: stringValue(sub2api, "baseUrl", "sub2api").replace(/\/$/u, ""),
       requestTimeoutMs: integerValue(sub2api, "requestTimeoutMs", "sub2api", 1),

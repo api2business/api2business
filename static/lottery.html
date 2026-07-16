@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111412" />
+  <title>额度抽奖 | ApiState</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/app.js" type="module"></script>
+</head>
+<body data-page="lottery">
+  <div data-shell></div>
+  <main class="workspace lottery-workspace">
+    <header class="page-head"><div><p class="eyebrow">DAILY CREDIT DRAW</p><h1>额度抽奖</h1></div><span id="lottery-mode" class="state-badge">读取中</span></header>
+    <section class="lottery-grid">
+      <div class="draw-console">
+        <p>本期额度</p><strong>$<span id="lottery-prize">—</span></strong>
+        <dl><div><dt>剩余次数</dt><dd id="lottery-remaining">—</dd></div><div><dt>候选用户</dt><dd id="lottery-eligible">—</dd></div><div><dt>下次增加</dt><dd id="lottery-next">—</dd></div></dl>
+        <button id="draw-button" class="primary-command" type="button" disabled>立即抽奖</button>
+        <p id="draw-status" class="command-status">正在读取抽奖状态...</p>
+      </div>
+      <section class="records-section"><header><p class="eyebrow">RECENT RESULTS</p><h2>开奖记录</h2></header><ol id="record-list" class="record-list"><li class="empty">暂无记录</li></ol></section>
+    </section>
+  </main>
+  <dialog id="winner-dialog" class="winner-dialog"><p class="eyebrow">TODAY'S WINNER</p><h2 id="winner-name">—</h2><p>获得 <strong>$<span id="winner-prize">—</span></strong> 额度</p><p id="winner-meta"></p><button id="winner-close" class="primary-command" type="button">关闭</button></dialog>
+</body>
+</html>
