@@ -146,7 +146,7 @@ spec:
                   value: $(params.build-no-proxy)
                 - name: no_proxy
                   value: $(params.build-no-proxy)
-              script: "#!/bin/sh\nset -eu\nroot=\"$(workspaces.source.path)\"\nrm -rf \"$root/repo\"\ngit clone --filter=blob:none --no-checkout \"$(params.git-read-url)\" \"$root/repo\"\ncd \"$root/repo\"\ngit fetch --depth=1 --filter=blob:none origin \"+$(params.source-stage-ref):refs/remotes/origin/sub2rank-source-snapshot\"\ngit checkout --detach \"$(params.revision)\"\ntest \"$(git rev-parse HEAD)\" = \"$(params.revision)\"\nbun install --frozen-lockfile\nbun scripts/sub2rank-cli.ts --config \"$(params.config-path)\" config validate\nchmod -R a+rX,g+rwX \"$root/repo\"\nprintf '{\"ok\":true,\"phase\":\"source-validate\",\"sourceCommit\":\"%s\",\"configPath\":\"%s\",\"valuesPrinted\":false}\\n' \"$(params.revision)\" \"$(params.config-path)\""
+              script: "#!/bin/sh\nset -eu\nroot=\"$(workspaces.source.path)\"\nrm -rf \"$root/repo\"\ngit clone --filter=blob:none --no-checkout \"$(params.git-read-url)\" \"$root/repo\"\ncd \"$root/repo\"\ngit fetch --depth=1 --filter=blob:none origin \"+$(params.source-stage-ref):refs/remotes/origin/sub2rank-source-snapshot\"\ngit checkout --detach \"$(params.revision)\"\ntest \"$(git rev-parse HEAD)\" = \"$(params.revision)\"\nbun install --frozen-lockfile\nbun scripts/apistate-cli.ts --config \"$(params.config-path)\" config validate\nchmod -R a+rX,g+rwX \"$root/repo\"\nprintf '{\"ok\":true,\"phase\":\"source-validate\",\"sourceCommit\":\"%s\",\"configPath\":\"%s\",\"valuesPrinted\":false}\\n' \"$(params.revision)\" \"$(params.config-path)\""
         params:
           - name: git-read-url
             value: $(params.git-read-url)
