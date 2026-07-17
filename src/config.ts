@@ -81,6 +81,7 @@ export interface EmbeddedCliTarget {
   databasePath: string;
   scoreCachePath: string;
   monitorWorkDir: string;
+  temporalTaskQueue: string;
 }
 
 export interface HttpCliTarget {
@@ -101,6 +102,8 @@ export interface ServerTarget {
   databasePath: string;
   scoreCachePath: string;
   monitorWorkDir: string;
+  temporalTaskQueue: string;
+  scoreScheduleWorkflowId: string;
   adminTokenEnv: string;
   sub2apiAdminEmailEnv: string;
   sub2apiAdminPasswordEnv: string;
@@ -214,6 +217,7 @@ export function loadConfig(path: string): AppConfig {
       databasePath: stringValue(target, "databasePath", `runtime.cliTargets.${id}`),
       scoreCachePath: stringValue(target, "scoreCachePath", `runtime.cliTargets.${id}`),
       monitorWorkDir: stringValue(target, "monitorWorkDir", `runtime.cliTargets.${id}`),
+      temporalTaskQueue: stringValue(target, "temporalTaskQueue", `runtime.cliTargets.${id}`),
     };
     else if (mode === "http") cliTargets[id] = { mode, baseUrl: stringValue(target, "baseUrl", `runtime.cliTargets.${id}`), adminToken: secretRef(target.adminToken, `runtime.cliTargets.${id}.adminToken`) };
     else throw new Error(`runtime.cliTargets.${id}.mode must be embedded or http`);
@@ -233,6 +237,8 @@ export function loadConfig(path: string): AppConfig {
       databasePath: stringValue(target, "databasePath", `runtime.serverTargets.${id}`),
       scoreCachePath: stringValue(target, "scoreCachePath", `runtime.serverTargets.${id}`),
       monitorWorkDir: stringValue(target, "monitorWorkDir", `runtime.serverTargets.${id}`),
+      temporalTaskQueue: stringValue(target, "temporalTaskQueue", `runtime.serverTargets.${id}`),
+      scoreScheduleWorkflowId: stringValue(target, "scoreScheduleWorkflowId", `runtime.serverTargets.${id}`),
       adminTokenEnv: stringValue(target, "adminTokenEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminEmailEnv: stringValue(target, "sub2apiAdminEmailEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminPasswordEnv: stringValue(target, "sub2apiAdminPasswordEnv", `runtime.serverTargets.${id}`),

@@ -33,9 +33,6 @@ export class AdminHttpClient {
   creditTest(execute: boolean): Promise<Record<string, unknown>> { return this.request("/api/admin/credit-test", { method: "POST", body: JSON.stringify({ execute }) }); }
   serviceStatus(): Promise<Record<string, unknown>> { return this.request("/api/status"); }
   scores(): Promise<Record<string, unknown>> { return this.request("/api/scores"); }
-  refreshScores(): Promise<Record<string, unknown>> {
-    return this.request("/api/scores/refresh", { method: "POST", body: "{}" }, this.config.monitor.cli.timeoutMs + 5_000);
-  }
   ranking(): Promise<Record<string, unknown>> { return this.request("/api/ranking"); }
   lottery(): Promise<Record<string, unknown>> { return this.request("/api/lottery"); }
   workflowSubmit(command: Record<string, unknown>): Promise<Record<string, unknown>> {

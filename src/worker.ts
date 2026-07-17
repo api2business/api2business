@@ -16,11 +16,11 @@ const connection = await NativeConnection.connect({ address: temporalAddress(con
 const worker = await Worker.create({
   connection,
   namespace: config.temporal.namespace,
-  taskQueue: config.temporal.taskQueue,
+  taskQueue: target.temporalTaskQueue,
   workflowsPath: fileURLToPath(new URL("./workflows.ts", import.meta.url)),
   activities: createActivities({ lottery: context.service, scores: context.monitor }),
 });
-const temporal = await TemporalGateway.connect(config);
+const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId });
 const schedule = await temporal.ensureScoreSchedule();
 let state: "ready" | "stopping" = "ready";
 const health = Bun.serve({
@@ -31,7 +31,7 @@ const health = Bun.serve({
     component: "apistate-worker",
     state,
     namespace: config.temporal.namespace,
-    taskQueue: config.temporal.taskQueue,
+    taskQueue: target.temporalTaskQueue,
     schedule,
   }, { status: state === "ready" ? 200 : 503 }),
 });
@@ -42,7 +42,7 @@ console.log(JSON.stringify({
   runtime: runtimeId,
   health: health.url.toString(),
   temporalNamespace: config.temporal.namespace,
-  temporalTaskQueue: config.temporal.taskQueue,
+  temporalTaskQueue: target.temporalTaskQueue,
   schedule,
   valuesPrinted: false,
 }));
