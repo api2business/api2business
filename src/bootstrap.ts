@@ -18,7 +18,7 @@ export interface AppContext {
 export function createEmbeddedContext(config: AppConfig, target: EmbeddedCliTarget): AppContext {
   const store = new LotteryStore(config, resolveDataPath(config, target.databasePath));
   const client = new Sub2ApiClient(config, readSub2ApiCredentials(config));
-  const monitor = new AccountScoreService(config, resolveDataPath(config, ".state/account-scores.json"));
+  const monitor = new AccountScoreService(config, resolveDataPath(config, target.scoreCachePath), target.monitorWorkDir);
   return {
     service: new LotteryService(config, store, client),
     store,
@@ -39,7 +39,7 @@ export function createServerContext(config: AppConfig, target: ServerTarget): Ap
   }
   const store = new LotteryStore(config, resolveDataPath(config, target.databasePath));
   const client = new Sub2ApiClient(config, { email, password });
-  const monitor = new AccountScoreService(config, resolveDataPath(config, "account-scores.json"));
+  const monitor = new AccountScoreService(config, resolveDataPath(config, target.scoreCachePath), target.monitorWorkDir);
   return {
     service: new LotteryService(config, store, client),
     store,

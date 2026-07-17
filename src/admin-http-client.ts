@@ -38,4 +38,10 @@ export class AdminHttpClient {
   }
   ranking(): Promise<Record<string, unknown>> { return this.request("/api/ranking"); }
   lottery(): Promise<Record<string, unknown>> { return this.request("/api/lottery"); }
+  workflowSubmit(command: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/workflows", { method: "POST", body: JSON.stringify({ command }) });
+  }
+  workflowStatus(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/admin/workflows/${encodeURIComponent(id)}`);
+  }
 }
