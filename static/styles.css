@@ -49,7 +49,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .metric-strip > div { min-height: 92px; padding: 20px 18px; border-right: 1px solid var(--line); }
 .metric-strip > div:first-child { padding-left: 0; }
 .metric-strip > div:last-child { border-right: 0; }
-.metric-strip span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 10px; }
+.metric-strip > div > span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 10px; }
 .metric-strip strong { font: 600 25px/1 var(--mono); }
 
 .table-section { padding-top: 20px; }
