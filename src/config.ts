@@ -50,11 +50,26 @@ export interface AppConfig {
   };
   ranking: { timezone: string; windowDays: number; sourceLimit: number; displayLimit: number };
   records: { publicLimit: number };
+  temporal: {
+    addressEnv: string;
+    namespace: string;
+    taskQueue: string;
+    scoreScheduleWorkflowId: string;
+    workflowExecutionTimeout: string;
+    activityStartToCloseTimeout: string;
+    retry: { maximumAttempts: number };
+  };
   runtime: {
     secretsRoot: string;
     secretSourcePaths: Record<string, string>;
     defaultCliTarget: string;
+    overApiTarget: string;
     cliTargets: Record<string, EmbeddedCliTarget | HttpCliTarget>;
+    native: {
+      stateDir: string;
+      env: Record<string, SecretRef>;
+      services: Record<NativeServiceId, NativeServiceConfig>;
+    };
     serverTargets: Record<string, ServerTarget>;
   };
   configPath: string;
@@ -64,6 +79,7 @@ export interface AppConfig {
 export interface EmbeddedCliTarget {
   mode: "embedded";
   databasePath: string;
+  scoreCachePath: string;
 }
 
 export interface HttpCliTarget {
@@ -75,13 +91,27 @@ export interface HttpCliTarget {
 export interface ServerTarget {
   listenHost: string;
   listenPort: number;
+  workerHealthHost: string;
+  workerHealthPort: number;
+  webListenHost: string;
+  webListenPort: number;
+  webApiBaseUrl: string;
   databasePath: string;
+  scoreCachePath: string;
   adminTokenEnv: string;
   sub2apiAdminEmailEnv: string;
   sub2apiAdminPasswordEnv: string;
   webPasswordEnv: string;
   apiKeyEnv: string;
   sessionSecretEnv: string;
+}
+
+export type NativeServiceId = "api" | "worker" | "web";
+
+export interface NativeServiceConfig {
+  command: string[];
+  pidFile: string;
+  logFile: string;
 }
 
 type ObjectValue = Record<string, unknown>;
@@ -139,6 +169,12 @@ function secretRef(value: unknown, path: string): SecretRef {
   return { sourceRef: stringValue(raw, "sourceRef", path), sourceKey: stringValue(raw, "sourceKey", path) };
 }
 
+function nativeFile(parent: ObjectValue, key: string, path: string): string {
+  const value = stringValue(parent, key, path);
+  if (value.includes("/") || value.includes("\\") || value === "." || value === "..") throw new Error(`${path}.${key} must be a filename`);
+  return value;
+}
+
 export function loadConfig(path: string): AppConfig {
   const configPath = resolve(path);
   const rootDirectory = resolve(dirname(configPath), "..");
@@ -157,7 +193,12 @@ export function loadConfig(path: string): AppConfig {
   const creditTest = object(lottery.creditTest, "lottery.creditTest");
   const ranking = object(raw.ranking, "ranking");
   const records = object(raw.records, "records");
+  const temporal = object(raw.temporal, "temporal");
+  const temporalRetry = object(temporal.retry, "temporal.retry");
   const runtime = object(raw.runtime, "runtime");
+  const native = object(runtime.native, "runtime.native");
+  const nativeServicesRaw = object(native.services, "runtime.native.services");
+  const nativeEnvRaw = object(native.env, "runtime.native.env");
   const secretSourcePathsRaw = object(runtime.secretSourcePaths, "runtime.secretSourcePaths");
   const cliTargetsRaw = object(runtime.cliTargets, "runtime.cliTargets");
   const serverTargetsRaw = object(runtime.serverTargets, "runtime.serverTargets");
@@ -165,7 +206,11 @@ export function loadConfig(path: string): AppConfig {
   for (const [id, value] of Object.entries(cliTargetsRaw)) {
     const target = object(value, `runtime.cliTargets.${id}`);
     const mode = stringValue(target, "mode", `runtime.cliTargets.${id}`);
-    if (mode === "embedded") cliTargets[id] = { mode, databasePath: stringValue(target, "databasePath", `runtime.cliTargets.${id}`) };
+    if (mode === "embedded") cliTargets[id] = {
+      mode,
+      databasePath: stringValue(target, "databasePath", `runtime.cliTargets.${id}`),
+      scoreCachePath: stringValue(target, "scoreCachePath", `runtime.cliTargets.${id}`),
+    };
     else if (mode === "http") cliTargets[id] = { mode, baseUrl: stringValue(target, "baseUrl", `runtime.cliTargets.${id}`), adminToken: secretRef(target.adminToken, `runtime.cliTargets.${id}.adminToken`) };
     else throw new Error(`runtime.cliTargets.${id}.mode must be embedded or http`);
   }
@@ -175,7 +220,13 @@ export function loadConfig(path: string): AppConfig {
     serverTargets[id] = {
       listenHost: stringValue(target, "listenHost", `runtime.serverTargets.${id}`),
       listenPort: numberValue(target, "listenPort", `runtime.serverTargets.${id}`, 1),
+      workerHealthHost: stringValue(target, "workerHealthHost", `runtime.serverTargets.${id}`),
+      workerHealthPort: numberValue(target, "workerHealthPort", `runtime.serverTargets.${id}`, 1),
+      webListenHost: stringValue(target, "webListenHost", `runtime.serverTargets.${id}`),
+      webListenPort: numberValue(target, "webListenPort", `runtime.serverTargets.${id}`, 1),
+      webApiBaseUrl: stringValue(target, "webApiBaseUrl", `runtime.serverTargets.${id}`),
       databasePath: stringValue(target, "databasePath", `runtime.serverTargets.${id}`),
+      scoreCachePath: stringValue(target, "scoreCachePath", `runtime.serverTargets.${id}`),
       adminTokenEnv: stringValue(target, "adminTokenEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminEmailEnv: stringValue(target, "sub2apiAdminEmailEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminPasswordEnv: stringValue(target, "sub2apiAdminPasswordEnv", `runtime.serverTargets.${id}`),
@@ -188,6 +239,19 @@ export function loadConfig(path: string): AppConfig {
   if (automaticMode !== "dry-run" && automaticMode !== "live") throw new Error("lottery.automaticCredit.mode must be dry-run or live");
   const defaultCliTarget = stringValue(runtime, "defaultCliTarget", "runtime");
   if (!cliTargets[defaultCliTarget]) throw new Error(`runtime.defaultCliTarget references missing target ${defaultCliTarget}`);
+  const overApiTarget = stringValue(runtime, "overApiTarget", "runtime");
+  if (cliTargets[overApiTarget]?.mode !== "http") throw new Error(`runtime.overApiTarget must reference an http target`);
+  const nativeServices = {} as Record<NativeServiceId, NativeServiceConfig>;
+  for (const id of ["api", "worker", "web"] as const) {
+    const service = object(nativeServicesRaw[id], `runtime.native.services.${id}`);
+    const command = strings(service, "command", `runtime.native.services.${id}`);
+    if (command.length === 0) throw new Error(`runtime.native.services.${id}.command must not be empty`);
+    nativeServices[id] = {
+      command,
+      pidFile: nativeFile(service, "pidFile", `runtime.native.services.${id}`),
+      logFile: nativeFile(service, "logFile", `runtime.native.services.${id}`),
+    };
+  }
   return {
     apiVersion: stringValue(raw, "apiVersion", "config"),
     kind: stringValue(raw, "kind", "config"),
@@ -255,6 +319,15 @@ export function loadConfig(path: string): AppConfig {
       displayLimit: integerValue(ranking, "displayLimit", "ranking", 1),
     },
     records: { publicLimit: integerValue(records, "publicLimit", "records", 1) },
+    temporal: {
+      addressEnv: stringValue(temporal, "addressEnv", "temporal"),
+      namespace: stringValue(temporal, "namespace", "temporal"),
+      taskQueue: stringValue(temporal, "taskQueue", "temporal"),
+      scoreScheduleWorkflowId: stringValue(temporal, "scoreScheduleWorkflowId", "temporal"),
+      workflowExecutionTimeout: stringValue(temporal, "workflowExecutionTimeout", "temporal"),
+      activityStartToCloseTimeout: stringValue(temporal, "activityStartToCloseTimeout", "temporal"),
+      retry: { maximumAttempts: integerValue(temporalRetry, "maximumAttempts", "temporal.retry", 1) },
+    },
     runtime: {
       secretsRoot: stringValue(runtime, "secretsRoot", "runtime"),
       secretSourcePaths: Object.fromEntries(Object.entries(secretSourcePathsRaw).map(([ref, value]) => {
@@ -262,7 +335,13 @@ export function loadConfig(path: string): AppConfig {
         return [ref, value];
       })),
       defaultCliTarget,
+      overApiTarget,
       cliTargets,
+      native: {
+        stateDir: stringValue(native, "stateDir", "runtime.native"),
+        env: Object.fromEntries(Object.entries(nativeEnvRaw).map(([targetKey, value]) => [targetKey, secretRef(value, `runtime.native.env.${targetKey}`)])),
+        services: nativeServices,
+      },
       serverTargets,
     },
     configPath,

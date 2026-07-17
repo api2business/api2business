@@ -5,10 +5,16 @@
   "type": "module",
   "scripts": {
     "cli": "bun scripts/apistate-cli.ts --config config/sub2rank.yaml",
-    "server": "bun src/server.ts --config config/sub2rank.yaml --runtime k8s",
+    "api": "bun --hot src/api.ts --config config/sub2rank.yaml --runtime native",
+    "worker": "bun src/worker.ts --config config/sub2rank.yaml --runtime native",
+    "dev:web": "bun --hot src/dev-web.ts --config config/sub2rank.yaml --runtime native",
+    "server": "bun src/api.ts --config config/sub2rank.yaml --runtime k8s",
     "check": "bunx tsc --noEmit"
   },
   "dependencies": {
+    "@temporalio/client": "^1.20.3",
+    "@temporalio/worker": "^1.20.3",
+    "@temporalio/workflow": "^1.20.3",
     "luxon": "^3.7.2",
     "yaml": "^2.8.1"
   },
@@ -16,5 +22,9 @@
     "@types/bun": "^1.2.21",
     "@types/luxon": "^3.7.1",
     "typescript": "^5.9.2"
-  }
+  },
+  "trustedDependencies": [
+    "@swc/core",
+    "protobufjs"
+  ]
 }
