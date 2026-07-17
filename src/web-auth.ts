@@ -42,17 +42,17 @@ export function sessionAuthorized(request: Request, config: AppConfig, secrets: 
   }
 }
 
-export function createSessionCookie(config: AppConfig, secrets: WebAuthSecrets): string {
+export function createSessionCookie(config: AppConfig, secrets: WebAuthSecrets, secure: boolean): string {
   const payload = Buffer.from(JSON.stringify({
     user: config.webAuth.username,
     exp: Date.now() + config.webAuth.sessionTtlSeconds * 1000,
   })).toString("base64url");
   const value = `${payload}.${signature(payload, secrets.sessionSecret)}`;
-  return `${config.webAuth.cookieName}=${value}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${config.webAuth.sessionTtlSeconds}`;
+  return `${config.webAuth.cookieName}=${value}; Path=/; HttpOnly;${secure ? " Secure;" : ""} SameSite=Strict; Max-Age=${config.webAuth.sessionTtlSeconds}`;
 }
 
-export function clearSessionCookie(config: AppConfig): string {
-  return `${config.webAuth.cookieName}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
+export function clearSessionCookie(config: AppConfig, secure: boolean): string {
+  return `${config.webAuth.cookieName}=; Path=/; HttpOnly;${secure ? " Secure;" : ""} SameSite=Strict; Max-Age=0`;
 }
 
 export function validLogin(username: unknown, password: unknown, config: AppConfig, secrets: WebAuthSecrets): boolean {

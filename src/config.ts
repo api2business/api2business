@@ -80,6 +80,7 @@ export interface EmbeddedCliTarget {
   mode: "embedded";
   databasePath: string;
   scoreCachePath: string;
+  monitorWorkDir: string;
 }
 
 export interface HttpCliTarget {
@@ -96,8 +97,10 @@ export interface ServerTarget {
   webListenHost: string;
   webListenPort: number;
   webApiBaseUrl: string;
+  secureCookies: boolean;
   databasePath: string;
   scoreCachePath: string;
+  monitorWorkDir: string;
   adminTokenEnv: string;
   sub2apiAdminEmailEnv: string;
   sub2apiAdminPasswordEnv: string;
@@ -210,6 +213,7 @@ export function loadConfig(path: string): AppConfig {
       mode,
       databasePath: stringValue(target, "databasePath", `runtime.cliTargets.${id}`),
       scoreCachePath: stringValue(target, "scoreCachePath", `runtime.cliTargets.${id}`),
+      monitorWorkDir: stringValue(target, "monitorWorkDir", `runtime.cliTargets.${id}`),
     };
     else if (mode === "http") cliTargets[id] = { mode, baseUrl: stringValue(target, "baseUrl", `runtime.cliTargets.${id}`), adminToken: secretRef(target.adminToken, `runtime.cliTargets.${id}.adminToken`) };
     else throw new Error(`runtime.cliTargets.${id}.mode must be embedded or http`);
@@ -225,8 +229,10 @@ export function loadConfig(path: string): AppConfig {
       webListenHost: stringValue(target, "webListenHost", `runtime.serverTargets.${id}`),
       webListenPort: numberValue(target, "webListenPort", `runtime.serverTargets.${id}`, 1),
       webApiBaseUrl: stringValue(target, "webApiBaseUrl", `runtime.serverTargets.${id}`),
+      secureCookies: booleanValue(target, "secureCookies", `runtime.serverTargets.${id}`),
       databasePath: stringValue(target, "databasePath", `runtime.serverTargets.${id}`),
       scoreCachePath: stringValue(target, "scoreCachePath", `runtime.serverTargets.${id}`),
+      monitorWorkDir: stringValue(target, "monitorWorkDir", `runtime.serverTargets.${id}`),
       adminTokenEnv: stringValue(target, "adminTokenEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminEmailEnv: stringValue(target, "sub2apiAdminEmailEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminPasswordEnv: stringValue(target, "sub2apiAdminPasswordEnv", `runtime.serverTargets.${id}`),

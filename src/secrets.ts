@@ -19,7 +19,8 @@ function parseEnv(text: string): Map<string, string> {
 export function readSecret(config: AppConfig, ref: SecretRef): string {
   const path = config.runtime.secretSourcePaths[ref.sourceRef];
   if (!path) throw new Error(`runtime.secretSourcePaths is missing sourceRef ${ref.sourceRef}`);
-  const value = parseEnv(readFileSync(path, "utf8")).get(ref.sourceKey);
+  const text = readFileSync(path, "utf8");
+  const value = ref.sourceKey === "contents" ? text.trim() : parseEnv(text).get(ref.sourceKey);
   if (!value) throw new Error(`secret source ${ref.sourceRef} is missing key ${ref.sourceKey}`);
   return value;
 }

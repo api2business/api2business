@@ -48,7 +48,7 @@ export class AccountScoreService {
   private inFlight: Promise<ScoreSnapshot> | null = null;
   private snapshot: ScoreSnapshot;
 
-  constructor(private readonly config: AppConfig, private readonly cachePath: string) {
+  constructor(private readonly config: AppConfig, private readonly cachePath: string, private readonly cliWorkDir: string) {
     this.snapshot = this.readCache();
   }
 
@@ -125,7 +125,7 @@ export class AccountScoreService {
 
   private async invoke(scope: string[]): Promise<Record<string, unknown>> {
     const args = [
-      resolve(this.config.monitor.cli.workDir, this.config.monitor.cli.entrypoint),
+      resolve(this.cliWorkDir, this.config.monitor.cli.entrypoint),
       "platform-infra", "sub2api", "codex-pool", "runtime", "errors",
       "--target", this.config.monitor.target,
       "--since", this.config.monitor.scoreWindow,
@@ -133,7 +133,7 @@ export class AccountScoreService {
       "--raw",
     ];
     const process = Bun.spawn([this.config.monitor.cli.executable, ...args], {
-      cwd: this.config.monitor.cli.workDir,
+      cwd: this.cliWorkDir,
       stdout: "pipe",
       stderr: "pipe",
       env: { ...Bun.env, UNIDESK_MAIN_SERVER_IP: this.config.monitor.cli.mainServerHost },

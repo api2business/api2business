@@ -37,6 +37,17 @@ export class ApplicationDispatcher {
     if (!this.temporal) throw new Error(`command ${command.kind} requires Temporal`);
     return await this.temporal.execute(command);
   }
+
+  async submit(command: AppCommand): Promise<unknown> {
+    if (!usesWorkflow(command)) throw new Error(`command ${command.kind} does not use Temporal`);
+    if (!this.temporal) throw new Error(`command ${command.kind} requires Temporal`);
+    return await this.temporal.submit(command);
+  }
+
+  async workflowStatus(workflowId: string): Promise<unknown> {
+    if (!this.temporal) throw new Error("workflow status requires Temporal");
+    return await this.temporal.status(workflowId);
+  }
 }
 
 export function createActivities(services: DispatcherServices): { executeOperation(request: OperationRequest): Promise<unknown> } {

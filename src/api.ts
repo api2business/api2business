@@ -18,7 +18,7 @@ const dispatcher = new ApplicationDispatcher({ lottery: context.service, scores:
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies),
 });
 
 console.log(JSON.stringify({

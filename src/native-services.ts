@@ -51,6 +51,8 @@ export function nativeStart(config: AppConfig, component: NativeServiceId): Reco
   rmSync(target.pid, { force: true });
   const env: Record<string, string> = { ...process.env } as Record<string, string>;
   for (const [targetKey, ref] of Object.entries(config.runtime.native.env)) env[targetKey] = readSecret(config, ref);
+  env.APISTATE_CONFIG_PATH = config.configPath;
+  env.APISTATE_RUNTIME_ID = "native";
   const log = openSync(target.log, "a", 0o600);
   try {
     const child = spawn(service.command[0]!, service.command.slice(1), {

@@ -47,6 +47,7 @@ export function createHandler(
   config: AppConfig,
   auth: WebAuthSecrets,
   legacyAdminToken: string,
+  secureCookies: boolean,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
@@ -60,10 +61,10 @@ export function createHandler(
       if (request.method === "POST" && url.pathname === "/api/login") {
         const input = await body(request);
         if (!validLogin(input.username, input.password, config, auth)) return json({ ok: false, error: "用户名或密码错误" }, 401);
-        return json({ ok: true, username: config.webAuth.username }, 200, { "set-cookie": createSessionCookie(config, auth) });
+        return json({ ok: true, username: config.webAuth.username }, 200, { "set-cookie": createSessionCookie(config, auth, secureCookies) });
       }
       if (request.method === "POST" && url.pathname === "/api/logout") {
-        return json({ ok: true }, 200, { "set-cookie": clearSessionCookie(config) });
+        return json({ ok: true }, 200, { "set-cookie": clearSessionCookie(config, secureCookies) });
       }
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/login") {
         return session ? redirect("/scores") : await staticFile("login.html", "text/html; charset=utf-8");
@@ -107,6 +108,17 @@ export function createHandler(
         return json(await dispatcher.dispatch({ kind: "records.list", limit }));
       }
       if (request.method === "DELETE" && url.pathname.startsWith("/api/admin/records/")) return json(await dispatcher.dispatch({ kind: "records.delete", id: decodeURIComponent(url.pathname.slice("/api/admin/records/".length)) }));
+      if (request.method === "POST" && url.pathname === "/api/admin/workflows") {
+        const input = await body(request);
+        const command = input.command as Record<string, unknown> | undefined;
+        if (command?.kind !== "scores.refresh") return json({ ok: false, error: "command.kind must be scores.refresh" }, 400);
+        return json(await dispatcher.submit({ kind: "scores.refresh" }));
+      }
+      if (request.method === "GET" && url.pathname.startsWith("/api/admin/workflows/")) {
+        const workflowId = decodeURIComponent(url.pathname.slice("/api/admin/workflows/".length));
+        if (!workflowId) return json({ ok: false, error: "workflow id is required" }, 400);
+        return json(await dispatcher.workflowStatus(workflowId));
+      }
       if (request.method === "POST" && url.pathname === "/api/admin/credit-test") {
         const input = await body(request);
         if (typeof input.execute !== "boolean") return json({ ok: false, error: "execute must be boolean" }, 400);

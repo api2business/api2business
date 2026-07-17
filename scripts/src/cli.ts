@@ -85,6 +85,7 @@ function help(): Record<string, unknown> {
       "records list|delete",
       "credit test",
       "api smoke --over-api",
+      "workflow status --id <workflow-id>",
       "native start|stop|status|logs --component api|worker|web [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
@@ -130,6 +131,16 @@ function isAppCommand(value: AppCommand | Record<string, unknown>): value is App
 }
 
 async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: EmbeddedCliTarget): Promise<unknown> {
+  if (parsed.command.join(" ") === "scores refresh" || parsed.command.join(" ") === "workflow status") {
+    const temporal = await TemporalGateway.connect(config);
+    try {
+      if (parsed.command[0] === "scores") return await temporal.submit({ kind: "scores.refresh" });
+      if (!parsed.id) throw new Error("workflow status requires --id");
+      return await temporal.status(parsed.id);
+    } finally {
+      await temporal.close();
+    }
+  }
   const command = appCommand(parsed, config);
   if (!isAppCommand(command)) return command;
   const context = createEmbeddedContext(config, target);
@@ -148,7 +159,11 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   const [group, action] = parsed.command;
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "scores" && action === "get") return await client.scores();
-  if (group === "scores" && action === "refresh") return await client.refreshScores();
+  if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
+  if (group === "workflow" && action === "status") {
+    if (!parsed.id) throw new Error("workflow status requires --id");
+    return await client.workflowStatus(parsed.id);
+  }
   if (group === "lottery" && action === "status") return await client.status();
   if (group === "lottery" && action === "draw") return parsed.confirm ? await client.draw() : { ok: true, mutation: false, action: "lottery-draw", hint: "add --confirm to execute" };
   if (group === "lottery" && action === "reset") {
