@@ -5,7 +5,13 @@ export class AdminHttpClient {
   private readonly token: string;
 
   constructor(private readonly config: AppConfig, private readonly target: HttpCliTarget) {
-    this.token = readSecret(config, target.adminToken);
+    if ("envKey" in target.adminToken) {
+      const value = process.env[target.adminToken.envKey];
+      if (!value) throw new Error(`HTTP CLI target requires env ${target.adminToken.envKey}`);
+      this.token = value;
+    } else {
+      this.token = readSecret(config, target.adminToken);
+    }
   }
 
   private async request<T>(path: string, init: RequestInit = {}, timeoutMs = this.config.sub2api.requestTimeoutMs): Promise<T> {
