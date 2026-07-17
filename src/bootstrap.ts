@@ -6,6 +6,7 @@ import { LotteryStore } from "./store";
 import { Sub2ApiClient } from "./sub2api-client";
 import { AccountScoreService } from "./account-score-service";
 import type { WebAuthSecrets } from "./web-auth";
+import { UniDeskRuntimePolicyEventSource } from "./runtime-policy-events";
 
 export interface AppContext {
   service: LotteryService;
@@ -18,7 +19,7 @@ export interface AppContext {
 export function createEmbeddedContext(config: AppConfig, target: EmbeddedCliTarget): AppContext {
   const store = new LotteryStore(config, resolveDataPath(config, target.databasePath));
   const client = new Sub2ApiClient(config, readSub2ApiCredentials(config));
-  const monitor = new AccountScoreService(config, resolveDataPath(config, target.scoreCachePath), target.monitorWorkDir);
+  const monitor = new AccountScoreService(config, resolveDataPath(config, target.scoreCachePath), client, new UniDeskRuntimePolicyEventSource(config, target.monitorWorkDir));
   return {
     service: new LotteryService(config, store, client),
     store,
@@ -39,7 +40,7 @@ export function createServerContext(config: AppConfig, target: ServerTarget): Ap
   }
   const store = new LotteryStore(config, resolveDataPath(config, target.databasePath));
   const client = new Sub2ApiClient(config, { email, password });
-  const monitor = new AccountScoreService(config, resolveDataPath(config, target.scoreCachePath), target.monitorWorkDir);
+  const monitor = new AccountScoreService(config, resolveDataPath(config, target.scoreCachePath), client, new UniDeskRuntimePolicyEventSource(config, target.monitorWorkDir));
   return {
     service: new LotteryService(config, store, client),
     store,

@@ -14,11 +14,15 @@ export class TemporalGateway {
     private readonly connection: Connection,
     private readonly client: Client,
     private readonly config: AppConfig,
+    private readonly runtime: { taskQueue: string; scoreScheduleWorkflowId: string },
   ) {}
 
-  static async connect(config: AppConfig): Promise<TemporalGateway> {
+  static async connect(config: AppConfig, runtime: { taskQueue: string; scoreScheduleWorkflowId?: string }): Promise<TemporalGateway> {
     const connection = await Connection.connect({ address: temporalAddress(config) });
-    return new TemporalGateway(connection, new Client({ connection, namespace: config.temporal.namespace }), config);
+    return new TemporalGateway(connection, new Client({ connection, namespace: config.temporal.namespace }), config, {
+      taskQueue: runtime.taskQueue,
+      scoreScheduleWorkflowId: runtime.scoreScheduleWorkflowId ?? config.temporal.scoreScheduleWorkflowId,
+    });
   }
 
   async execute(command: AppCommand): Promise<unknown> {
@@ -29,7 +33,7 @@ export class TemporalGateway {
   async submit(command: AppCommand): Promise<{ ok: true; workflowId: string; runId: string; state: "submitted" }> {
     const operation: OperationRequest = { operationId: randomUUID(), command };
     const handle = await this.client.workflow.start("operationWorkflow", {
-      taskQueue: this.config.temporal.taskQueue,
+      taskQueue: this.runtime.taskQueue,
       workflowId: `apistate-${command.kind.replaceAll(".", "-")}-${operation.operationId}`,
       workflowExecutionTimeout: this.config.temporal.workflowExecutionTimeout,
       args: [{
@@ -56,10 +60,10 @@ export class TemporalGateway {
   }
 
   async ensureScoreSchedule(): Promise<{ started: boolean; workflowId: string }> {
-    const workflowId = this.config.temporal.scoreScheduleWorkflowId;
+    const workflowId = this.runtime.scoreScheduleWorkflowId;
     try {
       await this.client.workflow.start("scoreRefreshScheduleWorkflow", {
-        taskQueue: this.config.temporal.taskQueue,
+        taskQueue: this.runtime.taskQueue,
         workflowId,
         args: [{
           intervalMs: this.config.monitor.refreshIntervalMinutes * 60_000,
