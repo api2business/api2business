@@ -7,12 +7,62 @@ interface Envelope<T> {
   data: T;
 }
 
-interface Paginated<T> {
+export interface Paginated<T> {
   items: T[];
   total: number;
   page: number;
   page_size: number;
   pages: number;
+}
+
+export interface Sub2ApiGroup {
+  id: number;
+  name: string;
+  platform: string;
+  status: string;
+}
+
+export interface Sub2ApiAccount {
+  id: number;
+  name: string;
+  platform: string;
+  status: string;
+  schedulable?: boolean;
+  priority?: number;
+}
+
+export interface Sub2ApiUsageRow {
+  id: number;
+  account_id: number | null;
+  group_id: number | null;
+  model: string;
+  stream: boolean;
+  input_tokens: number;
+  output_tokens: number;
+  actual_cost: number;
+  duration_ms: number | null;
+  first_token_ms: number | null;
+  created_at: string;
+}
+
+export interface Sub2ApiRequestError {
+  id: number;
+  request_id?: string;
+  account_id?: number | null;
+  status_code?: number;
+  phase?: string;
+  type?: string;
+  message?: string;
+  error_message?: string;
+}
+
+export interface Sub2ApiSystemLog {
+  id: number;
+  created_at: string;
+  message: string;
+  request_id?: string;
+  account_id?: number | null;
+  extra?: Record<string, unknown>;
 }
 
 export class Sub2ApiClient {
@@ -83,6 +133,85 @@ export class Sub2ApiClient {
       limit: String(this.config.ranking.sourceLimit),
     });
     return await this.request(`/admin/dashboard/users-ranking?${params}`);
+  }
+
+  async listGroups(): Promise<Sub2ApiGroup[]> {
+    return await this.request<Sub2ApiGroup[]>("/admin/groups/all");
+  }
+
+  async listGroupAccounts(groupId: number, platform: string): Promise<Sub2ApiAccount[]> {
+    const params = new URLSearchParams({
+      page: "1",
+      page_size: "1000",
+      group: String(groupId),
+      platform,
+      sort_by: "id",
+      sort_order: "asc",
+    });
+    return (await this.request<Paginated<Sub2ApiAccount>>(`/admin/accounts?${params}`)).items;
+  }
+
+  async listGroupUsage(groupId: number, start: Date, end: Date): Promise<Sub2ApiUsageRow[]> {
+    return await this.paginate<Sub2ApiUsageRow>("/admin/usage", {
+      group_id: String(groupId),
+      start_date: start.toISOString().slice(0, 10),
+      end_date: end.toISOString().slice(0, 10),
+      timezone: "UTC",
+      sort_by: "created_at",
+      sort_order: "desc",
+    }, 1000, (row) => {
+      const createdAt = Date.parse(row.created_at);
+      return Number.isFinite(createdAt) && createdAt >= start.getTime() && createdAt <= end.getTime();
+    });
+  }
+
+  async listRequestErrors(groupId: number, platform: string, start: Date): Promise<Sub2ApiRequestError[]> {
+    return await this.paginate<Sub2ApiRequestError>("/admin/ops/request-errors", {
+      group_id: String(groupId),
+      platform,
+      start_time: start.toISOString(),
+      view: "all",
+    }, 500);
+  }
+
+  async listSystemLogs(platform: string, start: Date, marker: string): Promise<Sub2ApiSystemLog[]> {
+    return await this.paginate<Sub2ApiSystemLog>("/admin/ops/system-logs", {
+      platform,
+      start_time: start.toISOString(),
+      q: marker,
+    }, 200);
+  }
+
+  async getOpsOverview(groupId: number, platform: string, start: Date): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams({
+      group_id: String(groupId),
+      platform,
+      start_time: start.toISOString(),
+      query_mode: "raw",
+    });
+    return await this.request(`/admin/ops/dashboard/overview?${params}`);
+  }
+
+  async getOpsAccountAvailability(groupId: number, platform: string): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams({ group_id: String(groupId), platform });
+    return await this.request(`/admin/ops/account-availability?${params}`);
+  }
+
+  async getOpsConcurrency(groupId: number, platform: string): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams({ group_id: String(groupId), platform });
+    return await this.request(`/admin/ops/concurrency?${params}`);
+  }
+
+  private async paginate<T>(path: string, query: Record<string, string>, pageSize: number, keep: (row: T) => boolean = () => true): Promise<T[]> {
+    const rows: T[] = [];
+    let page = 1;
+    for (;;) {
+      const params = new URLSearchParams({ ...query, page: String(page), page_size: String(pageSize) });
+      const data = await this.request<Paginated<T>>(`${path}?${params}`);
+      rows.push(...data.items.filter(keep));
+      if (page >= data.pages) return rows;
+      page += 1;
+    }
   }
 
   async addBalance(userId: number, amountUsd: number, notes: string): Promise<Sub2ApiUser> {

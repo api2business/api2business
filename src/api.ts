@@ -13,7 +13,7 @@ const adminToken = process.env[target.adminTokenEnv];
 if (!adminToken) throw new Error(`server target requires env ${target.adminTokenEnv}`);
 
 const context = createServerContext(config, target);
-const temporal = await TemporalGateway.connect(config);
+const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId });
 const dispatcher = new ApplicationDispatcher({ lottery: context.service, scores: context.monitor }, temporal);
 const server = Bun.serve({
   hostname: target.listenHost,
@@ -27,7 +27,7 @@ console.log(JSON.stringify({
   runtime: runtimeId,
   listen: server.url.toString(),
   temporalNamespace: config.temporal.namespace,
-  temporalTaskQueue: config.temporal.taskQueue,
+  temporalTaskQueue: target.temporalTaskQueue,
   automaticCreditEnabled: config.lottery.automaticCredit.enabled,
   valuesPrinted: false,
 }));

@@ -1,7 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { mergeAccountScores } from "./account-score-aggregation";
+import { collectNativeScores } from "./account-score-native";
 import type { AppConfig } from "./config";
+import type { Sub2ApiClient } from "./sub2api-client";
+import type { RuntimePolicyEventSource } from "./runtime-policy-events";
 
 interface ScoreSnapshot {
   ok: boolean;
@@ -14,6 +17,7 @@ interface ScoreSnapshot {
   accounts: Array<Record<string, unknown>>;
   error: string | null;
   source: string;
+  collection?: Record<string, unknown>;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -24,31 +28,17 @@ function records(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value) ? value.map(record).filter((item): item is Record<string, unknown> => item !== null) : [];
 }
 
-function nested(root: unknown, ...keys: string[]): unknown {
-  let value = root;
-  for (const key of keys) value = record(value)?.[key];
-  return value;
-}
-
-async function pooled<T, R>(values: T[], concurrency: number, operation: (value: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(values.length);
-  let cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-    for (;;) {
-      const index = cursor++;
-      if (index >= values.length) return;
-      results[index] = await operation(values[index]!);
-    }
-  }));
-  return results;
-}
-
 export class AccountScoreService {
   private timer: ReturnType<typeof setInterval> | null = null;
   private inFlight: Promise<ScoreSnapshot> | null = null;
   private snapshot: ScoreSnapshot;
 
-  constructor(private readonly config: AppConfig, private readonly cachePath: string, private readonly cliWorkDir: string) {
+  constructor(
+    private readonly config: AppConfig,
+    private readonly cachePath: string,
+    private readonly sub2api: Sub2ApiClient,
+    private readonly policyEvents: RuntimePolicyEventSource,
+  ) {
     this.snapshot = this.readCache();
   }
 
@@ -86,24 +76,9 @@ export class AccountScoreService {
     const startedAt = new Date();
     this.snapshot = { ...this.snapshot, status: "refreshing", refreshStartedAt: startedAt.toISOString(), error: null };
     try {
-      const overview = await this.invoke(["--all-groups"]);
-      const groups = records(nested(overview, "data", "parsed", "allGroups", "groups"));
-      const details = await pooled(groups, 2, async (group) => {
-        const id = String(group.groupId ?? "");
-        if (!id) return { group, accounts: [] as Array<Record<string, unknown>> };
-        const payload = await this.invoke(["--group", id]);
-        return {
-          group,
-          accounts: records(nested(payload, "data", "parsed", "errors", "nativeOps", "accountQuality", "accounts")),
-        };
-      });
+      const collected = await collectNativeScores(this.sub2api, this.policyEvents, this.config.monitor.scoreWindow);
       const refreshedAt = new Date();
-      const accounts = mergeAccountScores(details.flatMap(({ group, accounts }) => accounts.map((account): Record<string, unknown> => ({
-        groupId: group.groupId ?? null,
-        groupName: group.groupName ?? null,
-        platform: group.platform ?? null,
-        ...account,
-      }))));
+      const accounts = mergeAccountScores(collected.accounts);
       this.snapshot = {
         ok: true,
         status: "ready",
@@ -111,10 +86,11 @@ export class AccountScoreService {
         refreshStartedAt: startedAt.toISOString(),
         nextRefreshAt: new Date(refreshedAt.getTime() + this.config.monitor.refreshIntervalMinutes * 60_000).toISOString(),
         window: this.config.monitor.scoreWindow,
-        groups,
+        groups: collected.groups,
         accounts,
         error: null,
-        source: "unidesk-sub2api-runtime-errors",
+        source: "sub2api-native-admin-api-local-aggregation",
+        collection: collected.collection,
       };
       this.writeCache(this.snapshot);
       return this.snapshot;
@@ -129,50 +105,6 @@ export class AccountScoreService {
       this.writeCache(this.snapshot);
       return this.snapshot;
     }
-  }
-
-  private async invoke(scope: string[]): Promise<Record<string, unknown>> {
-    const args = [
-      resolve(this.cliWorkDir, this.config.monitor.cli.entrypoint),
-      "platform-infra", "sub2api", "codex-pool", "runtime", "errors",
-      "--target", this.config.monitor.target,
-      "--since", this.config.monitor.scoreWindow,
-      ...scope,
-      "--raw",
-    ];
-    const process = Bun.spawn([this.config.monitor.cli.executable, ...args], {
-      cwd: this.cliWorkDir,
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...Bun.env, UNIDESK_MAIN_SERVER_IP: this.config.monitor.cli.mainServerHost },
-    });
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      process.kill();
-    }, this.config.monitor.cli.timeoutMs);
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(process.stdout).text(),
-      new Response(process.stderr).text(),
-      process.exited,
-    ]).finally(() => clearTimeout(timeout));
-    if (timedOut) throw new Error(`评分 CLI 在 ${this.config.monitor.cli.timeoutMs}ms 后超时`);
-    if (exitCode !== 0) throw new Error(`评分 CLI 退出码 ${exitCode}: ${stderr.trim().slice(-600)}`);
-    let payload = record(JSON.parse(stdout));
-    if (!payload || payload.ok !== true) throw new Error("评分 CLI 返回无效结果");
-    if (nested(payload, "data", "outputTruncated")) {
-      const dumpPath = nested(payload, "data", "dump", "path");
-      if (typeof dumpPath !== "string" || !dumpPath.startsWith("/tmp/unidesk-cli-output/")) {
-        throw new Error("评分 CLI 渐进披露结果缺少受保护 dump");
-      }
-      try {
-        payload = record(JSON.parse(readFileSync(dumpPath, "utf8")));
-      } finally {
-        try { unlinkSync(dumpPath); } catch { /* The CLI may clean up its own temporary output. */ }
-      }
-      if (!payload || payload.ok !== true) throw new Error("评分 CLI dump 返回无效结果");
-    }
-    return payload;
   }
 
   private readCache(): ScoreSnapshot {
@@ -194,7 +126,7 @@ export class AccountScoreService {
       groups: [],
       accounts: [],
       error: null,
-      source: "unidesk-sub2api-runtime-errors",
+      source: "sub2api-native-admin-api-local-aggregation",
     };
   }
 

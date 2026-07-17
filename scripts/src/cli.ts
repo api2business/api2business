@@ -160,7 +160,7 @@ function isAppCommand(value: AppCommand | Record<string, unknown>): value is App
 
 async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: EmbeddedCliTarget): Promise<unknown> {
   if (parsed.command.join(" ") === "scores refresh" || parsed.command.join(" ") === "workflow status") {
-    const temporal = await TemporalGateway.connect(config);
+    const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue });
     try {
       if (parsed.command[0] === "scores") return await temporal.submit({ kind: "scores.refresh" });
       if (!parsed.id) throw new Error("workflow status requires --id");
@@ -174,7 +174,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
   const context = createEmbeddedContext(config, target);
   let temporal: TemporalGateway | null = null;
   try {
-    if (usesWorkflow(command)) temporal = await TemporalGateway.connect(config);
+    if (usesWorkflow(command)) temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue });
     return await new ApplicationDispatcher({ lottery: context.service, scores: context.monitor }, temporal).dispatch(command);
   } finally {
     if (temporal) await temporal.close();
@@ -206,11 +206,15 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "credit" && action === "test") return await client.creditTest(parsed.confirm);
   if (group === "api" && action === "smoke") {
     const [status, scores, ranking, lottery] = await Promise.all([client.serviceStatus(), client.scores(), client.ranking(), client.lottery()]);
-    const refreshed = await client.refreshScores();
+    const refreshed = await client.workflowSubmit({ kind: "scores.refresh" });
     return {
       ok: status.ok === true && scores.ok === true && refreshed.ok === true && ranking.ok === true && lottery.ok === true,
       action: "apistate-api-smoke",
-      checks: { status: status.ok === true, scores: scores.ok === true, refresh: refreshed.ok === true && refreshed.snapshotOk === true, ranking: ranking.ok === true, lottery: lottery.ok === true },
+      checks: { status: status.ok === true, scores: scores.ok === true, refreshSubmitted: refreshed.ok === true, ranking: ranking.ok === true, lottery: lottery.ok === true },
+      workflowId: refreshed.workflowId,
+      runId: refreshed.runId,
+      state: refreshed.state,
+      next: "workflow status --id <workflowId>",
       valuesPrinted: false,
     };
   }
@@ -244,7 +248,10 @@ export async function runCli(args: string[]): Promise<void> {
     const config = loadConfig(parsed.configPath);
     if (parsed.command.join(" ") === "config validate") return emit({
       ok: true, configPath: config.configPath, kind: config.kind, service: config.metadata.name,
-      temporalNamespace: config.temporal.namespace, temporalTaskQueue: config.temporal.taskQueue,
+      temporalNamespace: config.temporal.namespace,
+      temporalTaskQueue: config.temporal.taskQueue,
+      cliTargets: Object.fromEntries(Object.entries(config.runtime.cliTargets).map(([id, target]) => [id, target.mode === "embedded" ? { mode: target.mode, temporalTaskQueue: target.temporalTaskQueue } : { mode: target.mode }])),
+      serverTargets: Object.fromEntries(Object.entries(config.runtime.serverTargets).map(([id, target]) => [id, { temporalTaskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId }])),
       refreshIntervalMinutes: config.monitor.refreshIntervalMinutes, scoreWindow: config.monitor.scoreWindow,
       automaticCreditEnabled: config.lottery.automaticCredit.enabled, valuesPrinted: false,
     }, parsed.json);

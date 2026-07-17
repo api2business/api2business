@@ -5,7 +5,13 @@ export class AdminHttpClient {
   private readonly token: string;
 
   constructor(private readonly config: AppConfig, private readonly target: HttpCliTarget) {
-    this.token = readSecret(config, target.adminToken);
+    if ("envKey" in target.adminToken) {
+      const value = process.env[target.adminToken.envKey];
+      if (!value) throw new Error(`HTTP CLI target requires env ${target.adminToken.envKey}`);
+      this.token = value;
+    } else {
+      this.token = readSecret(config, target.adminToken);
+    }
   }
 
   private async request<T>(path: string, init: RequestInit = {}, timeoutMs = this.config.sub2api.requestTimeoutMs): Promise<T> {
@@ -33,9 +39,6 @@ export class AdminHttpClient {
   creditTest(execute: boolean): Promise<Record<string, unknown>> { return this.request("/api/admin/credit-test", { method: "POST", body: JSON.stringify({ execute }) }); }
   serviceStatus(): Promise<Record<string, unknown>> { return this.request("/api/status"); }
   scores(): Promise<Record<string, unknown>> { return this.request("/api/scores"); }
-  refreshScores(): Promise<Record<string, unknown>> {
-    return this.request("/api/scores/refresh", { method: "POST", body: "{}" }, this.config.monitor.cli.timeoutMs + 5_000);
-  }
   ranking(): Promise<Record<string, unknown>> { return this.request("/api/ranking"); }
   lottery(): Promise<Record<string, unknown>> { return this.request("/api/lottery"); }
   workflowSubmit(command: Record<string, unknown>): Promise<Record<string, unknown>> {

@@ -10,6 +10,10 @@ export interface SecretRef {
   sourceKey: string;
 }
 
+export interface EnvSecretRef {
+  envKey: string;
+}
+
 export interface AppConfig {
   apiVersion: string;
   kind: string;
@@ -81,12 +85,13 @@ export interface EmbeddedCliTarget {
   databasePath: string;
   scoreCachePath: string;
   monitorWorkDir: string;
+  temporalTaskQueue: string;
 }
 
 export interface HttpCliTarget {
   mode: "http";
   baseUrl: string;
-  adminToken: SecretRef;
+  adminToken: SecretRef | EnvSecretRef;
 }
 
 export interface ServerTarget {
@@ -101,6 +106,8 @@ export interface ServerTarget {
   databasePath: string;
   scoreCachePath: string;
   monitorWorkDir: string;
+  temporalTaskQueue: string;
+  scoreScheduleWorkflowId: string;
   adminTokenEnv: string;
   sub2apiAdminEmailEnv: string;
   sub2apiAdminPasswordEnv: string;
@@ -172,6 +179,15 @@ function secretRef(value: unknown, path: string): SecretRef {
   return { sourceRef: stringValue(raw, "sourceRef", path), sourceKey: stringValue(raw, "sourceKey", path) };
 }
 
+function cliTokenRef(value: unknown, path: string): SecretRef | EnvSecretRef {
+  const raw = object(value, path);
+  if (typeof raw.envKey === "string") {
+    if (raw.sourceRef !== undefined || raw.sourceKey !== undefined) throw new Error(`${path} must use either envKey or sourceRef/sourceKey`);
+    return { envKey: stringValue(raw, "envKey", path) };
+  }
+  return secretRef(raw, path);
+}
+
 function nativeFile(parent: ObjectValue, key: string, path: string): string {
   const value = stringValue(parent, key, path);
   if (value.includes("/") || value.includes("\\") || value === "." || value === "..") throw new Error(`${path}.${key} must be a filename`);
@@ -214,8 +230,9 @@ export function loadConfig(path: string): AppConfig {
       databasePath: stringValue(target, "databasePath", `runtime.cliTargets.${id}`),
       scoreCachePath: stringValue(target, "scoreCachePath", `runtime.cliTargets.${id}`),
       monitorWorkDir: stringValue(target, "monitorWorkDir", `runtime.cliTargets.${id}`),
+      temporalTaskQueue: stringValue(target, "temporalTaskQueue", `runtime.cliTargets.${id}`),
     };
-    else if (mode === "http") cliTargets[id] = { mode, baseUrl: stringValue(target, "baseUrl", `runtime.cliTargets.${id}`), adminToken: secretRef(target.adminToken, `runtime.cliTargets.${id}.adminToken`) };
+    else if (mode === "http") cliTargets[id] = { mode, baseUrl: stringValue(target, "baseUrl", `runtime.cliTargets.${id}`), adminToken: cliTokenRef(target.adminToken, `runtime.cliTargets.${id}.adminToken`) };
     else throw new Error(`runtime.cliTargets.${id}.mode must be embedded or http`);
   }
   const serverTargets: Record<string, ServerTarget> = {};
@@ -233,6 +250,8 @@ export function loadConfig(path: string): AppConfig {
       databasePath: stringValue(target, "databasePath", `runtime.serverTargets.${id}`),
       scoreCachePath: stringValue(target, "scoreCachePath", `runtime.serverTargets.${id}`),
       monitorWorkDir: stringValue(target, "monitorWorkDir", `runtime.serverTargets.${id}`),
+      temporalTaskQueue: stringValue(target, "temporalTaskQueue", `runtime.serverTargets.${id}`),
+      scoreScheduleWorkflowId: stringValue(target, "scoreScheduleWorkflowId", `runtime.serverTargets.${id}`),
       adminTokenEnv: stringValue(target, "adminTokenEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminEmailEnv: stringValue(target, "sub2apiAdminEmailEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminPasswordEnv: stringValue(target, "sub2apiAdminPasswordEnv", `runtime.serverTargets.${id}`),
