@@ -62,7 +62,14 @@ export class AccountScoreService {
   }
 
   state(): ScoreSnapshot {
-    return { ...this.snapshot, status: this.inFlight ? "refreshing" : this.snapshot.status };
+    if (!this.inFlight && existsSync(this.cachePath)) this.snapshot = this.readCache();
+    const nextRefreshAt = this.snapshot.nextRefreshAt ? Date.parse(this.snapshot.nextRefreshAt) : Number.NaN;
+    const status = this.inFlight
+      ? "refreshing"
+      : this.snapshot.status === "ready" && Number.isFinite(nextRefreshAt) && Date.now() > nextRefreshAt
+        ? "stale"
+        : this.snapshot.status;
+    return { ...this.snapshot, status };
   }
 
   async refresh(): Promise<ScoreSnapshot> {
@@ -119,6 +126,7 @@ export class AccountScoreService {
         refreshStartedAt: startedAt.toISOString(),
         error: error instanceof Error ? error.message : String(error),
       };
+      this.writeCache(this.snapshot);
       return this.snapshot;
     }
   }
@@ -171,7 +179,7 @@ export class AccountScoreService {
     if (existsSync(this.cachePath)) {
       try {
         const cached = record(JSON.parse(readFileSync(this.cachePath, "utf8"))) as ScoreSnapshot | null;
-        if (cached) return { ...cached, status: "stale", accounts: mergeAccountScores(records(cached.accounts)) };
+        if (cached) return { ...cached, accounts: mergeAccountScores(records(cached.accounts)) };
       } catch {
         // Invalid cache is replaced by the next successful refresh.
       }
