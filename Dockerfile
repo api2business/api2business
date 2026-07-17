@@ -9,6 +9,7 @@ RUN apt-get update \
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 COPY config ./config
+COPY scripts ./scripts
 COPY src ./src
 COPY static ./static
 
