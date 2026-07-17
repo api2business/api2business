@@ -12,6 +12,18 @@ function number(value, digits = 0) {
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits })
 }
 
+function usd(value, digits = 3) {
+  const numeric = Number(value)
+  if (value === null || value === undefined || !Number.isFinite(numeric)) return '<span class="usd-value is-empty">—</span>'
+  const formatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits })
+  const parts = formatter.formatToParts(numeric)
+  const whole = parts.filter(({ type }) => ['minusSign', 'plusSign', 'integer', 'group'].includes(type)).map(({ value: part }) => part).join('')
+  const point = parts.find(({ type }) => type === 'decimal')?.value ?? '.'
+  const fraction = parts.find(({ type }) => type === 'fraction')?.value ?? ''.padEnd(digits, '0')
+  const label = `$${formatter.format(numeric)}`
+  return `<span class="usd-value" aria-label="${escapeHtml(label)}"><span class="usd-symbol" aria-hidden="true">$</span><span class="usd-whole" aria-hidden="true">${escapeHtml(whole)}</span><span class="usd-point" aria-hidden="true">${escapeHtml(point)}</span><span class="usd-fraction" aria-hidden="true">${escapeHtml(fraction)}</span></span>`
+}
+
 function compact(value) {
   if (value === null || value === undefined) return '—'
   return new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 2 }).format(Number(value))
@@ -134,7 +146,7 @@ function renderScoreRows() {
       <td>${row.ttftP95Ms == null ? '—' : `${number(row.ttftP95Ms)} ms`}</td>
       <td>${compact(usage.requestCount)}</td>
       <td>${compact(usage.tokenCount)}</td>
-      <td>${usage.apiAmountUsd == null ? '—' : `$${number(usage.apiAmountUsd, 3)}`}</td>
+      <td class="usd-cell">${usd(usage.apiAmountUsd)}</td>
       <td>${number(row.failoverRecovered)} / ${number(row.failoverRequests)}</td>
       <td><span class="availability ${row.currentlyAvailable ? 'is-up' : 'is-down'}">${row.currentlyAvailable ? '可用' : '不可用'}</span></td>
     </tr>`
@@ -180,10 +192,10 @@ async function rankingPage() {
   const data = await requestJson('/api/ranking')
   const ranking = data.ranking
   $('#ranking-range').textContent = `${ranking.startDate} 至 ${ranking.endDate}`
-  $('#ranking-cost').textContent = `$${number(ranking.totals.actualCost, 3)}`
+  $('#ranking-cost').innerHTML = usd(ranking.totals.actualCost)
   $('#ranking-requests').textContent = compact(ranking.totals.requests)
   $('#ranking-tokens').textContent = compact(ranking.totals.tokens)
-  $('#ranking-body').innerHTML = ranking.rows.length ? ranking.rows.map((row) => `<tr><td>${String(row.rank).padStart(2, '0')}</td><td class="account-cell"><b>${escapeHtml(row.displayName)}</b></td><td>$${number(row.actualCost, 3)}</td><td>${compact(row.requests)}</td><td>${compact(row.tokens)}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">当前窗口暂无用量</td></tr>'
+  $('#ranking-body').innerHTML = ranking.rows.length ? ranking.rows.map((row) => `<tr><td>${String(row.rank).padStart(2, '0')}</td><td class="account-cell"><b>${escapeHtml(row.displayName)}</b></td><td class="usd-cell">${usd(row.actualCost)}</td><td>${compact(row.requests)}</td><td>${compact(row.tokens)}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">当前窗口暂无用量</td></tr>'
 }
 
 function creditLabel(status) {

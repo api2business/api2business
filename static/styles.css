@@ -67,6 +67,14 @@ button:disabled { cursor: wait; opacity: .48; }
 .data-table th { height: 40px; padding: 0 12px; position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap; background: var(--surface-raised); color: var(--muted); font: 10px/1 var(--mono); border-bottom: 1px solid var(--line); }
 .data-table td { height: 52px; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .data-table tbody tr:hover { background: rgba(185,228,71,.045); }
+.usd-cell { text-align: right !important; }
+.usd-value { display: inline-grid; grid-template-columns: 1ch 9ch .65ch 3ch; justify-content: end; align-items: baseline; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usd-symbol { color: var(--muted); text-align: left; }
+.usd-whole { color: var(--paper); text-align: right; font-weight: 650; }
+.usd-point, .usd-fraction { color: var(--info); }
+.usd-point { text-align: center; }
+.usd-fraction { text-align: left; font-weight: 550; }
+.usd-value.is-empty { display: inline-block; width: 13.65ch; color: var(--muted); text-align: right; }
 .account-cell { min-width: 230px; }
 .account-cell b { display: block; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
 .account-cell small { display: block; color: var(--muted); margin-top: 4px; font: 10px/1 var(--mono); }
