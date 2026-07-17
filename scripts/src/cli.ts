@@ -106,6 +106,34 @@ function emit(value: Record<string, unknown>, json: boolean): void {
   }
 }
 
+export function summarizeWorkflowStatus(value: Record<string, unknown>): Record<string, unknown> {
+  const result = record(value.result);
+  const summary: Record<string, unknown> = {
+    target: value.target,
+    transport: value.transport,
+    ok: value.ok,
+    workflowId: value.workflowId,
+    runId: value.runId,
+    state: value.state,
+    terminal: value.terminal,
+    error: value.error,
+  };
+  if (result) {
+    summary.resultOk = result.ok;
+    summary.resultStatus = result.status;
+    summary.refreshedAt = result.refreshedAt;
+    summary.window = result.window;
+    summary.groupCount = Array.isArray(result.groups) ? result.groups.length : null;
+    summary.accountCount = Array.isArray(result.accounts) ? result.accounts.length : null;
+    summary.resultFieldCount = Object.keys(result).length;
+    summary.disclosure = "add --json for the complete workflow result";
+  } else if (value.result !== null && value.result !== undefined) {
+    summary.resultType = Array.isArray(value.result) ? "array" : typeof value.result;
+    summary.disclosure = "add --json for the complete workflow result";
+  }
+  return summary;
+}
+
 function appCommand(parsed: Parsed, config: ReturnType<typeof loadConfig>): AppCommand | Record<string, unknown> {
   const [group, action] = parsed.command;
   if (group === "backend" && action === "check") return { kind: "backend.check" };
@@ -236,7 +264,8 @@ export async function runCli(args: string[]): Promise<void> {
     if (!target) throw new Error(`runtime.cliTargets.${targetId} does not exist`);
     if (parsed.overApi && target.mode !== "http") throw new Error(`--over-api requires an http target; ${targetId} is ${target.mode}`);
     const result = target.mode === "embedded" ? await embedded(parsed, config, target) : await remote(parsed, config, target);
-    emit({ target: targetId, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...result as Record<string, unknown> }, parsed.json);
+    const output = { target: targetId, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...result as Record<string, unknown> };
+    emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);
     process.exitCode = 1;
