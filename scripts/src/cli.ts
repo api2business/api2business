@@ -8,6 +8,8 @@ import { usesWorkflow } from "../../src/contracts";
 import { ApplicationDispatcher } from "../../src/dispatcher";
 import { nativeLogs, nativeStart, nativeStatus, nativeStop } from "../../src/native-services";
 import { TemporalGateway } from "../../src/temporal-client";
+import { collectUserImpactFromDatabase } from "../../src/user-impact-database";
+import { emitUserImpact } from "./user-impact-output";
 
 interface Parsed {
   configPath: string;
@@ -24,6 +26,9 @@ interface Parsed {
   tail: number | null;
   calls: number | null;
   account: string | null;
+  start: string | null;
+  end: string | null;
+  affectedOnly: boolean;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -41,8 +46,8 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--limit", "--draws", "--component", "--tail", "--calls", "--account"]);
-  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--limit", "--draws", "--component", "--tail", "--calls", "--account", "--start", "--end"]);
+  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index]!;
@@ -75,6 +80,9 @@ function parseArgs(args: string[]): Parsed {
     tail: integer("--tail"),
     calls: integer("--calls"),
     account: value(args, "--account"),
+    start: value(args, "--start"),
+    end: value(args, "--end"),
+    affectedOnly: args.includes("--affected-only"),
   };
 }
 
@@ -86,6 +94,7 @@ function help(): Record<string, unknown> {
       "config validate",
       "backend check",
       "scores get|refresh|rank|aggregate-smoke",
+      "users impact --start <ISO> --end <ISO> [--affected-only]",
       "lottery status|draw|reset",
       "records list|delete",
       "credit test",
@@ -295,6 +304,12 @@ export async function runCli(args: string[]): Promise<void> {
       automaticCreditEnabled: config.lottery.automaticCredit.enabled, valuesPrinted: false,
     }, parsed.json);
     if (parsed.command.join(" ") === "scores aggregate-smoke") return emit(aggregateSmoke(), parsed.json);
+    if (parsed.command.join(" ") === "users impact") {
+      if (parsed.overApi) throw new Error("users impact uses direct PostgreSQL and does not support --over-api");
+      if (!parsed.start || !parsed.end) throw new Error("users impact requires --start and --end");
+      const result = await collectUserImpactFromDatabase(config, parsed.start, parsed.end, parsed.affectedOnly);
+      return emitUserImpact({ target: "database", transport: "postgresql-direct", ...result }, parsed.json);
+    }
     if (parsed.command[0] === "native") {
       const action = parsed.command[1];
       if (!parsed.component) throw new Error("native commands require --component api, worker, or web");
