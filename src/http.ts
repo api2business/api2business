@@ -94,7 +94,9 @@ export function createHandler(
         const state = await dispatcher.dispatch({
           kind: "scores.rank",
           recentCallLimit: Number(input.recentCallLimit),
-          accountSelector: null,
+          accountSelector: typeof input.accountSelector === "string" && input.accountSelector.trim()
+            ? input.accountSelector.trim()
+            : null,
         }) as Record<string, unknown>;
         return json({ ...state, ok: true });
       }
