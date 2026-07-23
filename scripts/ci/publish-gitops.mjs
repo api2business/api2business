@@ -78,6 +78,17 @@ function validateManifest(manifest, expected) {
 }
 
 function main() {
+  const giteaToken = required(process.env.GITEA_TOKEN, "GITEA_TOKEN");
+  const askPassPath = resolve(required(process.env.TMPDIR ?? "/tmp", "TMPDIR"), "apistate-git-askpass.sh");
+  writeFileSync(askPassPath, `#!/bin/sh
+case "$1" in
+  *Username*) printf '%s' 'unidesk-admin' ;;
+  *Password*) printf '%s' "$GITEA_TOKEN" ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o700 });
+  process.env.GIT_ASKPASS = askPassPath;
+  process.env.GIT_TERMINAL_PROMPT = "0";
   const sourceRoot = resolve(required(option("--source-root"), "--source-root"));
   const sourceCommit = required(option("--source-commit"), "--source-commit");
   const configPath = safePath(required(option("--config-path"), "--config-path"), "--config-path");
