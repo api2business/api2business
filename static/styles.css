@@ -62,6 +62,13 @@ button:disabled { cursor: wait; opacity: .48; }
 .filter-field { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
 .filter-field input { width: 260px; height: 34px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); color: var(--paper); padding: 0 10px; outline: 0; }
 .filter-field input:focus { border-color: var(--signal); }
+.score-query-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.select-field { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.select-field select { height: 34px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); color: var(--paper); padding: 0 30px 0 10px; }
+.select-field select:focus { border-color: var(--signal); outline: 0; }
+.query-command { height: 34px; border: 1px solid var(--signal); border-radius: 3px; background: transparent; color: var(--signal); padding: 0 14px; font-weight: 700; }
+.query-command:hover:not(:disabled) { background: var(--signal); color: var(--ink); }
+.query-command:disabled { opacity: .5; cursor: wait; }
 .table-wrap { overflow: auto; border: 1px solid var(--line); }
 .data-table { width: 100%; min-width: 1220px; border-collapse: collapse; font-size: 12px; }
 .data-table th { height: 40px; padding: 0 12px; position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap; background: var(--surface-raised); color: var(--muted); font: 10px/1 var(--mono); border-bottom: 1px solid var(--line); }

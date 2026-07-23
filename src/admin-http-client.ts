@@ -39,6 +39,12 @@ export class AdminHttpClient {
   creditTest(execute: boolean): Promise<Record<string, unknown>> { return this.request("/api/admin/credit-test", { method: "POST", body: JSON.stringify({ execute }) }); }
   serviceStatus(): Promise<Record<string, unknown>> { return this.request("/api/status"); }
   scores(): Promise<Record<string, unknown>> { return this.request("/api/scores"); }
+  rankScores(recentCallLimit: number, accountSelector: string | null): Promise<Record<string, unknown>> {
+    return this.request("/api/scores/rank", {
+      method: "POST",
+      body: JSON.stringify({ recentCallLimit, accountSelector }),
+    }, 60000);
+  }
   ranking(): Promise<Record<string, unknown>> { return this.request("/api/ranking"); }
   lottery(): Promise<Record<string, unknown>> { return this.request("/api/lottery"); }
   workflowSubmit(command: Record<string, unknown>): Promise<Record<string, unknown>> {

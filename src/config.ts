@@ -22,6 +22,8 @@ export interface AppConfig {
     timezone: string;
     refreshIntervalMinutes: number;
     scoreWindow: string;
+    recentCallLimit: number;
+    recentCallOptions: number[];
     target: string;
     cli: { workDir: string; executable: string; entrypoint: string; mainServerHost: string; timeoutMs: number };
   };
@@ -30,6 +32,7 @@ export interface AppConfig {
     baseUrl: string;
     requestTimeoutMs: number;
     pageSize: number;
+    scoreDatabase: SecretRef & { statementTimeoutMs: number };
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
   };
   lottery: {
@@ -111,6 +114,7 @@ export interface ServerTarget {
   adminTokenEnv: string;
   sub2apiAdminEmailEnv: string;
   sub2apiAdminPasswordEnv: string;
+  scoreDatabaseUrlEnv: string;
   webPasswordEnv: string;
   apiKeyEnv: string;
   sessionSecretEnv: string;
@@ -167,6 +171,19 @@ function strings(parent: ObjectValue, key: string, path: string): string[] {
   return value as string[];
 }
 
+function integers(parent: ObjectValue, key: string, path: string, minimum: number, maximum: number): number[] {
+  const value = parent[key];
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${path}.${key} must be a non-empty integer array`);
+  const result = value.map((item, index) => {
+    if (!Number.isInteger(item) || Number(item) < minimum || Number(item) > maximum) {
+      throw new Error(`${path}.${key}[${index}] must be an integer from ${minimum} to ${maximum}`);
+    }
+    return Number(item);
+  });
+  if (new Set(result).size !== result.length) throw new Error(`${path}.${key} must not contain duplicates`);
+  return result;
+}
+
 function identityFields(parent: ObjectValue, key: string, path: string): IdentityField[] {
   const values = strings(parent, key, path);
   const supported = new Set(["username", "email", "emailLocalPart"]);
@@ -204,6 +221,7 @@ export function loadConfig(path: string): AppConfig {
   const monitorCli = object(monitor.cli, "monitor.cli");
   const webAuth = object(raw.webAuth, "webAuth");
   const adminCredentials = object(sub2api.adminCredentials, "sub2api.adminCredentials");
+  const scoreDatabase = object(sub2api.scoreDatabase, "sub2api.scoreDatabase");
   const lottery = object(raw.lottery, "lottery");
   const dailyGrant = object(lottery.dailyGrant, "lottery.dailyGrant");
   const eligibility = object(lottery.eligibility, "lottery.eligibility");
@@ -255,6 +273,7 @@ export function loadConfig(path: string): AppConfig {
       adminTokenEnv: stringValue(target, "adminTokenEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminEmailEnv: stringValue(target, "sub2apiAdminEmailEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminPasswordEnv: stringValue(target, "sub2apiAdminPasswordEnv", `runtime.serverTargets.${id}`),
+      scoreDatabaseUrlEnv: stringValue(target, "scoreDatabaseUrlEnv", `runtime.serverTargets.${id}`),
       webPasswordEnv: stringValue(target, "webPasswordEnv", `runtime.serverTargets.${id}`),
       apiKeyEnv: stringValue(target, "apiKeyEnv", `runtime.serverTargets.${id}`),
       sessionSecretEnv: stringValue(target, "sessionSecretEnv", `runtime.serverTargets.${id}`),
@@ -285,6 +304,8 @@ export function loadConfig(path: string): AppConfig {
       timezone: timezoneValue(monitor, "timezone", "monitor"),
       refreshIntervalMinutes: integerValue(monitor, "refreshIntervalMinutes", "monitor", 1, 1440),
       scoreWindow: stringValue(monitor, "scoreWindow", "monitor"),
+      recentCallLimit: integerValue(monitor, "recentCallLimit", "monitor", 1, 10000),
+      recentCallOptions: integers(monitor, "recentCallOptions", "monitor", 1, 10000),
       target: stringValue(monitor, "target", "monitor"),
       cli: {
         workDir: stringValue(monitorCli, "workDir", "monitor.cli"),
@@ -303,6 +324,11 @@ export function loadConfig(path: string): AppConfig {
       baseUrl: stringValue(sub2api, "baseUrl", "sub2api").replace(/\/$/u, ""),
       requestTimeoutMs: integerValue(sub2api, "requestTimeoutMs", "sub2api", 1),
       pageSize: integerValue(sub2api, "pageSize", "sub2api", 1, 100),
+      scoreDatabase: {
+        sourceRef: stringValue(scoreDatabase, "sourceRef", "sub2api.scoreDatabase"),
+        sourceKey: stringValue(scoreDatabase, "sourceKey", "sub2api.scoreDatabase"),
+        statementTimeoutMs: integerValue(scoreDatabase, "statementTimeoutMs", "sub2api.scoreDatabase", 1000, 60000),
+      },
       adminCredentials: {
         sourceRef: stringValue(adminCredentials, "sourceRef", "sub2api.adminCredentials"),
         emailKey: stringValue(adminCredentials, "emailKey", "sub2api.adminCredentials"),

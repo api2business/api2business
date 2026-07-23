@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname } from "node:path";
 import { mergeAccountScores } from "./account-score-aggregation";
 import { collectNativeScores } from "./account-score-native";
+import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import type { AppConfig } from "./config";
 import type { Sub2ApiClient } from "./sub2api-client";
 import type { RuntimePolicyEventSource } from "./runtime-policy-events";
@@ -38,8 +39,33 @@ export class AccountScoreService {
     private readonly cachePath: string,
     private readonly sub2api: Sub2ApiClient,
     private readonly policyEvents: RuntimePolicyEventSource,
+    private readonly scoreDatabaseUrl: string | null = null,
   ) {
     this.snapshot = this.readCache();
+  }
+
+  async rank(recentCallLimit: number, accountSelector: string | null = null): Promise<Record<string, unknown>> {
+    if (!this.config.monitor.recentCallOptions.includes(recentCallLimit)) {
+      throw new Error(`recentCallLimit must be one of: ${this.config.monitor.recentCallOptions.join(", ")}`);
+    }
+    const result = await collectRecentCallScoresFromDatabase(
+      this.config,
+      recentCallLimit,
+      accountSelector,
+      this.scoreDatabaseUrl,
+    );
+    const groupNames = [...new Set(result.accounts.flatMap((row) =>
+      Array.isArray(row.groupNames) ? row.groupNames.map(String) : [],
+    ))];
+    return {
+      ...result,
+      status: "ready",
+      refreshedAt: new Date().toISOString(),
+      nextRefreshAt: null,
+      window: `最近 ${recentCallLimit} 次`,
+      groups: groupNames.map((name) => ({ name })),
+      availableCallOptions: this.config.monitor.recentCallOptions,
+    };
   }
 
   start(): void {

@@ -2,6 +2,7 @@ export type AppCommand =
   | { kind: "backend.check" }
   | { kind: "scores.get" }
   | { kind: "scores.refresh" }
+  | { kind: "scores.rank"; recentCallLimit: number; accountSelector: string | null }
   | { kind: "ranking.get" }
   | { kind: "lottery.publicState" }
   | { kind: "lottery.publicDraw" }

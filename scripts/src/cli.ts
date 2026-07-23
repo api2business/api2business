@@ -1,5 +1,6 @@
 import { AdminHttpClient } from "../../src/admin-http-client";
 import { mergeAccountScores } from "../../src/account-score-aggregation";
+import { collectRecentCallScoresFromDatabase } from "../../src/account-score-database";
 import { createEmbeddedContext } from "../../src/bootstrap";
 import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServiceId } from "../../src/config";
 import type { AppCommand } from "../../src/contracts";
@@ -21,6 +22,8 @@ interface Parsed {
   limit: number | null;
   draws: number | null;
   tail: number | null;
+  calls: number | null;
+  account: string | null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -38,7 +41,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--limit", "--draws", "--component", "--tail"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--limit", "--draws", "--component", "--tail", "--calls", "--account"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -70,6 +73,8 @@ function parseArgs(args: string[]): Parsed {
     limit: integer("--limit"),
     draws: integer("--draws"),
     tail: integer("--tail"),
+    calls: integer("--calls"),
+    account: value(args, "--account"),
   };
 }
 
@@ -80,7 +85,7 @@ function help(): Record<string, unknown> {
     commands: [
       "config validate",
       "backend check",
-      "scores get|refresh|aggregate-smoke",
+      "scores get|refresh|rank|aggregate-smoke",
       "lottery status|draw|reset",
       "records list|delete",
       "credit test",
@@ -90,6 +95,30 @@ function help(): Record<string, unknown> {
     ],
     output: "k8s-style text by default; add --json for machine output",
   };
+}
+
+function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
+  if (json) return emit(value, true);
+  const accounts = Array.isArray(value.accounts) ? value.accounts.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
+  console.log(`APISTATE ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)} totalDurationMs=${String(value.totalDurationMs)}`);
+  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%   TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
+  for (const row of accounts) {
+    const failureRate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
+    const ttft = typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-";
+    const groups = Array.isArray(row.groupNames) ? row.groupNames.join(",") : "-";
+    console.log([
+      String(row.grade ?? "-").padEnd(5),
+      (typeof row.score === "number" ? row.score.toFixed(1) : "-").padStart(5),
+      String(row.confidence ?? "-").padEnd(7),
+      String(row.observedAttempts ?? 0).padStart(8),
+      failureRate.padStart(6),
+      ttft.padStart(9),
+      String(row.priority ?? "-").padStart(8),
+      (row.currentAvailable === true ? "available" : row.currentAvailable === false ? "unavailable" : "unknown").padEnd(11),
+      String(row.accountName ?? "-"),
+      groups,
+    ].join("  "));
+  }
 }
 
 function emit(value: Record<string, unknown>, json: boolean): void {
@@ -159,6 +188,13 @@ function isAppCommand(value: AppCommand | Record<string, unknown>): value is App
 }
 
 async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: EmbeddedCliTarget): Promise<unknown> {
+  if (parsed.command.join(" ") === "scores rank") {
+    return await collectRecentCallScoresFromDatabase(
+      config,
+      parsed.calls ?? config.monitor.recentCallLimit,
+      parsed.account,
+    );
+  }
   if (parsed.command.join(" ") === "scores refresh" || parsed.command.join(" ") === "workflow status") {
     const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue });
     try {
@@ -188,6 +224,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "scores" && action === "get") return await client.scores();
   if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
+  if (group === "scores" && action === "rank") {
+    return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account);
+  }
   if (group === "workflow" && action === "status") {
     if (!parsed.id) throw new Error("workflow status requires --id");
     return await client.workflowStatus(parsed.id);
@@ -272,7 +311,8 @@ export async function runCli(args: string[]): Promise<void> {
     if (parsed.overApi && target.mode !== "http") throw new Error(`--over-api requires an http target; ${targetId} is ${target.mode}`);
     const result = target.mode === "embedded" ? await embedded(parsed, config, target) : await remote(parsed, config, target);
     const output = { target: targetId, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...result as Record<string, unknown> };
-    emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
+    if (parsed.command.join(" ") === "scores rank") emitScoreRanking(output, parsed.json);
+    else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);
     process.exitCode = 1;

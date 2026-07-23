@@ -27,7 +27,11 @@
     </section>
     <section class="table-section">
       <div class="table-toolbar">
-        <div class="filter-field"><span>筛选</span><input id="score-filter" type="search" placeholder="账号或分组" /></div>
+        <div class="score-query-controls">
+          <div class="filter-field"><span>筛选</span><input id="score-filter" type="search" placeholder="账号或分组" /></div>
+          <label class="select-field"><span>评分样本</span><select id="score-call-limit"></select></label>
+          <button id="query-scores" class="query-command" type="button">按调用次数查询</button>
+        </div>
         <div id="score-updated" class="refresh-clock">
           <span>上次更新时间</span>
           <strong id="score-updated-time">尚无成功快照</strong>
