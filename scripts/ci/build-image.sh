@@ -22,6 +22,9 @@ esac
 image_ref="$image_repository:$(printf '%s' "$source_commit" | cut -c1-12)"
 rm -f "$metadata_file" "$result_file"
 
+build_log=$(mktemp)
+trap 'rm -f "$build_log"' 0 1 2 15
+set +e
 buildctl-daemonless.sh build \
   --allow network.host \
   --frontend dockerfile.v0 \
@@ -34,7 +37,20 @@ buildctl-daemonless.sh build \
   --opt "build-arg:ALL_PROXY=${ALL_PROXY:-}" \
   --opt "build-arg:NO_PROXY=${NO_PROXY:-}" \
   --metadata-file "$metadata_file" \
-  --output "type=image,name=$image_ref,push=true,registry.insecure=true"
+  --output "type=image,name=$image_ref,push=true,registry.insecure=true" >"$build_log" 2>&1
+build_status=$?
+set -e
+cat "$build_log"
+
+if [ "$build_status" -ne 0 ]; then
+  if [ -s "$metadata_file" ] \
+    && grep -F "pushing manifest for $image_ref" "$build_log" | grep -Fq ' done' \
+    && grep -Fq 'context deadline exceeded' "$build_log"; then
+    printf '{"warning":true,"blocking":false,"code":"buildkit-post-push-timeout","phase":"image-build","valuesPrinted":false}\n' >&2
+  else
+    exit "$build_status"
+  fi
+fi
 
 [ -s "$metadata_file" ] || { printf '%s\n' 'BuildKit metadata is missing' >&2; exit 2; }
 digest=$(tr -d '\n' < "$metadata_file" | sed -n 's/.*"containerimage.digest"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
@@ -46,3 +62,5 @@ esac
 printf '{"ok":true,"phase":"image-build","status":"built","imageStatus":"built","sourceCommit":"%s","imageRef":"%s","digest":"%s","digestRef":"%s@%s","valuesPrinted":false}\n' \
   "$source_commit" "$image_ref" "$digest" "$image_repository" "$digest" > "$result_file"
 cat "$result_file"
+rm -f "$build_log"
+trap - 0 1 2 15
