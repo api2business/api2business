@@ -95,6 +95,7 @@ case "$1" in
 esac
 `, { mode: 0o700 });
   process.env.GIT_ASKPASS = askPassPath;
+  process.env.GIT_ASKPASS_REQUIRE = "force";
   process.env.GIT_TERMINAL_PROMPT = "0";
   const sourceRoot = resolve(required(option("--source-root"), "--source-root"));
   const sourceCommit = required(option("--source-commit"), "--source-commit");
