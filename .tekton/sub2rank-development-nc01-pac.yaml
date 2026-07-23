@@ -373,7 +373,7 @@ spec:
                 - name: GITEA_TOKEN
                   valueFrom:
                     secretKeyRef:
-                      name: pac-gitea-sub2rank-development-nc01
+                      name: pac-gitea-sentinel-nc01-v03
                       key: token
               script: "#!/bin/sh\nset -eu\nroot=\"$(workspaces.source.path)\"\nexec bun \"$root/repo/scripts/ci/publish-gitops.mjs\" \\\n  --source-root \"$root/repo\" \\\n  --source-commit \"$(params.revision)\" \\\n  --config-path \"$(params.config-path)\" \\\n  --metadata \"$root/build-metadata.json\" \\\n  --manifest-template-b64 \"$(params.manifest-template-b64)\" \\\n  --image-repository \"$(params.image-repository)\" \\\n  --gitops-read-url \"$(params.gitops-read-url)\" \\\n  --gitops-write-url \"$(params.gitops-write-url)\" \\\n  --gitops-branch \"$(params.gitops-branch)\" \\\n  --manifest-path \"$(params.gitops-manifest-path)\" \\\n  --release-state-path \"$(params.gitops-release-state-path)\" \\\n  --max-push-attempts \"$(params.gitops-max-push-attempts)\" \\\n  --author-name \"$(params.gitops-author-name)\" \\\n  --author-email \"$(params.gitops-author-email)\" \\\n  --worktree \"$root/gitops\""
         params:
