@@ -82,11 +82,21 @@ export function createHandler(
       }
       if (request.method === "GET" && url.pathname === "/api/scores") {
         const state = await dispatcher.dispatch({ kind: "scores.get" }) as Record<string, unknown>;
-        return json({ ...state, snapshotOk: state.ok, ok: true });
+        return json({ ...state, availableCallOptions: config.monitor.recentCallOptions, snapshotOk: state.ok, ok: true });
       }
       if (request.method === "POST" && url.pathname === "/api/scores/refresh") {
         const state = await dispatcher.dispatch({ kind: "scores.refresh" }) as Record<string, unknown>;
         return json({ ...state, snapshotOk: state.ok, ok: true });
+      }
+      if (request.method === "POST" && url.pathname === "/api/scores/rank") {
+        const input = await body(request);
+        if (!Number.isInteger(input.recentCallLimit)) return json({ ok: false, error: "recentCallLimit must be an integer" }, 400);
+        const state = await dispatcher.dispatch({
+          kind: "scores.rank",
+          recentCallLimit: Number(input.recentCallLimit),
+          accountSelector: null,
+        }) as Record<string, unknown>;
+        return json({ ...state, ok: true });
       }
       if (request.method === "GET" && url.pathname === "/api/ranking") return json({ ok: true, ranking: await dispatcher.dispatch({ kind: "ranking.get" }) });
       if (request.method === "GET" && url.pathname === "/api/lottery") return json(await dispatcher.dispatch({ kind: "lottery.publicState" }));

@@ -35,12 +35,13 @@ export function createServerContext(config: AppConfig, target: ServerTarget): Ap
   const webPassword = process.env[target.webPasswordEnv];
   const apiKey = process.env[target.apiKeyEnv];
   const sessionSecret = process.env[target.sessionSecretEnv];
-  if (!email || !password || !webPassword || !apiKey || !sessionSecret) {
+  const scoreDatabaseUrl = process.env[target.scoreDatabaseUrlEnv];
+  if (!email || !password || !webPassword || !apiKey || !sessionSecret || !scoreDatabaseUrl) {
     throw new Error("server target is missing one or more declared secret environment keys");
   }
   const store = new LotteryStore(config, resolveDataPath(config, target.databasePath));
   const client = new Sub2ApiClient(config, { email, password });
-  const monitor = new AccountScoreService(config, resolveDataPath(config, target.scoreCachePath), client, new UniDeskRuntimePolicyEventSource(config, target.monitorWorkDir));
+  const monitor = new AccountScoreService(config, resolveDataPath(config, target.scoreCachePath), client, new UniDeskRuntimePolicyEventSource(config, target.monitorWorkDir), scoreDatabaseUrl);
   return {
     service: new LotteryService(config, store, client),
     store,

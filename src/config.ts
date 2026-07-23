@@ -23,6 +23,7 @@ export interface AppConfig {
     refreshIntervalMinutes: number;
     scoreWindow: string;
     recentCallLimit: number;
+    recentCallOptions: number[];
     target: string;
     cli: { workDir: string; executable: string; entrypoint: string; mainServerHost: string; timeoutMs: number };
   };
@@ -113,6 +114,7 @@ export interface ServerTarget {
   adminTokenEnv: string;
   sub2apiAdminEmailEnv: string;
   sub2apiAdminPasswordEnv: string;
+  scoreDatabaseUrlEnv: string;
   webPasswordEnv: string;
   apiKeyEnv: string;
   sessionSecretEnv: string;
@@ -167,6 +169,19 @@ function strings(parent: ObjectValue, key: string, path: string): string[] {
   const value = parent[key];
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.trim() === "")) throw new Error(`${path}.${key} must be a string array`);
   return value as string[];
+}
+
+function integers(parent: ObjectValue, key: string, path: string, minimum: number, maximum: number): number[] {
+  const value = parent[key];
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${path}.${key} must be a non-empty integer array`);
+  const result = value.map((item, index) => {
+    if (!Number.isInteger(item) || Number(item) < minimum || Number(item) > maximum) {
+      throw new Error(`${path}.${key}[${index}] must be an integer from ${minimum} to ${maximum}`);
+    }
+    return Number(item);
+  });
+  if (new Set(result).size !== result.length) throw new Error(`${path}.${key} must not contain duplicates`);
+  return result;
 }
 
 function identityFields(parent: ObjectValue, key: string, path: string): IdentityField[] {
@@ -258,6 +273,7 @@ export function loadConfig(path: string): AppConfig {
       adminTokenEnv: stringValue(target, "adminTokenEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminEmailEnv: stringValue(target, "sub2apiAdminEmailEnv", `runtime.serverTargets.${id}`),
       sub2apiAdminPasswordEnv: stringValue(target, "sub2apiAdminPasswordEnv", `runtime.serverTargets.${id}`),
+      scoreDatabaseUrlEnv: stringValue(target, "scoreDatabaseUrlEnv", `runtime.serverTargets.${id}`),
       webPasswordEnv: stringValue(target, "webPasswordEnv", `runtime.serverTargets.${id}`),
       apiKeyEnv: stringValue(target, "apiKeyEnv", `runtime.serverTargets.${id}`),
       sessionSecretEnv: stringValue(target, "sessionSecretEnv", `runtime.serverTargets.${id}`),
@@ -289,6 +305,7 @@ export function loadConfig(path: string): AppConfig {
       refreshIntervalMinutes: integerValue(monitor, "refreshIntervalMinutes", "monitor", 1, 1440),
       scoreWindow: stringValue(monitor, "scoreWindow", "monitor"),
       recentCallLimit: integerValue(monitor, "recentCallLimit", "monitor", 1, 10000),
+      recentCallOptions: integers(monitor, "recentCallOptions", "monitor", 1, 10000),
       target: stringValue(monitor, "target", "monitor"),
       cli: {
         workDir: stringValue(monitorCli, "workDir", "monitor.cli"),

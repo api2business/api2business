@@ -148,7 +148,7 @@ function renderScoreRows() {
       <td>${compact(usage.tokenCount)}</td>
       <td class="usd-cell">${usd(usage.apiAmountUsd)}</td>
       <td>${number(row.failoverRecovered)} / ${number(row.failoverRequests)}</td>
-      <td><span class="availability ${row.currentlyAvailable ? 'is-up' : 'is-down'}">${row.currentlyAvailable ? '可用' : '不可用'}</span></td>
+      <td><span class="availability ${(row.currentAvailable ?? row.currentlyAvailable) ? 'is-up' : 'is-down'}">${(row.currentAvailable ?? row.currentlyAvailable) ? '可用' : '不可用'}</span></td>
     </tr>`
   }).join('') : '<tr><td colspan="14" class="empty">没有匹配的账号</td></tr>'
 }
@@ -169,7 +169,27 @@ function renderScores(data) {
 }
 
 async function scoresPage() {
+  const select = $('#score-call-limit')
   $('#score-filter').addEventListener('input', renderScoreRows)
+  $('#query-scores').addEventListener('click', async () => {
+    const button = $('#query-scores')
+    const recentCallLimit = Number(select.value)
+    button.disabled = true
+    select.disabled = true
+    $('#score-state').textContent = '查询中'
+    try {
+      renderScores(await requestJson('/api/scores/rank', {
+        method: 'POST',
+        body: JSON.stringify({ recentCallLimit }),
+      }, 60000))
+    } catch (error) {
+      $('#score-state').textContent = '查询失败'
+      $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error)
+    } finally {
+      button.disabled = false
+      select.disabled = false
+    }
+  })
   $('#refresh-scores').addEventListener('click', async () => {
     const button = $('#refresh-scores')
     button.disabled = true
@@ -178,7 +198,10 @@ async function scoresPage() {
     catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }
   })
-  renderScores(await requestJson('/api/scores'))
+  const initial = await requestJson('/api/scores')
+  const options = initial.availableCallOptions ?? []
+  select.innerHTML = options.map((value) => `<option value="${value}"${value === 500 ? ' selected' : ''}>最近 ${number(value)} 次</option>`).join('')
+  renderScores(initial)
   setInterval(renderRefreshClock, 1000)
   setInterval(async () => {
     if (!document.hidden) {

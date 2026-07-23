@@ -224,6 +224,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "scores" && action === "get") return await client.scores();
   if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
+  if (group === "scores" && action === "rank") {
+    return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account);
+  }
   if (group === "workflow" && action === "status") {
     if (!parsed.id) throw new Error("workflow status requires --id");
     return await client.workflowStatus(parsed.id);
