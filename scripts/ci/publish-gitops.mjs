@@ -37,7 +37,7 @@ function safePath(value, path) {
 }
 
 function run(command, args, cwd, allowFailure = false) {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
+  const result = spawnSync(command, args, { cwd, env: { ...process.env }, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
   if (result.error !== undefined) throw result.error;
   if (result.status !== 0 && !allowFailure) {
     const detail = `${result.stderr || result.stdout || "command failed"}`.trim().slice(-2000);
