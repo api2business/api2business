@@ -46,6 +46,13 @@ function run(command, args, cwd, allowFailure = false) {
   return result;
 }
 
+function safeCommandFailure(result) {
+  return `${result.stderr || result.stdout || "command failed"}`
+    .replace(/https?:\/\/\S+/gu, "<url>")
+    .trim()
+    .slice(-1000);
+}
+
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -167,12 +174,15 @@ esac
   let pushAttempts = 0;
   if (changed) {
     let pushed = false;
+    let pushFailure = "command failed";
     for (let attempt = 1; attempt <= maxPushAttempts; attempt += 1) {
       pushAttempts = attempt;
-      if (run("git", ["push", "origin", `HEAD:refs/heads/${branch}`], worktree, true).status === 0) {
+      const push = run("git", ["push", "origin", `HEAD:refs/heads/${branch}`], worktree, true);
+      if (push.status === 0) {
         pushed = true;
         break;
       }
+      pushFailure = safeCommandFailure(push);
       run("git", ["fetch", "origin", branch], worktree);
       const rebase = run("git", ["rebase", `origin/${branch}`], worktree, true);
       if (rebase.status !== 0) {
@@ -180,7 +190,7 @@ esac
         throw new Error(`GitOps rebase failed after push attempt ${attempt}`);
       }
     }
-    if (!pushed) throw new Error(`GitOps push failed after ${maxPushAttempts} attempts`);
+    if (!pushed) throw new Error(`GitOps push failed after ${maxPushAttempts} attempts: ${pushFailure}`);
   }
   const gitopsCommit = run("git", ["rev-parse", "HEAD"], worktree).stdout.trim();
   const remoteHead = run("git", ["ls-remote", writeUrl, `refs/heads/${branch}`], worktree).stdout.trim().split(/\s+/u)[0] ?? "";
