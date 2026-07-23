@@ -43,7 +43,6 @@ export interface Sub2ApiUsageRow {
   duration_ms: number | null;
   first_token_ms: number | null;
   created_at: string;
-  request_id?: string;
 }
 
 export interface Sub2ApiRequestError {
@@ -55,7 +54,6 @@ export interface Sub2ApiRequestError {
   type?: string;
   message?: string;
   error_message?: string;
-  created_at?: string;
 }
 
 export interface Sub2ApiSystemLog {
@@ -165,60 +163,6 @@ export class Sub2ApiClient {
       const createdAt = Date.parse(row.created_at);
       return Number.isFinite(createdAt) && createdAt >= start.getTime() && createdAt <= end.getTime();
     });
-  }
-
-  async listRecentAccountUsage(accountId: number, limit: number): Promise<{ rows: Sub2ApiUsageRow[]; requestCount: number }> {
-    return await this.listRecentAccountRows<Sub2ApiUsageRow>("/admin/usage", accountId, limit, {});
-  }
-
-  async listRecentAccountRequestErrors(accountId: number, platform: string, limit: number): Promise<{ rows: Sub2ApiRequestError[]; requestCount: number }> {
-    return await this.listRecentAccountRows<Sub2ApiRequestError>("/admin/ops/request-errors", accountId, limit, {
-      platform,
-      view: "all",
-    });
-  }
-
-  private async listRecentAccountRows<T extends { account_id?: number | null }>(
-    path: string,
-    accountId: number,
-    limit: number,
-    query: Record<string, string>,
-  ): Promise<{ rows: T[]; requestCount: number }> {
-    const rows: T[] = [];
-    let requestCount = 0;
-    const pageSize = Math.min(this.config.sub2api.pageSize, limit);
-    const maxPages = Math.ceil(limit / pageSize);
-    for (let page = 1; page <= maxPages; page += 1) {
-      const params = new URLSearchParams({
-        ...query,
-        account_id: String(accountId),
-        page: String(page),
-        page_size: String(pageSize),
-        sort_by: "created_at",
-        sort_order: "desc",
-      });
-      let data: Paginated<T> | null = null;
-      let lastError: unknown = null;
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
-        try {
-          data = await this.request<Paginated<T>>(`${path}?${params}`);
-          requestCount += 1;
-          break;
-        } catch (error) {
-          requestCount += 1;
-          lastError = error;
-          if (attempt === 1) await Bun.sleep(500);
-        }
-      }
-      if (data === null) {
-        const detail = lastError instanceof Error ? lastError.message : String(lastError);
-        throw new Error(`recent account read failed for account ${accountId}, page ${page}: ${detail}`);
-      }
-      if (data.items.some((row) => row.account_id !== accountId)) throw new Error(`Sub2API ${path} account filter is overbroad for account ${accountId}`);
-      rows.push(...data.items);
-      if (rows.length >= limit || page >= data.pages) break;
-    }
-    return { rows: rows.slice(0, limit), requestCount };
   }
 
   async listRequestErrors(groupId: number, platform: string, start: Date): Promise<Sub2ApiRequestError[]> {

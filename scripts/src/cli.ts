@@ -1,6 +1,6 @@
 import { AdminHttpClient } from "../../src/admin-http-client";
 import { mergeAccountScores } from "../../src/account-score-aggregation";
-import { collectRecentCallScores } from "../../src/account-score-recent-calls";
+import { collectRecentCallScoresFromDatabase } from "../../src/account-score-database";
 import { createEmbeddedContext } from "../../src/bootstrap";
 import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServiceId } from "../../src/config";
 import type { AppCommand } from "../../src/contracts";
@@ -100,7 +100,7 @@ function help(): Record<string, unknown> {
 function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
   if (json) return emit(value, true);
   const accounts = Array.isArray(value.accounts) ? value.accounts.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
-  console.log(`APISTATE ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} remoteRequests=${String(value.remoteRequests)}`);
+  console.log(`APISTATE ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)} totalDurationMs=${String(value.totalDurationMs)}`);
   console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%   TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
   for (const row of accounts) {
     const failureRate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
@@ -189,17 +189,11 @@ function isAppCommand(value: AppCommand | Record<string, unknown>): value is App
 
 async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: EmbeddedCliTarget): Promise<unknown> {
   if (parsed.command.join(" ") === "scores rank") {
-    const context = createEmbeddedContext(config, target);
-    try {
-      return await collectRecentCallScores(
-        context.monitorClient(),
-        parsed.calls ?? config.monitor.recentCallLimit,
-        parsed.account,
-        (progress) => console.error(JSON.stringify({ event: "apistate.scores.rank.progress", ...progress })),
-      );
-    } finally {
-      context.close();
-    }
+    return await collectRecentCallScoresFromDatabase(
+      config,
+      parsed.calls ?? config.monitor.recentCallLimit,
+      parsed.account,
+    );
   }
   if (parsed.command.join(" ") === "scores refresh" || parsed.command.join(" ") === "workflow status") {
     const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue });

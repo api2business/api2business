@@ -31,6 +31,7 @@ export interface AppConfig {
     baseUrl: string;
     requestTimeoutMs: number;
     pageSize: number;
+    scoreDatabase: SecretRef & { statementTimeoutMs: number };
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
   };
   lottery: {
@@ -205,6 +206,7 @@ export function loadConfig(path: string): AppConfig {
   const monitorCli = object(monitor.cli, "monitor.cli");
   const webAuth = object(raw.webAuth, "webAuth");
   const adminCredentials = object(sub2api.adminCredentials, "sub2api.adminCredentials");
+  const scoreDatabase = object(sub2api.scoreDatabase, "sub2api.scoreDatabase");
   const lottery = object(raw.lottery, "lottery");
   const dailyGrant = object(lottery.dailyGrant, "lottery.dailyGrant");
   const eligibility = object(lottery.eligibility, "lottery.eligibility");
@@ -305,6 +307,11 @@ export function loadConfig(path: string): AppConfig {
       baseUrl: stringValue(sub2api, "baseUrl", "sub2api").replace(/\/$/u, ""),
       requestTimeoutMs: integerValue(sub2api, "requestTimeoutMs", "sub2api", 1),
       pageSize: integerValue(sub2api, "pageSize", "sub2api", 1, 100),
+      scoreDatabase: {
+        sourceRef: stringValue(scoreDatabase, "sourceRef", "sub2api.scoreDatabase"),
+        sourceKey: stringValue(scoreDatabase, "sourceKey", "sub2api.scoreDatabase"),
+        statementTimeoutMs: integerValue(scoreDatabase, "statementTimeoutMs", "sub2api.scoreDatabase", 1000, 60000),
+      },
       adminCredentials: {
         sourceRef: stringValue(adminCredentials, "sourceRef", "sub2api.adminCredentials"),
         emailKey: stringValue(adminCredentials, "emailKey", "sub2api.adminCredentials"),

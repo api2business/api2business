@@ -69,12 +69,9 @@ export function mergeAccountScores(rows: Row[]): Row[] {
     const ttftP95Ms = max(accountRows, "ttftP95Ms");
     const reliability = reliabilityPoints(failureRate);
     const latency = firstTokenSamples >= 5 ? latencyPoints(ttftP95Ms) : null;
-    const currentStateScoreImpact = representative.currentStateScoreImpact === "none" ? "none" : "score";
-    const currentlyAvailable = currentStateScoreImpact === "none"
-      ? accountRows.every((row) => row.currentAvailable === true)
-      : accountRows.every((row) => row.currentlyAvailable === true);
+    const currentlyAvailable = accountRows.every((row) => row.currentlyAvailable === true);
     const status = String(representative.status ?? "");
-    const availability = currentStateScoreImpact === "none" ? 15 : currentlyAvailable ? 15 : status === "active" ? 8 : 0;
+    const availability = currentlyAvailable ? 15 : status === "active" ? 8 : 0;
     const availableWeight = (reliability === null ? 0 : 60) + (latency === null ? 0 : 25) + 15;
     const earned = (reliability ?? 0) + (latency ?? 0) + availability;
     const score = observedAttempts > 0 && availableWeight > 0 ? Math.round(earned / availableWeight * 1_000) / 10 : null;
@@ -133,9 +130,5 @@ export function mergeAccountScores(rows: Row[]): Row[] {
         latency: "maximum-group-ttft-p95",
       },
     };
-  }).sort((left, right) => {
-    const gradeOrder = { A: 0, B: 1, C: 2, D: 3, E: 4, insufficient: 5 } as Record<string, number>;
-    const gradeDelta = (gradeOrder[String(left.grade)] ?? 6) - (gradeOrder[String(right.grade)] ?? 6);
-    return gradeDelta || Number(right.score ?? -1) - Number(left.score ?? -1);
-  });
+  }).sort((left, right) => Number(right.score ?? -1) - Number(left.score ?? -1));
 }
