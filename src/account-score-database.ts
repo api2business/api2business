@@ -235,8 +235,8 @@ export async function collectRecentCallScoresFromDatabase(
   recentCallLimit: number,
   accountSelector: string | null = null,
 ): Promise<{ ok: true; mode: string; recentCallLimit: number; accountCount: number; databaseQueries: number; queryDurationMs: number; totalDurationMs: number; accounts: Row[] }> {
-  if (!Number.isInteger(recentCallLimit) || recentCallLimit < 1 || recentCallLimit > 1000) {
-    throw new Error("recent call limit must be an integer from 1 to 1000");
+  if (!Number.isInteger(recentCallLimit) || recentCallLimit < 1 || recentCallLimit > 10000) {
+    throw new Error("recent call limit must be an integer from 1 to 10000");
   }
   const databaseUrl = readSecret(config, config.sub2api.scoreDatabase);
   const database = new SQL(databaseUrl, { max: 1 });

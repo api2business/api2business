@@ -39,3 +39,21 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(row.currentStateScoreImpact).toBe("none");
   expect(row.priority).toBe(5);
 });
+
+test("database aggregate accepts a 2000-call analysis window", () => {
+  expect(() => scoreRecentDatabaseRow({
+    account_id: 1,
+    account_name: "account",
+    status: "active",
+    schedulable: true,
+    priority: 1,
+    group_ids: [2],
+    group_names: ["pool"],
+    success_requests: 2000,
+    failure_requests: 0,
+    stream_success_requests: 2000,
+    first_token_samples: 2000,
+    ttft_p95_ms: 5000,
+    selected_calls: 2000,
+  }, 2000)).not.toThrow();
+});

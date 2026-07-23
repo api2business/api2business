@@ -288,7 +288,7 @@ export function loadConfig(path: string): AppConfig {
       timezone: timezoneValue(monitor, "timezone", "monitor"),
       refreshIntervalMinutes: integerValue(monitor, "refreshIntervalMinutes", "monitor", 1, 1440),
       scoreWindow: stringValue(monitor, "scoreWindow", "monitor"),
-      recentCallLimit: integerValue(monitor, "recentCallLimit", "monitor", 1, 1000),
+      recentCallLimit: integerValue(monitor, "recentCallLimit", "monitor", 1, 10000),
       target: stringValue(monitor, "target", "monitor"),
       cli: {
         workDir: stringValue(monitorCli, "workDir", "monitor.cli"),
