@@ -13,6 +13,7 @@ export interface AppContext {
   store: LotteryStore;
   monitor: AccountScoreService;
   auth: WebAuthSecrets;
+  monitorClient(): Sub2ApiClient;
   close(): void;
 }
 
@@ -25,6 +26,7 @@ export function createEmbeddedContext(config: AppConfig, target: EmbeddedCliTarg
     store,
     monitor,
     auth: { password: "embedded", apiKey: "embedded", sessionSecret: "embedded" },
+    monitorClient: () => client,
     close: () => { monitor.close(); store.close(); },
   };
 }
@@ -46,6 +48,7 @@ export function createServerContext(config: AppConfig, target: ServerTarget): Ap
     store,
     monitor,
     auth: { password: webPassword, apiKey, sessionSecret },
+    monitorClient: () => client,
     close: () => { monitor.close(); store.close(); },
   };
 }

@@ -22,6 +22,7 @@ export interface AppConfig {
     timezone: string;
     refreshIntervalMinutes: number;
     scoreWindow: string;
+    recentCallLimit: number;
     target: string;
     cli: { workDir: string; executable: string; entrypoint: string; mainServerHost: string; timeoutMs: number };
   };
@@ -285,6 +286,7 @@ export function loadConfig(path: string): AppConfig {
       timezone: timezoneValue(monitor, "timezone", "monitor"),
       refreshIntervalMinutes: integerValue(monitor, "refreshIntervalMinutes", "monitor", 1, 1440),
       scoreWindow: stringValue(monitor, "scoreWindow", "monitor"),
+      recentCallLimit: integerValue(monitor, "recentCallLimit", "monitor", 1, 1000),
       target: stringValue(monitor, "target", "monitor"),
       cli: {
         workDir: stringValue(monitorCli, "workDir", "monitor.cli"),
