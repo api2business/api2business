@@ -66,10 +66,10 @@ spec:
         default: "localhost,127.0.0.1,::1,127.0.0.1:5000,localhost:5000,.svc,.svc.cluster.local,.cluster.local,hyueapi.com,.hyueapi.com"
       - name: gitops-read-url
         type: string
-        default: http://git-mirror-http.devops-infra.svc.cluster.local:8080/pikasTech/unidesk.git
+        default: http://gitea.example.com/mirrors/pikasTech-unidesk.git
       - name: gitops-write-url
         type: string
-        default: http://git-mirror-write.devops-infra.svc.cluster.local:8080/pikasTech/unidesk.git
+        default: http://gitea.example.com/mirrors/pikasTech-unidesk.git
       - name: gitops-branch
         type: string
         default: unidesk-host-gitops
@@ -455,9 +455,9 @@ spec:
     - name: build-no-proxy
       value: "localhost,127.0.0.1,::1,127.0.0.1:5000,localhost:5000,.svc,.svc.cluster.local,.cluster.local,hyueapi.com,.hyueapi.com"
     - name: gitops-read-url
-      value: http://git-mirror-http.devops-infra.svc.cluster.local:8080/pikasTech/unidesk.git
+      value: http://gitea.example.com/mirrors/pikasTech-unidesk.git
     - name: gitops-write-url
-      value: http://git-mirror-write.devops-infra.svc.cluster.local:8080/pikasTech/unidesk.git
+      value: http://gitea.example.com/mirrors/pikasTech-unidesk.git
     - name: gitops-branch
       value: "{{ gitops_branch }}"
     - name: gitops-manifest-path
