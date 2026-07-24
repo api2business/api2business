@@ -49,6 +49,7 @@ export interface AppConfig {
       requiredConfidence: string;
       requireCurrentAvailable: boolean;
       pointsPerScore: number;
+      minimumChange: number;
       minimumPriority: number;
       maximumPriority: number;
     };
@@ -366,6 +367,7 @@ export function loadConfig(path: string): AppConfig {
         requiredConfidence: stringValue(priorityPlan, "requiredConfidence", "sub2api.priorityPlan"),
         requireCurrentAvailable: booleanValue(priorityPlan, "requireCurrentAvailable", "sub2api.priorityPlan"),
         pointsPerScore: numberValue(priorityPlan, "pointsPerScore", "sub2api.priorityPlan", 0.01, 1000),
+        minimumChange: integerValue(priorityPlan, "minimumChange", "sub2api.priorityPlan", 1, 1000),
         minimumPriority: integerValue(priorityPlan, "minimumPriority", "sub2api.priorityPlan", 1, 1000),
         maximumPriority: integerValue(priorityPlan, "maximumPriority", "sub2api.priorityPlan", 1, 1000),
       },
