@@ -23,6 +23,8 @@ export interface AppConfig {
     refreshIntervalMinutes: number;
     scoreWindow: string;
     recentCallLimit: number;
+    errorAggregateLimit: number;
+    errorAggregateTop: number;
     recentCallOptions: number[];
     target: string;
     cli: { workDir: string; executable: string; entrypoint: string; mainServerHost: string; timeoutMs: number };
@@ -163,9 +165,17 @@ function stringValue(parent: ObjectValue, key: string, path: string): string {
   return value;
 }
 
-function numberValue(parent: ObjectValue, key: string, path: string, minimum = 0): number {
+function numberValue(
+  parent: ObjectValue,
+  key: string,
+  path: string,
+  minimum = 0,
+  maximum = Number.MAX_VALUE,
+): number {
   const value = parent[key];
-  if (typeof value !== "number" || !Number.isFinite(value) || value < minimum) throw new Error(`${path}.${key} must be a number >= ${minimum}`);
+  if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new Error(`${path}.${key} must be a number from ${minimum} to ${maximum}`);
+  }
   return value;
 }
 
@@ -329,6 +339,8 @@ export function loadConfig(path: string): AppConfig {
       refreshIntervalMinutes: integerValue(monitor, "refreshIntervalMinutes", "monitor", 1, 1440),
       scoreWindow: stringValue(monitor, "scoreWindow", "monitor"),
       recentCallLimit: integerValue(monitor, "recentCallLimit", "monitor", 1, 10000),
+      errorAggregateLimit: integerValue(monitor, "errorAggregateLimit", "monitor", 1, 10000),
+      errorAggregateTop: integerValue(monitor, "errorAggregateTop", "monitor", 1, 100),
       recentCallOptions: integers(monitor, "recentCallOptions", "monitor", 1, 10000),
       target: stringValue(monitor, "target", "monitor"),
       cli: {
@@ -365,7 +377,7 @@ export function loadConfig(path: string): AppConfig {
       },
       priorityPlan: {
         platform: stringValue(priorityPlan, "platform", "sub2api.priorityPlan"),
-        eligibleGroupIds: integers(priorityPlan, "eligibleGroupIds", "sub2api.priorityPlan", 1),
+        eligibleGroupIds: integers(priorityPlan, "eligibleGroupIds", "sub2api.priorityPlan", 1, Number.MAX_SAFE_INTEGER),
         requiredConfidence: stringValue(priorityPlan, "requiredConfidence", "sub2api.priorityPlan"),
         requireCurrentAvailable: booleanValue(priorityPlan, "requireCurrentAvailable", "sub2api.priorityPlan"),
         qualityWeight: numberValue(priorityPlan, "qualityWeight", "sub2api.priorityPlan", 0, 100),

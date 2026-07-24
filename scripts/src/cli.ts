@@ -2,6 +2,7 @@ import { AdminHttpClient } from "../../src/admin-http-client";
 import { mergeAccountScores } from "../../src/account-score-aggregation";
 import { collectRecentCallScoresFromDatabase } from "../../src/account-score-database";
 import { buildAccountPriorityPlan } from "../../src/account-priority-plan";
+import { collectErrorAggregateFromDatabase } from "../../src/error-aggregate-database";
 import { createEmbeddedContext } from "../../src/bootstrap";
 import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServiceId } from "../../src/config";
 import type { AppCommand } from "../../src/contracts";
@@ -11,6 +12,7 @@ import { nativeLogs, nativeStart, nativeStatus, nativeStop } from "../../src/nat
 import { TemporalGateway } from "../../src/temporal-client";
 import { collectUserImpactFromDatabase } from "../../src/user-impact-database";
 import { emitUserImpact } from "./user-impact-output";
+import { emitErrorAggregate } from "./error-aggregate-output";
 
 interface Parsed {
   configPath: string;
@@ -25,6 +27,7 @@ interface Parsed {
   limit: number | null;
   draws: number | null;
   tail: number | null;
+  top: number | null;
   calls: number | null;
   account: string | null;
   group: string | null;
@@ -48,7 +51,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--limit", "--draws", "--component", "--tail", "--calls", "--account", "--group", "--start", "--end"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--group", "--start", "--end"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -80,6 +83,7 @@ function parseArgs(args: string[]): Parsed {
     limit: integer("--limit"),
     draws: integer("--draws"),
     tail: integer("--tail"),
+    top: integer("--top"),
     calls: integer("--calls"),
     account: value(args, "--account"),
     group: value(args, "--group"),
@@ -97,6 +101,7 @@ function help(): Record<string, unknown> {
       "config validate",
       "backend check",
       "scores get|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
+      "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "users impact --start <ISO> --end <ISO> [--affected-only]",
       "lottery status|draw|reset",
       "records list|delete",
@@ -319,6 +324,17 @@ export async function runCli(args: string[]): Promise<void> {
       automaticCreditEnabled: config.lottery.automaticCredit.enabled, valuesPrinted: false,
     }, parsed.json);
     if (parsed.command.join(" ") === "scores aggregate-smoke") return emit(aggregateSmoke(), parsed.json);
+    if (parsed.command.join(" ") === "errors aggregate") {
+      if (parsed.overApi) throw new Error("errors aggregate uses direct PostgreSQL and does not support --over-api");
+      const result = await collectErrorAggregateFromDatabase(
+        config,
+        parsed.limit ?? config.monitor.errorAggregateLimit,
+        parsed.top ?? config.monitor.errorAggregateTop,
+        parsed.account,
+        parsed.group,
+      );
+      return emitErrorAggregate({ target: "database", transport: "postgresql-direct", ...result }, parsed.json);
+    }
     if (parsed.command.join(" ") === "users impact") {
       if (parsed.overApi) throw new Error("users impact uses direct PostgreSQL and does not support --over-api");
       if (!parsed.start || !parsed.end) throw new Error("users impact requires --start and --end");
