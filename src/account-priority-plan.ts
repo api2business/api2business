@@ -32,10 +32,11 @@ export function buildAccountPriorityPlan(
     const score = number(row.score)!;
     const before = number(row.priority);
     if (accountId === null || before === null) throw new Error("eligible score row is missing accountId or priority");
-    const desired = Math.min(
+    const calculated = Math.min(
       policy.maximumPriority,
       Math.max(policy.minimumPriority, policy.minimumPriority + Math.round((anchorScore - score) * policy.pointsPerScore)),
     );
+    const desired = Math.abs(before - calculated) < policy.minimumChange ? before : calculated;
     if (before !== desired) priorities[String(accountId)] = desired;
     return {
       accountId,
@@ -47,6 +48,7 @@ export function buildAccountPriorityPlan(
       failoverRate: row.failoverRate,
       ttftP95Ms: row.ttftP95Ms,
       beforePriority: before,
+      calculatedPriority: calculated,
       desiredPriority: desired,
       change: before === desired ? "noop" : "update",
     };
