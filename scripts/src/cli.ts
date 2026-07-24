@@ -1,6 +1,7 @@
 import { AdminHttpClient } from "../../src/admin-http-client";
 import { mergeAccountScores } from "../../src/account-score-aggregation";
 import { collectRecentCallScoresFromDatabase } from "../../src/account-score-database";
+import { buildAccountPriorityPlan } from "../../src/account-priority-plan";
 import { createEmbeddedContext } from "../../src/bootstrap";
 import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServiceId } from "../../src/config";
 import type { AppCommand } from "../../src/contracts";
@@ -95,7 +96,7 @@ function help(): Record<string, unknown> {
     commands: [
       "config validate",
       "backend check",
-      "scores get|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
+      "scores get|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "users impact --start <ISO> --end <ISO> [--affected-only]",
       "lottery status|draw|reset",
       "records list|delete",
@@ -201,6 +202,15 @@ function isAppCommand(value: AppCommand | Record<string, unknown>): value is App
 }
 
 async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: EmbeddedCliTarget): Promise<unknown> {
+  if (parsed.command.join(" ") === "scores priority-plan") {
+    const ranking = await collectRecentCallScoresFromDatabase(
+      config,
+      parsed.calls ?? config.monitor.recentCallLimit,
+      parsed.account,
+      parsed.group,
+    );
+    return buildAccountPriorityPlan(ranking, config);
+  }
   if (parsed.command.join(" ") === "scores rank") {
     return await collectRecentCallScoresFromDatabase(
       config,

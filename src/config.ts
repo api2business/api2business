@@ -43,6 +43,15 @@ export interface AppConfig {
       ttftFullScoreMs: number;
       ttftZeroScoreMs: number;
     };
+    priorityPlan: {
+      platform: string;
+      eligibleGroupIds: number[];
+      requiredConfidence: string;
+      requireCurrentAvailable: boolean;
+      pointsPerScore: number;
+      minimumPriority: number;
+      maximumPriority: number;
+    };
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
   };
   lottery: {
@@ -233,6 +242,7 @@ export function loadConfig(path: string): AppConfig {
   const adminCredentials = object(sub2api.adminCredentials, "sub2api.adminCredentials");
   const scoreDatabase = object(sub2api.scoreDatabase, "sub2api.scoreDatabase");
   const scorePolicy = object(sub2api.scorePolicy, "sub2api.scorePolicy");
+  const priorityPlan = object(sub2api.priorityPlan, "sub2api.priorityPlan");
   const lottery = object(raw.lottery, "lottery");
   const dailyGrant = object(lottery.dailyGrant, "lottery.dailyGrant");
   const eligibility = object(lottery.eligibility, "lottery.eligibility");
@@ -349,6 +359,15 @@ export function loadConfig(path: string): AppConfig {
         failoverZeroScoreRate: numberValue(scorePolicy, "failoverZeroScoreRate", "sub2api.scorePolicy", 0.000001, 1),
         ttftFullScoreMs: integerValue(scorePolicy, "ttftFullScoreMs", "sub2api.scorePolicy", 0),
         ttftZeroScoreMs: integerValue(scorePolicy, "ttftZeroScoreMs", "sub2api.scorePolicy", 1),
+      },
+      priorityPlan: {
+        platform: stringValue(priorityPlan, "platform", "sub2api.priorityPlan"),
+        eligibleGroupIds: integers(priorityPlan, "eligibleGroupIds", "sub2api.priorityPlan", 1),
+        requiredConfidence: stringValue(priorityPlan, "requiredConfidence", "sub2api.priorityPlan"),
+        requireCurrentAvailable: booleanValue(priorityPlan, "requireCurrentAvailable", "sub2api.priorityPlan"),
+        pointsPerScore: numberValue(priorityPlan, "pointsPerScore", "sub2api.priorityPlan", 0.01, 1000),
+        minimumPriority: integerValue(priorityPlan, "minimumPriority", "sub2api.priorityPlan", 1, 1000),
+        maximumPriority: integerValue(priorityPlan, "maximumPriority", "sub2api.priorityPlan", 1, 1000),
       },
       adminCredentials: {
         sourceRef: stringValue(adminCredentials, "sourceRef", "sub2api.adminCredentials"),
