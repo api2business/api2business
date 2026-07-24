@@ -13,7 +13,7 @@ export async function dispatchDirect(services: DispatcherServices, command: AppC
   if (command.kind === "backend.check") return await services.lottery.status(true);
   if (command.kind === "scores.get") return services.scores.state();
   if (command.kind === "scores.refresh") return await services.scores.refresh();
-  if (command.kind === "scores.rank") return await services.scores.rank(command.recentCallLimit, command.accountSelector);
+  if (command.kind === "scores.rank") return await services.scores.rank(command.recentCallLimit, command.accountSelector, command.groupSelector);
   if (command.kind === "ranking.get") return await services.lottery.ranking();
   if (command.kind === "lottery.publicState") return await services.lottery.publicState();
   if (command.kind === "lottery.publicDraw") return await services.lottery.publicDraw();

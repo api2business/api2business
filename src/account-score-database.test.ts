@@ -17,6 +17,8 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("WHERE o.account_id = a.account_id");
   expect(recentAccountAggregateQuery.match(/LIMIT \$1/gu)?.length).toBe(3);
   expect(recentAccountAggregateQuery).toContain("a.name = $2::text");
+  expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
+  expect(recentAccountAggregateQuery).toContain("selected_g.name = $3::text");
   expect(recentAccountAggregateQuery).not.toContain("start_time");
 
   const row = scoreRecentDatabaseRow({

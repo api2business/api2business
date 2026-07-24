@@ -26,6 +26,7 @@ interface Parsed {
   tail: number | null;
   calls: number | null;
   account: string | null;
+  group: string | null;
   start: string | null;
   end: string | null;
   affectedOnly: boolean;
@@ -46,7 +47,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--limit", "--draws", "--component", "--tail", "--calls", "--account", "--start", "--end"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--limit", "--draws", "--component", "--tail", "--calls", "--account", "--group", "--start", "--end"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -80,6 +81,7 @@ function parseArgs(args: string[]): Parsed {
     tail: integer("--tail"),
     calls: integer("--calls"),
     account: value(args, "--account"),
+    group: value(args, "--group"),
     start: value(args, "--start"),
     end: value(args, "--end"),
     affectedOnly: args.includes("--affected-only"),
@@ -93,7 +95,7 @@ function help(): Record<string, unknown> {
     commands: [
       "config validate",
       "backend check",
-      "scores get|refresh|rank|aggregate-smoke",
+      "scores get|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "users impact --start <ISO> --end <ISO> [--affected-only]",
       "lottery status|draw|reset",
       "records list|delete",
@@ -204,6 +206,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
       config,
       parsed.calls ?? config.monitor.recentCallLimit,
       parsed.account,
+      parsed.group,
     );
   }
   if (parsed.command.join(" ") === "scores refresh" || parsed.command.join(" ") === "workflow status") {
@@ -236,7 +239,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "scores" && action === "get") return await client.scores();
   if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
   if (group === "scores" && action === "rank") {
-    return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account);
+    return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account, parsed.group);
   }
   if (group === "workflow" && action === "status") {
     if (!parsed.id) throw new Error("workflow status requires --id");
