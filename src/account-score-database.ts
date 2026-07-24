@@ -30,6 +30,10 @@ account_stats AS (
   SELECT
     a.account_id,
     COUNT(*) FILTER (WHERE e.kind = 'usage')::int AS success_requests,
+    COUNT(DISTINCT e.request_id) FILTER (WHERE e.request_id IS NOT NULL)::int AS attributed_requests,
+    COUNT(DISTINCT e.request_id) FILTER (
+      WHERE e.request_id IS NOT NULL AND f.triggered
+    )::int AS failover_requests,
     COUNT(DISTINCT e.request_id) FILTER (
       WHERE e.kind = 'error' AND e.scoreable AND e.request_id IS NOT NULL
     )::int AS failure_requests,
@@ -116,6 +120,15 @@ account_stats AS (
     ORDER BY candidate.created_at DESC
     LIMIT $1
   ) e ON true
+  LEFT JOIN LATERAL (
+    SELECT EXISTS (
+      SELECT 1
+      FROM ops_system_logs system_log
+      WHERE system_log.account_id = a.account_id
+        AND system_log.request_id = e.request_id
+        AND system_log.message = 'openai.upstream_failover_switching'
+    ) AS triggered
+  ) f ON true
   GROUP BY a.account_id
 )
 SELECT a.*, s.*
@@ -149,17 +162,21 @@ export function scoreRecentDatabaseRow(row: Row, recentCallLimit: number, now = 
   const failureRequests = numeric(row.failure_requests) ?? 0;
   const observedAttempts = successRequests + failureRequests;
   const failureRate = observedAttempts > 0 ? Math.round(failureRequests / observedAttempts * 1_000_000) / 1_000_000 : null;
+  const attributedRequests = numeric(row.attributed_requests) ?? 0;
+  const failoverRequests = numeric(row.failover_requests) ?? 0;
+  const failoverRate = attributedRequests > 0 ? Math.round(failoverRequests / attributedRequests * 1_000_000) / 1_000_000 : null;
   const firstTokenSamples = numeric(row.first_token_samples) ?? 0;
   const streamSuccessRequests = numeric(row.stream_success_requests) ?? 0;
   const ttftP95Ms = percentile(row.ttft_p95_ms);
-  const reliability = failureRate === null ? null : Math.round(60 * (1 - Math.min(Math.max(failureRate, 0), 0.2) / 0.2) * 100) / 100;
+  const reliability = failureRate === null ? null : Math.round(50 * (1 - Math.min(Math.max(failureRate, 0), 0.2) / 0.2) * 100) / 100;
+  const failover = failoverRate === null ? null : Math.round(10 * (1 - Math.min(Math.max(failoverRate, 0), 0.2) / 0.2) * 100) / 100;
   const latency = firstTokenSamples < 5 || ttftP95Ms === null
     ? null
     : Math.round(25 * (1 - Math.min(Math.max(ttftP95Ms - 10_000, 0), 170_000) / 170_000) * 100) / 100;
   // 当前状态只展示，不参与最近调用质量分。
-  const availableWeight = (reliability === null ? 0 : 60) + (latency === null ? 0 : 25) + 15;
+  const availableWeight = (reliability === null ? 0 : 50) + (failover === null ? 0 : 10) + (latency === null ? 0 : 25) + 15;
   const score = observedAttempts > 0
-    ? Math.round(((reliability ?? 0) + (latency ?? 0) + 15) / availableWeight * 1_000) / 10
+    ? Math.round(((reliability ?? 0) + (failover ?? 0) + (latency ?? 0) + 15) / availableWeight * 1_000) / 10
     : null;
   const comparable = observedAttempts >= 10 && firstTokenSamples >= 5;
   const accountGrade = grade(score, comparable, observedAttempts);
@@ -197,6 +214,9 @@ export function scoreRecentDatabaseRow(row: Row, recentCallLimit: number, now = 
     successRequests,
     failureRequests,
     failureRate,
+    attributedRequests,
+    failoverRequests,
+    failoverRate,
     streamSuccessRequests,
     firstTokenSamples,
     firstTokenCoverage: streamSuccessRequests > 0 ? Math.round(firstTokenSamples / streamSuccessRequests * 1_000_000) / 1_000_000 : null,
@@ -215,7 +235,7 @@ export function scoreRecentDatabaseRow(row: Row, recentCallLimit: number, now = 
       costRateCnyPerApiUsd: rate,
       upstreamCostCny: rate === null ? null : Math.round(apiAmountUsd * rate * 100_000_000) / 100_000_000,
     },
-    scoreComponents: { reliability, latency, availability: 15, availableWeight },
+    scoreComponents: { reliability, failover, latency, availability: 15, availableWeight },
     recentCallLimit,
     selectedCalls: numeric(row.selected_calls) ?? 0,
     evidenceMode: "recent-account-calls-postgresql",
