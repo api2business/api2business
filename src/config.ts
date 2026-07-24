@@ -33,6 +33,16 @@ export interface AppConfig {
     requestTimeoutMs: number;
     pageSize: number;
     scoreDatabase: SecretRef & { statementTimeoutMs: number };
+    scorePolicy: {
+      reliabilityWeight: number;
+      failoverWeight: number;
+      latencyWeight: number;
+      baselineWeight: number;
+      failureZeroScoreRate: number;
+      failoverZeroScoreRate: number;
+      ttftFullScoreMs: number;
+      ttftZeroScoreMs: number;
+    };
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
   };
   lottery: {
@@ -222,6 +232,7 @@ export function loadConfig(path: string): AppConfig {
   const webAuth = object(raw.webAuth, "webAuth");
   const adminCredentials = object(sub2api.adminCredentials, "sub2api.adminCredentials");
   const scoreDatabase = object(sub2api.scoreDatabase, "sub2api.scoreDatabase");
+  const scorePolicy = object(sub2api.scorePolicy, "sub2api.scorePolicy");
   const lottery = object(raw.lottery, "lottery");
   const dailyGrant = object(lottery.dailyGrant, "lottery.dailyGrant");
   const eligibility = object(lottery.eligibility, "lottery.eligibility");
@@ -328,6 +339,16 @@ export function loadConfig(path: string): AppConfig {
         sourceRef: stringValue(scoreDatabase, "sourceRef", "sub2api.scoreDatabase"),
         sourceKey: stringValue(scoreDatabase, "sourceKey", "sub2api.scoreDatabase"),
         statementTimeoutMs: integerValue(scoreDatabase, "statementTimeoutMs", "sub2api.scoreDatabase", 1000, 60000),
+      },
+      scorePolicy: {
+        reliabilityWeight: numberValue(scorePolicy, "reliabilityWeight", "sub2api.scorePolicy", 0, 100),
+        failoverWeight: numberValue(scorePolicy, "failoverWeight", "sub2api.scorePolicy", 0, 100),
+        latencyWeight: numberValue(scorePolicy, "latencyWeight", "sub2api.scorePolicy", 0, 100),
+        baselineWeight: numberValue(scorePolicy, "baselineWeight", "sub2api.scorePolicy", 0, 100),
+        failureZeroScoreRate: numberValue(scorePolicy, "failureZeroScoreRate", "sub2api.scorePolicy", 0.000001, 1),
+        failoverZeroScoreRate: numberValue(scorePolicy, "failoverZeroScoreRate", "sub2api.scorePolicy", 0.000001, 1),
+        ttftFullScoreMs: integerValue(scorePolicy, "ttftFullScoreMs", "sub2api.scorePolicy", 0),
+        ttftZeroScoreMs: integerValue(scorePolicy, "ttftZeroScoreMs", "sub2api.scorePolicy", 1),
       },
       adminCredentials: {
         sourceRef: stringValue(adminCredentials, "sourceRef", "sub2api.adminCredentials"),
