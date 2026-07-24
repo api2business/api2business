@@ -1,6 +1,17 @@
 import { expect, test } from "bun:test";
 import { recentAccountAggregateQuery, scoreRecentDatabaseRow } from "./account-score-database";
 
+const scorePolicy = {
+  reliabilityWeight: 45,
+  failoverWeight: 10,
+  latencyWeight: 35,
+  baselineWeight: 10,
+  failureZeroScoreRate: 0.2,
+  failoverZeroScoreRate: 0.2,
+  ttftFullScoreMs: 5_000,
+  ttftZeroScoreMs: 55_000,
+};
+
 test("database aggregate uses bounded account indexes and current state is display-only", () => {
   expect(recentAccountAggregateQuery).toContain("WHERE u.account_id = a.account_id");
   expect(recentAccountAggregateQuery).toContain("WHERE o.account_id = a.account_id");
@@ -31,7 +42,7 @@ test("database aggregate uses bounded account indexes and current state is displ
     token_count: 2_000,
     api_amount_usd: 1,
     selected_calls: 100,
-  }, 500, Date.parse("2026-07-23T00:00:00Z"));
+  }, 500, scorePolicy, Date.parse("2026-07-23T00:00:00Z"));
 
   expect(row.score).toBe(100);
   expect(row.grade).toBe("A");
@@ -55,5 +66,28 @@ test("database aggregate accepts a 2000-call analysis window", () => {
     first_token_samples: 2000,
     ttft_p95_ms: 5000,
     selected_calls: 2000,
-  }, 2000)).not.toThrow();
+  }, 2000, scorePolicy)).not.toThrow();
+});
+
+test("TTFT weight curve keeps latency above 20 seconds below grade A", () => {
+  const row = scoreRecentDatabaseRow({
+    account_id: 2,
+    account_name: "slow-perfect",
+    status: "active",
+    schedulable: true,
+    priority: 1,
+    group_ids: [2],
+    group_names: ["pool"],
+    success_requests: 1000,
+    attributed_requests: 1000,
+    failover_requests: 0,
+    failure_requests: 0,
+    stream_success_requests: 1000,
+    first_token_samples: 1000,
+    ttft_p95_ms: 20_001,
+    selected_calls: 1000,
+  }, 1000, scorePolicy);
+
+  expect(row.score).toBeLessThan(90);
+  expect(row.grade).toBe("B");
 });

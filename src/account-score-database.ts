@@ -157,7 +157,15 @@ function grade(score: number | null, comparable: boolean, attempts: number): str
   return score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "E";
 }
 
-export function scoreRecentDatabaseRow(row: Row, recentCallLimit: number, now = Date.now()): Row {
+export function scoreRecentDatabaseRow(
+  row: Row,
+  recentCallLimit: number,
+  policy: AppConfig["sub2api"]["scorePolicy"],
+  now = Date.now(),
+): Row {
+  if (policy.ttftZeroScoreMs <= policy.ttftFullScoreMs) throw new Error("TTFT zero-score boundary must exceed full-score boundary");
+  const totalWeight = policy.reliabilityWeight + policy.failoverWeight + policy.latencyWeight + policy.baselineWeight;
+  if (totalWeight !== 100) throw new Error("account score policy weights must total 100");
   const successRequests = numeric(row.success_requests) ?? 0;
   const failureRequests = numeric(row.failure_requests) ?? 0;
   const observedAttempts = successRequests + failureRequests;
@@ -168,15 +176,21 @@ export function scoreRecentDatabaseRow(row: Row, recentCallLimit: number, now = 
   const firstTokenSamples = numeric(row.first_token_samples) ?? 0;
   const streamSuccessRequests = numeric(row.stream_success_requests) ?? 0;
   const ttftP95Ms = percentile(row.ttft_p95_ms);
-  const reliability = failureRate === null ? null : Math.round(50 * (1 - Math.min(Math.max(failureRate, 0), 0.2) / 0.2) * 100) / 100;
-  const failover = failoverRate === null ? null : Math.round(10 * (1 - Math.min(Math.max(failoverRate, 0), 0.2) / 0.2) * 100) / 100;
+  const reliability = failureRate === null ? null : Math.round(policy.reliabilityWeight * (1 - Math.min(Math.max(failureRate, 0), policy.failureZeroScoreRate) / policy.failureZeroScoreRate) * 100) / 100;
+  const failover = failoverRate === null ? null : Math.round(policy.failoverWeight * (1 - Math.min(Math.max(failoverRate, 0), policy.failoverZeroScoreRate) / policy.failoverZeroScoreRate) * 100) / 100;
   const latency = firstTokenSamples < 5 || ttftP95Ms === null
     ? null
-    : Math.round(25 * (1 - Math.min(Math.max(ttftP95Ms - 10_000, 0), 170_000) / 170_000) * 100) / 100;
+    : Math.round(policy.latencyWeight * (1 - Math.min(
+      Math.max(ttftP95Ms - policy.ttftFullScoreMs, 0),
+      policy.ttftZeroScoreMs - policy.ttftFullScoreMs,
+    ) / (policy.ttftZeroScoreMs - policy.ttftFullScoreMs)) * 100) / 100;
   // 当前状态只展示，不参与最近调用质量分。
-  const availableWeight = (reliability === null ? 0 : 50) + (failover === null ? 0 : 10) + (latency === null ? 0 : 25) + 15;
+  const availableWeight = (reliability === null ? 0 : policy.reliabilityWeight)
+    + (failover === null ? 0 : policy.failoverWeight)
+    + (latency === null ? 0 : policy.latencyWeight)
+    + policy.baselineWeight;
   const score = observedAttempts > 0
-    ? Math.round(((reliability ?? 0) + (failover ?? 0) + (latency ?? 0) + 15) / availableWeight * 1_000) / 10
+    ? Math.round(((reliability ?? 0) + (failover ?? 0) + (latency ?? 0) + policy.baselineWeight) / availableWeight * 1_000) / 10
     : null;
   const comparable = observedAttempts >= 10 && firstTokenSamples >= 5;
   const accountGrade = grade(score, comparable, observedAttempts);
@@ -235,7 +249,7 @@ export function scoreRecentDatabaseRow(row: Row, recentCallLimit: number, now = 
       costRateCnyPerApiUsd: rate,
       upstreamCostCny: rate === null ? null : Math.round(apiAmountUsd * rate * 100_000_000) / 100_000_000,
     },
-    scoreComponents: { reliability, failover, latency, availability: 15, availableWeight },
+    scoreComponents: { reliability, failover, latency, baseline: policy.baselineWeight, availableWeight },
     recentCallLimit,
     selectedCalls: numeric(row.selected_calls) ?? 0,
     evidenceMode: "recent-account-calls-postgresql",
@@ -279,7 +293,7 @@ export async function collectRecentCallScoresFromDatabase(
       || String(row.account_id) === accountSelector
       || String(row.account_name) === accountSelector);
     if (accountSelector !== null && selected.length !== 1) throw new Error(`account selector did not resolve exactly once: ${accountSelector}`);
-    const accounts = sortScores(selected.map((row) => scoreRecentDatabaseRow(row, recentCallLimit)));
+    const accounts = sortScores(selected.map((row) => scoreRecentDatabaseRow(row, recentCallLimit, config.sub2api.scorePolicy)));
     return {
       ok: true,
       mode: "recent-account-calls-postgresql-local-score",
