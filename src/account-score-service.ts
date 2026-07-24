@@ -44,7 +44,7 @@ export class AccountScoreService {
     this.snapshot = this.readCache();
   }
 
-  async rank(recentCallLimit: number, accountSelector: string | null = null): Promise<Record<string, unknown>> {
+  async rank(recentCallLimit: number, accountSelector: string | null = null, groupSelector: string | null = null): Promise<Record<string, unknown>> {
     if (!this.config.monitor.recentCallOptions.includes(recentCallLimit)) {
       throw new Error(`recentCallLimit must be one of: ${this.config.monitor.recentCallOptions.join(", ")}`);
     }
@@ -52,6 +52,7 @@ export class AccountScoreService {
       this.config,
       recentCallLimit,
       accountSelector,
+      groupSelector,
       this.scoreDatabaseUrl,
     );
     const groupNames = [...new Set(result.accounts.flatMap((row) =>

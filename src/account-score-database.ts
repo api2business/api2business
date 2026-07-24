@@ -24,6 +24,21 @@ WITH target_accounts AS (
   JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
   WHERE a.deleted_at IS NULL
     AND ($2::text IS NULL OR a.id::text = $2::text OR a.name = $2::text)
+    AND (
+      $3::text IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM account_groups selected_ag
+        JOIN groups selected_g
+          ON selected_g.id = selected_ag.group_id
+          AND selected_g.deleted_at IS NULL
+        WHERE selected_ag.account_id = a.id
+          AND (
+            selected_g.id::text = $3::text
+            OR selected_g.name = $3::text
+          )
+      )
+    )
   GROUP BY a.id
 ),
 account_stats AS (
@@ -268,8 +283,9 @@ export async function collectRecentCallScoresFromDatabase(
   config: AppConfig,
   recentCallLimit: number,
   accountSelector: string | null = null,
+  groupSelector: string | null = null,
   databaseUrlOverride: string | null = null,
-): Promise<{ ok: true; mode: string; recentCallLimit: number; accountCount: number; databaseQueries: number; queryDurationMs: number; totalDurationMs: number; accounts: Row[] }> {
+): Promise<{ ok: true; mode: string; recentCallLimit: number; accountSelector: string | null; groupSelector: string | null; accountCount: number; databaseQueries: number; queryDurationMs: number; totalDurationMs: number; accounts: Row[] }> {
   if (!Number.isInteger(recentCallLimit) || recentCallLimit < 1 || recentCallLimit > 10000) {
     throw new Error("recent call limit must be an integer from 1 to 10000");
   }
@@ -285,7 +301,7 @@ export async function collectRecentCallScoresFromDatabase(
       // 账号反复扫描全局 created_at 索引，优先使用 account_id 复合索引。
       await transaction.unsafe("SET LOCAL random_page_cost = 1");
       const queryStartedAt = performance.now();
-      const result = await transaction.unsafe(recentAccountAggregateSql, [recentCallLimit, accountSelector]);
+      const result = await transaction.unsafe(recentAccountAggregateSql, [recentCallLimit, accountSelector, groupSelector]);
       queryDurationMs = Math.round((performance.now() - queryStartedAt) * 10) / 10;
       return result;
     }) as unknown as Row[];
@@ -293,11 +309,14 @@ export async function collectRecentCallScoresFromDatabase(
       || String(row.account_id) === accountSelector
       || String(row.account_name) === accountSelector);
     if (accountSelector !== null && selected.length !== 1) throw new Error(`account selector did not resolve exactly once: ${accountSelector}`);
+    if (groupSelector !== null && selected.length === 0) throw new Error(`group selector resolved no scoreable accounts: ${groupSelector}`);
     const accounts = sortScores(selected.map((row) => scoreRecentDatabaseRow(row, recentCallLimit, config.sub2api.scorePolicy)));
     return {
       ok: true,
       mode: "recent-account-calls-postgresql-local-score",
       recentCallLimit,
+      accountSelector,
+      groupSelector,
       accountCount: accounts.length,
       databaseQueries: 1,
       queryDurationMs,

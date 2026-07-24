@@ -97,6 +97,9 @@ export function createHandler(
           accountSelector: typeof input.accountSelector === "string" && input.accountSelector.trim()
             ? input.accountSelector.trim()
             : null,
+          groupSelector: typeof input.groupSelector === "string" && input.groupSelector.trim()
+            ? input.groupSelector.trim()
+            : null,
         }) as Record<string, unknown>;
         return json({ ...state, ok: true });
       }
