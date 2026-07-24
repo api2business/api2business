@@ -13,6 +13,7 @@ import { TemporalGateway } from "../../src/temporal-client";
 import { collectUserImpactFromDatabase } from "../../src/user-impact-database";
 import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
+import { emitPriorityPlan } from "./priority-plan-output";
 
 interface Parsed {
   configPath: string;
@@ -358,6 +359,7 @@ export async function runCli(args: string[]): Promise<void> {
     const result = target.mode === "embedded" ? await embedded(parsed, config, target) : await remote(parsed, config, target);
     const output = { target: targetId, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...result as Record<string, unknown> };
     if (parsed.command.join(" ") === "scores rank") emitScoreRanking(output, parsed.json);
+    else if (parsed.command.join(" ") === "scores priority-plan") emitPriorityPlan(output, parsed.json);
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);

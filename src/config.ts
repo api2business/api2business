@@ -56,6 +56,18 @@ export interface AppConfig {
       minimumChange: number;
       minimumPriority: number;
       maximumPriority: number;
+      procurementAdvice: {
+        enabled: boolean;
+        minimumQualityScore: number;
+        valueWeight: number;
+        redundancyWeight: number;
+        recommendationLimit: number;
+        statusAlertLimit: number;
+        maximumRecommendationsPerSupplier: number;
+        minimumSupplierCount: number;
+        maximumSupplierShare: number;
+        billingErrorPatterns: string[];
+      };
     };
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
   };
@@ -256,6 +268,7 @@ export function loadConfig(path: string): AppConfig {
   const scoreDatabase = object(sub2api.scoreDatabase, "sub2api.scoreDatabase");
   const scorePolicy = object(sub2api.scorePolicy, "sub2api.scorePolicy");
   const priorityPlan = object(sub2api.priorityPlan, "sub2api.priorityPlan");
+  const procurementAdvice = object(priorityPlan.procurementAdvice, "sub2api.priorityPlan.procurementAdvice");
   const lottery = object(raw.lottery, "lottery");
   const dailyGrant = object(lottery.dailyGrant, "lottery.dailyGrant");
   const eligibility = object(lottery.eligibility, "lottery.eligibility");
@@ -386,6 +399,18 @@ export function loadConfig(path: string): AppConfig {
         minimumChange: integerValue(priorityPlan, "minimumChange", "sub2api.priorityPlan", 1, 1000),
         minimumPriority: integerValue(priorityPlan, "minimumPriority", "sub2api.priorityPlan", 1, 1000),
         maximumPriority: integerValue(priorityPlan, "maximumPriority", "sub2api.priorityPlan", 1, 1000),
+        procurementAdvice: {
+          enabled: booleanValue(procurementAdvice, "enabled", "sub2api.priorityPlan.procurementAdvice"),
+          minimumQualityScore: numberValue(procurementAdvice, "minimumQualityScore", "sub2api.priorityPlan.procurementAdvice", 0, 100),
+          valueWeight: numberValue(procurementAdvice, "valueWeight", "sub2api.priorityPlan.procurementAdvice", 0, 100),
+          redundancyWeight: numberValue(procurementAdvice, "redundancyWeight", "sub2api.priorityPlan.procurementAdvice", 0, 100),
+          recommendationLimit: integerValue(procurementAdvice, "recommendationLimit", "sub2api.priorityPlan.procurementAdvice", 1, 100),
+          statusAlertLimit: integerValue(procurementAdvice, "statusAlertLimit", "sub2api.priorityPlan.procurementAdvice", 1, 100),
+          maximumRecommendationsPerSupplier: integerValue(procurementAdvice, "maximumRecommendationsPerSupplier", "sub2api.priorityPlan.procurementAdvice", 1, 100),
+          minimumSupplierCount: integerValue(procurementAdvice, "minimumSupplierCount", "sub2api.priorityPlan.procurementAdvice", 1, 100),
+          maximumSupplierShare: numberValue(procurementAdvice, "maximumSupplierShare", "sub2api.priorityPlan.procurementAdvice", 0.01, 1),
+          billingErrorPatterns: strings(procurementAdvice, "billingErrorPatterns", "sub2api.priorityPlan.procurementAdvice"),
+        },
       },
       adminCredentials: {
         sourceRef: stringValue(adminCredentials, "sourceRef", "sub2api.adminCredentials"),
