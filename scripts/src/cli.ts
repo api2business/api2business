@@ -110,9 +110,10 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
   if (json) return emit(value, true);
   const accounts = Array.isArray(value.accounts) ? value.accounts.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
   console.log(`APISTATE ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)} totalDurationMs=${String(value.totalDurationMs)}`);
-  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%   TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
+  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%  SWITCH%  TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
   for (const row of accounts) {
     const failureRate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
+    const failoverRate = typeof row.failoverRate === "number" ? `${(row.failoverRate * 100).toFixed(1)}%` : "-";
     const ttft = typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-";
     const groups = Array.isArray(row.groupNames) ? row.groupNames.join(",") : "-";
     console.log([
@@ -121,6 +122,7 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
       String(row.confidence ?? "-").padEnd(7),
       String(row.observedAttempts ?? 0).padStart(8),
       failureRate.padStart(6),
+      failoverRate.padStart(7),
       ttft.padStart(9),
       String(row.priority ?? "-").padStart(8),
       (row.currentAvailable === true ? "available" : row.currentAvailable === false ? "unavailable" : "unknown").padEnd(11),
