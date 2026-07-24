@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config";
+import { buildProcurementAdvice } from "./account-procurement-advice";
 
 type ScoreRow = Record<string, unknown>;
 
@@ -34,15 +35,29 @@ export function buildAccountPriorityPlan(
       && costRate(row) !== null;
   });
   const costs = eligible.map((row) => costRate(row)!);
-  const minimumCost = Math.min(...costs);
-  const maximumCost = Math.max(...costs);
+  const fallbackCosts = rows.flatMap((row) => {
+    const groups = Array.isArray(row.groupIds) ? row.groupIds : [];
+    const cost = costRate(row);
+    return row.platform === policy.platform
+      && row.confidence === policy.requiredConfidence
+      && groups.some((id) => typeof id === "number" && policy.eligibleGroupIds.includes(id))
+      && cost !== null
+      ? [cost]
+      : [];
+  });
+  const costEvidence = costs.length > 0 ? costs : fallbackCosts;
+  if (costEvidence.length === 0) throw new Error("priority plan has no accounts with known cost");
+  const minimumCost = Math.min(...costEvidence);
+  const maximumCost = Math.max(...costEvidence);
   const economicScore = (row: ScoreRow): number => {
     const quality = number(row.score)!;
     const cost = costRate(row)!;
     const costScore = maximumCost === minimumCost ? 100 : 100 * (maximumCost - cost) / (maximumCost - minimumCost);
     return (quality * policy.qualityWeight + costScore * policy.costWeight) / totalWeight;
   };
-  const anchorScore = eligible.reduce((best, row) => Math.max(best, economicScore(row)), -Infinity);
+  const anchorScore = eligible.length === 0
+    ? null
+    : eligible.reduce((best, row) => Math.max(best, economicScore(row)), -Infinity);
   const priorities: Record<string, number> = {};
   const changes = eligible.map((row) => {
     const accountId = number(row.accountId);
@@ -54,7 +69,7 @@ export function buildAccountPriorityPlan(
     if (accountId === null || before === null) throw new Error("eligible score row is missing accountId or priority");
     const calculated = Math.min(
       policy.maximumPriority,
-      Math.max(policy.minimumPriority, policy.minimumPriority + Math.round((anchorScore - combinedScore) * policy.pointsPerScore)),
+      Math.max(policy.minimumPriority, policy.minimumPriority + Math.round((anchorScore! - combinedScore) * policy.pointsPerScore)),
     );
     const desired = Math.abs(before - calculated) < policy.minimumChange ? before : calculated;
     if (before !== desired) priorities[String(accountId)] = desired;
@@ -76,6 +91,7 @@ export function buildAccountPriorityPlan(
       change: before === desired ? "noop" : "update",
     };
   });
+  const procurementAdvice = buildProcurementAdvice(rows, config, { minimum: minimumCost, maximum: maximumCost });
   return {
     ok: true,
     action: "scores-priority-plan",
@@ -88,6 +104,7 @@ export function buildAccountPriorityPlan(
     changedCount: Object.keys(priorities).length,
     priorities,
     changes,
+    procurementAdvice,
     apply: {
       command: "bun scripts/cli.ts platform-infra sub2api codex-pool runtime apply --target PK01 --kind priority --priorities-json '<priorities>' --confirm",
       oneBatch: true,
