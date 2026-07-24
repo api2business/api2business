@@ -224,6 +224,7 @@ export function scoreRecentDatabaseRow(
   return {
     accountId: numeric(row.account_id),
     accountName,
+    platform: row.platform,
     status: row.status,
     schedulable: row.schedulable,
     priority: numeric(row.priority),
