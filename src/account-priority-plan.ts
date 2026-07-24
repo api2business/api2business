@@ -6,6 +6,11 @@ function number(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function costRate(row: ScoreRow): number | null {
+  if (typeof row.usage !== "object" || row.usage === null || Array.isArray(row.usage)) return null;
+  return number((row.usage as ScoreRow).costRateCnyPerApiUsd);
+}
+
 export function buildAccountPriorityPlan(
   ranking: Record<string, unknown>,
   config: AppConfig,
@@ -14,6 +19,8 @@ export function buildAccountPriorityPlan(
   if (policy.maximumPriority < policy.minimumPriority) {
     throw new Error("sub2api.priorityPlan.maximumPriority must be >= minimumPriority");
   }
+  const totalWeight = policy.qualityWeight + policy.costWeight;
+  if (totalWeight <= 0) throw new Error("sub2api.priorityPlan qualityWeight + costWeight must be positive");
   const rows = Array.isArray(ranking.accounts)
     ? ranking.accounts.filter((row): row is ScoreRow => typeof row === "object" && row !== null && !Array.isArray(row))
     : [];
@@ -23,18 +30,31 @@ export function buildAccountPriorityPlan(
       && row.confidence === policy.requiredConfidence
       && (!policy.requireCurrentAvailable || row.currentAvailable === true)
       && groups.some((id) => typeof id === "number" && policy.eligibleGroupIds.includes(id))
-      && number(row.score) !== null;
+      && number(row.score) !== null
+      && costRate(row) !== null;
   });
-  const anchorScore = eligible.reduce((best, row) => Math.max(best, number(row.score)!), -Infinity);
+  const costs = eligible.map((row) => costRate(row)!);
+  const minimumCost = Math.min(...costs);
+  const maximumCost = Math.max(...costs);
+  const economicScore = (row: ScoreRow): number => {
+    const quality = number(row.score)!;
+    const cost = costRate(row)!;
+    const costScore = maximumCost === minimumCost ? 100 : 100 * (maximumCost - cost) / (maximumCost - minimumCost);
+    return (quality * policy.qualityWeight + costScore * policy.costWeight) / totalWeight;
+  };
+  const anchorScore = eligible.reduce((best, row) => Math.max(best, economicScore(row)), -Infinity);
   const priorities: Record<string, number> = {};
   const changes = eligible.map((row) => {
     const accountId = number(row.accountId);
     const score = number(row.score)!;
+    const cost = costRate(row)!;
+    const costScore = maximumCost === minimumCost ? 100 : 100 * (maximumCost - cost) / (maximumCost - minimumCost);
+    const combinedScore = economicScore(row);
     const before = number(row.priority);
     if (accountId === null || before === null) throw new Error("eligible score row is missing accountId or priority");
     const calculated = Math.min(
       policy.maximumPriority,
-      Math.max(policy.minimumPriority, policy.minimumPriority + Math.round((anchorScore - score) * policy.pointsPerScore)),
+      Math.max(policy.minimumPriority, policy.minimumPriority + Math.round((anchorScore - combinedScore) * policy.pointsPerScore)),
     );
     const desired = Math.abs(before - calculated) < policy.minimumChange ? before : calculated;
     if (before !== desired) priorities[String(accountId)] = desired;
@@ -42,6 +62,9 @@ export function buildAccountPriorityPlan(
       accountId,
       accountName: row.accountName,
       score,
+      costRateCnyPerApiUsd: cost,
+      costScore,
+      combinedScore,
       confidence: row.confidence,
       observedAttempts: row.observedAttempts,
       failureRate: row.failureRate,
@@ -60,6 +83,7 @@ export function buildAccountPriorityPlan(
     recentCallLimit: ranking.recentCallLimit,
     policy,
     anchorScore,
+    costRange: { minimumCostRateCnyPerApiUsd: minimumCost, maximumCostRateCnyPerApiUsd: maximumCost },
     eligibleCount: eligible.length,
     changedCount: Object.keys(priorities).length,
     priorities,

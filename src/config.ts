@@ -48,6 +48,8 @@ export interface AppConfig {
       eligibleGroupIds: number[];
       requiredConfidence: string;
       requireCurrentAvailable: boolean;
+      qualityWeight: number;
+      costWeight: number;
       pointsPerScore: number;
       minimumChange: number;
       minimumPriority: number;
@@ -366,6 +368,8 @@ export function loadConfig(path: string): AppConfig {
         eligibleGroupIds: integers(priorityPlan, "eligibleGroupIds", "sub2api.priorityPlan", 1),
         requiredConfidence: stringValue(priorityPlan, "requiredConfidence", "sub2api.priorityPlan"),
         requireCurrentAvailable: booleanValue(priorityPlan, "requireCurrentAvailable", "sub2api.priorityPlan"),
+        qualityWeight: numberValue(priorityPlan, "qualityWeight", "sub2api.priorityPlan", 0, 100),
+        costWeight: numberValue(priorityPlan, "costWeight", "sub2api.priorityPlan", 0, 100),
         pointsPerScore: numberValue(priorityPlan, "pointsPerScore", "sub2api.priorityPlan", 0.01, 1000),
         minimumChange: integerValue(priorityPlan, "minimumChange", "sub2api.priorityPlan", 1, 1000),
         minimumPriority: integerValue(priorityPlan, "minimumPriority", "sub2api.priorityPlan", 1, 1000),
