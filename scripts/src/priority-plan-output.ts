@@ -49,13 +49,13 @@ export function renderPriorityPlanLines(value: Row): string[] {
   const alertLimit = Number(record(record(value.policy).procurementAdvice).statusAlertLimit ?? 0);
   const alerts = rows(advice.statusAlerts).slice(0, alertLimit);
   if (alerts.length > 0) {
-    lines.push("", "ACCOUNT_ID     KIND                 SCORE  SUPPLIER  ACCOUNT");
+    lines.push("", "KIND                 SCORE  CHANNELS  AVAILABLE  BILLING_SITE");
     for (const row of alerts) lines.push([
-      String(row.accountId ?? "-").padEnd(13),
       String(row.kind ?? "-").padEnd(20),
       String(row.qualityScore ?? "-").padStart(5),
-      String(row.supplier ?? "unknown"),
-      String(row.accountName ?? "-"),
+      String(row.channelCount ?? "-").padStart(8),
+      String(row.availableChannelCount ?? "-").padStart(9),
+      String(row.billingSite ?? "unknown"),
     ].join("  "));
   }
   const recommendations = rows(advice.recommendations);
@@ -67,7 +67,7 @@ export function renderPriorityPlanLines(value: Row): string[] {
       String(row.valueScore ?? "-").padStart(5),
       String(row.redundancyScore ?? "-").padStart(10),
       String(row.procurementScore ?? "-").padStart(5),
-      String(row.supplier ?? "-"),
+      String(row.billingSite ?? "-"),
     ].join("  "));
   }
   const priorities = record(value.priorities);

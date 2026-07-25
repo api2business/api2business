@@ -31,6 +31,16 @@ export function supplierIdentity(accountName: unknown): string | null {
   }
 }
 
+function rowsByBillingSite(rows: Row[]): Map<string, Row[]> {
+  const grouped = new Map<string, Row[]>();
+  for (const row of rows) {
+    const billingSite = supplierIdentity(row.accountName);
+    if (billingSite === null) continue;
+    grouped.set(billingSite, [...(grouped.get(billingSite) ?? []), row]);
+  }
+  return grouped;
+}
+
 function billingBlocked(row: Row, policy: ProcurementPolicy): boolean {
   const error = String(row.currentError ?? "").toLowerCase();
   return error.length > 0 && policy.billingErrorPatterns.some((pattern) => error.includes(pattern.toLowerCase()));
@@ -62,40 +72,39 @@ export function buildProcurementAdvice(
       && groups.some((id) => typeof id === "number" && priorityPolicy.eligibleGroupIds.includes(id))
       && number(row.score) !== null;
   });
-  const statusAlerts = scope
-    .filter((row) => row.currentAvailable !== true)
-    .map((row) => {
-      const billing = billingBlocked(row, policy);
-      const supplier = supplierIdentity(row.accountName);
+  const scopedSites = rowsByBillingSite(scope);
+  const statusAlerts = [...scopedSites.entries()]
+    .map(([billingSite, siteRows]) => {
+      const unavailableRows = siteRows.filter((row) => row.currentAvailable !== true);
+      if (unavailableRows.length === 0) return null;
+      const billing = siteRows.some((row) => billingBlocked(row, policy));
+      const availableChannelCount = siteRows.length - unavailableRows.length;
+      const qualityScore = weightedAverage(siteRows, (row) => number(row.score) ?? 0);
       return {
-        accountId: row.accountId,
-        accountName: row.accountName,
-        supplier,
-        status: row.status,
-        schedulable: row.schedulable,
-        qualityScore: row.score,
-        kind: billing ? "billing-depleted" : "account-unavailable",
-        procurementRelevant: billing
-          && supplier !== null
-          && costRate(row) !== null
-          && (number(row.score) ?? 0) >= policy.minimumQualityScore,
+        billingSite,
+        channelCount: siteRows.length,
+        availableChannelCount,
+        unavailableChannelCount: unavailableRows.length,
+        qualityScore: Math.round(qualityScore * 10) / 10,
+        kind: billing && availableChannelCount === 0 ? "billing-depleted" : "channel-unavailable",
+        procurementRelevant: billing && availableChannelCount === 0
+          && siteRows.some((row) => costRate(row) !== null)
+          && qualityScore >= policy.minimumQualityScore,
       };
     })
+    .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((left, right) => Number(right.procurementRelevant) - Number(left.procurementRelevant)
       || Number(right.qualityScore ?? -1) - Number(left.qualityScore ?? -1));
 
   const candidates = scope.filter((row) => supplierIdentity(row.accountName) !== null && costRate(row) !== null);
-  const available = candidates.filter((row) => row.currentAvailable === true);
-  const availableBySupplier = new Map<string, number>();
-  for (const row of available) {
-    const supplier = supplierIdentity(row.accountName)!;
-    availableBySupplier.set(supplier, (availableBySupplier.get(supplier) ?? 0) + 1);
-  }
-  const supplierCount = availableBySupplier.size;
-  const availableCount = available.length;
+  const allBySupplier = rowsByBillingSite(candidates);
+  const availableSites = new Set(candidates.filter((row) => row.currentAvailable === true)
+    .map((row) => supplierIdentity(row.accountName)!));
+  const supplierCount = availableSites.size;
+  const availableCount = availableSites.size;
   const largestSupplierShare = availableCount === 0
     ? 0
-    : Math.max(0, ...availableBySupplier.values()) / availableCount;
+    : 1 / availableCount;
   const redundancyStatus = supplierCount < policy.minimumSupplierCount
     ? "insufficient-suppliers"
     : largestSupplierShare > policy.maximumSupplierShare
@@ -103,19 +112,14 @@ export function buildProcurementAdvice(
       : "diversified";
 
   const bySupplier = new Map<string, Row[]>();
-  const allBySupplier = new Map<string, Row[]>();
-  for (const row of candidates) {
-    const supplier = supplierIdentity(row.accountName)!;
-    allBySupplier.set(supplier, [...(allBySupplier.get(supplier) ?? []), row]);
-  }
   for (const row of candidates) {
     if ((number(row.score) ?? 0) < policy.minimumQualityScore) continue;
     const supplier = supplierIdentity(row.accountName)!;
     bySupplier.set(supplier, [...(bySupplier.get(supplier) ?? []), row]);
   }
   const supplierOptions = [...bySupplier.entries()].map(([supplier, supplierRows]) => {
-    const currentAvailableAccounts = availableBySupplier.get(supplier) ?? 0;
-    const share = availableCount === 0 ? 0 : (availableBySupplier.get(supplier) ?? 0) / availableCount;
+    const currentAvailableChannels = supplierRows.filter((row) => row.currentAvailable === true).length;
+    const share = availableCount === 0 || !availableSites.has(supplier) ? 0 : 1 / availableCount;
     const qualityScore = weightedAverage(supplierRows, (row) => number(row.score) ?? 0);
     const valueScore = weightedAverage(supplierRows, (row) => economicScore(
       row,
@@ -128,33 +132,31 @@ export function buildProcurementAdvice(
     const procurementScore = (valueScore * policy.valueWeight + redundancyScore * policy.redundancyWeight) / adviceWeight;
     const billingRows = supplierRows.filter((row) => billingBlocked(row, policy));
     return {
-      supplier,
-      action: billingRows.length > 0 ? "renew-balance" : "buy-additional-capacity",
+      billingSite: supplier,
+      action: billingRows.length > 0 && currentAvailableChannels === 0 ? "renew-balance" : "buy-additional-capacity",
       qualityScore: Math.round(qualityScore * 10) / 10,
       valueScore: Math.round(valueScore * 10) / 10,
       redundancyScore: Math.round(redundancyScore * 10) / 10,
       procurementScore: Math.round(procurementScore * 10) / 10,
       availableShare: Math.round(share * 10_000) / 10_000,
-      historicalAccountCount: allBySupplier.get(supplier)?.length ?? supplierRows.length,
-      qualifiedAccountCount: supplierRows.length,
-      currentlyAvailableAccountCount: currentAvailableAccounts,
-      billingBlockedAccountCount: billingRows.length,
-      accountIds: supplierRows.map((row) => row.accountId),
-      billingAccountIds: billingRows.map((row) => row.accountId),
+      channelCount: allBySupplier.get(supplier)?.length ?? supplierRows.length,
+      qualifiedChannelCount: supplierRows.length,
+      availableChannelCount: currentAvailableChannels,
+      billingBlockedChannelCount: billingRows.length,
     };
   }).sort((left, right) => Number(right.action === "renew-balance") - Number(left.action === "renew-balance")
     || right.procurementScore - left.procurementScore
     || right.qualityScore - left.qualityScore
-    || left.supplier.localeCompare(right.supplier));
+    || left.billingSite.localeCompare(right.billingSite));
 
   const recommendations: Row[] = [];
   const selectedPerSupplier = new Map<string, number>();
   for (const option of supplierOptions) {
     if (recommendations.length >= policy.recommendationLimit) break;
-    const selected = selectedPerSupplier.get(option.supplier) ?? 0;
+    const selected = selectedPerSupplier.get(option.billingSite) ?? 0;
     if (selected >= policy.maximumRecommendationsPerSupplier) continue;
     recommendations.push(option);
-    selectedPerSupplier.set(option.supplier, selected + 1);
+    selectedPerSupplier.set(option.billingSite, selected + 1);
   }
 
   return {
@@ -165,7 +167,7 @@ export function buildProcurementAdvice(
       unavailableAccountCount: statusAlerts.length,
       billingDepletedAccountCount: statusAlerts.filter((alert) => alert.kind === "billing-depleted").length,
       stableSupplierCount: supplierCount,
-      currentlyAvailableAccountCount: availableCount,
+      currentlyAvailableSiteCount: availableCount,
       largestSupplierShare: Math.round(largestSupplierShare * 10_000) / 10_000,
       redundancyStatus,
       unknownSupplierCount: scope.filter((row) => supplierIdentity(row.accountName) === null).length,

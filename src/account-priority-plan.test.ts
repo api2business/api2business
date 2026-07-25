@@ -58,9 +58,10 @@ test("priority plan reports billing depletion without scheduling unavailable acc
     account(2, "https://beta.example pro 0.1", 90),
   ] }, config);
   const advice = plan.procurementAdvice as Record<string, any>;
-  expect(advice.statusAlerts[0]).toMatchObject({ accountId: 1, kind: "billing-depleted", procurementRelevant: true });
-  expect(advice.recommendations[0]).toMatchObject({ supplier: "alpha.example", action: "renew-balance" });
-  expect(advice.recommendations[0].currentlyAvailableAccountCount).toBe(0);
+  expect(advice.statusAlerts[0]).toMatchObject({ billingSite: "alpha.example", kind: "billing-depleted", procurementRelevant: true });
+  expect(advice.statusAlerts[0]).not.toHaveProperty("accountId");
+  expect(advice.recommendations[0]).toMatchObject({ billingSite: "alpha.example", action: "renew-balance" });
+  expect(advice.recommendations[0].availableChannelCount).toBe(0);
   expect(plan.priorities).not.toHaveProperty("1");
 });
 
@@ -75,12 +76,12 @@ test("procurement recommendations remain supplier-diverse and do not treat limit
     account(5, "https://delta.example pro 0.1", 91, false, "weekly usage limit reached"),
   ] }, diverseConfig);
   const advice = plan.procurementAdvice as Record<string, any>;
-  expect(advice.statusAlerts[0]).toMatchObject({ accountId: 5, kind: "account-unavailable", procurementRelevant: false });
-  expect(new Set(advice.recommendations.map((item: Record<string, unknown>) => item.supplier)).size).toBe(4);
-  expect(advice.recommendations.find((item: Record<string, unknown>) => item.supplier === "alpha.example")).toMatchObject({
-    historicalAccountCount: 2,
-    qualifiedAccountCount: 2,
-    currentlyAvailableAccountCount: 2,
+  expect(advice.statusAlerts[0]).toMatchObject({ billingSite: "delta.example", kind: "channel-unavailable", procurementRelevant: false });
+  expect(new Set(advice.recommendations.map((item: Record<string, unknown>) => item.billingSite)).size).toBe(4);
+  expect(advice.recommendations.find((item: Record<string, unknown>) => item.billingSite === "alpha.example")).toMatchObject({
+    channelCount: 2,
+    qualifiedChannelCount: 2,
+    availableChannelCount: 2,
   });
   expect(advice.summary.redundancyStatus).toBe("diversified");
 });
@@ -93,5 +94,19 @@ test("procurement advice remains available when every account is unavailable", (
   expect(plan.eligibleCount).toBe(0);
   expect(plan.anchorScore).toBeNull();
   expect(plan.priorities).toEqual({});
-  expect(advice.recommendations[0]).toMatchObject({ supplier: "alpha.example", action: "renew-balance" });
+  expect(advice.recommendations[0]).toMatchObject({ billingSite: "alpha.example", action: "renew-balance" });
+});
+
+test("shared-balance channels produce one website-level alert and recommendation", () => {
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    account(1, "https://shared.example plus 0.08", 95, false, "余额不足"),
+    account(2, "https://shared.example pro 0.08", 90, false, "余额不足"),
+  ] }, config);
+  const advice = plan.procurementAdvice as Record<string, any>;
+  expect(advice.statusAlerts).toHaveLength(1);
+  expect(advice.statusAlerts[0]).toMatchObject({ billingSite: "shared.example", channelCount: 2, availableChannelCount: 0 });
+  expect(advice.recommendations).toHaveLength(1);
+  expect(advice.recommendations[0]).toMatchObject({ billingSite: "shared.example", channelCount: 2, action: "renew-balance" });
+  expect(advice.recommendations[0]).not.toHaveProperty("accountIds");
+  expect(Object.keys(plan.priorities as Record<string, number>)).toHaveLength(0);
 });
