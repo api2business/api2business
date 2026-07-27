@@ -15,6 +15,7 @@ export default defineConfig({
   server: {
     host: target.webListenHost,
     port: target.webListenPort,
+    allowedHosts: target.webAllowedHosts,
     strictPort: true,
     watch: { usePolling: true, interval: 300 },
     proxy: {

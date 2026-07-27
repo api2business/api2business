@@ -158,6 +158,7 @@ export interface ServerTarget {
   workerHealthPort: number;
   webListenHost: string;
   webListenPort: number;
+  webAllowedHosts: string[];
   webApiBaseUrl: string;
   secureCookies: boolean;
   databasePath: string;
@@ -343,6 +344,7 @@ export function loadConfig(path: string): AppConfig {
       workerHealthPort: numberValue(target, "workerHealthPort", `runtime.serverTargets.${id}`, 1),
       webListenHost: stringValue(target, "webListenHost", `runtime.serverTargets.${id}`),
       webListenPort: numberValue(target, "webListenPort", `runtime.serverTargets.${id}`, 1),
+      webAllowedHosts: strings(target, "webAllowedHosts", `runtime.serverTargets.${id}`),
       webApiBaseUrl: stringValue(target, "webApiBaseUrl", `runtime.serverTargets.${id}`),
       secureCookies: booleanValue(target, "secureCookies", `runtime.serverTargets.${id}`),
       databasePath: stringValue(target, "databasePath", `runtime.serverTargets.${id}`),
