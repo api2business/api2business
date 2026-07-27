@@ -195,7 +195,19 @@ export class OperationsService {
   }
 
   async priorityHistory() {
-    return { ok: true, records: await this.store.priorityHistory(this.config.operations.auditLimit) };
+    const rows = await this.store.priorityHistory(this.config.operations.auditLimit);
+    return {
+      ok: true,
+      records: rows.map((row) => {
+        const priorities = typeof row.priorities === "string" ? JSON.parse(row.priorities) : row.priorities;
+        const { priorities: _hidden, ...visible } = row;
+        return {
+          ...visible,
+          changed_count: priorities && typeof priorities === "object" && !Array.isArray(priorities)
+            ? Object.keys(priorities).length : 0,
+        };
+      }),
+    };
   }
 
   async getPriorityAutomation() {

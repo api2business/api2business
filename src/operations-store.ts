@@ -142,8 +142,7 @@ export class OperationsStore {
   async priorityHistory(limit: number) {
     return await this.sql`
       SELECT id, created_at, completed_at, created_by, trigger_type, status,
-        recent_call_limit, jsonb_object_length(priorities)::int AS changed_count,
-        apply_result
+        recent_call_limit, priorities, apply_result
       FROM apistate_priority_plans
       ORDER BY created_at DESC LIMIT ${limit}
     `;
