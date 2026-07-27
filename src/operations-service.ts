@@ -111,6 +111,36 @@ export class OperationsService {
     return { ...result, refreshedAt: new Date().toISOString() };
   }
 
+  private async verifyPriorities(priorities: Record<string, number>) {
+    const expected = new Map(Object.entries(priorities).map(([id, priority]) => [id, Number(priority)]));
+    const startedAt = Date.now();
+    const deadline = startedAt + this.config.operations.priorityVerificationTimeoutMs;
+    let verifiedCount = 0;
+    do {
+      const sql = new SQL(this.scoreDatabaseUrl, { max: 1 });
+      try {
+        const rows = await sql.begin(async (tx) => {
+          await tx.unsafe("SET TRANSACTION READ ONLY");
+          await tx.unsafe(`SET LOCAL statement_timeout = '${this.config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
+          return await tx`SELECT id::text AS id, priority::int AS priority FROM accounts`;
+        });
+        const actual = new Map(rows.map((row) => [String(row.id), Number(row.priority)]));
+        verifiedCount = [...expected].filter(([id, priority]) => actual.get(id) === priority).length;
+        if (verifiedCount === expected.size) {
+          return {
+            verification: "postgresql-direct",
+            verifiedCount,
+            verificationDurationMs: Date.now() - startedAt,
+          };
+        }
+      } finally {
+        await sql.close();
+      }
+      await Bun.sleep(this.config.operations.priorityVerificationPollMs);
+    } while (Date.now() < deadline);
+    throw new Error(`优先级写入后 PostgreSQL 回读超时（已验证 ${verifiedCount}/${expected.size}）`);
+  }
+
   async confirmPriorityPlan(id: string, operator: string) {
     const plan = await this.store.getPlan(id);
     if (plan.status !== "pending") throw new Error("priority plan is not pending");
@@ -119,7 +149,7 @@ export class OperationsService {
     const args = [
       this.config.monitor.cli.entrypoint, "platform-infra", "sub2api", "codex-pool", "runtime", "apply",
       "--target", this.config.monitor.target, "--kind", "priority",
-      "--priorities-json", JSON.stringify(priorities), "--confirm",
+      "--priorities-json", JSON.stringify(priorities), "--write-only", "--confirm",
     ];
     const proc = Bun.spawn([this.config.monitor.cli.executable, ...args], {
       cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe",
@@ -133,13 +163,35 @@ export class OperationsService {
       new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
     ]);
     clearTimeout(timeout);
-    const result = { exitCode, timedOut, output: stdout.slice(-4000), error: stderr.slice(-1000), changedCount: Object.keys(priorities).length };
-    await this.store.finishPlan(id, exitCode === 0 ? "applied" : "failed", result);
-    await this.store.audit("priority.plan.confirm", exitCode === 0 ? "succeeded" : "failed",
-      operator, { planId: id, changedCount: Object.keys(priorities).length }, { exitCode, timedOut });
-    if (timedOut) throw new Error("优先级调整执行超时");
-    if (exitCode !== 0) throw new Error("优先级调整失败");
-    return { ok: true, planId: id, ...result };
+    const writeResult = {
+      exitCode, timedOut, output: stdout.slice(-4000), error: stderr.slice(-1000),
+      changedCount: Object.keys(priorities).length, writeMode: "backend-api-only",
+    };
+    if (timedOut || exitCode !== 0) {
+      await this.store.finishPlan(id, "failed", writeResult);
+      await this.store.audit("priority.plan.confirm", "failed", operator,
+        { planId: id, changedCount: Object.keys(priorities).length },
+        { exitCode, timedOut, writeMode: "backend-api-only", verification: "not-started" });
+      if (timedOut) throw new Error("优先级调整执行超时");
+      throw new Error("优先级调整失败");
+    }
+    try {
+      const verification = await this.verifyPriorities(priorities);
+      const result = { ...writeResult, ...verification };
+      await this.store.finishPlan(id, "applied", result);
+      await this.store.audit("priority.plan.confirm", "succeeded", operator,
+        { planId: id, changedCount: Object.keys(priorities).length },
+        { exitCode, timedOut, writeMode: "backend-api-only", ...verification });
+      return { ok: true, planId: id, ...result };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const result = { ...writeResult, verification: "postgresql-direct", verificationError: message };
+      await this.store.finishPlan(id, "failed", result);
+      await this.store.audit("priority.plan.confirm", "failed", operator,
+        { planId: id, changedCount: Object.keys(priorities).length },
+        { exitCode, timedOut, writeMode: "backend-api-only", verification: "postgresql-direct", error: message });
+      throw error;
+    }
   }
 
   async procurement(budgetCny: number, operator: string) {

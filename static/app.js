@@ -419,14 +419,14 @@ async function operationsPage() {
     button.disabled = true
     $('#generate-plan').disabled = true
     $('#refresh-priority').disabled = true
-    planProgress('已提交确认，后端正在通过受控 API 批量写入并回读')
+    planProgress('已提交确认，后端 API 正在批量写入；随后通过 PostgreSQL 直连回读')
     const startedAt = Date.now()
     const ticker = setInterval(() => {
       $('#plan-refresh-state').textContent = `调整执行中：${Math.floor((Date.now() - startedAt) / 1000)} 秒`
     }, 1000)
     try {
       const result = await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 190000)
-      planProgress(`调整成功，已写入并回读 ${number(result.changedCount)} 个账号`)
+      planProgress(`调整成功，后端已写入并由 PostgreSQL 验证 ${number(result.verifiedCount)} 个账号`)
       activePlanId = null
       await refreshPriorityState()
       await loadOperations()

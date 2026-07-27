@@ -121,7 +121,7 @@ export function buildAccountPriorityPlan(
     changes,
     procurementAdvice,
     apply: {
-      command: "bun scripts/cli.ts platform-infra sub2api codex-pool runtime apply --target PK01 --kind priority --priorities-json '<priorities>' --confirm",
+      command: "bun scripts/cli.ts platform-infra sub2api codex-pool runtime apply --target PK01 --kind priority --priorities-json '<priorities>' --write-only --confirm",
       oneBatch: true,
     },
   };

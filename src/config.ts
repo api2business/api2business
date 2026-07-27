@@ -103,6 +103,8 @@ export interface AppConfig {
     rechargeDenominationsCny: number[];
     planTtlMinutes: number;
     auditLimit: number;
+    priorityVerificationTimeoutMs: number;
+    priorityVerificationPollMs: number;
   };
   temporal: {
     addressEnv: string;
@@ -493,6 +495,8 @@ export function loadConfig(path: string): AppConfig {
       rechargeDenominationsCny: integers(operations, "rechargeDenominationsCny", "operations", 1, 100000),
       planTtlMinutes: integerValue(operations, "planTtlMinutes", "operations", 1, 1440),
       auditLimit: integerValue(operations, "auditLimit", "operations", 1, 1000),
+      priorityVerificationTimeoutMs: integerValue(operations, "priorityVerificationTimeoutMs", "operations", 1000, 120000),
+      priorityVerificationPollMs: integerValue(operations, "priorityVerificationPollMs", "operations", 100, 10000),
     },
     temporal: {
       addressEnv: stringValue(temporal, "addressEnv", "temporal"),
