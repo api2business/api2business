@@ -15,7 +15,11 @@ const adminToken = process.env[target.adminTokenEnv];
 if (!adminToken) throw new Error(`server target requires env ${target.adminTokenEnv}`);
 
 const context = createServerContext(config, target);
-const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId });
+const temporalAddress = process.env[config.temporal.addressEnv];
+if (runtimeId !== "native" && !temporalAddress) throw new Error(`server target requires env ${config.temporal.addressEnv}`);
+const temporal = temporalAddress
+  ? await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId })
+  : null;
 const dispatcher = new ApplicationDispatcher({ lottery: context.service, scores: context.monitor }, temporal);
 const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
 if (!operationsDatabaseUrl) throw new Error(`server target requires env ${config.operations.databaseUrlEnv}`);
@@ -32,8 +36,9 @@ console.log(JSON.stringify({
   component: "apistate-api",
   runtime: runtimeId,
   listen: server.url.toString(),
-  temporalNamespace: config.temporal.namespace,
-  temporalTaskQueue: target.temporalTaskQueue,
+  temporalNamespace: temporal ? config.temporal.namespace : null,
+  temporalTaskQueue: temporal ? target.temporalTaskQueue : null,
+  workflowMode: temporal ? "temporal" : "disabled",
   automaticCreditEnabled: config.lottery.automaticCredit.enabled,
   valuesPrinted: false,
 }));
@@ -45,7 +50,7 @@ async function stop(): Promise<void> {
   server.stop(true);
   context.close();
   await operations.close();
-  await temporal.close();
+  if (temporal) await temporal.close();
   process.exit(0);
 }
 
