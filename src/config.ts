@@ -56,6 +56,11 @@ export interface AppConfig {
       minimumChange: number;
       minimumPriority: number;
       maximumPriority: number;
+      reservePolicies: Record<string, {
+        lowRemainingThresholdPercent: number;
+        normalPriorityFloor: number;
+        lowRemainingPriority: number;
+      }>;
       procurementAdvice: {
         enabled: boolean;
         minimumQualityScore: number;
@@ -268,6 +273,19 @@ export function loadConfig(path: string): AppConfig {
   const scoreDatabase = object(sub2api.scoreDatabase, "sub2api.scoreDatabase");
   const scorePolicy = object(sub2api.scorePolicy, "sub2api.scorePolicy");
   const priorityPlan = object(sub2api.priorityPlan, "sub2api.priorityPlan");
+  const reservePoliciesRaw = object(priorityPlan.reservePolicies, "sub2api.priorityPlan.reservePolicies");
+  const reservePolicies = Object.fromEntries(Object.keys(reservePoliciesRaw).map((accountId) => {
+    if (!/^[1-9][0-9]*$/u.test(accountId)) {
+      throw new Error("sub2api.priorityPlan.reservePolicies keys must be positive account IDs");
+    }
+    const path = `sub2api.priorityPlan.reservePolicies.${accountId}`;
+    const policy = object(reservePoliciesRaw[accountId], path);
+    return [accountId, {
+      lowRemainingThresholdPercent: numberValue(policy, "lowRemainingThresholdPercent", path, 0, 100),
+      normalPriorityFloor: integerValue(policy, "normalPriorityFloor", path, 1, 1000),
+      lowRemainingPriority: integerValue(policy, "lowRemainingPriority", path, 1, 1000),
+    }];
+  }));
   const procurementAdvice = object(priorityPlan.procurementAdvice, "sub2api.priorityPlan.procurementAdvice");
   const lottery = object(raw.lottery, "lottery");
   const dailyGrant = object(lottery.dailyGrant, "lottery.dailyGrant");
@@ -399,6 +417,7 @@ export function loadConfig(path: string): AppConfig {
         minimumChange: integerValue(priorityPlan, "minimumChange", "sub2api.priorityPlan", 1, 1000),
         minimumPriority: integerValue(priorityPlan, "minimumPriority", "sub2api.priorityPlan", 1, 1000),
         maximumPriority: integerValue(priorityPlan, "maximumPriority", "sub2api.priorityPlan", 1, 1000),
+        reservePolicies,
         procurementAdvice: {
           enabled: booleanValue(procurementAdvice, "enabled", "sub2api.priorityPlan.procurementAdvice"),
           minimumQualityScore: numberValue(procurementAdvice, "minimumQualityScore", "sub2api.priorityPlan.procurementAdvice", 0, 100),

@@ -15,6 +15,7 @@ const config = {
       minimumChange: 5,
       minimumPriority: 1,
       maximumPriority: 1000,
+      reservePolicies: {},
       procurementAdvice: {
         enabled: true,
         minimumQualityScore: 80,
@@ -63,6 +64,31 @@ test("priority plan reports billing depletion without scheduling unavailable acc
   expect(advice.recommendations[0]).toMatchObject({ billingSite: "alpha.example", action: "renew-balance" });
   expect(advice.recommendations[0].availableChannelCount).toBe(0);
   expect(plan.priorities).not.toHaveProperty("1");
+});
+
+test("reserve policy dynamically lowers priority as weekly quota is depleted", () => {
+  const reserveConfig = structuredClone(config);
+  reserveConfig.sub2api.priorityPlan.reservePolicies = {
+    "2": { lowRemainingThresholdPercent: 20, normalPriorityFloor: 100, lowRemainingPriority: 600 },
+  };
+  const reserveAccount: Record<string, unknown> = account(2, "stable reserve pro 0.1", 99);
+  reserveAccount.weeklyRemainingPercent = 19;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    account(1, "https://alpha.example plus 0.05", 90),
+    reserveAccount,
+  ] }, reserveConfig);
+  const reserve = (plan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2);
+  expect(reserve).toMatchObject({
+    configuredPriorityFloor: 600,
+    priorityFloorApplied: true,
+    desiredPriority: 600,
+    reservePolicy: {
+      weeklyRemainingPercent: 19,
+      lowRemainingThresholdPercent: 20,
+      mode: "low-remaining-reserve",
+    },
+  });
+  expect(plan.priorities).toMatchObject({ "2": 600 });
 });
 
 test("procurement recommendations remain supplier-diverse and do not treat limits as billing", () => {
