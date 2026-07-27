@@ -123,6 +123,12 @@ export interface AppConfig {
     native: {
       stateDir: string;
       env: Record<string, SecretRef>;
+      temporalServiceRef: {
+        route: string;
+        namespace: string;
+        service: string;
+        portName: string;
+      };
       services: Record<NativeServiceId, NativeServiceConfig>;
     };
     serverTargets: Record<string, ServerTarget>;
@@ -309,6 +315,7 @@ export function loadConfig(path: string): AppConfig {
   const native = object(runtime.native, "runtime.native");
   const nativeServicesRaw = object(native.services, "runtime.native.services");
   const nativeEnvRaw = object(native.env, "runtime.native.env");
+  const nativeTemporalServiceRef = object(native.temporalServiceRef, "runtime.native.temporalServiceRef");
   const secretSourcePathsRaw = object(runtime.secretSourcePaths, "runtime.secretSourcePaths");
   const cliTargetsRaw = object(runtime.cliTargets, "runtime.cliTargets");
   const serverTargetsRaw = object(runtime.serverTargets, "runtime.serverTargets");
@@ -508,6 +515,12 @@ export function loadConfig(path: string): AppConfig {
       native: {
         stateDir: stringValue(native, "stateDir", "runtime.native"),
         env: Object.fromEntries(Object.entries(nativeEnvRaw).map(([targetKey, value]) => [targetKey, secretRef(value, `runtime.native.env.${targetKey}`)])),
+        temporalServiceRef: {
+          route: stringValue(nativeTemporalServiceRef, "route", "runtime.native.temporalServiceRef"),
+          namespace: stringValue(nativeTemporalServiceRef, "namespace", "runtime.native.temporalServiceRef"),
+          service: stringValue(nativeTemporalServiceRef, "service", "runtime.native.temporalServiceRef"),
+          portName: stringValue(nativeTemporalServiceRef, "portName", "runtime.native.temporalServiceRef"),
+        },
         services: nativeServices,
       },
       serverTargets,

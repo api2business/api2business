@@ -1,5 +1,5 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import type { AppConfig, NativeServiceId } from "./config";
 import { readSecret } from "./secrets";
@@ -28,6 +28,33 @@ function running(pid: number | null): boolean {
   }
 }
 
+function nativeEnvironment(config: AppConfig): Record<string, string> {
+  const env: Record<string, string> = { ...process.env } as Record<string, string>;
+  for (const [targetKey, ref] of Object.entries(config.runtime.native.env)) env[targetKey] = readSecret(config, ref);
+  if (!env[config.temporal.addressEnv]) {
+    const ref = config.runtime.native.temporalServiceRef;
+    const result = spawnSync("trans", [
+      ref.route,
+      "kubectl",
+      "-n",
+      ref.namespace,
+      "get",
+      "service",
+      ref.service,
+      "-o",
+      `jsonpath={.spec.clusterIP}:{.spec.ports[?(@.name=="${ref.portName}")].port}`,
+    ], { encoding: "utf8", timeout: 10_000 });
+    const address = result.stdout.trim();
+    if (result.status !== 0 || !/^[0-9a-f:.]+:[1-9][0-9]*$/iu.test(address)) {
+      throw new Error(`native temporal service resolution failed for ${ref.namespace}/${ref.service}`);
+    }
+    env[config.temporal.addressEnv] = address;
+  }
+  env.APISTATE_CONFIG_PATH = config.configPath;
+  env.APISTATE_RUNTIME_ID = "native";
+  return env;
+}
+
 export function nativeStatus(config: AppConfig, component: NativeServiceId): Record<string, unknown> {
   const target = paths(config, component);
   const pid = processId(target.pid);
@@ -42,19 +69,18 @@ export function nativeStatus(config: AppConfig, component: NativeServiceId): Rec
   };
 }
 
-export function nativeStart(config: AppConfig, component: NativeServiceId): Record<string, unknown> {
+export function nativeStart(
+  config: AppConfig,
+  component: NativeServiceId,
+  preparedEnvironment?: Record<string, string>,
+): Record<string, unknown> {
   const current = nativeStatus(config, component);
   if (current.state === "running") return { ...current, mutation: false, reason: "already-running" };
-  const temporalAddress = process.env[config.temporal.addressEnv];
-  if (component === "worker" && !temporalAddress) throw new Error(`native ${component} requires env ${config.temporal.addressEnv}`);
+  const env = preparedEnvironment ?? nativeEnvironment(config);
   const service = config.runtime.native.services[component];
   const target = paths(config, component);
   mkdirSync(target.stateDir, { recursive: true });
   rmSync(target.pid, { force: true });
-  const env: Record<string, string> = { ...process.env } as Record<string, string>;
-  for (const [targetKey, ref] of Object.entries(config.runtime.native.env)) env[targetKey] = readSecret(config, ref);
-  env.APISTATE_CONFIG_PATH = config.configPath;
-  env.APISTATE_RUNTIME_ID = "native";
   const log = openSync(target.log, "a", 0o600);
   try {
     const child = spawn(service.command[0]!, service.command.slice(1), {
@@ -96,8 +122,9 @@ export function nativeAll(
   tail = 40,
 ): Record<string, unknown> {
   const components = action === "stop" ? [...nativeComponents].reverse() : nativeComponents;
+  const environment = action === "start" ? nativeEnvironment(config) : undefined;
   const results = components.map((component) =>
-    action === "start" ? nativeStart(config, component)
+    action === "start" ? nativeStart(config, component, environment)
       : action === "stop" ? nativeStop(config, component)
         : action === "status" ? nativeStatus(config, component)
           : nativeLogs(config, component, tail)
