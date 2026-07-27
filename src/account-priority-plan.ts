@@ -71,7 +71,15 @@ export function buildAccountPriorityPlan(
       policy.maximumPriority,
       Math.max(policy.minimumPriority, policy.minimumPriority + Math.round((anchorScore! - combinedScore) * policy.pointsPerScore)),
     );
-    const desired = Math.abs(before - calculated) < policy.minimumChange ? before : calculated;
+    const reservePolicy = policy.reservePolicies[String(accountId)] ?? null;
+    const remainingPercent = number(row.weeklyRemainingPercent);
+    const lowRemaining = reservePolicy !== null
+      && (remainingPercent === null || remainingPercent < reservePolicy.lowRemainingThresholdPercent);
+    const configuredFloor = reservePolicy === null
+      ? null
+      : lowRemaining ? reservePolicy.lowRemainingPriority : reservePolicy.normalPriorityFloor;
+    const floored = configuredFloor === null ? calculated : Math.max(calculated, configuredFloor);
+    const desired = Math.abs(before - floored) < policy.minimumChange ? before : floored;
     if (before !== desired) priorities[String(accountId)] = desired;
     return {
       accountId,
@@ -87,6 +95,13 @@ export function buildAccountPriorityPlan(
       ttftP95Ms: row.ttftP95Ms,
       beforePriority: before,
       calculatedPriority: calculated,
+      configuredPriorityFloor: configuredFloor,
+      priorityFloorApplied: configuredFloor !== null && floored !== calculated,
+      reservePolicy: reservePolicy === null ? null : {
+        weeklyRemainingPercent: remainingPercent,
+        lowRemainingThresholdPercent: reservePolicy.lowRemainingThresholdPercent,
+        mode: lowRemaining ? "low-remaining-reserve" : "normal-cost-aware",
+      },
       desiredPriority: desired,
       change: before === desired ? "noop" : "update",
     };

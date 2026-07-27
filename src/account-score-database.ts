@@ -16,6 +16,11 @@ WITH target_accounts AS (
     a.rate_limit_reset_at,
     a.overload_until,
     a.temp_unschedulable_until,
+    CASE
+      WHEN COALESCE(a.extra->>'codex_7d_used_percent', '') ~ '^[0-9]+(?:\\.[0-9]+)?$'
+      THEN LEAST(100, GREATEST(0, 100 - (a.extra->>'codex_7d_used_percent')::numeric))
+      ELSE NULL
+    END AS weekly_remaining_percent,
     a.priority::int AS priority,
     ARRAY_AGG(g.id ORDER BY g.id) AS group_ids,
     ARRAY_AGG(g.name ORDER BY g.id) AS group_names
@@ -235,6 +240,7 @@ export function scoreRecentDatabaseRow(
     currentStatus: row.status,
     currentError: row.error_message ?? null,
     currentStateScoreImpact: "none",
+    weeklyRemainingPercent: numeric(row.weekly_remaining_percent),
     score,
     grade: accountGrade,
     assessment: ({ A: "preferred", B: "healthy", C: "watch", D: "degraded", E: "poor" } as Row)[accountGrade] ?? "insufficient-evidence",
