@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { mergeAccountScores } from "./account-score-aggregation";
-import { collectNativeScores } from "./account-score-native";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import type { AppConfig } from "./config";
 import type { Sub2ApiClient } from "./sub2api-client";
@@ -103,21 +102,34 @@ export class AccountScoreService {
     const startedAt = new Date();
     this.snapshot = { ...this.snapshot, status: "refreshing", refreshStartedAt: startedAt.toISOString(), error: null };
     try {
-      const collected = await collectNativeScores(this.sub2api, this.policyEvents, this.config.monitor.scoreWindow);
+      const collected = await collectRecentCallScoresFromDatabase(
+        this.config,
+        this.config.monitor.recentCallLimit,
+        null,
+        null,
+        this.scoreDatabaseUrl,
+      );
       const refreshedAt = new Date();
       const accounts = mergeAccountScores(collected.accounts);
+      const groupNames = [...new Set(accounts.flatMap((row) =>
+        Array.isArray(row.groupNames) ? row.groupNames.map(String) : [],
+      ))];
       this.snapshot = {
         ok: true,
         status: "ready",
         refreshedAt: refreshedAt.toISOString(),
         refreshStartedAt: startedAt.toISOString(),
         nextRefreshAt: new Date(refreshedAt.getTime() + this.config.monitor.refreshIntervalMinutes * 60_000).toISOString(),
-        window: this.config.monitor.scoreWindow,
-        groups: collected.groups,
+        window: `最近 ${this.config.monitor.recentCallLimit} 次`,
+        groups: groupNames.map((name) => ({ name })),
         accounts,
         error: null,
-        source: "sub2api-native-admin-api-local-aggregation",
-        collection: collected.collection,
+        source: "postgresql-recent-account-calls",
+        collection: {
+          recentCallLimit: this.config.monitor.recentCallLimit,
+          databaseQueries: collected.databaseQueries,
+          queryDurationMs: collected.queryDurationMs,
+        },
       };
       this.writeCache(this.snapshot);
       return this.snapshot;
@@ -149,7 +161,7 @@ export class AccountScoreService {
       refreshedAt: null,
       refreshStartedAt: null,
       nextRefreshAt: null,
-      window: this.config.monitor.scoreWindow,
+      window: `最近 ${this.config.monitor.recentCallLimit} 次`,
       groups: [],
       accounts: [],
       error: null,

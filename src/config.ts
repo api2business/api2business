@@ -21,7 +21,6 @@ export interface AppConfig {
   monitor: {
     timezone: string;
     refreshIntervalMinutes: number;
-    scoreWindow: string;
     recentCallLimit: number;
     errorAggregateLimit: number;
     errorAggregateTop: number;
@@ -385,7 +384,6 @@ export function loadConfig(path: string): AppConfig {
     monitor: {
       timezone: timezoneValue(monitor, "timezone", "monitor"),
       refreshIntervalMinutes: integerValue(monitor, "refreshIntervalMinutes", "monitor", 1, 1440),
-      scoreWindow: stringValue(monitor, "scoreWindow", "monitor"),
       recentCallLimit: integerValue(monitor, "recentCallLimit", "monitor", 1, 10000),
       errorAggregateLimit: integerValue(monitor, "errorAggregateLimit", "monitor", 1, 10000),
       errorAggregateTop: integerValue(monitor, "errorAggregateTop", "monitor", 1, 100),

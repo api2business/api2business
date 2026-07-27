@@ -96,8 +96,8 @@ export class OperationsStore {
       INSERT INTO apistate_priority_plans
         (id, expires_at, created_by, status, recent_call_limit, priorities, result)
       VALUES (${id}, ${expiresAt}, ${input.operator}, 'pending',
-        ${input.recentCallLimit}, ${JSON.stringify(input.priorities)}::jsonb,
-        ${JSON.stringify(input.result)}::jsonb)
+        ${input.recentCallLimit}, ${input.priorities}::jsonb,
+        ${input.result}::jsonb)
     `;
     return { id, expiresAt: expiresAt.toISOString() };
   }
@@ -109,13 +109,19 @@ export class OperationsStore {
       FROM apistate_priority_plans WHERE id=${id}
     `;
     if (!row) throw new Error("priority plan does not exist");
-    return row as Record<string, unknown>;
+    const plan = row as Record<string, unknown>;
+    for (const key of ["priorities", "result", "apply_result"]) {
+      if (typeof plan[key] === "string") {
+        try { plan[key] = JSON.parse(plan[key] as string); } catch {}
+      }
+    }
+    return plan;
   }
 
   async finishPlan(id: string, status: "applied" | "failed", result: unknown) {
     await this.sql`
       UPDATE apistate_priority_plans SET status=${status}, applied_at=now(),
-        apply_result=${JSON.stringify(result)}::jsonb WHERE id=${id}
+        apply_result=${result}::jsonb WHERE id=${id}
     `;
   }
 
@@ -124,7 +130,7 @@ export class OperationsStore {
       INSERT INTO apistate_operation_audit
         (id, action, status, operator, input_summary, result_summary)
       VALUES (${crypto.randomUUID()}, ${action}, ${status}, ${operator},
-        ${JSON.stringify(input)}::jsonb, ${JSON.stringify(result)}::jsonb)
+        ${input}::jsonb, ${result}::jsonb)
     `;
   }
 
