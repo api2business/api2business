@@ -266,6 +266,7 @@ function cny(value) {
 }
 
 let activePlanId = null
+let priorityAutomationExists = false
 const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
 let priorityRows = []
 
@@ -328,11 +329,13 @@ async function loadPriorityAutomation() {
   const data = await requestJson('/api/operations/priority-automation')
   const policy = data.automation
   if (!policy) {
+    priorityAutomationExists = false
     $('#automation-enabled').value = 'false'
     $('#automation-interval').value = '3600'
     $('#automation-state').textContent = '尚未创建自动调整配置'
     return false
   }
+  priorityAutomationExists = true
   $('#automation-enabled').value = String(policy.enabled)
   $('#automation-interval').value = String(policy.interval_seconds)
   $('#automation-limit').value = String(policy.recent_call_limit)
@@ -347,15 +350,16 @@ async function setupPriorityPanel(options) {
   $('#refresh-history').addEventListener('click', () => void loadPriorityHistory().catch(() => undefined))
   $('#automation-form').addEventListener('submit', async (event) => {
     event.preventDefault()
-    const exists = await loadPriorityAutomation()
+    const input = {
+      enabled: $('#automation-enabled').value === 'true',
+      intervalSeconds: Number($('#automation-interval').value),
+      recentCallLimit: Number($('#automation-limit').value),
+    }
     const result = await requestJson('/api/operations/priority-automation', {
-      method: exists ? 'PATCH' : 'POST',
-      body: JSON.stringify({
-        enabled: $('#automation-enabled').value === 'true',
-        intervalSeconds: Number($('#automation-interval').value),
-        recentCallLimit: Number($('#automation-limit').value),
-      }),
+      method: priorityAutomationExists ? 'PATCH' : 'POST',
+      body: JSON.stringify(input),
     })
+    priorityAutomationExists = true
     $('#automation-state').textContent = `配置已保存 · 下次执行：${time(result.automation.next_run_at)}`
   })
   $('#generate-plan').addEventListener('click', async () => {
