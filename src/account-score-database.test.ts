@@ -7,6 +7,7 @@ const scorePolicy = {
   latencyWeight: 35,
   baselineWeight: 10,
   failureZeroScoreRate: 0.2,
+  failureBurstCallLimit: 100,
   failoverZeroScoreRate: 0.2,
   ttftFullScoreMs: 5_000,
   ttftZeroScoreMs: 55_000,
@@ -15,6 +16,8 @@ const scorePolicy = {
 test("database aggregate uses bounded account indexes and current state is display-only", () => {
   expect(recentAccountAggregateQuery).toContain("WHERE u.account_id = a.account_id");
   expect(recentAccountAggregateQuery).toContain("WHERE o.account_id = a.account_id");
+  expect(recentAccountAggregateQuery).toContain("COALESCE(o.upstream_status_code, 0) >= 400");
+  expect(recentAccountAggregateQuery).toContain("e.recent_rank <= $4");
   expect(recentAccountAggregateQuery.match(/LIMIT \$1/gu)?.length).toBe(3);
   expect(recentAccountAggregateQuery).toContain("a.name = $2::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
@@ -92,4 +95,32 @@ test("TTFT weight curve keeps latency above 20 seconds below grade A", () => {
 
   expect(row.score).toBeLessThan(90);
   expect(row.grade).toBe("B");
+});
+
+test("short-window upstream burst cannot be diluted by long-window success", () => {
+  const row = scoreRecentDatabaseRow({
+    account_id: 32,
+    account_name: "stable-until-now 0.07",
+    status: "active",
+    schedulable: true,
+    priority: 1,
+    group_ids: [2],
+    group_names: ["pool"],
+    success_requests: 990,
+    attributed_requests: 1000,
+    failover_requests: 0,
+    failure_requests: 10,
+    burst_attempts: 100,
+    burst_failure_requests: 10,
+    stream_success_requests: 900,
+    first_token_samples: 900,
+    ttft_p95_ms: 10_000,
+    selected_calls: 1000,
+  }, 1000, scorePolicy);
+
+  expect(row.failureRate).toBe(0.01);
+  expect(row.burstFailureRate).toBe(0.1);
+  expect(row.effectiveFailureRate).toBe(0.1);
+  expect(row.score).toBeLessThan(80);
+  expect(row.grade).toBe("C");
 });

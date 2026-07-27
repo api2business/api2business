@@ -40,6 +40,7 @@ export interface AppConfig {
       latencyWeight: number;
       baselineWeight: number;
       failureZeroScoreRate: number;
+      failureBurstCallLimit: number;
       failoverZeroScoreRate: number;
       ttftFullScoreMs: number;
       ttftZeroScoreMs: number;
@@ -420,6 +421,7 @@ export function loadConfig(path: string): AppConfig {
         latencyWeight: numberValue(scorePolicy, "latencyWeight", "sub2api.scorePolicy", 0, 100),
         baselineWeight: numberValue(scorePolicy, "baselineWeight", "sub2api.scorePolicy", 0, 100),
         failureZeroScoreRate: numberValue(scorePolicy, "failureZeroScoreRate", "sub2api.scorePolicy", 0.000001, 1),
+        failureBurstCallLimit: integerValue(scorePolicy, "failureBurstCallLimit", "sub2api.scorePolicy", 1),
         failoverZeroScoreRate: numberValue(scorePolicy, "failoverZeroScoreRate", "sub2api.scorePolicy", 0.000001, 1),
         ttftFullScoreMs: integerValue(scorePolicy, "ttftFullScoreMs", "sub2api.scorePolicy", 0),
         ttftZeroScoreMs: integerValue(scorePolicy, "ttftZeroScoreMs", "sub2api.scorePolicy", 1),

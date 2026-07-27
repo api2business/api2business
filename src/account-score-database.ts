@@ -57,6 +57,15 @@ account_stats AS (
     COUNT(DISTINCT e.request_id) FILTER (
       WHERE e.kind = 'error' AND e.scoreable AND e.request_id IS NOT NULL
     )::int AS failure_requests,
+    COUNT(*) FILTER (
+      WHERE e.recent_rank <= $4
+    )::int AS burst_attempts,
+    COUNT(DISTINCT e.request_id) FILTER (
+      WHERE e.recent_rank <= $4
+        AND e.kind = 'error'
+        AND e.scoreable
+        AND e.request_id IS NOT NULL
+    )::int AS burst_failure_requests,
     COUNT(DISTINCT e.request_id) FILTER (
       WHERE e.kind = 'error' AND e.request_id IS NOT NULL
     )::int AS customer_error_requests,
@@ -77,7 +86,9 @@ account_stats AS (
     COUNT(*)::int AS selected_calls
   FROM target_accounts a
   LEFT JOIN LATERAL (
-    SELECT candidate.*
+    SELECT
+      candidate.*,
+      ROW_NUMBER() OVER (ORDER BY candidate.created_at DESC, candidate.id DESC) AS recent_rank
     FROM (
       (
         SELECT
@@ -132,7 +143,11 @@ account_stats AS (
           END AS scoreable
         FROM ops_error_logs o
         WHERE o.account_id = a.account_id
-          AND (COALESCE(o.status_code, 0) >= 400 OR o.error_type = 'cyber_policy')
+          AND (
+            COALESCE(o.status_code, 0) >= 400
+            OR COALESCE(o.upstream_status_code, 0) >= 400
+            OR o.error_type = 'cyber_policy'
+          )
         ORDER BY o.created_at DESC
         LIMIT $1
       )
@@ -190,13 +205,21 @@ export function scoreRecentDatabaseRow(
   const failureRequests = numeric(row.failure_requests) ?? 0;
   const observedAttempts = successRequests + failureRequests;
   const failureRate = observedAttempts > 0 ? Math.round(failureRequests / observedAttempts * 1_000_000) / 1_000_000 : null;
+  const burstAttempts = numeric(row.burst_attempts) ?? 0;
+  const burstFailureRequests = numeric(row.burst_failure_requests) ?? 0;
+  const burstFailureRate = burstAttempts > 0
+    ? Math.round(burstFailureRequests / burstAttempts * 1_000_000) / 1_000_000
+    : null;
+  const effectiveFailureRate = failureRate === null
+    ? burstFailureRate
+    : burstFailureRate === null ? failureRate : Math.max(failureRate, burstFailureRate);
   const attributedRequests = numeric(row.attributed_requests) ?? 0;
   const failoverRequests = numeric(row.failover_requests) ?? 0;
   const failoverRate = attributedRequests > 0 ? Math.round(failoverRequests / attributedRequests * 1_000_000) / 1_000_000 : null;
   const firstTokenSamples = numeric(row.first_token_samples) ?? 0;
   const streamSuccessRequests = numeric(row.stream_success_requests) ?? 0;
   const ttftP95Ms = percentile(row.ttft_p95_ms);
-  const reliability = failureRate === null ? null : Math.round(policy.reliabilityWeight * (1 - Math.min(Math.max(failureRate, 0), policy.failureZeroScoreRate) / policy.failureZeroScoreRate) * 100) / 100;
+  const reliability = effectiveFailureRate === null ? null : Math.round(policy.reliabilityWeight * (1 - Math.min(Math.max(effectiveFailureRate, 0), policy.failureZeroScoreRate) / policy.failureZeroScoreRate) * 100) / 100;
   const failover = failoverRate === null ? null : Math.round(policy.failoverWeight * (1 - Math.min(Math.max(failoverRate, 0), policy.failoverZeroScoreRate) / policy.failoverZeroScoreRate) * 100) / 100;
   const latency = firstTokenSamples < 5 || ttftP95Ms === null
     ? null
@@ -250,6 +273,11 @@ export function scoreRecentDatabaseRow(
     successRequests,
     failureRequests,
     failureRate,
+    burstCallLimit: policy.failureBurstCallLimit,
+    burstAttempts,
+    burstFailureRequests,
+    burstFailureRate,
+    effectiveFailureRate,
     attributedRequests,
     failoverRequests,
     failoverRate,
@@ -308,7 +336,12 @@ export async function collectRecentCallScoresFromDatabase(
       // 账号反复扫描全局 created_at 索引，优先使用 account_id 复合索引。
       await transaction.unsafe("SET LOCAL random_page_cost = 1");
       const queryStartedAt = performance.now();
-      const result = await transaction.unsafe(recentAccountAggregateSql, [recentCallLimit, accountSelector, groupSelector]);
+      const result = await transaction.unsafe(recentAccountAggregateSql, [
+        recentCallLimit,
+        accountSelector,
+        groupSelector,
+        Math.min(recentCallLimit, config.sub2api.scorePolicy.failureBurstCallLimit),
+      ]);
       queryDurationMs = Math.round((performance.now() - queryStartedAt) * 10) / 10;
       return result;
     }) as unknown as Row[];
