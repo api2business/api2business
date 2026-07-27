@@ -265,12 +265,9 @@ function cny(value) {
 }
 
 let activePlanId = null
+const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
 
-async function loadOperations() {
-  const [ledger, audits] = await Promise.all([
-    requestJson('/api/operations/ledger'),
-    requestJson('/api/operations/audits'),
-  ])
+function renderOperations(ledger, audits) {
   $('#ops-income').textContent = cny(ledger.summary.incomeCny)
   $('#ops-expense').textContent = cny(ledger.summary.expenseCny)
   $('#ops-profit').textContent = cny(ledger.summary.grossProfitCny)
@@ -305,6 +302,36 @@ async function loadOperations() {
     <td>${escapeHtml(row.operator)}</td><td><code>${escapeHtml(JSON.stringify(row.input_summary))}</code></td>
     <td><code>${escapeHtml(JSON.stringify(row.result_summary))}</code></td>
   </tr>`).join('') : '<tr><td colspan="6" class="empty">暂无操作记录</td></tr>'
+}
+
+function readOperationsSnapshot() {
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(operationsSnapshotKey) ?? 'null')
+    return snapshot?.ledger?.summary && Array.isArray(snapshot?.audits?.records) ? snapshot : null
+  } catch {
+    return null
+  }
+}
+
+function writeOperationsSnapshot(ledger, audits) {
+  try {
+    localStorage.setItem(operationsSnapshotKey, JSON.stringify({ ledger, audits, refreshedAt: new Date().toISOString() }))
+  } catch {
+    // 隐私模式可能禁用存储，不影响实时数据渲染。
+  }
+}
+
+async function loadOperations({ showCached = false } = {}) {
+  if (showCached) {
+    const cached = readOperationsSnapshot()
+    if (cached) renderOperations(cached.ledger, cached.audits)
+  }
+  const [ledger, audits] = await Promise.all([
+    requestJson('/api/operations/ledger'),
+    requestJson('/api/operations/audits'),
+  ])
+  renderOperations(ledger, audits)
+  writeOperationsSnapshot(ledger, audits)
 }
 
 async function operationsPage() {
@@ -355,7 +382,7 @@ async function operationsPage() {
     </tr>`).join('') : `<tr><td colspan="3" class="empty">未分配 ${cny(result.unallocatedCny)}</td></tr>`
     await loadOperations()
   })
-  await loadOperations()
+  await loadOperations({ showCached: true })
 }
 
 async function boot() {
