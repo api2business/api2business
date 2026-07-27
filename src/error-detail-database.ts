@@ -1,6 +1,6 @@
-import { SQL } from "bun";
 import type { AppConfig } from "./config";
 import { readSecret } from "./secrets";
+import { scoreDatabasePool } from "./score-database-pool";
 
 type Row = Record<string, unknown>;
 
@@ -173,11 +173,10 @@ async function query(
   databaseUrlOverride: string | null,
 ): Promise<{ rows: Row[]; queryDurationMs: number; totalDurationMs: number }> {
   const databaseUrl = databaseUrlOverride ?? readSecret(config, config.sub2api.scoreDatabase);
-  const database = new SQL(databaseUrl, { max: 1 });
+  const database = scoreDatabasePool(databaseUrl);
   const startedAt = performance.now();
-  try {
-    let queryDurationMs = 0;
-    const rows = await database.begin(async (transaction) => {
+  let queryDurationMs = 0;
+  const rows = await database.begin(async (transaction) => {
       await transaction.unsafe("SET TRANSACTION READ ONLY");
       await transaction.unsafe(`SET LOCAL statement_timeout = '${config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
       const queryStartedAt = performance.now();
@@ -185,14 +184,11 @@ async function query(
       queryDurationMs = Math.round((performance.now() - queryStartedAt) * 10) / 10;
       return result;
     }) as unknown as Row[];
-    return {
+  return {
       rows,
       queryDurationMs,
       totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
-    };
-  } finally {
-    await database.close();
-  }
+  };
 }
 
 export async function collectErrorListFromDatabase(

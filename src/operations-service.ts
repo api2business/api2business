@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
-import { SQL } from "bun";
 import type { AppConfig } from "./config";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
 import { OperationsStore, type CashDirection } from "./operations-store";
+import { scoreDatabasePool } from "./score-database-pool";
 
 function records(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
@@ -41,9 +41,8 @@ export class OperationsService {
   }
 
   private async alipay(period: string): Promise<{ completedOrders: number; revenueCny: number }> {
-    const sql = new SQL(this.scoreDatabaseUrl, { max: 1 });
-    try {
-      return await sql.begin(async (tx) => {
+    const sql = scoreDatabasePool(this.scoreDatabaseUrl);
+    return await sql.begin(async (tx) => {
         await tx.unsafe("SET TRANSACTION READ ONLY");
         await tx.unsafe(`SET LOCAL statement_timeout = '${this.config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
         const [row] = await tx`
@@ -57,10 +56,7 @@ export class OperationsService {
               AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM')=${period}
         `;
         return { completedOrders: Number(row?.completed_orders ?? 0), revenueCny: money(row?.revenue_cny) };
-      });
-    } finally {
-      await sql.close();
-    }
+    });
   }
 
   async ledger(period = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 7)) {
@@ -121,24 +117,20 @@ export class OperationsService {
     const deadline = startedAt + this.config.operations.priorityVerificationTimeoutMs;
     let verifiedCount = 0;
     do {
-      const sql = new SQL(this.scoreDatabaseUrl, { max: 1 });
-      try {
-        const rows = await sql.begin(async (tx) => {
+      const sql = scoreDatabasePool(this.scoreDatabaseUrl);
+      const rows = await sql.begin(async (tx) => {
           await tx.unsafe("SET TRANSACTION READ ONLY");
           await tx.unsafe(`SET LOCAL statement_timeout = '${this.config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
           return await tx`SELECT id::text AS id, priority::int AS priority FROM accounts`;
-        });
-        const actual = new Map((rows as Array<Record<string, unknown>>).map((row) => [String(row.id), Number(row.priority)]));
-        verifiedCount = [...expected].filter(([id, priority]) => actual.get(id) === priority).length;
-        if (verifiedCount === expected.size) {
-          return {
-            verification: "postgresql-direct",
-            verifiedCount,
-            verificationDurationMs: Date.now() - startedAt,
-          };
-        }
-      } finally {
-        await sql.close();
+      });
+      const actual = new Map((rows as Array<Record<string, unknown>>).map((row) => [String(row.id), Number(row.priority)]));
+      verifiedCount = [...expected].filter(([id, priority]) => actual.get(id) === priority).length;
+      if (verifiedCount === expected.size) {
+        return {
+          verification: "postgresql-direct",
+          verifiedCount,
+          verificationDurationMs: Date.now() - startedAt,
+        };
       }
       await Bun.sleep(this.config.operations.priorityVerificationPollMs);
     } while (Date.now() < deadline);

@@ -1,6 +1,6 @@
-import { SQL } from "bun";
 import type { AppConfig } from "./config";
 import { readSecret } from "./secrets";
+import { scoreDatabasePool } from "./score-database-pool";
 
 type Row = Record<string, unknown>;
 
@@ -325,11 +325,10 @@ export async function collectRecentCallScoresFromDatabase(
     throw new Error("recent call limit must be an integer from 1 to 10000");
   }
   const databaseUrl = databaseUrlOverride ?? readSecret(config, config.sub2api.scoreDatabase);
-  const database = new SQL(databaseUrl, { max: 1 });
+  const database = scoreDatabasePool(databaseUrl);
   const startedAt = performance.now();
   let queryDurationMs = 0;
-  try {
-    const rows = await database.begin(async (transaction) => {
+  const rows = await database.begin(async (transaction) => {
       await transaction.unsafe("SET TRANSACTION READ ONLY");
       await transaction.unsafe(`SET LOCAL statement_timeout = '${config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
       // PK01 的评分热数据常驻缓存；降低本事务随机页成本，避免规划器为每个
@@ -351,7 +350,7 @@ export async function collectRecentCallScoresFromDatabase(
     if (accountSelector !== null && selected.length !== 1) throw new Error(`account selector did not resolve exactly once: ${accountSelector}`);
     if (groupSelector !== null && selected.length === 0) throw new Error(`group selector resolved no scoreable accounts: ${groupSelector}`);
     const accounts = sortScores(selected.map((row) => scoreRecentDatabaseRow(row, recentCallLimit, config.sub2api.scorePolicy)));
-    return {
+  return {
       ok: true,
       mode: "recent-account-calls-postgresql-local-score",
       recentCallLimit,
@@ -362,10 +361,7 @@ export async function collectRecentCallScoresFromDatabase(
       queryDurationMs,
       totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
       accounts,
-    };
-  } finally {
-    await database.close();
-  }
+  };
 }
 
 export const recentAccountAggregateQuery = recentAccountAggregateSql;

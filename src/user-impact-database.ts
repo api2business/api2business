@@ -1,7 +1,7 @@
-import { SQL } from "bun";
 import { DateTime } from "luxon";
 import type { AppConfig } from "./config";
 import { readSecret } from "./secrets";
+import { scoreDatabasePool } from "./score-database-pool";
 
 type Row = Record<string, unknown>;
 
@@ -178,11 +178,10 @@ export async function collectUserImpactFromDatabase(
 ): Promise<Row> {
   const window = parseImpactWindow(start, end, config.monitor.timezone);
   const databaseUrl = databaseUrlOverride ?? readSecret(config, config.sub2api.scoreDatabase);
-  const database = new SQL(databaseUrl, { max: 1 });
+  const database = scoreDatabasePool(databaseUrl);
   const startedAt = performance.now();
   let queryDurationMs = 0;
-  try {
-    const rows = await database.begin(async (transaction) => {
+  const rows = await database.begin(async (transaction) => {
       await transaction.unsafe("SET TRANSACTION READ ONLY");
       await transaction.unsafe(`SET LOCAL statement_timeout = '${config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
       const queryStartedAt = performance.now();
@@ -192,7 +191,7 @@ export async function collectUserImpactFromDatabase(
     }) as unknown as Row[];
     const projected = rows.map((row) => projectRow(row, window.timezone));
     const users = affectedOnly ? projected.filter((row) => row.affected === true) : projected;
-    return {
+  return {
       ok: true,
       mode: "user-impact-postgresql",
       window,
@@ -205,10 +204,7 @@ export async function collectUserImpactFromDatabase(
       totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
       users,
       valuesPrinted: false,
-    };
-  } finally {
-    await database.close();
-  }
+  };
 }
 
 export const userImpactQuery = userImpactSql;

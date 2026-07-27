@@ -1,6 +1,6 @@
-import { SQL } from "bun";
 import type { AppConfig } from "./config";
 import { readSecret } from "./secrets";
+import { scoreDatabasePool } from "./score-database-pool";
 
 type Row = Record<string, unknown>;
 
@@ -202,11 +202,10 @@ export async function collectErrorAggregateFromDatabase(
     throw new Error("error aggregate top must be an integer from 1 to 100");
   }
   const databaseUrl = databaseUrlOverride ?? readSecret(config, config.sub2api.scoreDatabase);
-  const database = new SQL(databaseUrl, { max: 1 });
+  const database = scoreDatabasePool(databaseUrl);
   const startedAt = performance.now();
   let queryDurationMs = 0;
-  try {
-    const rows = await database.begin(async (transaction) => {
+  const rows = await database.begin(async (transaction) => {
       await transaction.unsafe("SET TRANSACTION READ ONLY");
       await transaction.unsafe(`SET LOCAL statement_timeout = '${config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
       const queryStartedAt = performance.now();
@@ -220,7 +219,7 @@ export async function collectErrorAggregateFromDatabase(
     if (groupSelector !== null && integer(rows[0]?.sampled_error_rows) === 0) {
       throw new Error(`group selector resolved no recent errors: ${groupSelector}`);
     }
-    return {
+  return {
       ok: true,
       mode: "error-aggregate-postgresql",
       limit,
@@ -233,10 +232,7 @@ export async function collectErrorAggregateFromDatabase(
       totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
       ...projectErrorAggregateRow(rows[0] ?? {}, config.monitor.timezone),
       valuesPrinted: false,
-    };
-  } finally {
-    await database.close();
-  }
+  };
 }
 
 export const errorAggregateQuery = errorAggregateSql;
