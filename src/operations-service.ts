@@ -94,14 +94,14 @@ export class OperationsService {
     return { ok: true, entry: row };
   }
 
-  async generatePriorityPlan(recentCallLimit: number, operator: string) {
+  async generatePriorityPlan(recentCallLimit: number, operator: string, triggerType: "manual" | "automatic" = "manual") {
     const result = await this.priorityState(recentCallLimit);
     const priorities = result.priorities as Record<string, number>;
     const plan = await this.store.createPlan({
-      operator, recentCallLimit, ttlMinutes: this.config.operations.planTtlMinutes, priorities, result,
+      operator, recentCallLimit, ttlMinutes: this.config.operations.planTtlMinutes, priorities, result, triggerType,
     });
     await this.store.audit("priority.plan.generate", "succeeded", operator,
-      { recentCallLimit }, { planId: plan.id, changedCount: Object.keys(priorities).length });
+      { recentCallLimit, triggerType }, { planId: plan.id, changedCount: Object.keys(priorities).length });
     return { ...result, planId: plan.id, expiresAt: plan.expiresAt };
   }
 
@@ -190,6 +190,74 @@ export class OperationsService {
       await this.store.audit("priority.plan.confirm", "failed", operator,
         { planId: id, changedCount: Object.keys(priorities).length },
         { exitCode, timedOut, writeMode: "backend-api-only", verification: "postgresql-direct", error: message });
+      throw error;
+    }
+  }
+
+  async priorityHistory() {
+    return { ok: true, records: await this.store.priorityHistory(this.config.operations.auditLimit) };
+  }
+
+  async getPriorityAutomation() {
+    return { ok: true, automation: await this.store.getAutomation() };
+  }
+
+  private validateAutomation(input: { enabled: unknown; intervalSeconds: unknown; recentCallLimit: unknown }) {
+    const enabled = input.enabled;
+    const intervalSeconds = Number(input.intervalSeconds);
+    const recentCallLimit = Number(input.recentCallLimit);
+    if (typeof enabled !== "boolean") throw new Error("enabled must be boolean");
+    if (!Number.isInteger(intervalSeconds) || intervalSeconds < 5 || intervalSeconds > 86400) {
+      throw new Error("intervalSeconds must be an integer from 5 to 86400");
+    }
+    if (!this.config.monitor.recentCallOptions.includes(recentCallLimit)) {
+      throw new Error("recentCallLimit is not declared in owning YAML");
+    }
+    return { enabled, intervalSeconds, recentCallLimit };
+  }
+
+  async createPriorityAutomation(input: { enabled: unknown; intervalSeconds: unknown; recentCallLimit: unknown }, operator: string) {
+    const values = this.validateAutomation(input);
+    const automation = await this.store.createAutomation({ ...values, operator });
+    await this.store.audit("priority.automation.create", "succeeded", operator, values, { intervalSeconds: values.intervalSeconds });
+    return { ok: true, automation };
+  }
+
+  async updatePriorityAutomation(input: { enabled: unknown; intervalSeconds: unknown; recentCallLimit: unknown }, operator: string) {
+    const values = this.validateAutomation(input);
+    const automation = await this.store.updateAutomation({ ...values, operator });
+    await this.store.audit("priority.automation.update", "succeeded", operator, values, { intervalSeconds: values.intervalSeconds });
+    return { ok: true, automation };
+  }
+
+  async deletePriorityAutomation(operator: string) {
+    await this.store.deleteAutomation();
+    await this.store.audit("priority.automation.delete", "succeeded", operator, {}, { deleted: true });
+    return { ok: true, deleted: true };
+  }
+
+  async runDueAutomation() {
+    const policy = await this.store.claimDueAutomation();
+    if (!policy) return { ok: true, due: false };
+    const operator = "scheduler";
+    const plan = await this.generatePriorityPlan(Number(policy.recent_call_limit), operator, "automatic");
+    try {
+      if (Number(plan.changedCount) === 0) {
+        const result = { changedCount: 0, writeMode: "no-change", verification: "postgresql-direct", verifiedCount: 0 };
+        await this.store.finishPlan(String(plan.planId), "applied", result);
+        await this.store.audit("priority.automation.run", "succeeded", operator,
+          { recentCallLimit: Number(policy.recent_call_limit) }, result);
+        return { ok: true, due: true, planId: plan.planId, ...result };
+      }
+      const result = await this.confirmPriorityPlan(String(plan.planId), operator);
+      await this.store.audit("priority.automation.run", "succeeded", operator,
+        { recentCallLimit: Number(policy.recent_call_limit) },
+        { planId: plan.planId, changedCount: result.changedCount, verification: result.verification });
+      return { ok: true, due: true, ...result };
+    } catch (error) {
+      await this.store.audit("priority.automation.run", "failed", operator,
+        { recentCallLimit: Number(policy.recent_call_limit) },
+        { planId: plan.planId, error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }

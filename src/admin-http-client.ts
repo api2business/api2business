@@ -53,4 +53,15 @@ export class AdminHttpClient {
   workflowStatus(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/admin/workflows/${encodeURIComponent(id)}`);
   }
+  priorityAutomation(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-automation"); }
+  priorityHistory(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-history"); }
+  createPriorityAutomation(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/api/operations/priority-automation", { method: "POST", body: JSON.stringify(input) });
+  }
+  updatePriorityAutomation(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/api/operations/priority-automation", { method: "PATCH", body: JSON.stringify(input) });
+  }
+  deletePriorityAutomation(): Promise<Record<string, unknown>> {
+    return this.request("/api/operations/priority-automation", { method: "DELETE" });
+  }
 }

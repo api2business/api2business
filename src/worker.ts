@@ -5,6 +5,8 @@ import { loadConfig } from "./config";
 import { createActivities } from "./dispatcher";
 import { requiredOption } from "./runtime-args";
 import { temporalAddress, TemporalGateway } from "./temporal-client";
+import { OperationsService } from "./operations-service";
+import { OperationsStore } from "./operations-store";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -12,6 +14,11 @@ const target = config.runtime.serverTargets[runtimeId];
 if (!target) throw new Error(`runtime.serverTargets.${runtimeId} does not exist`);
 
 const context = createServerContext(config, target);
+const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
+const scoreDatabaseUrl = process.env[target.scoreDatabaseUrlEnv];
+if (!operationsDatabaseUrl || !scoreDatabaseUrl) throw new Error("worker is missing declared operations or score database URL");
+const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), scoreDatabaseUrl);
+await operations.initialize();
 const connection = await NativeConnection.connect({ address: temporalAddress(config) });
 const worker = await Worker.create({
   connection,
@@ -48,6 +55,20 @@ console.log(JSON.stringify({
 }));
 
 let stopping = false;
+const automationLoop = (async () => {
+  while (!stopping) {
+    try {
+      const result = await operations.runDueAutomation();
+      if (result.due) console.log(JSON.stringify({ component: "priority-automation", ...result, valuesPrinted: false }));
+    } catch (error) {
+      console.error(JSON.stringify({
+        ok: false, component: "priority-automation",
+        error: error instanceof Error ? error.message : String(error), valuesPrinted: false,
+      }));
+    }
+    if (!stopping) await Bun.sleep(config.operations.automationPollMs);
+  }
+})();
 async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
@@ -60,6 +81,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => vo
 try {
   await worker.run();
 } finally {
+  await automationLoop;
+  await operations.close();
   await temporal.close();
   await connection.close();
   context.close();

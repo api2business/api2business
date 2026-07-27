@@ -203,6 +203,7 @@ async function scoresPage() {
   const options = initial.availableCallOptions ?? []
   select.innerHTML = options.map((value) => `<option value="${value}"${value === 500 ? ' selected' : ''}>最近 ${number(value)} 次</option>`).join('')
   renderScores(initial)
+  await setupPriorityPanel(options)
   setInterval(renderRefreshClock, 1000)
   setInterval(async () => {
     if (!document.hidden) {
@@ -313,6 +314,96 @@ async function refreshPriorityState() {
   }
 }
 
+async function loadPriorityHistory() {
+  const data = await requestJson('/api/operations/priority-history')
+  $('#priority-history-body').innerHTML = data.records?.length ? data.records.map((row) => `<tr>
+    <td>${time(row.created_at)}</td><td>${row.trigger_type === 'automatic' ? '自动' : '手动'}</td>
+    <td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.created_by)}</td>
+    <td>${number(row.recent_call_limit)}</td><td>${number(row.changed_count)}</td>
+    <td>${time(row.completed_at)}</td>
+  </tr>`).join('') : '<tr><td colspan="7" class="empty">暂无调整记录</td></tr>'
+}
+
+async function loadPriorityAutomation() {
+  const data = await requestJson('/api/operations/priority-automation')
+  const policy = data.automation
+  if (!policy) {
+    $('#automation-enabled').value = 'false'
+    $('#automation-interval').value = '3600'
+    $('#automation-state').textContent = '尚未创建自动调整配置'
+    return false
+  }
+  $('#automation-enabled').value = String(policy.enabled)
+  $('#automation-interval').value = String(policy.interval_seconds)
+  $('#automation-limit').value = String(policy.recent_call_limit)
+  $('#automation-state').textContent = `下次执行：${time(policy.next_run_at)} · 更新：${time(policy.updated_at)}`
+  return true
+}
+
+async function setupPriorityPanel(options) {
+  $('#plan-limit').innerHTML = options.map((value) => `<option value="${value}"${value === 500 ? ' selected' : ''}>最近 ${value} 条</option>`).join('')
+  $('#automation-limit').innerHTML = options.map((value) => `<option value="${value}"${value === 500 ? ' selected' : ''}>最近 ${value} 条</option>`).join('')
+  $('#refresh-priority').addEventListener('click', () => void refreshPriorityState().catch(() => undefined))
+  $('#refresh-history').addEventListener('click', () => void loadPriorityHistory().catch(() => undefined))
+  $('#automation-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const exists = await loadPriorityAutomation()
+    const result = await requestJson('/api/operations/priority-automation', {
+      method: exists ? 'PATCH' : 'POST',
+      body: JSON.stringify({
+        enabled: $('#automation-enabled').value === 'true',
+        intervalSeconds: Number($('#automation-interval').value),
+        recentCallLimit: Number($('#automation-limit').value),
+      }),
+    })
+    $('#automation-state').textContent = `配置已保存 · 下次执行：${time(result.automation.next_run_at)}`
+  })
+  $('#generate-plan').addEventListener('click', async () => {
+    const button = $('#generate-plan')
+    button.disabled = true
+    planProgress('开始读取最近调用并生成调整计划', true)
+    try {
+      const plan = await requestJson('/api/operations/priority-plans', {
+        method: 'POST', body: JSON.stringify({ recentCallLimit: Number($('#plan-limit').value) }),
+      }, 90000)
+      activePlanId = plan.planId
+      $('#confirm-plan').disabled = plan.changedCount === 0
+      renderPriorityRows(plan.changes, true)
+      $('#plan-refresh-state').textContent = `计划生成时间：${time(plan.refreshedAt)} · 最近 ${number(plan.recentCallLimit)} 次`
+      planProgress(`计划已生成，包含 ${number(plan.changedCount)} 项调整`)
+      await loadPriorityHistory()
+    } catch (error) {
+      planProgress(`计划生成失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally { button.disabled = false }
+  })
+  $('#confirm-plan').addEventListener('click', async () => {
+    if (!activePlanId) return
+    const button = $('#confirm-plan')
+    button.disabled = true
+    $('#generate-plan').disabled = true
+    $('#refresh-priority').disabled = true
+    planProgress('已提交确认，后端 API 正在批量写入；随后通过 PostgreSQL 直连回读')
+    try {
+      const result = await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 190000)
+      planProgress(`调整成功，后端已写入并由 PostgreSQL 验证 ${number(result.verifiedCount)} 个账号`)
+      activePlanId = null
+      await Promise.all([refreshPriorityState(), loadPriorityHistory()])
+    } catch (error) {
+      planProgress(`调整失败：${error instanceof Error ? error.message : String(error)}`)
+      activePlanId = null
+    } finally {
+      button.disabled = true
+      $('#generate-plan').disabled = false
+      $('#refresh-priority').disabled = false
+    }
+  })
+  await Promise.all([
+    refreshPriorityState().catch(() => undefined),
+    loadPriorityHistory(),
+    loadPriorityAutomation(),
+  ])
+}
+
 function renderOperations(ledger, audits) {
   $('#ops-income').textContent = cny(ledger.summary.incomeCny)
   $('#ops-expense').textContent = cny(ledger.summary.expenseCny)
@@ -382,8 +473,6 @@ async function loadOperations({ showCached = false } = {}) {
 
 async function operationsPage() {
   $('#cash-date').value = new Date().toISOString().slice(0, 10)
-  $('#plan-limit').innerHTML = [100, 500, 1000, 2000, 5000].map((value) => `<option value="${value}"${value === 500 ? ' selected' : ''}>最近 ${value} 条</option>`).join('')
-  $('#refresh-priority').addEventListener('click', () => void refreshPriorityState().catch(() => undefined))
   $('#cash-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     await requestJson('/api/operations/cash', { method: 'POST', body: JSON.stringify({
@@ -395,52 +484,6 @@ async function operationsPage() {
     $('#cash-date').value = new Date().toISOString().slice(0, 10)
     await loadOperations()
   })
-  $('#generate-plan').addEventListener('click', async () => {
-    const button = $('#generate-plan')
-    button.disabled = true
-    planProgress('开始读取最近调用并生成调整计划', true)
-    try {
-      const plan = await requestJson('/api/operations/priority-plans', {
-        method: 'POST', body: JSON.stringify({ recentCallLimit: Number($('#plan-limit').value) }),
-      }, 90000)
-      activePlanId = plan.planId
-      $('#confirm-plan').disabled = plan.changedCount === 0
-      renderPriorityRows(plan.changes, true)
-      $('#plan-refresh-state').textContent = `计划生成时间：${time(plan.refreshedAt)} · 最近 ${number(plan.recentCallLimit)} 次`
-      planProgress(`计划已生成，包含 ${number(plan.changedCount)} 项调整`)
-      await loadOperations()
-    } catch (error) {
-      planProgress(`计划生成失败：${error instanceof Error ? error.message : String(error)}`)
-    } finally { button.disabled = false }
-  })
-  $('#confirm-plan').addEventListener('click', async () => {
-    if (!activePlanId) return
-    const button = $('#confirm-plan')
-    button.disabled = true
-    $('#generate-plan').disabled = true
-    $('#refresh-priority').disabled = true
-    planProgress('已提交确认，后端 API 正在批量写入；随后通过 PostgreSQL 直连回读')
-    const startedAt = Date.now()
-    const ticker = setInterval(() => {
-      $('#plan-refresh-state').textContent = `调整执行中：${Math.floor((Date.now() - startedAt) / 1000)} 秒`
-    }, 1000)
-    try {
-      const result = await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 190000)
-      planProgress(`调整成功，后端已写入并由 PostgreSQL 验证 ${number(result.verifiedCount)} 个账号`)
-      activePlanId = null
-      await refreshPriorityState()
-      await loadOperations()
-    } catch (error) {
-      planProgress(`调整失败：${error instanceof Error ? error.message : String(error)}`)
-      $('#plan-refresh-state').textContent = '调整失败，请重新生成计划后重试'
-      activePlanId = null
-    } finally {
-      clearInterval(ticker)
-      button.disabled = true
-      $('#generate-plan').disabled = false
-      $('#refresh-priority').disabled = false
-    }
-  })
   $('#procurement-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     const result = await requestJson('/api/operations/procurement', {
@@ -451,10 +494,7 @@ async function operationsPage() {
     </tr>`).join('') : `<tr><td colspan="3" class="empty">未分配 ${cny(result.unallocatedCny)}</td></tr>`
     await loadOperations()
   })
-  await Promise.all([
-    loadOperations({ showCached: true }),
-    refreshPriorityState().catch(() => undefined),
-  ])
+  await loadOperations({ showCached: true })
 }
 
 async function boot() {

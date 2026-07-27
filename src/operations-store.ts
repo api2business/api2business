@@ -36,6 +36,20 @@ export class OperationsStore {
         applied_at timestamptz,
         apply_result jsonb
       );
+      ALTER TABLE apistate_priority_plans
+        ADD COLUMN IF NOT EXISTS trigger_type text NOT NULL DEFAULT 'manual';
+      ALTER TABLE apistate_priority_plans
+        ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+      CREATE TABLE IF NOT EXISTS apistate_priority_automation (
+        id text PRIMARY KEY CHECK (id='default'),
+        enabled boolean NOT NULL,
+        interval_seconds integer NOT NULL CHECK (interval_seconds BETWEEN 5 AND 86400),
+        recent_call_limit integer NOT NULL,
+        next_run_at timestamptz NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        updated_by text NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS apistate_operation_audit (
         id uuid PRIMARY KEY,
         action text NOT NULL,
@@ -89,15 +103,15 @@ export class OperationsStore {
     `;
   }
 
-  async createPlan(input: { operator: string; recentCallLimit: number; ttlMinutes: number; priorities: Record<string, number>; result: unknown }) {
+  async createPlan(input: { operator: string; recentCallLimit: number; ttlMinutes: number; priorities: Record<string, number>; result: unknown; triggerType?: "manual" | "automatic" }) {
     const id = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + input.ttlMinutes * 60_000);
     await this.sql`
       INSERT INTO apistate_priority_plans
-        (id, expires_at, created_by, status, recent_call_limit, priorities, result)
+        (id, expires_at, created_by, status, recent_call_limit, priorities, result, trigger_type)
       VALUES (${id}, ${expiresAt}, ${input.operator}, 'pending',
         ${input.recentCallLimit}, ${input.priorities}::jsonb,
-        ${input.result}::jsonb)
+        ${input.result}::jsonb, ${input.triggerType ?? "manual"})
     `;
     return { id, expiresAt: expiresAt.toISOString() };
   }
@@ -105,7 +119,7 @@ export class OperationsStore {
   async getPlan(id: string) {
     const [row] = await this.sql`
       SELECT id, created_at, expires_at, created_by, status, recent_call_limit,
-        priorities, result, applied_at, apply_result
+        priorities, result, applied_at, apply_result, trigger_type, completed_at
       FROM apistate_priority_plans WHERE id=${id}
     `;
     if (!row) throw new Error("priority plan does not exist");
@@ -120,9 +134,79 @@ export class OperationsStore {
 
   async finishPlan(id: string, status: "applied" | "failed", result: unknown) {
     await this.sql`
-      UPDATE apistate_priority_plans SET status=${status}, applied_at=now(),
+      UPDATE apistate_priority_plans SET status=${status}, applied_at=now(), completed_at=now(),
         apply_result=${result}::jsonb WHERE id=${id}
     `;
+  }
+
+  async priorityHistory(limit: number) {
+    return await this.sql`
+      SELECT id, created_at, completed_at, created_by, trigger_type, status,
+        recent_call_limit, jsonb_object_length(priorities)::int AS changed_count,
+        apply_result
+      FROM apistate_priority_plans
+      ORDER BY created_at DESC LIMIT ${limit}
+    `;
+  }
+
+  async getAutomation() {
+    const [row] = await this.sql`
+      SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at,
+        created_at, updated_at, updated_by
+      FROM apistate_priority_automation WHERE id='default'
+    `;
+    return row ?? null;
+  }
+
+  async createAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string }) {
+    const [row] = await this.sql`
+      INSERT INTO apistate_priority_automation
+        (id, enabled, interval_seconds, recent_call_limit, next_run_at, updated_by)
+      VALUES ('default', ${input.enabled}, ${input.intervalSeconds}, ${input.recentCallLimit},
+        now() + make_interval(secs => ${input.intervalSeconds}), ${input.operator})
+      RETURNING *
+    `;
+    return row;
+  }
+
+  async updateAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string }) {
+    const [row] = await this.sql`
+      UPDATE apistate_priority_automation
+      SET enabled=${input.enabled}, interval_seconds=${input.intervalSeconds},
+        recent_call_limit=${input.recentCallLimit},
+        next_run_at=now() + make_interval(secs => ${input.intervalSeconds}),
+        updated_at=now(), updated_by=${input.operator}
+      WHERE id='default' RETURNING *
+    `;
+    if (!row) throw new Error("priority automation does not exist");
+    return row;
+  }
+
+  async deleteAutomation() {
+    const [row] = await this.sql`
+      DELETE FROM apistate_priority_automation WHERE id='default' RETURNING id
+    `;
+    if (!row) throw new Error("priority automation does not exist");
+    return row;
+  }
+
+  async claimDueAutomation() {
+    return await this.sql.begin(async (tx) => {
+      const [row] = await tx`
+        SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at
+        FROM apistate_priority_automation
+        WHERE id='default' AND enabled=true AND next_run_at <= now()
+        FOR UPDATE SKIP LOCKED
+      `;
+      if (!row) return null;
+      await tx`
+        UPDATE apistate_priority_automation
+        SET next_run_at=now() + make_interval(secs => ${Number(row.interval_seconds)}),
+          updated_at=now()
+        WHERE id='default'
+      `;
+      return row;
+    });
   }
 
   async audit(action: string, status: string, operator: string, input: unknown, result: unknown) {

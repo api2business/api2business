@@ -147,6 +147,27 @@ export function createHandler(
         if (!config.monitor.recentCallOptions.includes(limit)) return json({ ok: false, error: "评分样本档位无效" }, 400);
         return json(await operations.priorityState(limit));
       }
+      if (request.method === "GET" && url.pathname === "/api/operations/priority-history") {
+        return json(await operations.priorityHistory());
+      }
+      if (request.method === "GET" && url.pathname === "/api/operations/priority-automation") {
+        return json(await operations.getPriorityAutomation());
+      }
+      if (request.method === "POST" && url.pathname === "/api/operations/priority-automation") {
+        const input = await body(request);
+        return json(await operations.createPriorityAutomation({
+          enabled: input.enabled, intervalSeconds: input.intervalSeconds, recentCallLimit: input.recentCallLimit,
+        }, config.webAuth.username));
+      }
+      if (request.method === "PATCH" && url.pathname === "/api/operations/priority-automation") {
+        const input = await body(request);
+        return json(await operations.updatePriorityAutomation({
+          enabled: input.enabled, intervalSeconds: input.intervalSeconds, recentCallLimit: input.recentCallLimit,
+        }, config.webAuth.username));
+      }
+      if (request.method === "DELETE" && url.pathname === "/api/operations/priority-automation") {
+        return json(await operations.deletePriorityAutomation(config.webAuth.username));
+      }
       if (request.method === "POST" && /^\/api\/operations\/priority-plans\/[^/]+\/confirm$/u.test(url.pathname)) {
         const id = decodeURIComponent(url.pathname.split("/")[4]!);
         return json(await operations.confirmPriorityPlan(id, config.webAuth.username));

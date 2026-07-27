@@ -45,6 +45,26 @@
         </table>
       </div>
     </section>
+    <section class="table-section">
+      <div class="table-toolbar"><h2>优先级调整</h2><div class="score-query-controls"><label class="select-field"><span>样本</span><select id="plan-limit"></select></label><button id="refresh-priority" class="query-command" type="button">刷新当前状态</button><button id="generate-plan" class="query-command" type="button">生成调整计划</button><button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button></div></div>
+      <p id="plan-refresh-state" class="section-state">尚未刷新</p>
+      <div id="plan-progress" class="operation-progress" aria-live="polite"></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>账号</th><th>当前</th><th>计划</th><th>变化</th><th>评分</th><th>成本</th></tr></thead><tbody id="plan-body"><tr><td colspan="6" class="empty">正在加载当前状态</td></tr></tbody></table></div>
+    </section>
+    <section class="table-section">
+      <div class="table-toolbar"><h2>定时自动调整</h2></div>
+      <form id="automation-form" class="score-query-controls">
+        <label class="select-field"><span>状态</span><select id="automation-enabled"><option value="true">启用</option><option value="false">停用</option></select></label>
+        <label class="filter-field"><span>周期（秒）</span><input id="automation-interval" type="number" min="5" max="86400" required /></label>
+        <label class="select-field"><span>样本</span><select id="automation-limit"></select></label>
+        <button class="query-command" type="submit">保存运行时配置</button>
+      </form>
+      <p id="automation-state" class="section-state">正在读取配置…</p>
+    </section>
+    <section class="table-section">
+      <div class="table-toolbar"><h2>调整记录</h2><button id="refresh-history" class="query-command" type="button">刷新记录</button></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>时间</th><th>方式</th><th>状态</th><th>操作者</th><th>样本</th><th>调整数</th><th>完成时间</th></tr></thead><tbody id="priority-history-body"><tr><td colspan="7" class="empty">正在读取调整记录</td></tr></tbody></table></div>
+    </section>
   </main>
 </body>
 </html>

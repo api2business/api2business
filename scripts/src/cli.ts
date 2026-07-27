@@ -37,6 +37,8 @@ interface Parsed {
   start: string | null;
   end: string | null;
   affectedOnly: boolean;
+  intervalSeconds: number | null;
+  enabled: boolean | null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -54,7 +56,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--group", "--start", "--end"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--group", "--start", "--end", "--interval-seconds", "--enabled"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -94,6 +96,11 @@ function parseArgs(args: string[]): Parsed {
     start: value(args, "--start"),
     end: value(args, "--end"),
     affectedOnly: args.includes("--affected-only"),
+    intervalSeconds: integer("--interval-seconds"),
+    enabled: value(args, "--enabled") === null ? null
+      : value(args, "--enabled") === "true" ? true
+      : value(args, "--enabled") === "false" ? false
+      : (() => { throw new Error("--enabled must be true or false"); })(),
   };
 }
 
@@ -114,6 +121,8 @@ function help(): Record<string, unknown> {
       "credit test",
       "api smoke --over-api",
       "workflow status --id <workflow-id>",
+      "priority automation get|create|update|delete --over-api [--interval-seconds N --calls N --enabled true|false] [--confirm]",
+      "priority history --over-api",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
@@ -213,6 +222,7 @@ function isAppCommand(value: AppCommand | Record<string, unknown>): value is App
 }
 
 async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: EmbeddedCliTarget): Promise<unknown> {
+  if (parsed.command[0] === "priority") throw new Error("priority runtime CRUD requires --over-api");
   if (parsed.command.join(" ") === "scores priority-plan") {
     const ranking = await collectRecentCallScoresFromDatabase(
       config,
@@ -256,6 +266,24 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
 async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: HttpCliTarget): Promise<unknown> {
   const client = new AdminHttpClient(config, target);
   const [group, action] = parsed.command;
+  if (group === "priority" && action === "history") return await client.priorityHistory();
+  if (group === "priority" && parsed.command[1] === "automation") {
+    const verb = parsed.command[2];
+    if (verb === "get") return await client.priorityAutomation();
+    if (verb === "delete") {
+      return parsed.confirm ? await client.deletePriorityAutomation()
+        : { ok: true, mutation: false, hint: "add --confirm to delete priority automation" };
+    }
+    if (verb === "create" || verb === "update") {
+      if (parsed.intervalSeconds === null || parsed.calls === null || parsed.enabled === null) {
+        throw new Error(`${verb} requires --interval-seconds, --calls, and --enabled`);
+      }
+      const input = { intervalSeconds: parsed.intervalSeconds, recentCallLimit: parsed.calls, enabled: parsed.enabled };
+      if (!parsed.confirm) return { ok: true, mutation: false, action: `priority-automation-${verb}`, plan: input, hint: "add --confirm to execute" };
+      return verb === "create" ? await client.createPriorityAutomation(input) : await client.updatePriorityAutomation(input);
+    }
+    throw new Error("priority automation requires get, create, update, or delete");
+  }
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "scores" && action === "get") return await client.scores();
   if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
