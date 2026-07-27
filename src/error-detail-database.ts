@@ -69,6 +69,7 @@ const projectionColumnsSql = `
   provider_error_type,
   is_business_limited,
   CASE
+    WHEN COALESCE(is_business_limited, false) THEN 'quota'
     WHEN LOWER(COALESCE(error_phase, '')) = 'auth' THEN 'auth'
     WHEN LOWER(COALESCE(error_phase, '')) = 'routing' THEN 'service_unavailable'
     WHEN LOWER(COALESCE(error_phase, '')) IN ('account_auth', 'upstream', 'network') THEN 'upstream'
@@ -93,7 +94,6 @@ ${baseProjectionSql}
 SELECT ${projectionColumnsSql}
 FROM enriched
 WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'cyber_policy')
-  AND COALESCE(is_business_limited, false) = false
 ORDER BY created_at DESC, id DESC
 LIMIT $1
 `;

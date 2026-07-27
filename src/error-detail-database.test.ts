@@ -3,7 +3,7 @@ import { errorGetQuery, errorListQuery, projectErrorDetailRow } from "./error-de
 
 test("error detail queries are bounded and request scoped", () => {
   expect(errorListQuery).toContain("LIMIT $1");
-  expect(errorListQuery).toContain("COALESCE(is_business_limited, false) = false");
+  expect(errorListQuery).not.toContain("COALESCE(is_business_limited, false) = false");
   expect(errorListQuery).toContain("COALESCE(status_code, 0) >= 400");
   expect(errorGetQuery).toContain("WHERE request_id = $1");
   expect(errorListQuery).not.toContain("SET TRANSACTION READ ONLY");
@@ -38,10 +38,25 @@ test("error category follows Sub2API native phase and type mapping", () => {
   const row = projectErrorDetailRow({
     id: 2,
     error_phase: "request",
-    error_type: "billing_error",
+    error_type: "api_error",
     category: "quota",
     recorded_status_code: 502,
   }, "Asia/Shanghai");
+  expect(row.category).toBe("quota");
+  expect(row.customerVisible).toBeTrue();
+});
+
+test("native error list keeps business-limited rows visible", () => {
+  const row = projectErrorDetailRow({
+    id: 3,
+    error_phase: "request",
+    error_type: "billing_error",
+    category: "quota",
+    recorded_status_code: 429,
+    display_status_code: 429,
+    is_business_limited: true,
+  }, "Asia/Shanghai");
+  expect(row.businessLimited).toBeTrue();
   expect(row.category).toBe("quota");
   expect(row.customerVisible).toBeTrue();
 });
