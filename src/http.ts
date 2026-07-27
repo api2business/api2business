@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import type { AppConfig } from "./config";
 import type { ApplicationDispatcher } from "./dispatcher";
+import type { OperationsService } from "./operations-service";
 import {
   apiKeyAuthorized,
   clearSessionCookie,
@@ -48,6 +49,7 @@ export function createHandler(
   auth: WebAuthSecrets,
   legacyAdminToken: string,
   secureCookies: boolean,
+  operations: OperationsService,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
@@ -72,7 +74,7 @@ export function createHandler(
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/styles.css") return await staticFile("styles.css", "text/css; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/app.js") return await staticFile("app.js", "text/javascript; charset=utf-8");
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
-      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html" } as Record<string, string>)[url.pathname];
+      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
@@ -106,6 +108,51 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/ranking") return json({ ok: true, ranking: await dispatcher.dispatch({ kind: "ranking.get" }) });
       if (request.method === "GET" && url.pathname === "/api/lottery") return json(await dispatcher.dispatch({ kind: "lottery.publicState" }));
       if (request.method === "POST" && url.pathname === "/api/lottery/draw") return json({ ok: true, record: await dispatcher.dispatch({ kind: "lottery.publicDraw" }) });
+      if (request.method === "GET" && url.pathname === "/api/operations/ledger") {
+        const period = url.searchParams.get("period") ?? undefined;
+        if (period !== undefined && !/^\d{4}-\d{2}$/u.test(period)) return json({ ok: false, error: "period must be YYYY-MM" }, 400);
+        return json(await operations.ledger(period));
+      }
+      if (request.method === "POST" && url.pathname === "/api/operations/cash") {
+        const input = await body(request);
+        if (!/^\\d{4}-\\d{2}-\\d{2}$/u.test(String(input.occurredOn ?? ""))
+          || (input.direction !== "income" && input.direction !== "expense")
+          || typeof input.category !== "string" || !input.category.trim()
+          || !Number.isFinite(Number(input.amountCny)) || Number(input.amountCny) <= 0
+          || typeof input.description !== "string" || !input.description.trim()) {
+          return json({ ok: false, error: "经营记录字段不完整" }, 400);
+        }
+        return json(await operations.addCash({
+          occurredOn: String(input.occurredOn),
+          direction: input.direction,
+          category: input.category.trim(),
+          amountCny: Number(input.amountCny),
+          description: input.description.trim(),
+        }, config.webAuth.username));
+      }
+      if (request.method === "POST" && /^\/api\/operations\/cash\/[^/]+\/void$/u.test(url.pathname)) {
+        const input = await body(request);
+        if (typeof input.reason !== "string" || !input.reason.trim()) return json({ ok: false, error: "作废原因不能为空" }, 400);
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(await operations.voidCash(id, input.reason.trim(), config.webAuth.username));
+      }
+      if (request.method === "POST" && url.pathname === "/api/operations/priority-plans") {
+        const input = await body(request);
+        const limit = Number(input.recentCallLimit ?? config.monitor.recentCallLimit);
+        if (!config.monitor.recentCallOptions.includes(limit)) return json({ ok: false, error: "评分样本档位无效" }, 400);
+        return json(await operations.generatePriorityPlan(limit, config.webAuth.username));
+      }
+      if (request.method === "POST" && /^\/api\/operations\/priority-plans\/[^/]+\/confirm$/u.test(url.pathname)) {
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(await operations.confirmPriorityPlan(id, config.webAuth.username));
+      }
+      if (request.method === "POST" && url.pathname === "/api/operations/procurement") {
+        const input = await body(request);
+        const budget = Number(input.budgetCny);
+        if (!Number.isInteger(budget) || budget <= 0) return json({ ok: false, error: "预算必须为正整数" }, 400);
+        return json(await operations.procurement(budget, config.webAuth.username));
+      }
+      if (request.method === "GET" && url.pathname === "/api/operations/audits") return json(await operations.audits());
 
       if (!url.pathname.startsWith("/api/admin/")) return json({ ok: false, error: "not found" }, 404);
       if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);

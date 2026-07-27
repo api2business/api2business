@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111412" />
+  <title>经营管理 | ApiState</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/app.js" type="module"></script>
+</head>
+<body data-page="operations">
+  <div data-shell></div>
+  <main class="workspace">
+    <header class="page-head"><div><p class="eyebrow">OPERATIONS / DETERMINISTIC</p><h1>经营管理</h1></div></header>
+    <section class="metric-strip">
+      <div><span>收入</span><strong id="ops-income">—</strong></div>
+      <div><span>支出</span><strong id="ops-expense">—</strong></div>
+      <div><span>毛利</span><strong id="ops-profit">—</strong></div>
+      <div><span>YAML</span><strong>只读</strong></div>
+    </section>
+    <section class="table-section">
+      <div class="table-toolbar"><h2>手工收支</h2></div>
+      <form id="cash-form" class="score-query-controls">
+        <label class="filter-field"><span>日期</span><input id="cash-date" type="date" required /></label>
+        <label class="select-field"><span>方向</span><select id="cash-direction"><option value="income">收入</option><option value="expense">支出</option></select></label>
+        <label class="filter-field"><span>类别</span><input id="cash-category" required /></label>
+        <label class="filter-field"><span>金额 CNY</span><input id="cash-amount" type="number" min="0.01" step="0.01" required /></label>
+        <label class="filter-field"><span>说明</span><input id="cash-description" required /></label>
+        <button class="query-command" type="submit">新增记录</button>
+      </form>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>来源</th><th>日期/月</th><th>方向</th><th>类别</th><th>金额</th><th>说明</th><th>状态</th><th>操作</th></tr></thead><tbody id="cash-body"></tbody></table></div>
+    </section>
+    <section class="table-section">
+      <div class="table-toolbar"><h2>自动优先级</h2><div class="score-query-controls"><label class="select-field"><span>样本</span><select id="plan-limit"></select></label><button id="generate-plan" class="query-command" type="button">生成调整计划</button><button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button></div></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>账号</th><th>当前</th><th>计划</th><th>评分</th><th>成本</th></tr></thead><tbody id="plan-body"><tr><td colspan="5" class="empty">尚未生成计划</td></tr></tbody></table></div>
+    </section>
+    <section class="table-section">
+      <div class="table-toolbar"><h2>预算采购建议</h2><form id="procurement-form" class="score-query-controls"><label class="filter-field"><span>预算 CNY</span><input id="procurement-budget" type="number" min="1" step="1" required /></label><button class="query-command" type="submit">计算建议</button></form></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>网站</th><th>金额</th><th>档位</th></tr></thead><tbody id="procurement-body"><tr><td colspan="3" class="empty">输入预算后计算；不调用 LLM</td></tr></tbody></table></div>
+    </section>
+    <section class="table-section">
+      <div class="table-toolbar"><h2>操作记录</h2></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>时间</th><th>动作</th><th>状态</th><th>操作人</th><th>输入摘要</th><th>结果摘要</th></tr></thead><tbody id="audit-body"></tbody></table></div>
+    </section>
+  </main>
+</body>
+</html>

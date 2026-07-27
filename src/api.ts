@@ -4,6 +4,8 @@ import { ApplicationDispatcher } from "./dispatcher";
 import { createHandler } from "./http";
 import { requiredOption } from "./runtime-args";
 import { TemporalGateway } from "./temporal-client";
+import { OperationsStore } from "./operations-store";
+import { OperationsService } from "./operations-service";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -15,10 +17,14 @@ if (!adminToken) throw new Error(`server target requires env ${target.adminToken
 const context = createServerContext(config, target);
 const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId });
 const dispatcher = new ApplicationDispatcher({ lottery: context.service, scores: context.monitor }, temporal);
+const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
+if (!operationsDatabaseUrl) throw new Error(`server target requires env ${config.operations.databaseUrlEnv}`);
+const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), process.env[target.scoreDatabaseUrlEnv]!);
+await operations.initialize();
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations),
 });
 
 console.log(JSON.stringify({
@@ -38,6 +44,7 @@ async function stop(): Promise<void> {
   stopping = true;
   server.stop(true);
   context.close();
+  await operations.close();
   await temporal.close();
   process.exit(0);
 }

@@ -64,6 +64,7 @@ function shell() {
     ['scores', '/scores', '账号评分'],
     ['ranking', '/ranking', '用户用量'],
     ['lottery', '/lottery', '额度抽奖'],
+    ['operations', '/operations', '经营管理'],
   ]
   mount.innerHTML = `<header class="topbar">
     <a class="brand" href="/scores"><span class="brand-mark">AS</span><span><b>ApiState</b><small>Sub2API Operations</small></span></a>
@@ -259,12 +260,111 @@ async function lotteryPage() {
   $('#winner-close').addEventListener('click', () => $('#winner-dialog').close())
 }
 
+function cny(value) {
+  return `¥${number(value, 2)}`
+}
+
+let activePlanId = null
+
+async function loadOperations() {
+  const [ledger, audits] = await Promise.all([
+    requestJson('/api/operations/ledger'),
+    requestJson('/api/operations/audits'),
+  ])
+  $('#ops-income').textContent = cny(ledger.summary.incomeCny)
+  $('#ops-expense').textContent = cny(ledger.summary.expenseCny)
+  $('#ops-profit').textContent = cny(ledger.summary.grossProfitCny)
+  const yamlRows = [
+    ...(ledger.yaml.revenues ?? []).map((row) => ({ ...row, direction: 'income' })),
+    ...(ledger.yaml.costs ?? []).map((row) => ({ ...row, direction: 'expense' })),
+  ]
+  const rows = [
+    { source: 'alipay', period: ledger.period, direction: 'income', kind: 'alipay-completed', amountCny: ledger.alipay.revenueCny, description: `${ledger.alipay.completedOrders} 笔已完成订单（已排除管理员测试）`, readOnly: true },
+    ...(ledger.manual ?? []), ...yamlRows,
+  ]
+  $('#cash-body').innerHTML = rows.length ? rows.map((row) => `<tr>
+    <td>${row.source === 'yaml' ? 'YAML（只读）' : row.source === 'alipay' ? '支付宝（只读）' : '手工数据库'}</td>
+    <td>${escapeHtml(row.occurred_on ?? row.period ?? '—')}</td>
+    <td>${row.direction === 'income' ? '收入' : '支出'}</td>
+    <td>${escapeHtml(row.category ?? row.kind ?? '—')}</td>
+    <td>${cny(row.amount_cny ?? row.amountCny)}</td>
+    <td>${escapeHtml(row.description ?? '')}</td>
+    <td>${row.voided_at ? '已作废' : '有效'}</td>
+    <td>${row.readOnly || row.voided_at ? '—' : `<button class="text-command cash-void" data-id="${escapeHtml(row.id)}" type="button">作废</button>`}</td>
+  </tr>`).join('') : '<tr><td colspan="8" class="empty">暂无经营记录</td></tr>'
+  document.querySelectorAll('.cash-void').forEach((button) => button.addEventListener('click', async () => {
+    const reason = window.prompt('请输入作废原因')
+    if (!reason?.trim()) return
+    await requestJson(`/api/operations/cash/${encodeURIComponent(button.dataset.id)}/void`, {
+      method: 'POST', body: JSON.stringify({ reason: reason.trim() }),
+    })
+    await loadOperations()
+  }))
+  $('#audit-body').innerHTML = audits.records?.length ? audits.records.map((row) => `<tr>
+    <td>${time(row.created_at)}</td><td>${escapeHtml(row.action)}</td><td>${escapeHtml(row.status)}</td>
+    <td>${escapeHtml(row.operator)}</td><td><code>${escapeHtml(JSON.stringify(row.input_summary))}</code></td>
+    <td><code>${escapeHtml(JSON.stringify(row.result_summary))}</code></td>
+  </tr>`).join('') : '<tr><td colspan="6" class="empty">暂无操作记录</td></tr>'
+}
+
+async function operationsPage() {
+  $('#cash-date').value = new Date().toISOString().slice(0, 10)
+  $('#plan-limit').innerHTML = [100, 500, 1000, 2000, 5000].map((value) => `<option value="${value}"${value === 1000 ? ' selected' : ''}>最近 ${value} 条</option>`).join('')
+  $('#cash-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    await requestJson('/api/operations/cash', { method: 'POST', body: JSON.stringify({
+      occurredOn: $('#cash-date').value, direction: $('#cash-direction').value,
+      category: $('#cash-category').value, amountCny: Number($('#cash-amount').value),
+      description: $('#cash-description').value,
+    }) })
+    event.currentTarget.reset()
+    $('#cash-date').value = new Date().toISOString().slice(0, 10)
+    await loadOperations()
+  })
+  $('#generate-plan').addEventListener('click', async () => {
+    const button = $('#generate-plan')
+    button.disabled = true
+    try {
+      const plan = await requestJson('/api/operations/priority-plans', {
+        method: 'POST', body: JSON.stringify({ recentCallLimit: Number($('#plan-limit').value) }),
+      }, 90000)
+      activePlanId = plan.planId
+      $('#confirm-plan').disabled = plan.changedCount === 0
+      $('#plan-body').innerHTML = plan.changes?.length ? plan.changes.map((row) => `<tr>
+        <td>${escapeHtml(row.accountName)}</td><td>${number(row.beforePriority)}</td>
+        <td>${number(row.desiredPriority)}</td><td>${number(row.score, 1)}</td>
+        <td>${number(row.costRateCnyPerApiUsd, 4)}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">没有可调整账号</td></tr>'
+      await loadOperations()
+    } finally { button.disabled = false }
+  })
+  $('#confirm-plan').addEventListener('click', async () => {
+    if (!activePlanId) return
+    const button = $('#confirm-plan')
+    button.disabled = true
+    await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 200000)
+    activePlanId = null
+    await loadOperations()
+  })
+  $('#procurement-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const result = await requestJson('/api/operations/procurement', {
+      method: 'POST', body: JSON.stringify({ budgetCny: Number($('#procurement-budget').value) }),
+    }, 90000)
+    $('#procurement-body').innerHTML = result.allocations?.length ? result.allocations.map((row) => `<tr>
+      <td>${escapeHtml(row.billingSite)}</td><td>${cny(row.amountCny)}</td><td>${cny(row.denominationCny)}</td>
+    </tr>`).join('') : `<tr><td colspan="3" class="empty">未分配 ${cny(result.unallocatedCny)}</td></tr>`
+    await loadOperations()
+  })
+  await loadOperations()
+}
+
 async function boot() {
   if (page === 'login') return await loginPage()
   shell()
   if (page === 'scores') return await scoresPage()
   if (page === 'ranking') return await rankingPage()
   if (page === 'lottery') return await lotteryPage()
+  if (page === 'operations') return await operationsPage()
 }
 
 boot().catch((error) => {

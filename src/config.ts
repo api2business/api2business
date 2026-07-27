@@ -98,6 +98,13 @@ export interface AppConfig {
   };
   ranking: { timezone: string; windowDays: number; sourceLimit: number; displayLimit: number };
   records: { publicLimit: number };
+  operations: {
+    databaseUrlEnv: string;
+    ledgerYamlPath: string;
+    rechargeDenominationsCny: number[];
+    planTtlMinutes: number;
+    auditLimit: number;
+  };
   temporal: {
     addressEnv: string;
     namespace: string;
@@ -295,6 +302,7 @@ export function loadConfig(path: string): AppConfig {
   const creditTest = object(lottery.creditTest, "lottery.creditTest");
   const ranking = object(raw.ranking, "ranking");
   const records = object(raw.records, "records");
+  const operations = object(raw.operations, "operations");
   const temporal = object(raw.temporal, "temporal");
   const temporalRetry = object(temporal.retry, "temporal.retry");
   const runtime = object(raw.runtime, "runtime");
@@ -472,6 +480,13 @@ export function loadConfig(path: string): AppConfig {
       displayLimit: integerValue(ranking, "displayLimit", "ranking", 1),
     },
     records: { publicLimit: integerValue(records, "publicLimit", "records", 1) },
+    operations: {
+      databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
+      ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),
+      rechargeDenominationsCny: integers(operations, "rechargeDenominationsCny", "operations", 1, 100000),
+      planTtlMinutes: integerValue(operations, "planTtlMinutes", "operations", 1, 1440),
+      auditLimit: integerValue(operations, "auditLimit", "operations", 1, 1000),
+    },
     temporal: {
       addressEnv: stringValue(temporal, "addressEnv", "temporal"),
       namespace: stringValue(temporal, "namespace", "temporal"),
