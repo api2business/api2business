@@ -142,6 +142,11 @@ export function createHandler(
         if (!config.monitor.recentCallOptions.includes(limit)) return json({ ok: false, error: "评分样本档位无效" }, 400);
         return json(await operations.generatePriorityPlan(limit, config.webAuth.username));
       }
+      if (request.method === "GET" && url.pathname === "/api/operations/priority-state") {
+        const limit = Number(url.searchParams.get("recentCallLimit") ?? config.monitor.recentCallLimit);
+        if (!config.monitor.recentCallOptions.includes(limit)) return json({ ok: false, error: "评分样本档位无效" }, 400);
+        return json(await operations.priorityState(limit));
+      }
       if (request.method === "POST" && /^\/api\/operations\/priority-plans\/[^/]+\/confirm$/u.test(url.pathname)) {
         const id = decodeURIComponent(url.pathname.split("/")[4]!);
         return json(await operations.confirmPriorityPlan(id, config.webAuth.username));

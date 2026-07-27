@@ -161,3 +161,23 @@ button:disabled { cursor: wait; opacity: .48; }
   .login-brand h1 { font-size: 58px; margin-bottom: 24px; }
   .login-panel { min-height: 62vh; }
 }
+.section-state {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.operation-progress {
+  min-height: 0;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.operation-progress p {
+  margin: 4px 0;
+}
+
+.operation-progress time {
+  color: var(--accent);
+}

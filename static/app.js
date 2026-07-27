@@ -266,6 +266,52 @@ function cny(value) {
 
 let activePlanId = null
 const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
+let priorityRows = []
+
+function signed(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric === 0) return '0'
+  return numeric > 0 ? `+${numeric}` : String(numeric)
+}
+
+function renderPriorityRows(rows, showPlan = false) {
+  priorityRows = rows ?? []
+  $('#plan-body').innerHTML = priorityRows.length ? priorityRows.map((row) => {
+    const delta = Number(row.desiredPriority) - Number(row.beforePriority)
+    return `<tr>
+      <td>${escapeHtml(row.accountName)}</td><td>${number(row.beforePriority)}</td>
+      <td>${showPlan ? number(row.desiredPriority) : '—'}</td>
+      <td>${showPlan ? signed(delta) : '—'}</td><td>${number(row.score, 1)}</td>
+      <td>${number(row.costRateCnyPerApiUsd, 4)}</td></tr>`
+  }).join('') : '<tr><td colspan="6" class="empty">没有符合当前评分条件的账号</td></tr>'
+}
+
+function planProgress(message, reset = false) {
+  const target = $('#plan-progress')
+  if (reset) target.innerHTML = ''
+  const stamp = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date())
+  target.insertAdjacentHTML('beforeend', `<p><time>${stamp}</time> ${escapeHtml(message)}</p>`)
+}
+
+async function refreshPriorityState() {
+  const button = $('#refresh-priority')
+  const limit = Number($('#plan-limit').value)
+  button.disabled = true
+  $('#plan-refresh-state').textContent = '正在刷新，保留当前显示数据…'
+  try {
+    const state = await requestJson(`/api/operations/priority-state?recentCallLimit=${limit}`, {}, 90000)
+    renderPriorityRows(state.changes, false)
+    activePlanId = null
+    $('#confirm-plan').disabled = true
+    $('#plan-refresh-state').textContent = `上次刷新时间：${time(state.refreshedAt)} · 最近 ${number(limit)} 次`
+    return state
+  } catch (error) {
+    $('#plan-refresh-state').textContent = `刷新失败：${error instanceof Error ? error.message : String(error)}`
+    throw error
+  } finally {
+    button.disabled = false
+  }
+}
 
 function renderOperations(ledger, audits) {
   $('#ops-income').textContent = cny(ledger.summary.incomeCny)
@@ -336,7 +382,8 @@ async function loadOperations({ showCached = false } = {}) {
 
 async function operationsPage() {
   $('#cash-date').value = new Date().toISOString().slice(0, 10)
-  $('#plan-limit').innerHTML = [100, 500, 1000, 2000, 5000].map((value) => `<option value="${value}"${value === 1000 ? ' selected' : ''}>最近 ${value} 条</option>`).join('')
+  $('#plan-limit').innerHTML = [100, 500, 1000, 2000, 5000].map((value) => `<option value="${value}"${value === 500 ? ' selected' : ''}>最近 ${value} 条</option>`).join('')
+  $('#refresh-priority').addEventListener('click', () => void refreshPriorityState().catch(() => undefined))
   $('#cash-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     await requestJson('/api/operations/cash', { method: 'POST', body: JSON.stringify({
@@ -351,26 +398,48 @@ async function operationsPage() {
   $('#generate-plan').addEventListener('click', async () => {
     const button = $('#generate-plan')
     button.disabled = true
+    planProgress('开始读取最近调用并生成调整计划', true)
     try {
       const plan = await requestJson('/api/operations/priority-plans', {
         method: 'POST', body: JSON.stringify({ recentCallLimit: Number($('#plan-limit').value) }),
       }, 90000)
       activePlanId = plan.planId
       $('#confirm-plan').disabled = plan.changedCount === 0
-      $('#plan-body').innerHTML = plan.changes?.length ? plan.changes.map((row) => `<tr>
-        <td>${escapeHtml(row.accountName)}</td><td>${number(row.beforePriority)}</td>
-        <td>${number(row.desiredPriority)}</td><td>${number(row.score, 1)}</td>
-        <td>${number(row.costRateCnyPerApiUsd, 4)}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">没有可调整账号</td></tr>'
+      renderPriorityRows(plan.changes, true)
+      $('#plan-refresh-state').textContent = `计划生成时间：${time(plan.refreshedAt)} · 最近 ${number(plan.recentCallLimit)} 次`
+      planProgress(`计划已生成，包含 ${number(plan.changedCount)} 项调整`)
       await loadOperations()
+    } catch (error) {
+      planProgress(`计划生成失败：${error instanceof Error ? error.message : String(error)}`)
     } finally { button.disabled = false }
   })
   $('#confirm-plan').addEventListener('click', async () => {
     if (!activePlanId) return
     const button = $('#confirm-plan')
     button.disabled = true
-    await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 200000)
-    activePlanId = null
-    await loadOperations()
+    $('#generate-plan').disabled = true
+    $('#refresh-priority').disabled = true
+    planProgress('已提交确认，后端正在通过受控 API 批量写入并回读')
+    const startedAt = Date.now()
+    const ticker = setInterval(() => {
+      $('#plan-refresh-state').textContent = `调整执行中：${Math.floor((Date.now() - startedAt) / 1000)} 秒`
+    }, 1000)
+    try {
+      const result = await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 190000)
+      planProgress(`调整成功，已写入并回读 ${number(result.changedCount)} 个账号`)
+      activePlanId = null
+      await refreshPriorityState()
+      await loadOperations()
+    } catch (error) {
+      planProgress(`调整失败：${error instanceof Error ? error.message : String(error)}`)
+      $('#plan-refresh-state').textContent = '调整失败，请重新生成计划后重试'
+      activePlanId = null
+    } finally {
+      clearInterval(ticker)
+      button.disabled = true
+      $('#generate-plan').disabled = false
+      $('#refresh-priority').disabled = false
+    }
   })
   $('#procurement-form').addEventListener('submit', async (event) => {
     event.preventDefault()
@@ -382,7 +451,10 @@ async function operationsPage() {
     </tr>`).join('') : `<tr><td colspan="3" class="empty">未分配 ${cny(result.unallocatedCny)}</td></tr>`
     await loadOperations()
   })
-  await loadOperations({ showCached: true })
+  await Promise.all([
+    loadOperations({ showCached: true }),
+    refreshPriorityState().catch(() => undefined),
+  ])
 }
 
 async function boot() {

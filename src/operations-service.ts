@@ -95,8 +95,7 @@ export class OperationsService {
   }
 
   async generatePriorityPlan(recentCallLimit: number, operator: string) {
-    const ranking = await collectRecentCallScoresFromDatabase(this.config, recentCallLimit, null, null, this.scoreDatabaseUrl);
-    const result = buildAccountPriorityPlan(ranking, this.config);
+    const result = await this.priorityState(recentCallLimit);
     const priorities = result.priorities as Record<string, number>;
     const plan = await this.store.createPlan({
       operator, recentCallLimit, ttlMinutes: this.config.operations.planTtlMinutes, priorities, result,
@@ -104,6 +103,12 @@ export class OperationsService {
     await this.store.audit("priority.plan.generate", "succeeded", operator,
       { recentCallLimit }, { planId: plan.id, changedCount: Object.keys(priorities).length });
     return { ...result, planId: plan.id, expiresAt: plan.expiresAt };
+  }
+
+  async priorityState(recentCallLimit: number) {
+    const ranking = await collectRecentCallScoresFromDatabase(this.config, recentCallLimit, null, null, this.scoreDatabaseUrl);
+    const result = buildAccountPriorityPlan(ranking, this.config);
+    return { ...result, refreshedAt: new Date().toISOString() };
   }
 
   async confirmPriorityPlan(id: string, operator: string) {
@@ -119,14 +124,21 @@ export class OperationsService {
     const proc = Bun.spawn([this.config.monitor.cli.executable, ...args], {
       cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe",
     });
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      proc.kill();
+    }, this.config.monitor.cli.timeoutMs);
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
     ]);
-    const result = { exitCode, output: stdout.slice(-4000), error: stderr.slice(-1000), changedCount: Object.keys(priorities).length };
+    clearTimeout(timeout);
+    const result = { exitCode, timedOut, output: stdout.slice(-4000), error: stderr.slice(-1000), changedCount: Object.keys(priorities).length };
     await this.store.finishPlan(id, exitCode === 0 ? "applied" : "failed", result);
     await this.store.audit("priority.plan.confirm", exitCode === 0 ? "succeeded" : "failed",
-      operator, { planId: id, changedCount: Object.keys(priorities).length }, { exitCode });
-    if (exitCode !== 0) throw new Error("priority adjustment failed");
+      operator, { planId: id, changedCount: Object.keys(priorities).length }, { exitCode, timedOut });
+    if (timedOut) throw new Error("优先级调整执行超时");
+    if (exitCode !== 0) throw new Error("优先级调整失败");
     return { ok: true, planId: id, ...result };
   }
 

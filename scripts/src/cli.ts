@@ -326,7 +326,7 @@ export async function runCli(args: string[]): Promise<void> {
       temporalTaskQueue: config.temporal.taskQueue,
       cliTargets: Object.fromEntries(Object.entries(config.runtime.cliTargets).map(([id, target]) => [id, target.mode === "embedded" ? { mode: target.mode, temporalTaskQueue: target.temporalTaskQueue } : { mode: target.mode }])),
       serverTargets: Object.fromEntries(Object.entries(config.runtime.serverTargets).map(([id, target]) => [id, { temporalTaskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId }])),
-      refreshIntervalMinutes: config.monitor.refreshIntervalMinutes, scoreWindow: config.monitor.scoreWindow,
+      refreshIntervalMinutes: config.monitor.refreshIntervalMinutes, recentCallLimit: config.monitor.recentCallLimit,
       automaticCreditEnabled: config.lottery.automaticCredit.enabled, valuesPrinted: false,
     }, parsed.json);
     if (parsed.command.join(" ") === "scores aggregate-smoke") return emit(aggregateSmoke(), parsed.json);

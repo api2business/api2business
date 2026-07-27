@@ -31,8 +31,10 @@
       <div class="table-wrap"><table class="data-table"><thead><tr><th>来源</th><th>日期/月</th><th>方向</th><th>类别</th><th>金额</th><th>说明</th><th>状态</th><th>操作</th></tr></thead><tbody id="cash-body"></tbody></table></div>
     </section>
     <section class="table-section">
-      <div class="table-toolbar"><h2>自动优先级</h2><div class="score-query-controls"><label class="select-field"><span>样本</span><select id="plan-limit"></select></label><button id="generate-plan" class="query-command" type="button">生成调整计划</button><button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button></div></div>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>账号</th><th>当前</th><th>计划</th><th>评分</th><th>成本</th></tr></thead><tbody id="plan-body"><tr><td colspan="5" class="empty">尚未生成计划</td></tr></tbody></table></div>
+      <div class="table-toolbar"><h2>自动优先级</h2><div class="score-query-controls"><label class="select-field"><span>样本</span><select id="plan-limit"></select></label><button id="refresh-priority" class="query-command" type="button">刷新当前状态</button><button id="generate-plan" class="query-command" type="button">生成调整计划</button><button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button></div></div>
+      <p id="plan-refresh-state" class="section-state">尚未刷新</p>
+      <div id="plan-progress" class="operation-progress" aria-live="polite"></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>账号</th><th>当前</th><th>计划</th><th>变化</th><th>评分</th><th>成本</th></tr></thead><tbody id="plan-body"><tr><td colspan="6" class="empty">正在加载当前状态</td></tr></tbody></table></div>
     </section>
     <section class="table-section">
       <div class="table-toolbar"><h2>预算采购建议</h2><form id="procurement-form" class="score-query-controls"><label class="filter-field"><span>预算 CNY</span><input id="procurement-budget" type="number" min="1" step="1" required /></label><button class="query-command" type="submit">计算建议</button></form></div>
