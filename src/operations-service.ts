@@ -94,7 +94,11 @@ export class OperationsService {
     return { ok: true, entry: row };
   }
 
-  async generatePriorityPlan(recentCallLimit: number, operator: string, triggerType: "manual" | "automatic" = "manual") {
+  async generatePriorityPlan(
+    recentCallLimit: number,
+    operator: string,
+    triggerType: "manual" | "automatic" = "manual",
+  ): Promise<Record<string, unknown>> {
     const result = await this.priorityState(recentCallLimit);
     const priorities = result.priorities as Record<string, number>;
     const plan = await this.store.createPlan({
@@ -105,7 +109,7 @@ export class OperationsService {
     return { ...result, planId: plan.id, expiresAt: plan.expiresAt };
   }
 
-  async priorityState(recentCallLimit: number) {
+  async priorityState(recentCallLimit: number): Promise<Record<string, unknown>> {
     const ranking = await collectRecentCallScoresFromDatabase(this.config, recentCallLimit, null, null, this.scoreDatabaseUrl);
     const result = buildAccountPriorityPlan(ranking, this.config);
     return { ...result, refreshedAt: new Date().toISOString() };
@@ -124,7 +128,7 @@ export class OperationsService {
           await tx.unsafe(`SET LOCAL statement_timeout = '${this.config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
           return await tx`SELECT id::text AS id, priority::int AS priority FROM accounts`;
         });
-        const actual = new Map(rows.map((row) => [String(row.id), Number(row.priority)]));
+        const actual = new Map((rows as Array<Record<string, unknown>>).map((row) => [String(row.id), Number(row.priority)]));
         verifiedCount = [...expected].filter(([id, priority]) => actual.get(id) === priority).length;
         if (verifiedCount === expected.size) {
           return {
@@ -195,7 +199,7 @@ export class OperationsService {
   }
 
   async priorityHistory() {
-    const rows = await this.store.priorityHistory(this.config.operations.auditLimit);
+    const rows = await this.store.priorityHistory(this.config.operations.auditLimit) as Array<Record<string, unknown>>;
     return {
       ok: true,
       records: rows.map((row) => {
@@ -265,7 +269,7 @@ export class OperationsService {
       await this.store.audit("priority.automation.run", "succeeded", operator,
         { recentCallLimit: Number(policy.recent_call_limit) },
         { planId: plan.planId, changedCount: result.changedCount, verification: result.verification });
-      return { ok: true, due: true, ...result };
+      return { due: true, ...result };
     } catch (error) {
       await this.store.audit("priority.automation.run", "failed", operator,
         { recentCallLimit: Number(policy.recent_call_limit) },
