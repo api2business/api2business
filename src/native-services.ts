@@ -44,7 +44,7 @@ export function nativeStart(config: AppConfig, component: NativeServiceId): Reco
   const current = nativeStatus(config, component);
   if (current.state === "running") return { ...current, mutation: false, reason: "already-running" };
   const temporalAddress = process.env[config.temporal.addressEnv];
-  if ((component === "api" || component === "worker") && !temporalAddress) throw new Error(`native ${component} requires env ${config.temporal.addressEnv}`);
+  if (component === "worker" && !temporalAddress) throw new Error(`native ${component} requires env ${config.temporal.addressEnv}`);
   const service = config.runtime.native.services[component];
   const target = paths(config, component);
   mkdirSync(target.stateDir, { recursive: true });
