@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import type { AppConfig, NativeServiceId } from "./config";
 import { readSecret } from "./secrets";
 
+const nativeComponents: NativeServiceId[] = ["api", "worker", "web"];
+
 function paths(config: AppConfig, component: NativeServiceId): { stateDir: string; pid: string; log: string } {
   const service = config.runtime.native.services[component];
   const stateDir = resolve(config.rootDirectory, config.runtime.native.stateDir);
@@ -86,4 +88,28 @@ export function nativeLogs(config: AppConfig, component: NativeServiceId, tail: 
   const target = paths(config, component);
   const lines = existsSync(target.log) ? readFileSync(target.log, "utf8").split(/\r?\n/u).filter(Boolean).slice(-tail) : [];
   return { ok: true, component, logFile: target.log, lines, lineCount: lines.length, mutation: false, valuesPrinted: false };
+}
+
+export function nativeAll(
+  config: AppConfig,
+  action: "start" | "stop" | "status" | "logs",
+  tail = 40,
+): Record<string, unknown> {
+  const components = action === "stop" ? [...nativeComponents].reverse() : nativeComponents;
+  const results = components.map((component) =>
+    action === "start" ? nativeStart(config, component)
+      : action === "stop" ? nativeStop(config, component)
+        : action === "status" ? nativeStatus(config, component)
+          : nativeLogs(config, component, tail)
+  );
+  return {
+    ok: results.every((result) => result.ok === true),
+    component: "all",
+    action,
+    components: results,
+    mutation: action === "start" || action === "stop"
+      ? results.some((result) => result.mutation === true)
+      : false,
+    valuesPrinted: false,
+  };
 }

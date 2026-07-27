@@ -9,7 +9,7 @@ import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServ
 import type { AppCommand } from "../../src/contracts";
 import { usesWorkflow } from "../../src/contracts";
 import { ApplicationDispatcher } from "../../src/dispatcher";
-import { nativeLogs, nativeStart, nativeStatus, nativeStop } from "../../src/native-services";
+import { nativeAll, nativeLogs, nativeStart, nativeStatus, nativeStop } from "../../src/native-services";
 import { TemporalGateway } from "../../src/temporal-client";
 import { collectUserImpactFromDatabase } from "../../src/user-impact-database";
 import { emitUserImpact } from "./user-impact-output";
@@ -26,7 +26,7 @@ interface Parsed {
   json: boolean;
   id: string | null;
   requestId: string | null;
-  component: NativeServiceId | null;
+  component: NativeServiceId | "all" | null;
   limit: number | null;
   draws: number | null;
   tail: number | null;
@@ -72,7 +72,7 @@ function parseArgs(args: string[]): Parsed {
     return parsed;
   };
   const component = value(args, "--component");
-  if (component !== null && component !== "api" && component !== "worker" && component !== "web") throw new Error("--component must be api, worker, or web");
+  if (component !== null && component !== "all" && component !== "api" && component !== "worker" && component !== "web") throw new Error("--component must be all, api, worker, or web");
   return {
     configPath,
     targetId: value(args, "--target"),
@@ -114,7 +114,7 @@ function help(): Record<string, unknown> {
       "credit test",
       "api smoke --over-api",
       "workflow status --id <workflow-id>",
-      "native start|stop|status|logs --component api|worker|web [--tail N]",
+      "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
   };
@@ -360,12 +360,16 @@ export async function runCli(args: string[]): Promise<void> {
     }
     if (parsed.command[0] === "native") {
       const action = parsed.command[1];
-      if (!parsed.component) throw new Error("native commands require --component api, worker, or web");
+      if (action !== "start" && action !== "stop" && action !== "status" && action !== "logs") {
+        throw new Error(`unknown native action ${action ?? ""}`);
+      }
+      if (parsed.component === null || parsed.component === "all") {
+        return emit(nativeAll(config, action, parsed.tail ?? 40), parsed.json);
+      }
       const result = action === "start" ? nativeStart(config, parsed.component)
         : action === "stop" ? nativeStop(config, parsed.component)
         : action === "status" ? nativeStatus(config, parsed.component)
-        : action === "logs" ? nativeLogs(config, parsed.component, parsed.tail ?? 40)
-        : (() => { throw new Error(`unknown native action ${action ?? ""}`); })();
+        : nativeLogs(config, parsed.component, parsed.tail ?? 40);
       return emit(result, parsed.json);
     }
     const targetId = parsed.targetId ?? (parsed.overApi ? config.runtime.overApiTarget : config.runtime.defaultCliTarget);
