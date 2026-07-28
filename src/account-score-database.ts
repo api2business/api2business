@@ -203,6 +203,46 @@ function costRate(name: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function availabilityReason(row: Row, currentAvailable: boolean, billingErrorPatterns: string[], now: number): Row | null {
+  if (currentAvailable) return null;
+  const error = String(row.error_message ?? "").trim();
+  const normalizedError = error.toLowerCase();
+  const weeklyRemainingPercent = numeric(row.weekly_remaining_percent);
+  const activeUntil = (value: unknown): string | null => {
+    const parsed = Date.parse(String(value ?? ""));
+    return Number.isFinite(parsed) && parsed > now ? new Date(parsed).toISOString() : null;
+  };
+  const timedStates = [
+    { value: row.rate_limit_reset_at, code: "rate-limited", label: "限流冷却" },
+    { value: row.overload_until, code: "upstream-overloaded", label: "上游过载" },
+    { value: row.temp_unschedulable_until, code: "temporarily-unschedulable", label: "临时不可调度" },
+  ];
+
+  if (weeklyRemainingPercent !== null && weeklyRemainingPercent <= 0) {
+    return { code: "weekly-quota", label: "周限额已用尽", detail: "7 天剩余 0%", resetAt: null };
+  }
+  if (normalizedError && billingErrorPatterns.some((pattern) => normalizedError.includes(pattern.toLowerCase()))) {
+    return { code: "billing-depleted", label: "费用不足", detail: "上游余额或预扣额度不足", resetAt: null };
+  }
+  if (/token (?:revoked|invalid|expired)|authentication token|invalid api key|unauthorized|鉴权|令牌.*(?:失效|过期)/iu.test(error)) {
+    return { code: "authentication", label: "鉴权失效", detail: "上游凭据已失效", resetAt: null };
+  }
+  if (/api key.*(?:分组|权限)|专属分组|所属分组|forbidden.*(?:group|permission)/iu.test(error)) {
+    return { code: "account-permission", label: "账号权限异常", detail: "上游 API Key 或分组权限不可用", resetAt: null };
+  }
+  for (const state of timedStates) {
+    const resetAt = activeUntil(state.value);
+    if (resetAt !== null) return { code: state.code, label: state.label, detail: "等待自动恢复", resetAt };
+  }
+  if (row.status !== "active") {
+    return { code: "account-error", label: "账号错误", detail: error ? "上游已返回错误" : "未记录上游错误原因", resetAt: null };
+  }
+  if (row.schedulable !== true) {
+    return { code: "unschedulable", label: "已停止调度", detail: "未记录停止调度原因", resetAt: null };
+  }
+  return { code: "unknown", label: "原因未记录", detail: "当前状态不可用，但没有可判定的原因证据", resetAt: null };
+}
+
 function grade(score: number | null, comparable: boolean, attempts: number): string {
   if (score === null || (!comparable && !(score < 60 && attempts >= 10))) return "insufficient";
   return score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "E";
@@ -213,6 +253,7 @@ export function scoreRecentDatabaseRow(
   recentCallLimit: number,
   policy: AppConfig["sub2api"]["scorePolicy"],
   now = Date.now(),
+  billingErrorPatterns: string[] = [],
 ): Row {
   if (policy.ttftZeroScoreMs <= policy.ttftFullScoreMs) throw new Error("TTFT zero-score boundary must exceed full-score boundary");
   const totalWeight = policy.reliabilityWeight + policy.failoverWeight + policy.latencyWeight + policy.baselineWeight;
@@ -262,8 +303,10 @@ export function scoreRecentDatabaseRow(
     const parsed = Date.parse(String(value ?? ""));
     return Number.isFinite(parsed) && parsed > now;
   };
+  const weeklyRemainingPercent = numeric(row.weekly_remaining_percent);
   const currentAvailable = row.status === "active"
     && row.schedulable === true
+    && (weeklyRemainingPercent === null || weeklyRemainingPercent > 0)
     && !untilActive(row.rate_limit_reset_at)
     && !untilActive(row.overload_until)
     && !untilActive(row.temp_unschedulable_until);
@@ -281,10 +324,14 @@ export function scoreRecentDatabaseRow(
     groupIds: Array.isArray(row.group_ids) ? row.group_ids.map(Number) : [],
     groupNames: Array.isArray(row.group_names) ? row.group_names.map(String) : [],
     currentAvailable,
+    availabilityReason: availabilityReason(row, currentAvailable, billingErrorPatterns, now),
     currentStatus: row.status,
     currentError: row.error_message ?? null,
+    rateLimitResetAt: row.rate_limit_reset_at ?? null,
+    overloadUntil: row.overload_until ?? null,
+    tempUnschedulableUntil: row.temp_unschedulable_until ?? null,
     currentStateScoreImpact: "none",
-    weeklyRemainingPercent: numeric(row.weekly_remaining_percent),
+    weeklyRemainingPercent,
     score,
     grade: accountGrade,
     assessment: ({ A: "preferred", B: "healthy", C: "watch", D: "degraded", E: "poor" } as Row)[accountGrade] ?? "insufficient-evidence",
@@ -401,6 +448,8 @@ export async function collectRecentCallScoresFromDatabase(
       row,
       recentCallLimit,
       String(row.platform) === "grok" ? config.sub2api.grokScorePolicy : config.sub2api.scorePolicy,
+      Date.now(),
+      (String(row.platform) === "grok" ? config.sub2api.grokPriorityPlan : config.sub2api.priorityPlan).procurementAdvice.billingErrorPatterns,
     )));
   return {
       ok: true,

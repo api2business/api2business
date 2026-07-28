@@ -153,7 +153,10 @@ function renderScoreRows() {
     const desiredPriority = priorityPlanVisible && planRow ? Number(planRow.desiredPriority) : null
     const priorityDelta = desiredPriority === null ? null : desiredPriority - Number(row.priority)
     const costRate = planRow?.costRateCnyPerApiUsd ?? usage.costRateCnyPerApiUsd
-    return `<tr>
+    const available = row.currentAvailable ?? row.currentlyAvailable
+    const reason = row.availabilityReason ?? {}
+    const reasonDetail = reason.resetAt ? `${reason.detail ?? reason.label}，${time(reason.resetAt)} 恢复` : (reason.detail ?? reason.label ?? '原因未记录')
+    return `<tr class="${available ? '' : 'score-row-unavailable'}">
       <td class="account-cell"><b>${escapeHtml(row.accountName)}</b><small>#${escapeHtml(row.accountId)}</small></td>
       <td>${groupLabels(row)}</td>
       <td>${number(row.priority)}</td>
@@ -170,7 +173,7 @@ function renderScoreRows() {
       <td>${compact(usage.tokenCount)}</td>
       <td class="usd-cell">${usd(usage.apiAmountUsd)}</td>
       <td>${number(row.failoverRequests)} / ${number(row.failoverRecovered)}</td>
-      <td><span class="availability ${(row.currentAvailable ?? row.currentlyAvailable) ? 'is-up' : 'is-down'}">${(row.currentAvailable ?? row.currentlyAvailable) ? '可用' : '不可用'}</span></td>
+      <td class="availability-cell"><span class="availability ${available ? 'is-up' : 'is-down'}">${available ? '可用' : '不可用'}</span>${available ? '' : `<small title="${escapeHtml(reasonDetail)}">${escapeHtml(reason.label ?? '原因未记录')}</small>`}</td>
     </tr>`
   }).join('') : '<tr><td colspan="17" class="empty">没有匹配的账号</td></tr>'
 }

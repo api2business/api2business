@@ -80,6 +80,8 @@ button:disabled { cursor: wait; opacity: .48; }
 .data-table th { height: 40px; padding: 0 12px; position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap; background: var(--surface-raised); color: var(--muted); font: 10px/1 var(--mono); border-bottom: 1px solid var(--line); }
 .data-table td { height: 52px; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .data-table tbody tr:hover { background: rgba(185,228,71,.045); }
+.data-table tbody tr.score-row-unavailable { background: rgba(255,107,74,.09); box-shadow: inset 3px 0 rgba(255,107,74,.85); }
+.data-table tbody tr.score-row-unavailable:hover { background: rgba(255,107,74,.14); }
 .usd-cell { text-align: right !important; }
 .usd-value { display: inline-grid; grid-template-columns: 1ch 9ch .65ch 3ch; justify-content: end; align-items: baseline; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .usd-symbol { color: var(--muted); text-align: left; }
@@ -99,6 +101,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .grade-mid { color: var(--info); background: rgba(112,183,212,.1); }
 .grade-risk { color: var(--alert); background: rgba(255,107,74,.1); }
 .availability { font-size: 11px; }
+.availability-cell small { display: block; max-width: 128px; margin-top: 4px; overflow: hidden; color: #ff9a82; font: 10px/1.2 var(--mono); text-overflow: ellipsis; }
 .availability::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; background: currentColor; }
 .is-up { color: var(--signal); }
 .is-down { color: var(--alert); }

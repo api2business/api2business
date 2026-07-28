@@ -58,8 +58,26 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(row.score).toBe(100);
   expect(row.grade).toBe("A");
   expect(row.currentAvailable).toBe(false);
+  expect(row.availabilityReason).toMatchObject({ code: "account-error", label: "账号错误" });
   expect(row.currentStateScoreImpact).toBe("none");
   expect(row.priority).toBe(5);
+});
+
+test("unavailable reasons distinguish weekly quota, billing, authentication, and missing evidence", () => {
+  const base = {
+    account_id: 1, account_name: "account", status: "active", schedulable: true,
+    priority: 1, group_ids: [2], group_names: ["pool"], selected_calls: 0,
+  };
+  const reason = (overrides: Record<string, unknown>, patterns: string[] = []) => scoreRecentDatabaseRow(
+    { ...base, ...overrides }, 1000, scorePolicy, Date.parse("2026-07-29T00:00:00Z"), patterns,
+  ).availabilityReason;
+
+  expect(reason({ weekly_remaining_percent: 0 })).toMatchObject({ code: "weekly-quota", label: "周限额已用尽" });
+  expect(reason({ status: "error", schedulable: false, error_message: "用户额度不足" }, ["用户额度不足"]))
+    .toMatchObject({ code: "billing-depleted", label: "费用不足" });
+  expect(reason({ status: "error", schedulable: false, error_message: "Token revoked: authentication token invalidated" }))
+    .toMatchObject({ code: "authentication", label: "鉴权失效" });
+  expect(reason({ schedulable: false })).toMatchObject({ code: "unschedulable", label: "已停止调度" });
 });
 
 test("database aggregate accepts a 2000-call analysis window", () => {
