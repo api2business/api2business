@@ -55,6 +55,32 @@ export function buildPriorityWriteBatches(
   return batches;
 }
 
+export function buildPriorityWriteProfileQueues(
+  plan: Record<string, unknown>,
+  batchSize: number,
+): Array<{ profile: string; batches: Array<Record<string, number>> }> {
+  const size = Math.max(1, Math.floor(batchSize));
+  const changes = new Map(
+    (Array.isArray(plan.changes) ? plan.changes : [])
+      .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null && !Array.isArray(row))
+      .map((row) => [String(row.accountId), row]),
+  );
+  const profileEntries = new Map<string, Array<[string, number]>>();
+  for (const entry of orderedPriorityEntries(plan)) {
+    const profile = String(changes.get(entry[0])?.profile ?? "unknown");
+    const entries = profileEntries.get(profile) ?? [];
+    entries.push(entry);
+    profileEntries.set(profile, entries);
+  }
+  return [...profileEntries].map(([profile, entries]) => {
+    const batches: Array<Record<string, number>> = [];
+    for (let index = 0; index < entries.length; index += size) {
+      batches.push(Object.fromEntries(entries.slice(index, index + size)));
+    }
+    return { profile, batches };
+  });
+}
+
 export function randomIntervalMs(minimumMs: number, maximumMs: number, random = Math.random): number {
   if (maximumMs <= minimumMs) return Math.max(0, Math.round(minimumMs));
   const sample = Math.max(0, Math.min(0.999999999, random()));

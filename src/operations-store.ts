@@ -3,11 +3,20 @@ import { jitteredIntervalSeconds } from "./priority-automation-schedule";
 
 export type CashDirection = "income" | "expense";
 
+export interface PriorityWriteQueueLease {
+  queueName: "priority-write-global";
+  queuedAt: string;
+  acquiredAt: string;
+  waitMs: number;
+}
+
 export class OperationsStore {
   private readonly sql: SQL;
+  private readonly priorityWriteQueueSql: SQL;
 
   constructor(databaseUrl: string) {
     this.sql = new SQL(databaseUrl, { max: 4 });
+    this.priorityWriteQueueSql = new SQL(databaseUrl, { max: 1 });
   }
 
   async migrate(): Promise<void> {
@@ -76,7 +85,48 @@ export class OperationsStore {
   }
 
   async close(): Promise<void> {
-    await this.sql.close();
+    await Promise.all([this.sql.close(), this.priorityWriteQueueSql.close()]);
+  }
+
+  async withPriorityWriteQueue<T>(
+    operation: (lease: PriorityWriteQueueLease) => Promise<T>,
+  ): Promise<T> {
+    const queuedAt = new Date().toISOString();
+    const queuedAtMs = Date.now();
+    const connection = await this.priorityWriteQueueSql.reserve();
+    let locked = false;
+    let reusable = true;
+    try {
+      await connection`
+        SELECT pg_advisory_lock(
+          hashtext(${"apistate"}),
+          hashtext(${"priority-write-global"})
+        )
+      `;
+      locked = true;
+      const acquiredAt = new Date().toISOString();
+      return await operation({
+        queueName: "priority-write-global",
+        queuedAt,
+        acquiredAt,
+        waitMs: Date.now() - queuedAtMs,
+      });
+    } finally {
+      if (locked) {
+        try {
+          await connection`
+            SELECT pg_advisory_unlock(
+              hashtext(${"apistate"}),
+              hashtext(${"priority-write-global"})
+            )
+          `;
+        } catch {
+          reusable = false;
+          await connection.close();
+        }
+      }
+      if (reusable) connection.release();
+    }
   }
 
   async addCash(input: { occurredOn: string; direction: CashDirection; category: string; amountCny: number; description: string; operator: string }) {

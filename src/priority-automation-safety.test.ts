@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   buildPriorityWriteBatches,
+  buildPriorityWriteProfileQueues,
   exponentialRetryDelayMs,
   preparePriorityAutomationBatch,
   randomIntervalMs,
@@ -86,4 +87,22 @@ test("priority writes use random inter-batch intervals and jittered exponential 
   expect(exponentialRetryDelayMs(2000, 1, 0.2, () => 0.5)).toBe(2000);
   expect(exponentialRetryDelayMs(2000, 2, 0.2, () => 0.5)).toBe(4000);
   expect(exponentialRetryDelayMs(2000, 3, 0.2, () => 0.5)).toBe(8000);
+});
+
+test("codex and grok writes use separate non-overlapping profile queues", () => {
+  const queues = buildPriorityWriteProfileQueues({
+    priorities: { "1": 300, "2": 100, "3": 400, "4": 200 },
+    changes: [
+      { accountId: 1, profile: "codex", beforePriority: 100 },
+      { accountId: 2, profile: "grok", beforePriority: 300 },
+      { accountId: 3, profile: "codex", beforePriority: 200 },
+      { accountId: 4, profile: "grok", beforePriority: 400 },
+    ],
+  }, 3);
+
+  expect(queues.map((queue) => queue.profile)).toEqual(["codex", "grok"]);
+  expect(queues.map((queue) => queue.batches)).toEqual([
+    [{ "1": 300, "3": 400 }],
+    [{ "2": 100, "4": 200 }],
+  ]);
 });

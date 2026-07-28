@@ -3,9 +3,13 @@ import { parse } from "yaml";
 import type { AppConfig } from "./config";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
-import { OperationsStore, type CashDirection } from "./operations-store";
 import {
-  buildPriorityWriteBatches,
+  OperationsStore,
+  type CashDirection,
+  type PriorityWriteQueueLease,
+} from "./operations-store";
+import {
+  buildPriorityWriteProfileQueues,
   exponentialRetryDelayMs,
   preparePriorityAutomationBatch,
   randomIntervalMs,
@@ -333,57 +337,92 @@ export class OperationsService {
   }
 
   async confirmPriorityPlan(id: string, operator: string) {
+    return await this.store.withPriorityWriteQueue(async (queue) => {
+      return await this.confirmPriorityPlanQueued(id, operator, queue);
+    });
+  }
+
+  private async confirmPriorityPlanQueued(
+    id: string,
+    operator: string,
+    queue: PriorityWriteQueueLease,
+  ) {
     const plan = await this.store.getPlan(id);
     if (plan.status !== "pending") throw new Error("priority plan is not pending");
     if (new Date(String(plan.expires_at)).getTime() <= Date.now()) throw new Error("priority plan has expired");
     const priorities = object(plan.priorities) as Record<string, number>;
     const planResult = object(plan.result);
-    const batches = buildPriorityWriteBatches(
+    const profileQueues = buildPriorityWriteProfileQueues(
       { priorities, changes: planResult.changes },
       this.config.operations.priorityWrite.batchSize,
     );
+    const batches = profileQueues.flatMap((profileQueue) => profileQueue.batches);
+    const profiles = profileQueues.map((profileQueue) => profileQueue.profile);
     const batchResults: Array<Record<string, unknown>> = [];
     let completedChangedCount = 0;
-    for (let index = 0; index < batches.length; index += 1) {
-      const interBatchDelayMs = index === 0
-        ? 0
-        : randomIntervalMs(
-          this.config.operations.priorityWrite.interBatchMinimumDelayMs,
-          this.config.operations.priorityWrite.interBatchMaximumDelayMs,
+    let completedBatchCount = 0;
+    for (const profileQueue of profileQueues) {
+      for (let profileBatchIndex = 0; profileBatchIndex < profileQueue.batches.length; profileBatchIndex += 1) {
+        const interBatchDelayMs = completedBatchCount === 0
+          ? 0
+          : randomIntervalMs(
+            this.config.operations.priorityWrite.interBatchMinimumDelayMs,
+            this.config.operations.priorityWrite.interBatchMaximumDelayMs,
+          );
+        if (interBatchDelayMs > 0) await Bun.sleep(interBatchDelayMs);
+        const batchResult = await this.applyPriorityBatch(
+          profileQueue.batches[profileBatchIndex]!,
+          completedBatchCount + 1,
+          batches.length,
         );
-      if (interBatchDelayMs > 0) await Bun.sleep(interBatchDelayMs);
-      const batchResult = await this.applyPriorityBatch(batches[index]!, index + 1, batches.length);
-      batchResults.push({ ...batchResult, interBatchDelayMs });
-      if (!batchResult.ok) {
-        const result = {
-          changedCount: Object.keys(priorities).length,
-          completedChangedCount,
-          writeMode: "backend-api-paced",
-          batchSize: this.config.operations.priorityWrite.batchSize,
-          batchCount: batches.length,
-          completedBatchCount: index,
-          maximumRetries: this.config.operations.priorityWrite.maximumRetries,
-          verification: "postgresql-direct",
-          batches: batchResults,
-        };
-        await this.store.finishPlan(id, "failed", result);
-        await this.store.audit("priority.plan.confirm", "failed", operator,
-          { planId: id, changedCount: Object.keys(priorities).length },
-          {
+        batchResults.push({
+          ...batchResult,
+          profile: profileQueue.profile,
+          profileBatchNumber: profileBatchIndex + 1,
+          profileBatchCount: profileQueue.batches.length,
+          interBatchDelayMs,
+        });
+        if (!batchResult.ok) {
+          const result = {
+            changedCount: Object.keys(priorities).length,
+            completedChangedCount,
             writeMode: "backend-api-paced",
+            queue,
+            profiles,
+            failedProfile: profileQueue.profile,
+            batchSize: this.config.operations.priorityWrite.batchSize,
             batchCount: batches.length,
-            completedBatchCount: index,
-            failedBatchNumber: index + 1,
+            completedBatchCount,
+            maximumRetries: this.config.operations.priorityWrite.maximumRetries,
             verification: "postgresql-direct",
-          });
-        throw new Error("优先级分轮写入重试耗尽，已停止后续轮次");
+            batches: batchResults,
+          };
+          await this.store.finishPlan(id, "failed", result);
+          await this.store.audit("priority.plan.confirm", "failed", operator,
+            { planId: id, changedCount: Object.keys(priorities).length },
+            {
+              writeMode: "backend-api-paced",
+              queueName: queue.queueName,
+              queueWaitMs: queue.waitMs,
+              profiles,
+              failedProfile: profileQueue.profile,
+              batchCount: batches.length,
+              completedBatchCount,
+              failedBatchNumber: completedBatchCount + 1,
+              verification: "postgresql-direct",
+            });
+          throw new Error("优先级分轮写入重试耗尽，已停止后续轮次");
+        }
+        completedChangedCount += Number(batchResult.changedCount);
+        completedBatchCount += 1;
       }
-      completedChangedCount += Number(batchResult.changedCount);
     }
     const result = {
       changedCount: Object.keys(priorities).length,
       completedChangedCount,
       writeMode: "backend-api-paced",
+      queue,
+      profiles,
       batchSize: this.config.operations.priorityWrite.batchSize,
       batchCount: batches.length,
       completedBatchCount: batches.length,
@@ -397,6 +436,9 @@ export class OperationsService {
       { planId: id, changedCount: Object.keys(priorities).length },
       {
         writeMode: "backend-api-paced",
+        queueName: queue.queueName,
+        queueWaitMs: queue.waitMs,
+        profiles,
         batchCount: batches.length,
         completedBatchCount: batches.length,
         verification: "postgresql-direct",

@@ -109,6 +109,14 @@ test("confirming nine changes writes three sequential rounds of three", async ()
     async finishPlan(_id: string, status: string, result: Record<string, unknown>) {
       finished.push({ status, result });
     },
+    async withPriorityWriteQueue<T>(operation: (lease: Record<string, unknown>) => Promise<T>) {
+      return await operation({
+        queueName: "priority-write-global",
+        queuedAt: "2026-07-28T12:00:00.000Z",
+        acquiredAt: "2026-07-28T12:00:00.010Z",
+        waitMs: 10,
+      });
+    },
     async audit() {},
   } as unknown as OperationsStore;
   const config = {
@@ -151,6 +159,10 @@ test("confirming nine changes writes three sequential rounds of three", async ()
     batchSize: 3,
     batchCount: 3,
     completedBatchCount: 3,
+    queue: {
+      queueName: "priority-write-global",
+      waitMs: 10,
+    },
   });
   expect(finished[0]).toMatchObject({ status: "applied" });
 });
