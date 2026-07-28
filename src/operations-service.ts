@@ -11,7 +11,7 @@ import {
 import {
   OperationsStore,
   type CashDirection,
-  type PriorityWriteQueueLease,
+  type PriorityOptimizationQueueLease,
 } from "./operations-store";
 import {
   buildPriorityWriteProfileQueues,
@@ -135,6 +135,24 @@ export class OperationsService {
     triggerType: "manual" | "automatic" = "manual",
     executionStartedAt: string | null = null,
   ): Promise<Record<string, unknown>> {
+    return await this.store.withPriorityOptimizationQueue(async (queue) => {
+      return await this.generatePriorityPlanQueued(
+        recentCallLimit,
+        operator,
+        triggerType,
+        executionStartedAt,
+        queue,
+      );
+    });
+  }
+
+  private async generatePriorityPlanQueued(
+    recentCallLimit: number,
+    operator: string,
+    triggerType: "manual" | "automatic",
+    executionStartedAt: string | null,
+    queue: PriorityOptimizationQueueLease,
+  ): Promise<Record<string, unknown>> {
     const candidate = await this.priorityState(
       recentCallLimit,
       triggerType === "automatic" ? "automatic" : "manual",
@@ -177,8 +195,15 @@ export class OperationsService {
         candidateChangedCount: result.candidateChangedCount ?? Object.keys(priorities).length,
         notSelectedChangedCount: result.notSelectedChangedCount ?? 0,
         automationMode: object(result.automationSafety).mode ?? null,
+        queueName: queue.queueName,
+        queueWaitMs: queue.waitMs,
       });
-    return { ...result, planId: plan.id, expiresAt: plan.expiresAt };
+    return {
+      ...result,
+      planId: plan.id,
+      expiresAt: plan.expiresAt,
+      queue,
+    };
   }
 
   async priorityState(
@@ -383,13 +408,13 @@ export class OperationsService {
   }
 
   async confirmPriorityPlan(id: string, operator: string) {
-    const pendingPlan = await this.store.getPlan(id);
-    if (pendingPlan.status !== "pending") throw new Error("priority plan is not pending");
-    if (new Date(String(pendingPlan.expires_at)).getTime() <= Date.now()) {
-      throw new Error("priority plan has expired");
-    }
-    await this.store.markPlanExecutionStarted(id);
-    return await this.store.withPriorityWriteQueue(async (queue) => {
+    return await this.store.withPriorityOptimizationQueue(async (queue) => {
+      const pendingPlan = await this.store.getPlan(id);
+      if (pendingPlan.status !== "pending") throw new Error("priority plan is not pending");
+      if (new Date(String(pendingPlan.expires_at)).getTime() <= Date.now()) {
+        throw new Error("priority plan has expired");
+      }
+      await this.store.markPlanExecutionStarted(id);
       return await this.confirmPriorityPlanQueued(id, operator, queue);
     });
   }
@@ -397,7 +422,7 @@ export class OperationsService {
   private async confirmPriorityPlanQueued(
     id: string,
     operator: string,
-    queue: PriorityWriteQueueLease,
+    queue: PriorityOptimizationQueueLease,
   ) {
     const plan = await this.store.getPlan(id);
     if (plan.status !== "pending") throw new Error("priority plan is not pending");
@@ -642,89 +667,147 @@ export class OperationsService {
     const policy = await this.store.claimDueAutomation();
     if (!policy) return { ok: true, due: false };
     const operator = "scheduler";
-    let plan: Record<string, unknown> | null = null;
-    let completionStatus = "failed";
-    let runError: unknown = null;
+    const runId = String(policy.run_id);
+    let enteredQueue = false;
     try {
-      plan = await this.generatePriorityPlan(
-        Number(policy.recent_call_limit),
-        operator,
-        "automatic",
-        policy.run_started_at instanceof Date
-          ? policy.run_started_at.toISOString()
-          : policy.run_started_at
-            ? new Date(String(policy.run_started_at)).toISOString()
-            : new Date().toISOString(),
-      );
-      const safety = object(plan.automationSafety);
-      if (safety.allowed !== true) {
-        const result = {
-          changedCount: 0,
-          candidateChangedCount: Number(plan.candidateChangedCount ?? 0),
-          notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
-          writeMode: "cycle-skipped",
-          verification: "not-started",
-          safety,
-          profiles: plan.profiles,
-        };
-        await this.store.finishPlan(
-          String(plan.planId),
-          "failed",
-          result,
-          this.config.operations.automationJitterPercent,
-        );
-        await this.store.audit("priority.automation.run", "blocked", operator,
-          { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
-          { planId: plan.planId, ...result });
-        completionStatus = "skipped";
-        return { ok: true, due: true, planId: plan.planId, ...result };
-      }
-      if (Number(plan.changedCount) === 0) {
-        const result = {
-          changedCount: 0,
-          candidateChangedCount: Number(plan.candidateChangedCount ?? 0),
-          notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
-          automationMode: safety.mode ?? "full",
-          writeMode: "no-change",
-          verification: "native-api-read-broker",
-          verifiedCount: 0,
-        };
-        await this.store.finishPlan(
-          String(plan.planId),
-          "applied",
-          result,
-          this.config.operations.automationJitterPercent,
-        );
-        await this.store.audit("priority.automation.run", "succeeded", operator,
-        { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
-        { ...result, profiles: plan.profiles });
-        completionStatus = "succeeded";
-        return { ok: true, due: true, planId: plan.planId, ...result };
-      }
-      const result = await this.confirmPriorityPlan(String(plan.planId), operator);
-      const batch = {
-        candidateChangedCount: Number(plan.candidateChangedCount ?? result.changedCount),
-        notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
-        automationMode: safety.mode ?? "full",
-      };
-      await this.store.audit("priority.automation.run", "succeeded", operator,
-        { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
-        {
-          planId: plan.planId,
-          changedCount: result.changedCount,
-          verification: result.verification,
-          profiles: plan.profiles,
-          ...batch,
-        });
-      completionStatus = "succeeded";
-      return { due: true, ...result, ...batch };
+      return await this.store.withPriorityOptimizationQueue(async (queue) => {
+        enteredQueue = true;
+        let plan: Record<string, unknown> | null = null;
+        let completionStatus = "failed";
+        let runError: unknown = null;
+        try {
+          const started = await this.store.markAutomationRunStarted(runId);
+          const startedAt = started.run_started_at instanceof Date
+            ? started.run_started_at.toISOString()
+            : new Date(String(started.run_started_at)).toISOString();
+          plan = await this.generatePriorityPlanQueued(
+            Number(policy.recent_call_limit),
+            operator,
+            "automatic",
+            startedAt,
+            queue,
+          );
+          const safety = object(plan.automationSafety);
+          if (safety.allowed !== true) {
+            const result = {
+              changedCount: 0,
+              candidateChangedCount: Number(plan.candidateChangedCount ?? 0),
+              notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
+              writeMode: "cycle-skipped",
+              verification: "not-started",
+              safety,
+              profiles: plan.profiles,
+              queue,
+            };
+            await this.store.finishPlan(
+              String(plan.planId),
+              "failed",
+              result,
+              this.config.operations.automationJitterPercent,
+            );
+            await this.store.audit("priority.automation.run", "blocked", operator,
+              { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
+              { planId: plan.planId, ...result });
+            completionStatus = "skipped";
+            return { ok: true, due: true, planId: plan.planId, ...result };
+          }
+          if (Number(plan.changedCount) === 0) {
+            const result = {
+              changedCount: 0,
+              candidateChangedCount: Number(plan.candidateChangedCount ?? 0),
+              notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
+              automationMode: safety.mode ?? "full",
+              writeMode: "no-change",
+              verification: "native-api-read-broker",
+              verifiedCount: 0,
+              queue,
+            };
+            await this.store.finishPlan(
+              String(plan.planId),
+              "applied",
+              result,
+              this.config.operations.automationJitterPercent,
+            );
+            await this.store.audit("priority.automation.run", "succeeded", operator,
+              { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
+              { ...result, profiles: plan.profiles });
+            completionStatus = "succeeded";
+            return { ok: true, due: true, planId: plan.planId, ...result };
+          }
+          const result = await this.confirmPriorityPlanQueued(
+            String(plan.planId),
+            operator,
+            queue,
+          );
+          const batch = {
+            candidateChangedCount: Number(plan.candidateChangedCount ?? result.changedCount),
+            notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
+            automationMode: safety.mode ?? "full",
+          };
+          await this.store.audit("priority.automation.run", "succeeded", operator,
+            { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
+            {
+              planId: plan.planId,
+              changedCount: result.changedCount,
+              verification: result.verification,
+              profiles: plan.profiles,
+              queueName: queue.queueName,
+              queueWaitMs: queue.waitMs,
+              ...batch,
+            });
+          completionStatus = "succeeded";
+          return { due: true, ...result, ...batch };
+        } catch (error) {
+          runError = error;
+          completionStatus = "failed";
+          try {
+            await this.store.audit("priority.automation.run", "failed", operator,
+              { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
+              {
+                planId: plan?.planId ?? null,
+                queueName: queue.queueName,
+                queueWaitMs: queue.waitMs,
+                error: error instanceof Error ? error.message : String(error),
+              });
+          } catch (auditError) {
+            console.error(JSON.stringify({
+              component: "priority-automation",
+              event: "failure-audit-failed",
+              error: auditError instanceof Error ? auditError.message : String(auditError),
+              valuesPrinted: false,
+            }));
+          }
+          throw error;
+        } finally {
+          try {
+            const completed = await this.store.completeAutomationRun(
+              runId,
+              this.config.operations.automationJitterPercent,
+              completionStatus,
+            );
+            if (!completed) throw new Error("priority automation run token no longer exists");
+          } catch (completionError) {
+            if (runError === null) throw completionError;
+            console.error(JSON.stringify({
+              component: "priority-automation",
+              event: "run-completion-failed",
+              error: completionError instanceof Error ? completionError.message : String(completionError),
+              valuesPrinted: false,
+            }));
+          }
+        }
+      });
     } catch (error) {
-      runError = error;
-      completionStatus = "failed";
+      if (enteredQueue) throw error;
       try {
         await this.store.audit("priority.automation.run", "failed", operator,
           { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
-          { planId: plan?.planId ?? null, error: error instanceof Error ? error.message : String(error) });
+          {
+            planId: null,
+            queueName: "priority-optimization-global",
+            queueAcquired: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
       } catch (auditError) {
         console.error(JSON.stringify({
           component: "priority-automation",
@@ -733,17 +816,14 @@ export class OperationsService {
           valuesPrinted: false,
         }));
       }
-      throw error;
-    } finally {
       try {
         const completed = await this.store.completeAutomationRun(
-          String(policy.run_id),
+          runId,
           this.config.operations.automationJitterPercent,
-          completionStatus,
+          "failed",
         );
         if (!completed) throw new Error("priority automation run token no longer exists");
       } catch (completionError) {
-        if (runError === null) throw completionError;
         console.error(JSON.stringify({
           component: "priority-automation",
           event: "run-completion-failed",
@@ -751,6 +831,7 @@ export class OperationsService {
           valuesPrinted: false,
         }));
       }
+      throw error;
     }
   }
 

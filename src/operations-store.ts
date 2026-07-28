@@ -3,8 +3,8 @@ import { jitteredIntervalSeconds } from "./priority-automation-schedule";
 
 export type CashDirection = "income" | "expense";
 
-export interface PriorityWriteQueueLease {
-  queueName: "priority-write-global";
+export interface PriorityOptimizationQueueLease {
+  queueName: "priority-optimization-global";
   queuedAt: string;
   acquiredAt: string;
   waitMs: number;
@@ -12,11 +12,11 @@ export interface PriorityWriteQueueLease {
 
 export class OperationsStore {
   private readonly sql: SQL;
-  private readonly priorityWriteQueueSql: SQL;
+  private readonly priorityOptimizationQueueSql: SQL;
 
   constructor(databaseUrl: string) {
     this.sql = new SQL(databaseUrl, { max: 4 });
-    this.priorityWriteQueueSql = new SQL(databaseUrl, { max: 1 });
+    this.priorityOptimizationQueueSql = new SQL(databaseUrl, { max: 1 });
   }
 
   async migrate(): Promise<void> {
@@ -87,28 +87,28 @@ export class OperationsStore {
   }
 
   async close(): Promise<void> {
-    await Promise.all([this.sql.close(), this.priorityWriteQueueSql.close()]);
+    await Promise.all([this.sql.close(), this.priorityOptimizationQueueSql.close()]);
   }
 
-  async withPriorityWriteQueue<T>(
-    operation: (lease: PriorityWriteQueueLease) => Promise<T>,
+  async withPriorityOptimizationQueue<T>(
+    operation: (lease: PriorityOptimizationQueueLease) => Promise<T>,
   ): Promise<T> {
     const queuedAt = new Date().toISOString();
     const queuedAtMs = Date.now();
-    const connection = await this.priorityWriteQueueSql.reserve();
+    const connection = await this.priorityOptimizationQueueSql.reserve();
     let locked = false;
     let reusable = true;
     try {
       await connection`
         SELECT pg_advisory_lock(
           hashtext(${"apistate"}),
-          hashtext(${"priority-write-global"})
+          hashtext(${"priority-optimization-global"})
         )
       `;
       locked = true;
       const acquiredAt = new Date().toISOString();
       return await operation({
-        queueName: "priority-write-global",
+        queueName: "priority-optimization-global",
         queuedAt,
         acquiredAt,
         waitMs: Date.now() - queuedAtMs,
@@ -119,7 +119,7 @@ export class OperationsStore {
           await connection`
             SELECT pg_advisory_unlock(
               hashtext(${"apistate"}),
-              hashtext(${"priority-write-global"})
+              hashtext(${"priority-optimization-global"})
             )
           `;
         } catch {
@@ -336,7 +336,7 @@ export class OperationsStore {
       const runId = crypto.randomUUID();
       const [claimed] = await tx`
         UPDATE apistate_priority_automation
-        SET run_id=${runId}, run_started_at=now(),
+        SET run_id=${runId}, run_started_at=NULL,
           updated_at=now()
         WHERE id='default'
         RETURNING id, enabled, interval_seconds, recent_call_limit,
@@ -344,6 +344,17 @@ export class OperationsStore {
       `;
       return claimed ?? null;
     });
+  }
+
+  async markAutomationRunStarted(runId: string) {
+    const [row] = await this.sql`
+      UPDATE apistate_priority_automation
+      SET run_started_at=COALESCE(run_started_at, now()), updated_at=now()
+      WHERE id='default' AND run_id=${runId}
+      RETURNING id, run_id, run_started_at
+    `;
+    if (!row) throw new Error("priority automation run token no longer exists");
+    return row;
   }
 
   async completeAutomationRun(runId: string, jitterPercent: number, status: string) {

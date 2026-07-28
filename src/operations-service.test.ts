@@ -30,6 +30,16 @@ function candidatePlan(queryDurationMs = 800) {
 function serviceFixture(candidate: Record<string, unknown>) {
   const created: Array<Record<string, unknown>> = [];
   const store = {
+    async withPriorityOptimizationQueue<T>(
+      operation: (lease: Record<string, unknown>) => Promise<T>,
+    ) {
+      return await operation({
+        queueName: "priority-optimization-global",
+        queuedAt: "2026-07-28T12:00:00.000Z",
+        acquiredAt: "2026-07-28T12:00:00.010Z",
+        waitMs: 10,
+      });
+    },
     async createPlan(input: Record<string, unknown>) {
       created.push(input);
       return { id: "plan-1", expiresAt: "2026-07-28T12:00:00.000Z" };
@@ -100,6 +110,7 @@ test("confirming nine changes writes three sequential rounds of three", async ()
   const priorities = Object.fromEntries(Array.from({ length: 9 }, (_, index) => [String(index + 1), 100 + index]));
   const appliedBatches: Array<Record<string, number>> = [];
   const finished: Array<Record<string, unknown>> = [];
+  const events: string[] = [];
   let executionStarted = false;
   const store = {
     async getPlan() {
@@ -111,10 +122,12 @@ test("confirming nine changes writes three sequential rounds of three", async ()
       };
     },
     async markPlanExecutionStarted() {
+      events.push("execution-started");
       executionStarted = true;
       return { execution_started_at: "2026-07-28T12:00:00.000Z" };
     },
     async finishPlan(_id: string, status: string, result: Record<string, unknown>) {
+      events.push("plan-finished");
       finished.push({ status, result });
       return {
         execution_started_at: "2026-07-28T12:00:00.000Z",
@@ -122,15 +135,22 @@ test("confirming nine changes writes three sequential rounds of three", async ()
         next_run_at: "2026-07-28T13:00:10.000Z",
       };
     },
-    async withPriorityWriteQueue<T>(operation: (lease: Record<string, unknown>) => Promise<T>) {
-      return await operation({
-        queueName: "priority-write-global",
-        queuedAt: "2026-07-28T12:00:00.000Z",
-        acquiredAt: "2026-07-28T12:00:00.010Z",
-        waitMs: 10,
-      });
+    async withPriorityOptimizationQueue<T>(operation: (lease: Record<string, unknown>) => Promise<T>) {
+      events.push("queue-acquired");
+      try {
+        return await operation({
+          queueName: "priority-optimization-global",
+          queuedAt: "2026-07-28T12:00:00.000Z",
+          acquiredAt: "2026-07-28T12:00:00.010Z",
+          waitMs: 10,
+        });
+      } finally {
+        events.push("queue-released");
+      }
     },
-    async audit() {},
+    async audit() {
+      events.push("plan-audited");
+    },
   } as unknown as OperationsStore;
   const config = {
     operations: {
@@ -154,6 +174,7 @@ test("confirming nine changes writes three sequential rounds of three", async ()
     ): Promise<Record<string, unknown> & { ok: boolean }>;
   };
   internals.applyPriorityBatch = async (batch, batchNumber, batchCount) => {
+    events.push(`batch-${batchNumber}`);
     appliedBatches.push(batch);
     return {
       ok: true,
@@ -175,7 +196,7 @@ test("confirming nine changes writes three sequential rounds of three", async ()
     batchCount: 3,
     completedBatchCount: 3,
     queue: {
-      queueName: "priority-write-global",
+      queueName: "priority-optimization-global",
       waitMs: 10,
     },
   });
@@ -185,6 +206,16 @@ test("confirming nine changes writes three sequential rounds of three", async ()
     completedAt: "2026-07-28T12:00:10.000Z",
     nextAutomaticRunAt: "2026-07-28T13:00:10.000Z",
   });
+  expect(events).toEqual([
+    "queue-acquired",
+    "execution-started",
+    "batch-1",
+    "batch-2",
+    "batch-3",
+    "plan-finished",
+    "plan-audited",
+    "queue-released",
+  ]);
 });
 
 test("priority history emits separate codex and grok rows with elapsed time", async () => {
@@ -342,52 +373,308 @@ test("one round skips backend writes when broker preflight readback is already c
   });
 });
 
-test("the next automatic interval starts only after queued writes fully complete", async () => {
+test("a waiting optimization cannot start scoring until the previous automatic flow is fully completed", async () => {
   const events: string[] = [];
+  let queueTail = Promise.resolve();
+  let queueSequence = 0;
+  let planSequence = 0;
+  let resolveFirstAcquired = () => {};
+  const firstAcquired = new Promise<void>((resolve) => {
+    resolveFirstAcquired = resolve;
+  });
   const store = {
     async claimDueAutomation() {
       events.push("claimed");
       return { run_id: "run-1", recent_call_limit: 1000 };
     },
-    async audit() {},
+    async withPriorityOptimizationQueue<T>(
+      operation: (lease: Record<string, unknown>) => Promise<T>,
+    ) {
+      const sequence = ++queueSequence;
+      events.push(`queued:${sequence}`);
+      const previous = queueTail;
+      let release = () => {};
+      queueTail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      events.push(`acquired:${sequence}`);
+      if (sequence === 1) resolveFirstAcquired();
+      try {
+        return await operation({
+          queueName: "priority-optimization-global",
+          queuedAt: `queued-${sequence}`,
+          acquiredAt: `acquired-${sequence}`,
+          waitMs: sequence === 1 ? 0 : 10,
+        });
+      } finally {
+        events.push(`released:${sequence}`);
+        release();
+      }
+    },
+    async markAutomationRunStarted() {
+      events.push("automation-started");
+      return { run_started_at: "2026-07-28T12:00:00.000Z" };
+    },
+    async createPlan(input: Record<string, unknown>) {
+      const id = `plan-${++planSequence}`;
+      events.push(`plan-created:${String(input.triggerType)}`);
+      return { id, expiresAt: "2026-07-28T12:15:00.000Z" };
+    },
+    async finishPlan() {
+      events.push("plan-finished");
+      return {
+        execution_started_at: "2026-07-28T12:00:00.000Z",
+        completed_at: "2026-07-28T12:00:01.000Z",
+        next_run_at: null,
+      };
+    },
+    async audit(action: string) {
+      if (action === "priority.plan.generate") events.push("plan-audited");
+      if (action === "priority.automation.run") events.push("automation-audited");
+    },
     async completeAutomationRun(_runId: string, _jitterPercent: number, status: string) {
-      events.push(`completed:${status}`);
+      events.push(`automation-completed:${status}`);
       return { id: "default" };
     },
   } as unknown as OperationsStore;
   const config = {
     operations: {
+      planTtlMinutes: 15,
       automationJitterPercent: 0.1,
+      automationSafety,
+      priorityWrite: {
+        batchSize: 3,
+      },
     },
   } as AppConfig;
   const service = new OperationsService(config, store, unusedReads);
-  const methods = service as unknown as {
-    generatePriorityPlan(): Promise<Record<string, unknown>>;
-    confirmPriorityPlan(): Promise<Record<string, unknown>>;
-  };
-  methods.generatePriorityPlan = async () => ({
-    planId: "plan-1",
-    changedCount: 1,
-    candidateChangedCount: 1,
-    notSelectedChangedCount: 0,
-    automationSafety: { allowed: true, mode: "full" },
-    profiles: { codex: { changedCount: 1 } },
-  });
-  methods.confirmPriorityPlan = async () => {
-    events.push("write-started");
-    await Bun.sleep(10);
-    events.push("write-finished");
+  service.priorityState = async (_limit, priority) => {
+    events.push(`score-started:${priority}`);
+    if (priority === "automatic") await Bun.sleep(10);
+    events.push(`score-finished:${priority}`);
     return {
-      changedCount: 1,
-      verification: "native-api-read-broker",
+      queryDurationMs: 10,
+      eligibleCount: 2,
+      changedCount: 0,
+      priorities: {},
+      changes: [],
+      profiles: {
+        codex: { changedCount: 0 },
+        grok: { changedCount: 0 },
+      },
     };
   };
 
-  await service.runDueAutomation();
+  const automatic = service.runDueAutomation();
+  await firstAcquired;
+  const manual = service.generatePriorityPlan(1000, "tester");
+  await Promise.all([automatic, manual]);
+
+  const automaticCompleted = events.indexOf("automation-completed:succeeded");
+  const automaticReleased = events.indexOf("released:1");
+  const manualAcquired = events.indexOf("acquired:2");
+  const manualScoreStarted = events.indexOf("score-started:manual");
+  expect(events.indexOf("automation-started")).toBeGreaterThan(events.indexOf("acquired:1"));
+  expect(automaticCompleted).toBeGreaterThan(events.indexOf("automation-audited"));
+  expect(automaticReleased).toBeGreaterThan(automaticCompleted);
+  expect(manualAcquired).toBeGreaterThan(automaticReleased);
+  expect(manualScoreStarted).toBeGreaterThan(manualAcquired);
+});
+
+test("an automatic changed plan uses one full-flow queue lease through writeback and completion", async () => {
+  const events: string[] = [];
+  const priorities = { "1": 120 };
+  const changes = [{
+    accountId: 1,
+    beforePriority: 300,
+    desiredPriority: 120,
+    profile: "codex",
+  }];
+  const store = {
+    async claimDueAutomation() {
+      return { run_id: "run-1", recent_call_limit: 1000 };
+    },
+    async withPriorityOptimizationQueue<T>(
+      operation: (lease: Record<string, unknown>) => Promise<T>,
+    ) {
+      events.push("acquired");
+      try {
+        return await operation({
+          queueName: "priority-optimization-global",
+          queuedAt: "queued",
+          acquiredAt: "acquired",
+          waitMs: 0,
+        });
+      } finally {
+        events.push("released");
+      }
+    },
+    async markAutomationRunStarted() {
+      events.push("started");
+      return { run_started_at: "2026-07-28T12:00:00.000Z" };
+    },
+    async createPlan() {
+      events.push("plan-created");
+      return { id: "plan-1", expiresAt: "2099-01-01T00:15:00.000Z" };
+    },
+    async getPlan() {
+      return {
+        status: "pending",
+        expires_at: "2099-01-01T00:15:00.000Z",
+        priorities,
+        result: { changes },
+      };
+    },
+    async finishPlan() {
+      events.push("plan-finished");
+      return {
+        execution_started_at: "2026-07-28T12:00:00.000Z",
+        completed_at: "2026-07-28T12:00:01.000Z",
+        next_run_at: null,
+      };
+    },
+    async audit(action: string) {
+      if (action === "priority.plan.confirm") events.push("confirmation-audited");
+      if (action === "priority.automation.run") events.push("automation-audited");
+    },
+    async completeAutomationRun() {
+      events.push("automation-completed");
+      return { id: "default" };
+    },
+  } as unknown as OperationsStore;
+  const config = {
+    operations: {
+      planTtlMinutes: 15,
+      automationJitterPercent: 0.1,
+      automationSafety,
+      priorityWrite: {
+        batchSize: 3,
+        interBatchMinimumDelayMs: 0,
+        interBatchMaximumDelayMs: 0,
+        maximumRetries: 3,
+      },
+    },
+  } as AppConfig;
+  const service = new OperationsService(config, store, unusedReads);
+  service.priorityState = async () => ({
+    queryDurationMs: 10,
+    eligibleCount: 2,
+    changedCount: 1,
+    priorities,
+    changes,
+    profiles: { codex: { changedCount: 1 } },
+  });
+  const internals = service as unknown as {
+    applyPriorityBatch(): Promise<Record<string, unknown> & { ok: boolean }>;
+  };
+  internals.applyPriorityBatch = async () => {
+    events.push("write-and-readback");
+    return {
+      ok: true,
+      changedCount: 1,
+      verification: "native-api-read-broker",
+      verifiedCount: 1,
+    };
+  };
+
+  const result = await service.runDueAutomation();
+  expect(result).toMatchObject({
+    due: true,
+    changedCount: 1,
+    queue: {
+      queueName: "priority-optimization-global",
+    },
+  });
   expect(events).toEqual([
-    "claimed",
-    "write-started",
-    "write-finished",
-    "completed:succeeded",
+    "acquired",
+    "started",
+    "plan-created",
+    "write-and-readback",
+    "plan-finished",
+    "confirmation-audited",
+    "automation-audited",
+    "automation-completed",
+    "released",
+  ]);
+});
+
+test("a blocked automatic cycle remains inside the full optimization queue through completion", async () => {
+  const events: string[] = [];
+  const store = {
+    async claimDueAutomation() {
+      return { run_id: "run-1", recent_call_limit: 1000 };
+    },
+    async withPriorityOptimizationQueue<T>(
+      operation: (lease: Record<string, unknown>) => Promise<T>,
+    ) {
+      events.push("acquired");
+      try {
+        return await operation({
+          queueName: "priority-optimization-global",
+          queuedAt: "queued",
+          acquiredAt: "acquired",
+          waitMs: 0,
+        });
+      } finally {
+        events.push("released");
+      }
+    },
+    async markAutomationRunStarted() {
+      events.push("started");
+      return { run_started_at: "2026-07-28T12:00:00.000Z" };
+    },
+    async createPlan() {
+      events.push("plan-created");
+      return { id: "plan-1", expiresAt: "2026-07-28T12:15:00.000Z" };
+    },
+    async finishPlan() {
+      events.push("plan-finished");
+      return {
+        execution_started_at: "2026-07-28T12:00:00.000Z",
+        completed_at: "2026-07-28T12:00:01.000Z",
+        next_run_at: null,
+      };
+    },
+    async audit(action: string, status: string) {
+      if (action === "priority.automation.run") events.push(`automation-audited:${status}`);
+    },
+    async completeAutomationRun() {
+      events.push("automation-completed");
+      return { id: "default" };
+    },
+  } as unknown as OperationsStore;
+  const config = {
+    operations: {
+      planTtlMinutes: 15,
+      automationJitterPercent: 0.1,
+      automationSafety,
+      priorityWrite: {
+        batchSize: 3,
+      },
+    },
+  } as AppConfig;
+  const service = new OperationsService(config, store, unusedReads);
+  service.priorityState = async () => ({
+    ...candidatePlan(3500),
+    profiles: { codex: { changedCount: 15 } },
+  });
+
+  const result = await service.runDueAutomation();
+  expect(result).toMatchObject({
+    due: true,
+    writeMode: "cycle-skipped",
+    queue: {
+      queueName: "priority-optimization-global",
+    },
+  });
+  expect(events).toEqual([
+    "acquired",
+    "started",
+    "plan-created",
+    "plan-finished",
+    "automation-audited:blocked",
+    "automation-completed",
+    "released",
   ]);
 });
