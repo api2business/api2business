@@ -264,3 +264,53 @@ test("one round skips backend writes when direct preflight readback is already c
     preflightVerifiedCount: 3,
   });
 });
+
+test("the next automatic interval starts only after queued writes fully complete", async () => {
+  const events: string[] = [];
+  const store = {
+    async claimDueAutomation() {
+      events.push("claimed");
+      return { run_id: "run-1", recent_call_limit: 1000 };
+    },
+    async audit() {},
+    async completeAutomationRun(_runId: string, _jitterPercent: number, status: string) {
+      events.push(`completed:${status}`);
+      return { id: "default" };
+    },
+  } as unknown as OperationsStore;
+  const config = {
+    operations: {
+      automationJitterPercent: 0.1,
+    },
+  } as AppConfig;
+  const service = new OperationsService(config, store, "postgres://unused");
+  const methods = service as unknown as {
+    generatePriorityPlan(): Promise<Record<string, unknown>>;
+    confirmPriorityPlan(): Promise<Record<string, unknown>>;
+  };
+  methods.generatePriorityPlan = async () => ({
+    planId: "plan-1",
+    changedCount: 1,
+    candidateChangedCount: 1,
+    notSelectedChangedCount: 0,
+    automationSafety: { allowed: true, mode: "full" },
+    profiles: { codex: { changedCount: 1 } },
+  });
+  methods.confirmPriorityPlan = async () => {
+    events.push("write-started");
+    await Bun.sleep(10);
+    events.push("write-finished");
+    return {
+      changedCount: 1,
+      verification: "postgresql-direct",
+    };
+  };
+
+  await service.runDueAutomation();
+  expect(events).toEqual([
+    "claimed",
+    "write-started",
+    "write-finished",
+    "completed:succeeded",
+  ]);
+});

@@ -267,7 +267,6 @@ export class OperationsStore {
       const [claimed] = await tx`
         UPDATE apistate_priority_automation
         SET run_id=${runId}, run_started_at=now(),
-          next_run_at=now() + make_interval(secs => interval_seconds),
           updated_at=now()
         WHERE id='default'
         RETURNING id, enabled, interval_seconds, recent_call_limit,
