@@ -22,10 +22,12 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("a.name = $2::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.name = $3::text");
-  expect(recentAccountAggregateQuery).toContain("recovery.request_id = e.request_id");
-  expect(recentAccountAggregateQuery).toContain("recovery.message = 'openai.request_completed'");
-  expect(recentAccountAggregateQuery).toContain("WHERE f.triggered");
+  expect(recentAccountAggregateQuery).toContain("e.client_status_code BETWEEN 200 AND 399");
+  expect(recentAccountAggregateQuery).toContain("e.client_status_code >= 400");
+  expect(recentAccountAggregateQuery).toContain("o.status_code::int AS client_status_code");
+  expect(recentAccountAggregateQuery).not.toContain("openai.request_completed");
   expect(recentAccountAggregateQuery).toContain("AS failover_recovered");
+  expect(recentAccountAggregateQuery).toContain("AS failover_failed");
   expect(recentAccountAggregateQuery).not.toContain("start_time");
 
   const row = scoreRecentDatabaseRow({
@@ -91,6 +93,7 @@ test("database score always projects failover and recovered request counts", () 
     attributed_requests: 100,
     failover_requests: 3,
     failover_recovered: 2,
+    failover_failed: 1,
     failure_requests: 0,
     stream_success_requests: 100,
     first_token_samples: 100,
@@ -116,7 +119,8 @@ test("database score always projects failover and recovered request counts", () 
 
   expect(recovered.failoverRequests).toBe(3);
   expect(recovered.failoverRecovered).toBe(2);
-  expect(recovered.failoverOutcomeMissing).toBe(1);
+  expect(recovered.failoverFailed).toBe(1);
+  expect(recovered.failoverOutcomeMissing).toBe(0);
   expect(zero.failoverRequests).toBe(0);
   expect(zero.failoverRecovered).toBe(0);
 });

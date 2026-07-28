@@ -57,8 +57,17 @@ account_stats AS (
       WHERE e.request_id IS NOT NULL AND f.triggered
     )::int AS failover_requests,
     COUNT(DISTINCT e.request_id) FILTER (
-      WHERE e.request_id IS NOT NULL AND f.triggered AND COALESCE(r.recovered, false)
+      WHERE e.request_id IS NOT NULL
+        AND f.triggered
+        AND e.kind = 'error'
+        AND e.client_status_code BETWEEN 200 AND 399
     )::int AS failover_recovered,
+    COUNT(DISTINCT e.request_id) FILTER (
+      WHERE e.request_id IS NOT NULL
+        AND f.triggered
+        AND e.kind = 'error'
+        AND e.client_status_code >= 400
+    )::int AS failover_failed,
     COUNT(DISTINCT e.request_id) FILTER (
       WHERE e.kind = 'error' AND e.scoreable AND e.request_id IS NOT NULL
     )::int AS failure_requests,
@@ -107,6 +116,7 @@ account_stats AS (
           u.input_tokens::bigint,
           u.output_tokens::bigint,
           u.actual_cost::numeric,
+          NULL::int AS client_status_code,
           false AS scoreable
         FROM usage_logs u
         WHERE u.account_id = a.account_id
@@ -126,6 +136,7 @@ account_stats AS (
           0::bigint,
           0::bigint,
           0::numeric,
+          o.status_code::int AS client_status_code,
           CASE
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%context window%'
               OR LOWER(COALESCE(o.error_message, '')) LIKE '%context_length_exceeded%' THEN false
@@ -169,15 +180,6 @@ account_stats AS (
         AND system_log.message = 'openai.upstream_failover_switching'
     ) AS triggered
   ) f ON true
-  LEFT JOIN LATERAL (
-    SELECT EXISTS (
-      SELECT 1
-      FROM ops_system_logs recovery
-      WHERE recovery.request_id = e.request_id
-        AND recovery.message = 'openai.request_completed'
-    ) AS recovered
-    WHERE f.triggered
-  ) r ON true
   GROUP BY a.account_id
 )
 SELECT a.*, s.*
@@ -230,6 +232,10 @@ export function scoreRecentDatabaseRow(
   const attributedRequests = numeric(row.attributed_requests) ?? 0;
   const failoverRequests = numeric(row.failover_requests) ?? 0;
   const failoverRecovered = Math.min(failoverRequests, numeric(row.failover_recovered) ?? 0);
+  const failoverFailed = Math.min(
+    Math.max(0, failoverRequests - failoverRecovered),
+    numeric(row.failover_failed) ?? 0,
+  );
   const failoverRate = attributedRequests > 0 ? Math.round(failoverRequests / attributedRequests * 1_000_000) / 1_000_000 : null;
   const firstTokenSamples = numeric(row.first_token_samples) ?? 0;
   const streamSuccessRequests = numeric(row.stream_success_requests) ?? 0;
@@ -296,8 +302,8 @@ export function scoreRecentDatabaseRow(
     attributedRequests,
     failoverRequests,
     failoverRecovered,
-    failoverFailed: 0,
-    failoverOutcomeMissing: Math.max(0, failoverRequests - failoverRecovered),
+    failoverFailed,
+    failoverOutcomeMissing: Math.max(0, failoverRequests - failoverRecovered - failoverFailed),
     failoverRate,
     streamSuccessRequests,
     firstTokenSamples,
