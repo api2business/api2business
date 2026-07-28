@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111412" />
   <title>账号评分 | ApiState</title>
   <link rel="stylesheet" href="/styles.css" />
-  <script src="/app.js?v=merged-score-priority-v4" type="module"></script>
+  <script src="/app.js?v=score-profile-tabs-v5" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -40,10 +40,14 @@
           <small>距离下次更新 <b id="score-countdown">--:--</b></small>
         </div>
       </div>
+      <div class="profile-tabs" role="tablist" aria-label="评分账号类型">
+        <button class="profile-tab is-active" type="button" role="tab" aria-selected="true" data-score-profile="codex">Codex</button>
+        <button class="profile-tab" type="button" role="tab" aria-selected="false" data-score-profile="grok">Grok</button>
+      </div>
       <p id="plan-refresh-state" class="section-state">尚未生成调整计划</p>
       <div id="plan-progress" class="operation-progress" aria-live="polite"></div>
       <div class="table-wrap">
-        <table class="data-table" aria-label="所有分组账号评分">
+        <table class="data-table" aria-label="当前账号类型评分">
           <thead><tr><th>账号</th><th>分组</th><th>当前优先级</th><th>计划优先级</th><th>变化</th><th>评分</th><th>成本</th><th>等级</th><th>置信度</th><th>尝试</th><th>失败率</th><th>TTFT P95</th><th>请求</th><th>Token</th><th class="usd-cell">API USD</th><th>切号恢复</th><th>可用</th></tr></thead>
           <tbody id="score-body"><tr><td colspan="17" class="empty">正在读取评分快照...</td></tr></tbody>
         </table>

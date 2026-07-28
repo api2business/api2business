@@ -104,6 +104,15 @@ let scoreRefreshedAt = null
 let scoreNextRefreshAt = null
 let priorityPlanRows = new Map()
 let priorityPlanVisible = false
+let activeScoreProfile = 'codex'
+
+function scoreProfile(row) {
+  return String(row.platform ?? '').toLowerCase() === 'grok' ? 'grok' : 'codex'
+}
+
+function scoreRowsForActiveProfile() {
+  return scoreRows.filter((row) => scoreProfile(row) === activeScoreProfile)
+}
 
 function gradeClass(value) {
   const grade = String(value ?? '').toLowerCase()
@@ -134,7 +143,8 @@ function renderRefreshClock() {
 
 function renderScoreRows() {
   const term = ($('#score-filter')?.value ?? '').trim().toLowerCase()
-  const rows = scoreRows.filter((row) => `${row.accountName} ${row.groupName}`.toLowerCase().includes(term))
+  const rows = scoreRowsForActiveProfile()
+    .filter((row) => `${row.accountName} ${row.groupName}`.toLowerCase().includes(term))
   $('#score-body').innerHTML = rows.length ? rows.map((row) => {
     const usage = row.usage ?? {}
     const planRow = priorityPlanRows.get(String(row.accountId))
@@ -163,16 +173,23 @@ function renderScoreRows() {
   }).join('') : '<tr><td colspan="17" class="empty">没有匹配的账号</td></tr>'
 }
 
-function renderScores(data) {
-  scoreRows = data.accounts ?? []
-  const groups = data.groups ?? [...new Set(scoreRows.flatMap((row) =>
+function renderScoreMetrics(data = {}) {
+  const rows = scoreRowsForActiveProfile()
+  const groups = [...new Set(rows.flatMap((row) =>
     Array.isArray(row.groupNames) ? row.groupNames : [row.groupName].filter(Boolean)
   ))]
-  $('#metric-accounts').textContent = number(scoreRows.length)
+  $('#metric-accounts').textContent = number(rows.length)
   $('#metric-groups').textContent = number(groups.length)
-  $('#metric-good').textContent = number(scoreRows.filter((row) => Number(row.score) >= 80).length)
-  $('#metric-risk').textContent = number(scoreRows.filter((row) => Number(row.score) < 60).length)
-  $('#metric-window').textContent = data.window ?? (data.recentCallLimit ? `最近 ${number(data.recentCallLimit)} 次` : '—')
+  $('#metric-good').textContent = number(rows.filter((row) => Number(row.score) >= 80).length)
+  $('#metric-risk').textContent = number(rows.filter((row) => Number(row.score) < 60).length)
+  if (data.window || data.recentCallLimit) {
+    $('#metric-window').textContent = data.window ?? `最近 ${number(data.recentCallLimit)} 次`
+  }
+}
+
+function renderScores(data) {
+  scoreRows = data.accounts ?? []
+  renderScoreMetrics(data)
   const status = data.status ?? (scoreRows.length ? 'ready' : 'unavailable')
   $('#score-state').textContent = ({ ready: '已更新', refreshing: '刷新中', stale: '使用旧快照', unavailable: '暂无快照' })[status] ?? status
   $('#score-state').dataset.state = status
@@ -186,6 +203,18 @@ function renderScores(data) {
 async function scoresPage() {
   const select = $('#score-call-limit')
   $('#score-filter').addEventListener('input', renderScoreRows)
+  document.querySelectorAll('[data-score-profile]').forEach((button) => {
+    button.addEventListener('click', () => {
+      activeScoreProfile = button.dataset.scoreProfile
+      document.querySelectorAll('[data-score-profile]').forEach((candidate) => {
+        const selected = candidate === button
+        candidate.classList.toggle('is-active', selected)
+        candidate.setAttribute('aria-selected', String(selected))
+      })
+      renderScoreMetrics()
+      renderScoreRows()
+    })
+  })
   $('#query-scores').addEventListener('click', () => void refreshPriorityState().catch(() => undefined))
   $('#refresh-scores').addEventListener('click', async () => {
     const button = $('#refresh-scores')
@@ -354,7 +383,7 @@ function renderPriorityHistoryPage() {
     <td>${row.profile === 'grok' ? 'Grok' : 'Codex'}</td>
     <td>${time(row.started_at)}</td><td>${row.trigger_type === 'automatic' ? '自动' : '手动'}</td>
     <td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.created_by)}</td>
-    <td>${number(row.recent_call_limit)}</td><td>${number(row.changed_count)}</td>
+    <td>${number(row.recent_call_limit)}</td><td>${Number(row.changed_count) === 0 ? '<span class="converged-state">已收敛</span>' : number(row.changed_count)}</td>
     <td>${time(row.completed_at)}</td>
     <td>${row.duration_ms == null ? '—' : `${number(Number(row.duration_ms) / 1000, 1)} 秒`}</td>
   </tr>`).join('') : '<tr><td colspan="9" class="empty">暂无调整记录</td></tr>'

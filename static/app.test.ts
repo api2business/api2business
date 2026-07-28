@@ -45,3 +45,21 @@ test("priority adjustment history is paginated instead of growing without bound"
   expect(html).toContain('id="history-page-state"');
   expect(html).toContain('id="history-next"');
 });
+
+test("score table separates Codex and Grok accounts with profile tabs", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+
+  expect(html).toContain('data-score-profile="codex"');
+  expect(html).toContain('data-score-profile="grok"');
+  expect(app).toContain("scoreRowsForActiveProfile()");
+  expect(app).toContain("String(row.platform ?? '').toLowerCase() === 'grok'");
+  expect(app).toContain("candidate.setAttribute('aria-selected', String(selected))");
+});
+
+test("zero-change priority history is labelled as converged", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+
+  expect(app).toContain("Number(row.changed_count) === 0");
+  expect(app).toContain("已收敛");
+});

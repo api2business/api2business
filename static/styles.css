@@ -69,6 +69,12 @@ button:disabled { cursor: wait; opacity: .48; }
 .query-command { height: 34px; border: 1px solid var(--signal); border-radius: 3px; background: transparent; color: var(--signal); padding: 0 14px; font-weight: 700; }
 .query-command:hover:not(:disabled) { background: var(--signal); color: var(--ink); }
 .query-command:disabled { opacity: .5; cursor: wait; }
+.profile-tabs { display: flex; width: fit-content; margin: 8px 0 12px; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.profile-tab { min-width: 108px; height: 36px; border: 0; border-right: 1px solid var(--line); background: var(--surface); color: var(--muted); font: 700 12px/1 var(--mono); }
+.profile-tab:last-child { border-right: 0; }
+.profile-tab:hover { color: var(--paper); }
+.profile-tab.is-active { background: var(--signal); color: var(--ink); }
+.converged-state { color: var(--muted); }
 .table-wrap { overflow: auto; border: 1px solid var(--line); }
 .data-table { width: 100%; min-width: 1220px; border-collapse: collapse; font-size: 12px; }
 .data-table th { height: 40px; padding: 0 12px; position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap; background: var(--surface-raised); color: var(--muted); font: 10px/1 var(--mono); border-bottom: 1px solid var(--line); }
