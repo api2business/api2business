@@ -110,6 +110,7 @@ export class OperationsService {
     recentCallLimit: number,
     operator: string,
     triggerType: "manual" | "automatic" = "manual",
+    executionStartedAt: string | null = null,
   ): Promise<Record<string, unknown>> {
     const candidate = await this.priorityState(recentCallLimit);
     let result = candidate;
@@ -135,7 +136,13 @@ export class OperationsService {
       };
     }
     const plan = await this.store.createPlan({
-      operator, recentCallLimit, ttlMinutes: this.config.operations.planTtlMinutes, priorities, result, triggerType,
+      operator,
+      recentCallLimit,
+      ttlMinutes: this.config.operations.planTtlMinutes,
+      priorities,
+      result,
+      triggerType,
+      executionStartedAt,
     });
     await this.store.audit("priority.plan.generate", "succeeded", operator,
       { recentCallLimit, triggerType }, {
@@ -337,6 +344,12 @@ export class OperationsService {
   }
 
   async confirmPriorityPlan(id: string, operator: string) {
+    const pendingPlan = await this.store.getPlan(id);
+    if (pendingPlan.status !== "pending") throw new Error("priority plan is not pending");
+    if (new Date(String(pendingPlan.expires_at)).getTime() <= Date.now()) {
+      throw new Error("priority plan has expired");
+    }
+    await this.store.markPlanExecutionStarted(id);
     return await this.store.withPriorityWriteQueue(async (queue) => {
       return await this.confirmPriorityPlanQueued(id, operator, queue);
     });
@@ -397,7 +410,12 @@ export class OperationsService {
             verification: "postgresql-direct",
             batches: batchResults,
           };
-          await this.store.finishPlan(id, "failed", result);
+          const completion = await this.store.finishPlan(
+            id,
+            "failed",
+            result,
+            this.config.operations.automationJitterPercent,
+          );
           await this.store.audit("priority.plan.confirm", "failed", operator,
             { planId: id, changedCount: Object.keys(priorities).length },
             {
@@ -410,6 +428,7 @@ export class OperationsService {
               completedBatchCount,
               failedBatchNumber: completedBatchCount + 1,
               verification: "postgresql-direct",
+              nextAutomaticRunAt: completion.next_run_at,
             });
           throw new Error("优先级分轮写入重试耗尽，已停止后续轮次");
         }
@@ -431,7 +450,12 @@ export class OperationsService {
       verifiedCount: completedChangedCount,
       batches: batchResults,
     };
-    await this.store.finishPlan(id, "applied", result);
+    const completion = await this.store.finishPlan(
+      id,
+      "applied",
+      result,
+      this.config.operations.automationJitterPercent,
+    );
     await this.store.audit("priority.plan.confirm", "succeeded", operator,
       { planId: id, changedCount: Object.keys(priorities).length },
       {
@@ -444,30 +468,91 @@ export class OperationsService {
         verification: "postgresql-direct",
         verifiedCount: completedChangedCount,
       });
-    return { ok: true, planId: id, ...result };
+    return {
+      ok: true,
+      planId: id,
+      ...result,
+      executionStartedAt: completion.execution_started_at,
+      completedAt: completion.completed_at,
+      nextAutomaticRunAt: completion.next_run_at,
+    };
   }
 
   async priorityHistory() {
     const rows = await this.store.priorityHistory(this.config.operations.auditLimit) as Array<Record<string, unknown>>;
     return {
       ok: true,
-      records: rows.map((row) => {
+      records: rows.flatMap((row) => {
         const priorities = typeof row.priorities === "string" ? JSON.parse(row.priorities) : row.priorities;
         const result = typeof row.result === "string" ? JSON.parse(row.result) : object(row.result);
+        const applyResult = typeof row.apply_result === "string"
+          ? JSON.parse(row.apply_result)
+          : object(row.apply_result);
         const automationSafety = object(object(result).automationSafety);
-        const { priorities: _hidden, result: _hiddenResult, ...visible } = row;
-        const changedCount = priorities && typeof priorities === "object" && !Array.isArray(priorities)
-          ? Object.keys(priorities).length : 0;
-        return {
-          ...visible,
-          changed_count: changedCount,
-          candidate_changed_count: Number(object(result).candidateChangedCount ?? changedCount),
-          not_selected_changed_count: Number(object(result).notSelectedChangedCount ?? 0),
-          automation_mode: automationSafety.mode ?? null,
-          automation_batching_reasons: automationSafety.batchingReasons ?? [],
-          automation_write_batch_size: Number(automationSafety.writeBatchSize ?? 0),
-          automation_write_batch_count: Number(automationSafety.writeBatchCount ?? 0),
-        };
+        const {
+          priorities: _hidden,
+          result: _hiddenResult,
+          apply_result: _hiddenApplyResult,
+          ...visible
+        } = row;
+        const priorityIds = new Set(
+          priorities && typeof priorities === "object" && !Array.isArray(priorities)
+            ? Object.keys(priorities)
+            : [],
+        );
+        const changes = records(object(result).changes);
+        const profileSummary = object(object(result).profiles);
+        const discoveredProfiles = new Set([
+          ...Object.keys(profileSummary),
+          ...changes.map((change) => String(change.profile ?? "")).filter(Boolean),
+        ]);
+        const profiles = ["codex", "grok"].filter((profile) => discoveredProfiles.has(profile));
+        if (profiles.length === 0) profiles.push("codex");
+        const startedAt = row.execution_started_at ?? row.created_at;
+        const completedAt = row.completed_at;
+        const startedAtMs = startedAt instanceof Date
+          ? startedAt.getTime()
+          : new Date(String(startedAt)).getTime();
+        const completedAtMs = completedAt instanceof Date
+          ? completedAt.getTime()
+          : new Date(String(completedAt)).getTime();
+        const durationMs = row.duration_ms !== null && row.duration_ms !== undefined
+          ? Math.max(0, Number(row.duration_ms))
+          : completedAt && Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
+            ? Math.max(0, completedAtMs - startedAtMs)
+            : null;
+        const batches = records(object(applyResult).batches);
+        return profiles.map((profile) => {
+          const profileChanges = changes.filter((change) => String(change.profile ?? "codex") === profile);
+          const changedCount = profileChanges.filter((change) =>
+            priorityIds.has(String(change.accountId ?? change.account_id ?? "")),
+          ).length;
+          const profileBatches = batches.filter((batch) => String(batch.profile ?? "") === profile);
+          let profileStatus = row.status;
+          if (row.status === "failed" && profileBatches.length > 0) {
+            profileStatus = profileBatches.some((batch) => batch.ok === false) ? "failed" : "applied";
+          } else if (row.status === "failed" && profileBatches.length === 0 && changedCount > 0) {
+            profileStatus = "skipped";
+          }
+          return {
+            ...visible,
+            id: `${String(row.id)}:${profile}`,
+            profile,
+            status: profileStatus,
+            started_at: startedAt,
+            duration_ms: durationMs,
+            changed_count: changedCount,
+            candidate_changed_count: Number(object(profileSummary[profile]).changedCount ?? profileChanges.length),
+            not_selected_changed_count: Math.max(
+              0,
+              Number(object(profileSummary[profile]).changedCount ?? profileChanges.length) - changedCount,
+            ),
+            automation_mode: automationSafety.mode ?? null,
+            automation_batching_reasons: automationSafety.batchingReasons ?? [],
+            automation_write_batch_size: Number(automationSafety.writeBatchSize ?? 0),
+            automation_write_batch_count: profileBatches.length,
+          };
+        });
       }),
     };
   }
@@ -522,7 +607,16 @@ export class OperationsService {
     let completionStatus = "failed";
     let runError: unknown = null;
     try {
-      plan = await this.generatePriorityPlan(Number(policy.recent_call_limit), operator, "automatic");
+      plan = await this.generatePriorityPlan(
+        Number(policy.recent_call_limit),
+        operator,
+        "automatic",
+        policy.run_started_at instanceof Date
+          ? policy.run_started_at.toISOString()
+          : policy.run_started_at
+            ? new Date(String(policy.run_started_at)).toISOString()
+            : new Date().toISOString(),
+      );
       const safety = object(plan.automationSafety);
       if (safety.allowed !== true) {
         const result = {
@@ -534,7 +628,12 @@ export class OperationsService {
           safety,
           profiles: plan.profiles,
         };
-        await this.store.finishPlan(String(plan.planId), "failed", result);
+        await this.store.finishPlan(
+          String(plan.planId),
+          "failed",
+          result,
+          this.config.operations.automationJitterPercent,
+        );
         await this.store.audit("priority.automation.run", "blocked", operator,
           { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
           { planId: plan.planId, ...result });
@@ -551,7 +650,12 @@ export class OperationsService {
           verification: "postgresql-direct",
           verifiedCount: 0,
         };
-        await this.store.finishPlan(String(plan.planId), "applied", result);
+        await this.store.finishPlan(
+          String(plan.planId),
+          "applied",
+          result,
+          this.config.operations.automationJitterPercent,
+        );
         await this.store.audit("priority.automation.run", "succeeded", operator,
         { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
         { ...result, profiles: plan.profiles });

@@ -97,6 +97,7 @@ test("confirming nine changes writes three sequential rounds of three", async ()
   const priorities = Object.fromEntries(Array.from({ length: 9 }, (_, index) => [String(index + 1), 100 + index]));
   const appliedBatches: Array<Record<string, number>> = [];
   const finished: Array<Record<string, unknown>> = [];
+  let executionStarted = false;
   const store = {
     async getPlan() {
       return {
@@ -106,8 +107,17 @@ test("confirming nine changes writes three sequential rounds of three", async ()
         result: { changes: candidatePlan().changes },
       };
     },
+    async markPlanExecutionStarted() {
+      executionStarted = true;
+      return { execution_started_at: "2026-07-28T12:00:00.000Z" };
+    },
     async finishPlan(_id: string, status: string, result: Record<string, unknown>) {
       finished.push({ status, result });
+      return {
+        execution_started_at: "2026-07-28T12:00:00.000Z",
+        completed_at: "2026-07-28T12:00:10.000Z",
+        next_run_at: "2026-07-28T13:00:10.000Z",
+      };
     },
     async withPriorityWriteQueue<T>(operation: (lease: Record<string, unknown>) => Promise<T>) {
       return await operation({
@@ -121,6 +131,7 @@ test("confirming nine changes writes three sequential rounds of three", async ()
   } as unknown as OperationsStore;
   const config = {
     operations: {
+      automationJitterPercent: 0.1,
       priorityWrite: {
         batchSize: 3,
         interBatchMinimumDelayMs: 0,
@@ -152,6 +163,7 @@ test("confirming nine changes writes three sequential rounds of three", async ()
   };
 
   const result = await service.confirmPriorityPlan("plan-1", "tester");
+  expect(executionStarted).toBeTrue();
   expect(appliedBatches.map((batch) => Object.keys(batch).length)).toEqual([3, 3, 3]);
   expect(result).toMatchObject({
     changedCount: 9,
@@ -165,6 +177,68 @@ test("confirming nine changes writes three sequential rounds of three", async ()
     },
   });
   expect(finished[0]).toMatchObject({ status: "applied" });
+  expect(result).toMatchObject({
+    executionStartedAt: "2026-07-28T12:00:00.000Z",
+    completedAt: "2026-07-28T12:00:10.000Z",
+    nextAutomaticRunAt: "2026-07-28T13:00:10.000Z",
+  });
+});
+
+test("priority history emits separate codex and grok rows with elapsed time", async () => {
+  const store = {
+    async priorityHistory() {
+      return [{
+        id: "plan-1",
+        created_at: "2026-07-28T12:00:00.000Z",
+        execution_started_at: "2026-07-28T12:00:05.000Z",
+        completed_at: "2026-07-28T12:00:15.000Z",
+        created_by: "scheduler",
+        trigger_type: "automatic",
+        status: "applied",
+        recent_call_limit: 1000,
+        priorities: { "1": 100, "2": 200 },
+        result: {
+          profiles: {
+            codex: { changedCount: 1 },
+            grok: { changedCount: 1 },
+          },
+          changes: [
+            { accountId: 1, profile: "codex" },
+            { accountId: 2, profile: "grok" },
+          ],
+        },
+        apply_result: {
+          batches: [
+            { profile: "codex", ok: true },
+            { profile: "grok", ok: true },
+          ],
+        },
+      }];
+    },
+  } as unknown as OperationsStore;
+  const config = {
+    operations: { auditLimit: 100 },
+  } as AppConfig;
+  const service = new OperationsService(config, store, "postgres://unused");
+
+  const result = await service.priorityHistory();
+  expect(result.records).toHaveLength(2);
+  expect(result.records).toEqual([
+    expect.objectContaining({
+      id: "plan-1:codex",
+      profile: "codex",
+      changed_count: 1,
+      started_at: "2026-07-28T12:00:05.000Z",
+      duration_ms: 10_000,
+    }),
+    expect.objectContaining({
+      id: "plan-1:grok",
+      profile: "grok",
+      changed_count: 1,
+      started_at: "2026-07-28T12:00:05.000Z",
+      duration_ms: 10_000,
+    }),
+  ]);
 });
 
 test("one round stops after the initial write and three exponential retries", async () => {

@@ -318,11 +318,13 @@ async function refreshPriorityState() {
 async function loadPriorityHistory() {
   const data = await requestJson('/api/operations/priority-history')
   $('#priority-history-body').innerHTML = data.records?.length ? data.records.map((row) => `<tr>
-    <td>${time(row.created_at)}</td><td>${row.trigger_type === 'automatic' ? '自动' : '手动'}</td>
+    <td>${row.profile === 'grok' ? 'Grok' : 'Codex'}</td>
+    <td>${time(row.started_at)}</td><td>${row.trigger_type === 'automatic' ? '自动' : '手动'}</td>
     <td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.created_by)}</td>
     <td>${number(row.recent_call_limit)}</td><td>${number(row.changed_count)}</td>
     <td>${time(row.completed_at)}</td>
-  </tr>`).join('') : '<tr><td colspan="7" class="empty">暂无调整记录</td></tr>'
+    <td>${row.duration_ms == null ? '—' : `${number(Number(row.duration_ms) / 1000, 1)} 秒`}</td>
+  </tr>`).join('') : '<tr><td colspan="9" class="empty">暂无调整记录</td></tr>'
 }
 
 async function loadPriorityAutomation() {
@@ -391,10 +393,14 @@ async function setupPriorityPanel(options) {
       const result = await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 190000)
       planProgress(`调整成功，后端已写入并由 PostgreSQL 验证 ${number(result.verifiedCount)} 个账号`)
       activePlanId = null
-      await Promise.all([refreshPriorityState(), loadPriorityHistory()])
+      await Promise.all([refreshPriorityState(), loadPriorityHistory(), loadPriorityAutomation()])
     } catch (error) {
       planProgress(`调整失败：${error instanceof Error ? error.message : String(error)}`)
       activePlanId = null
+      await Promise.all([
+        loadPriorityHistory().catch(() => undefined),
+        loadPriorityAutomation().catch(() => undefined),
+      ])
     } finally {
       button.disabled = true
       $('#generate-plan').disabled = false

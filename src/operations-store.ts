@@ -50,6 +50,8 @@ export class OperationsStore {
         ADD COLUMN IF NOT EXISTS trigger_type text NOT NULL DEFAULT 'manual';
       ALTER TABLE apistate_priority_plans
         ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+      ALTER TABLE apistate_priority_plans
+        ADD COLUMN IF NOT EXISTS execution_started_at timestamptz;
       CREATE TABLE IF NOT EXISTS apistate_priority_automation (
         id text PRIMARY KEY CHECK (id='default'),
         enabled boolean NOT NULL,
@@ -162,15 +164,25 @@ export class OperationsStore {
     `;
   }
 
-  async createPlan(input: { operator: string; recentCallLimit: number; ttlMinutes: number; priorities: Record<string, number>; result: unknown; triggerType?: "manual" | "automatic" }) {
+  async createPlan(input: {
+    operator: string;
+    recentCallLimit: number;
+    ttlMinutes: number;
+    priorities: Record<string, number>;
+    result: unknown;
+    triggerType?: "manual" | "automatic";
+    executionStartedAt?: string | null;
+  }) {
     const id = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + input.ttlMinutes * 60_000);
     await this.sql`
       INSERT INTO apistate_priority_plans
-        (id, expires_at, created_by, status, recent_call_limit, priorities, result, trigger_type)
+        (id, expires_at, created_by, status, recent_call_limit, priorities, result,
+          trigger_type, execution_started_at)
       VALUES (${id}, ${expiresAt}, ${input.operator}, 'pending',
         ${input.recentCallLimit}, ${input.priorities}::jsonb,
-        ${input.result}::jsonb, ${input.triggerType ?? "manual"})
+        ${input.result}::jsonb, ${input.triggerType ?? "manual"},
+        ${input.executionStartedAt ?? null})
     `;
     return { id, expiresAt: expiresAt.toISOString() };
   }
@@ -178,7 +190,8 @@ export class OperationsStore {
   async getPlan(id: string) {
     const [row] = await this.sql`
       SELECT id, created_at, expires_at, created_by, status, recent_call_limit,
-        priorities, result, applied_at, apply_result, trigger_type, completed_at
+        priorities, result, applied_at, apply_result, trigger_type, completed_at,
+        execution_started_at
       FROM apistate_priority_plans WHERE id=${id}
     `;
     if (!row) throw new Error("priority plan does not exist");
@@ -191,17 +204,74 @@ export class OperationsStore {
     return plan;
   }
 
-  async finishPlan(id: string, status: "applied" | "failed", result: unknown) {
-    await this.sql`
-      UPDATE apistate_priority_plans SET status=${status}, applied_at=now(), completed_at=now(),
-        apply_result=${result}::jsonb WHERE id=${id}
+  async markPlanExecutionStarted(id: string) {
+    const [row] = await this.sql`
+      UPDATE apistate_priority_plans
+      SET execution_started_at=COALESCE(execution_started_at, now())
+      WHERE id=${id} AND status='pending'
+      RETURNING execution_started_at
     `;
+    if (!row) throw new Error("priority plan is not pending");
+    return row;
+  }
+
+  async finishPlan(
+    id: string,
+    status: "applied" | "failed",
+    result: unknown,
+    jitterPercent: number,
+  ) {
+    return await this.sql.begin(async (tx) => {
+      const [plan] = await tx`
+        UPDATE apistate_priority_plans
+        SET status=${status}, applied_at=now(), completed_at=now(),
+          execution_started_at=COALESCE(execution_started_at, now()),
+          apply_result=${result}::jsonb
+        WHERE id=${id}
+        RETURNING trigger_type, execution_started_at, completed_at
+      `;
+      if (!plan) throw new Error("priority plan does not exist");
+
+      let nextRunAt: unknown = null;
+      if (plan.trigger_type === "manual") {
+        const [automation] = await tx`
+          SELECT interval_seconds
+          FROM apistate_priority_automation
+          WHERE id='default'
+          FOR UPDATE
+        `;
+        if (automation) {
+          const nextDelay = jitteredIntervalSeconds(
+            Number(automation.interval_seconds),
+            jitterPercent,
+          );
+          const [updated] = await tx`
+            UPDATE apistate_priority_automation
+            SET next_run_at=now() + make_interval(secs => ${nextDelay}),
+              updated_at=now()
+            WHERE id='default'
+            RETURNING next_run_at
+          `;
+          nextRunAt = updated?.next_run_at ?? null;
+        }
+      }
+      return {
+        execution_started_at: plan.execution_started_at,
+        completed_at: plan.completed_at,
+        next_run_at: nextRunAt,
+      };
+    });
   }
 
   async priorityHistory(limit: number) {
     return await this.sql`
-      SELECT id, created_at, completed_at, created_by, trigger_type, status,
-        recent_call_limit, priorities, result, apply_result
+      SELECT id, created_at, execution_started_at, completed_at, created_by,
+        trigger_type, status, recent_call_limit, priorities, result, apply_result,
+        CASE WHEN completed_at IS NULL THEN NULL
+          ELSE EXTRACT(EPOCH FROM (
+            completed_at - COALESCE(execution_started_at, created_at)
+          )) * 1000
+        END AS duration_ms
       FROM apistate_priority_plans
       ORDER BY created_at DESC LIMIT ${limit}
     `;
