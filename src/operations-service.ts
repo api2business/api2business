@@ -546,7 +546,7 @@ export class OperationsService {
     const rows = await this.store.priorityHistory(this.config.operations.auditLimit) as Array<Record<string, unknown>>;
     return {
       ok: true,
-      records: rows.flatMap((row) => {
+      records: rows.map((row) => {
         const priorities = typeof row.priorities === "string" ? JSON.parse(row.priorities) : row.priorities;
         const result = typeof row.result === "string" ? JSON.parse(row.result) : object(row.result);
         const applyResult = typeof row.apply_result === "string"
@@ -586,11 +586,19 @@ export class OperationsService {
             ? Math.max(0, completedAtMs - startedAtMs)
             : null;
         const batches = records(object(applyResult).batches);
-        return profiles.map((profile) => {
+        const profileChangedCounts: Record<string, number> = {};
+        const profileCandidateChangedCounts: Record<string, number> = {};
+        const profileNotSelectedChangedCounts: Record<string, number> = {};
+        const profileWriteBatchCounts: Record<string, number> = {};
+        const profileStatuses: Record<string, unknown> = {};
+        for (const profile of profiles) {
           const profileChanges = changes.filter((change) => String(change.profile ?? "codex") === profile);
           const changedCount = profileChanges.filter((change) =>
             priorityIds.has(String(change.accountId ?? change.account_id ?? "")),
           ).length;
+          const candidateChangedCount = Number(
+            object(profileSummary[profile]).changedCount ?? profileChanges.length,
+          );
           const profileBatches = batches.filter((batch) => String(batch.profile ?? "") === profile);
           let profileStatus = row.status;
           if (row.status === "failed" && profileBatches.length > 0) {
@@ -598,25 +606,35 @@ export class OperationsService {
           } else if (row.status === "failed" && profileBatches.length === 0 && changedCount > 0) {
             profileStatus = "skipped";
           }
-          return {
-            ...visible,
-            id: `${String(row.id)}:${profile}`,
-            profile,
-            status: profileStatus,
-            started_at: startedAt,
-            duration_ms: durationMs,
-            changed_count: changedCount,
-            candidate_changed_count: Number(object(profileSummary[profile]).changedCount ?? profileChanges.length),
-            not_selected_changed_count: Math.max(
-              0,
-              Number(object(profileSummary[profile]).changedCount ?? profileChanges.length) - changedCount,
-            ),
-            automation_mode: automationSafety.mode ?? null,
-            automation_batching_reasons: automationSafety.batchingReasons ?? [],
-            automation_write_batch_size: Number(automationSafety.writeBatchSize ?? 0),
-            automation_write_batch_count: profileBatches.length,
-          };
-        });
+          profileChangedCounts[profile] = changedCount;
+          profileCandidateChangedCounts[profile] = candidateChangedCount;
+          profileNotSelectedChangedCounts[profile] = Math.max(0, candidateChangedCount - changedCount);
+          profileWriteBatchCounts[profile] = profileBatches.length;
+          profileStatuses[profile] = profileStatus;
+        }
+        return {
+          ...visible,
+          id: String(row.id),
+          profile: profiles.length === 1 ? profiles[0] : "combined",
+          profiles,
+          status: row.status,
+          started_at: startedAt,
+          duration_ms: durationMs,
+          changed_count: priorityIds.size,
+          candidate_changed_count: Object.values(profileCandidateChangedCounts)
+            .reduce((sum, value) => sum + value, 0),
+          not_selected_changed_count: Object.values(profileNotSelectedChangedCounts)
+            .reduce((sum, value) => sum + value, 0),
+          profile_changed_counts: profileChangedCounts,
+          profile_candidate_changed_counts: profileCandidateChangedCounts,
+          profile_not_selected_changed_counts: profileNotSelectedChangedCounts,
+          profile_write_batch_counts: profileWriteBatchCounts,
+          profile_statuses: profileStatuses,
+          automation_mode: automationSafety.mode ?? null,
+          automation_batching_reasons: automationSafety.batchingReasons ?? [],
+          automation_write_batch_size: Number(automationSafety.writeBatchSize ?? 0),
+          automation_write_batch_count: batches.length,
+        };
       }),
     };
   }

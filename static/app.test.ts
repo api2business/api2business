@@ -80,3 +80,14 @@ test("zero-change priority history is labelled as converged", async () => {
   expect(app).toContain("Number(row.changed_count) === 0");
   expect(app).toContain("已收敛");
 });
+
+test("priority history renders one combined pool label with per-pool counts", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+
+  expect(app).toContain("profiles.map(label).join(' + ')");
+  expect(app).toContain("row.profile_changed_counts ?? {}");
+  expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
+  expect(html).toContain("/app.js?v=priority-history-v1");
+  expect(html).toContain("/styles.css?v=priority-history-v1");
+});

@@ -91,6 +91,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .account-cell { min-width: 230px; }
 .account-cell b { display: block; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
 .account-cell small { display: block; color: var(--muted); margin-top: 4px; font: 10px/1 var(--mono); }
+.history-profile small { display: block; color: var(--muted); margin-top: 5px; font: 10px/1 var(--mono); white-space: nowrap; }
 .score-value { display: inline-grid; place-items: center; min-width: 44px; height: 26px; padding: 0 6px; border-radius: 3px; font: 700 12px/1 var(--mono); }
 .group-list { display: flex; flex-wrap: wrap; gap: 4px; max-width: 250px; }
 .group-list span { padding: 3px 6px; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); font: 10px/1.2 var(--mono); }

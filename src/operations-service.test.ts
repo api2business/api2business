@@ -218,7 +218,82 @@ test("confirming nine changes writes three sequential rounds of three", async ()
   ]);
 });
 
-test("priority history emits separate codex and grok rows with elapsed time", async () => {
+test("codex profile writes finish before grok profile writes start", async () => {
+  const priorities = { "1": 100, "2": 200 };
+  const changes = [
+    { accountId: 1, profile: "codex", beforePriority: 300 },
+    { accountId: 2, profile: "grok", beforePriority: 400 },
+  ];
+  const events: string[] = [];
+  const store = {
+    async withPriorityOptimizationQueue<T>(operation: (lease: Record<string, unknown>) => Promise<T>) {
+      return await operation({
+        queueName: "priority-optimization-global",
+        queuedAt: "2026-07-28T12:00:00.000Z",
+        acquiredAt: "2026-07-28T12:00:00.010Z",
+        waitMs: 10,
+      });
+    },
+    async getPlan() {
+      return {
+        status: "pending",
+        expires_at: "2099-01-01T00:00:00.000Z",
+        priorities,
+        result: { changes },
+      };
+    },
+    async markPlanExecutionStarted() {
+      return { execution_started_at: "2026-07-28T12:00:00.000Z" };
+    },
+    async finishPlan() {
+      return {
+        execution_started_at: "2026-07-28T12:00:00.000Z",
+        completed_at: "2026-07-28T12:00:01.000Z",
+        next_run_at: null,
+      };
+    },
+    async audit() {},
+  } as unknown as OperationsStore;
+  const config = {
+    operations: {
+      automationJitterPercent: 0.1,
+      priorityWrite: {
+        batchSize: 3,
+        interBatchMinimumDelayMs: 0,
+        interBatchMaximumDelayMs: 0,
+        maximumRetries: 3,
+      },
+    },
+  } as AppConfig;
+  const service = new OperationsService(config, store, unusedReads);
+  const internals = service as unknown as {
+    applyPriorityBatch(
+      batch: Record<string, number>,
+    ): Promise<Record<string, unknown> & { ok: boolean }>;
+  };
+  internals.applyPriorityBatch = async (batch) => {
+    const profile = Object.hasOwn(batch, "1") ? "codex" : "grok";
+    events.push(`${profile}:start`);
+    await Bun.sleep(2);
+    events.push(`${profile}:end`);
+    return {
+      ok: true,
+      changedCount: Object.keys(batch).length,
+      verification: "native-api-read-broker",
+      verifiedCount: Object.keys(batch).length,
+    };
+  };
+
+  await service.confirmPriorityPlan("plan-1", "tester");
+  expect(events).toEqual([
+    "codex:start",
+    "codex:end",
+    "grok:start",
+    "grok:end",
+  ]);
+});
+
+test("priority history emits one combined codex and grok row with pool breakdown", async () => {
   const store = {
     async priorityHistory() {
       return [{
@@ -256,23 +331,19 @@ test("priority history emits separate codex and grok rows with elapsed time", as
   const service = new OperationsService(config, store, unusedReads);
 
   const result = await service.priorityHistory();
-  expect(result.records).toHaveLength(2);
-  expect(result.records).toEqual([
-    expect.objectContaining({
-      id: "plan-1:codex",
-      profile: "codex",
-      changed_count: 1,
-      started_at: "2026-07-28T12:00:05.000Z",
-      duration_ms: 10_000,
-    }),
-    expect.objectContaining({
-      id: "plan-1:grok",
-      profile: "grok",
-      changed_count: 1,
-      started_at: "2026-07-28T12:00:05.000Z",
-      duration_ms: 10_000,
-    }),
-  ]);
+  expect(result.records).toHaveLength(1);
+  expect(result.records[0]).toEqual(expect.objectContaining({
+    id: "plan-1",
+    profile: "combined",
+    profiles: ["codex", "grok"],
+    changed_count: 2,
+    candidate_changed_count: 2,
+    profile_changed_counts: { codex: 1, grok: 1 },
+    profile_candidate_changed_counts: { codex: 1, grok: 1 },
+    profile_write_batch_counts: { codex: 1, grok: 1 },
+    started_at: "2026-07-28T12:00:05.000Z",
+    duration_ms: 10_000,
+  }));
 });
 
 test("one round stops after the initial write and three exponential retries", async () => {
