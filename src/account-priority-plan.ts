@@ -179,8 +179,11 @@ function buildPriorityProfile(
     changes,
     procurementAdvice,
     apply: {
-      command: "bun scripts/cli.ts platform-infra sub2api codex-pool runtime apply --target PK01 --kind priority --priorities-json '<priorities>' --write-only --confirm",
-      oneBatch: true,
+      through: "apistate-priority-plan-confirm",
+      target: config.monitor.target,
+      writeMode: "backend-api-paced",
+      batchSize: config.operations.priorityWrite.batchSize,
+      verification: "postgresql-direct",
     },
   };
 }

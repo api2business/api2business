@@ -35,7 +35,13 @@ test("priority plan text includes review evidence and exact priorities", () => {
       statusAlerts: [],
       recommendations: [],
     },
-    apply: { command: "runtime apply --priorities-json '<priorities>' --confirm", oneBatch: true },
+    apply: {
+      through: "apistate-priority-plan-confirm",
+      target: "NC01-DOCKER",
+      writeMode: "backend-api-paced",
+      batchSize: 3,
+      verification: "postgresql-direct",
+    },
   });
 
   expect(lines.join("\n")).toContain("N  FAIL%  SWITCH%  TTFT_P95  QUALITY   COST  VALUE");
@@ -43,5 +49,7 @@ test("priority plan text includes review evidence and exact priorities", () => {
   expect(lines.join("\n")).toContain("3.4%");
   expect(lines.join("\n")).toContain("24117ms");
   expect(lines.join("\n")).toContain("0.200");
+  expect(lines.join("\n")).toContain('"target":"NC01-DOCKER"');
+  expect(lines.join("\n")).not.toContain("PK01");
   expect(lines).toContain('PRIORITIES_JSON {"2":111,"8":288}');
 });

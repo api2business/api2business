@@ -3,6 +3,14 @@ import { buildAccountPriorityPlan } from "./account-priority-plan";
 import type { AppConfig } from "./config";
 
 const config = {
+  monitor: {
+    target: "NC01-DOCKER",
+  },
+  operations: {
+    priorityWrite: {
+      batchSize: 3,
+    },
+  },
   sub2api: {
     priorityPlan: {
       platform: "openai",
