@@ -90,6 +90,9 @@ export function createHandler(
       }
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/styles.css") return await staticFile("styles.css", "text/css; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/app.js") return await staticFile("app.js", "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/score-display-freshness.js") {
+        return await staticFile("score-display-freshness.js", "text/javascript; charset=utf-8");
+      }
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
       const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");

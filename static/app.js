@@ -1,3 +1,5 @@
+import { shouldApplyScorePayload } from './score-display-freshness.js'
+
 const page = document.body.dataset.page
 const $ = (selector) => document.querySelector(selector)
 
@@ -188,6 +190,7 @@ function renderScoreMetrics(data = {}) {
 }
 
 function renderScores(data) {
+  if (!shouldApplyScorePayload(scoreRefreshedAt, data)) return false
   scoreRows = data.accounts ?? []
   renderScoreMetrics(data)
   const status = data.status ?? (scoreRows.length ? 'ready' : 'unavailable')
@@ -198,6 +201,7 @@ function renderScores(data) {
   if (data.recentCallLimit && $('#score-call-limit')) $('#score-call-limit').value = String(data.recentCallLimit)
   renderRefreshClock()
   renderScoreRows()
+  return true
 }
 
 async function scoresPage() {

@@ -26,6 +26,14 @@ test("score and manual priority planning share one sample selector and one table
   expect(app).toContain("priorityPlanRows.get(String(row.accountId))");
 });
 
+test("score rendering applies the monotonic freshness guard", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const http = await Bun.file(new URL("../src/http.ts", import.meta.url)).text();
+
+  expect(app).toContain("if (!shouldApplyScorePayload(scoreRefreshedAt, data)) return false");
+  expect(http).toContain('url.pathname === "/score-display-freshness.js"');
+});
+
 test("manual plan confirmation allows paced batches to finish before the browser timeout", async () => {
   const source = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const start = source.indexOf("$('#confirm-plan').addEventListener");
