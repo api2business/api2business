@@ -38,6 +38,7 @@ export interface PriorityPlanPolicy {
   minimumChange: number;
   minimumPriority: number;
   maximumPriority: number;
+  fixedPriorities: Record<string, number>;
   reservePolicies: Record<string, {
     lowRemainingThresholdPercent: number;
     unrestrictedRemainingThresholdPercent: number;
@@ -324,6 +325,11 @@ function readScorePolicy(raw: unknown, path: string): ScorePolicy {
 
 function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy {
   const policy = object(raw, path);
+  const fixedRaw = object(policy.fixedPriorities, `${path}.fixedPriorities`);
+  const fixedPriorities = Object.fromEntries(Object.keys(fixedRaw).map((accountId) => {
+    if (!/^[1-9][0-9]*$/u.test(accountId)) throw new Error(`${path}.fixedPriorities keys must be positive account IDs`);
+    return [accountId, integerValue(fixedRaw, accountId, `${path}.fixedPriorities`, 1, 1000)];
+  }));
   const reserveRaw = object(policy.reservePolicies, `${path}.reservePolicies`);
   const reservePolicies = Object.fromEntries(Object.keys(reserveRaw).map((accountId) => {
     if (!/^[1-9][0-9]*$/u.test(accountId)) throw new Error(`${path}.reservePolicies keys must be positive account IDs`);
@@ -340,6 +346,10 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
       lowRemainingPriority: integerValue(item, "lowRemainingPriority", itemPath, 1, 1000),
     }];
   }));
+  const overlappingAccountIds = Object.keys(fixedPriorities).filter((accountId) => reservePolicies[accountId] !== undefined);
+  if (overlappingAccountIds.length > 0) {
+    throw new Error(`${path} accounts cannot use both fixedPriorities and reservePolicies: ${overlappingAccountIds.join(",")}`);
+  }
   const advicePath = `${path}.procurementAdvice`;
   const advice = object(policy.procurementAdvice, advicePath);
   return {
@@ -354,6 +364,7 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
     minimumChange: integerValue(policy, "minimumChange", path, 1, 1000),
     minimumPriority: integerValue(policy, "minimumPriority", path, 1, 1000),
     maximumPriority: integerValue(policy, "maximumPriority", path, 1, 1000),
+    fixedPriorities,
     reservePolicies,
     procurementAdvice: {
       enabled: booleanValue(advice, "enabled", advicePath),

@@ -24,6 +24,7 @@ const config = {
       minimumChange: 5,
       minimumPriority: 1,
       maximumPriority: 1000,
+      fixedPriorities: {},
       reservePolicies: {},
       procurementAdvice: {
         enabled: true,
@@ -50,6 +51,7 @@ const config = {
       minimumChange: 5,
       minimumPriority: 1,
       maximumPriority: 1000,
+      fixedPriorities: {},
       reservePolicies: {},
       procurementAdvice: {
         enabled: false,
@@ -126,6 +128,40 @@ test("reserve policy dynamically lowers priority as weekly quota is depleted", (
     },
   });
   expect(plan.priorities).toMatchObject({ "2": 600 });
+});
+
+test("fixed priority account is excluded from dynamic optimization and only corrected to its declared value", () => {
+  const fixedConfig = structuredClone(config);
+  fixedConfig.sub2api.priorityPlan.fixedPriorities = { "2": 1 };
+  const fixedAccount: Record<string, unknown> = account(2, "lyon9801 0", 99);
+  fixedAccount.priority = 101;
+  fixedAccount.weeklyRemainingPercent = 5;
+  fixedAccount.usage = { costRateCnyPerApiUsd: 0 };
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    account(1, "https://alpha.example plus 0.1", 90),
+    fixedAccount,
+  ] }, fixedConfig);
+  const fixed = (plan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2);
+  expect(plan.eligibleCount).toBe(1);
+  expect(plan.fixedCount).toBe(1);
+  expect(plan.costRange).toEqual({ minimumCostRateCnyPerApiUsd: 0.1, maximumCostRateCnyPerApiUsd: 0.1 });
+  expect(fixed).toMatchObject({
+    beforePriority: 101,
+    desiredPriority: 1,
+    priorityMode: "fixed",
+    reservePolicy: null,
+    change: "update",
+  });
+  expect(plan.priorities).toMatchObject({ "2": 1 });
+
+  fixedAccount.priority = 1;
+  const converged = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    account(1, "https://alpha.example plus 0.1", 90),
+    fixedAccount,
+  ] }, fixedConfig);
+  const convergedFixed = (converged.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2);
+  expect(convergedFixed).toMatchObject({ desiredPriority: 1, priorityMode: "fixed", change: "noop" });
+  expect(converged.priorities).not.toHaveProperty("2");
 });
 
 test("reserve policy is unrestricted above half quota and weighted below it", () => {

@@ -39,22 +39,62 @@ function buildPriorityProfile(
   const rows = Array.isArray(ranking.accounts)
     ? ranking.accounts.filter((row): row is ScoreRow => typeof row === "object" && row !== null && !Array.isArray(row))
     : [];
-  const eligible = rows.filter((row) => {
+  const profileRow = (row: ScoreRow): boolean => {
     const groups = Array.isArray(row.groupIds) ? row.groupIds : [];
     return row.platform === policy.platform
+      && groups.some((id) => typeof id === "number" && policy.eligibleGroupIds.includes(id));
+  };
+  const fixedAccountIds = new Set(Object.keys(policy.fixedPriorities));
+  const fixedChanges = rows.flatMap((row) => {
+    const accountId = number(row.accountId);
+    if (accountId === null || !profileRow(row) || !fixedAccountIds.has(String(accountId))) return [];
+    const before = number(row.priority);
+    if (before === null) throw new Error("fixed priority row is missing priority");
+    const desired = policy.fixedPriorities[String(accountId)];
+    return [{
+      profile,
+      accountId,
+      accountName: row.accountName,
+      score: number(row.score),
+      costRateCnyPerApiUsd: costRate(row),
+      confidence: row.confidence,
+      observedAttempts: row.observedAttempts,
+      failureRate: row.failureRate,
+      failoverRate: row.failoverRate,
+      ttftP95Ms: row.ttftP95Ms,
+      beforePriority: before,
+      calculatedPriority: null,
+      configuredPriorityFloor: null,
+      priorityFloorApplied: false,
+      reservePolicy: null,
+      priorityMode: "fixed",
+      desiredPriority: desired,
+      change: before === desired ? "noop" : "update",
+    }];
+  });
+  const priorities: Record<string, number> = Object.fromEntries(
+    fixedChanges
+      .filter((row) => row.change === "update")
+      .map((row) => [String(row.accountId), row.desiredPriority]),
+  );
+  const eligible = rows.filter((row) => {
+    const accountId = number(row.accountId);
+    return profileRow(row)
+      && accountId !== null
+      && !fixedAccountIds.has(String(accountId))
       && row.confidence === policy.requiredConfidence
       && (!policy.requireCurrentAvailable || row.currentAvailable === true)
-      && groups.some((id) => typeof id === "number" && policy.eligibleGroupIds.includes(id))
       && number(row.score) !== null
       && costRate(row) !== null;
   });
   const costs = eligible.map((row) => costRate(row)!);
   const fallbackCosts = rows.flatMap((row) => {
-    const groups = Array.isArray(row.groupIds) ? row.groupIds : [];
+    const accountId = number(row.accountId);
     const cost = costRate(row);
-    return row.platform === policy.platform
+    return profileRow(row)
+      && accountId !== null
+      && !fixedAccountIds.has(String(accountId))
       && row.confidence === policy.requiredConfidence
-      && groups.some((id) => typeof id === "number" && policy.eligibleGroupIds.includes(id))
       && cost !== null
       ? [cost]
       : [];
@@ -74,9 +114,10 @@ function buildPriorityProfile(
       priorityReferenceScore: policy.referenceScore,
       costRange: null,
       eligibleCount: 0,
-      changedCount: 0,
-      priorities: {},
-      changes: [],
+      fixedCount: fixedChanges.length,
+      changedCount: Object.keys(priorities).length,
+      priorities,
+      changes: fixedChanges,
       procurementAdvice: profile === "codex"
         ? buildProcurementAdvice(rows, config, { minimum: 0, maximum: 0 })
         : { enabled: false, statusAlerts: [], recommendations: [] },
@@ -94,8 +135,7 @@ function buildPriorityProfile(
     ? null
     : eligible.reduce((best, row) => Math.max(best, economicScore(row)), -Infinity);
   const priorityReferenceScore = policy.referenceScore;
-  const priorities: Record<string, number> = {};
-  const changes = eligible.map((row) => {
+  const dynamicChanges = eligible.map((row) => {
     const accountId = number(row.accountId);
     const score = number(row.score)!;
     const cost = costRate(row)!;
@@ -174,9 +214,10 @@ function buildPriorityProfile(
     priorityReferenceScore,
     costRange: { minimumCostRateCnyPerApiUsd: minimumCost, maximumCostRateCnyPerApiUsd: maximumCost },
     eligibleCount: eligible.length,
+    fixedCount: fixedChanges.length,
     changedCount: Object.keys(priorities).length,
     priorities,
-    changes,
+    changes: [...fixedChanges, ...dynamicChanges],
     procurementAdvice,
     apply: {
       through: "apistate-priority-plan-confirm",
@@ -208,6 +249,7 @@ export function buildAccountPriorityPlan(
     profiles: {
       codex: {
         eligibleCount: codex.eligibleCount,
+        fixedCount: codex.fixedCount,
         changedCount: codex.changedCount,
         anchorScore: codex.anchorScore,
         observedAnchorScore: codex.observedAnchorScore,
@@ -216,6 +258,7 @@ export function buildAccountPriorityPlan(
       },
       grok: {
         eligibleCount: grok.eligibleCount,
+        fixedCount: grok.fixedCount,
         changedCount: grok.changedCount,
         anchorScore: grok.anchorScore,
         observedAnchorScore: grok.observedAnchorScore,
