@@ -267,6 +267,9 @@ function cny(value) {
 
 let activePlanId = null
 let priorityAutomationExists = false
+let priorityHistoryRecords = []
+let priorityHistoryPage = 1
+const priorityHistoryPageSize = 10
 const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
 
 function signed(value) {
@@ -341,9 +344,13 @@ async function refreshPriorityState() {
   }
 }
 
-async function loadPriorityHistory() {
-  const data = await requestJson('/api/operations/priority-history')
-  $('#priority-history-body').innerHTML = data.records?.length ? data.records.map((row) => `<tr>
+function renderPriorityHistoryPage() {
+  const totalRecords = priorityHistoryRecords.length
+  const totalPages = Math.max(1, Math.ceil(totalRecords / priorityHistoryPageSize))
+  priorityHistoryPage = Math.min(Math.max(priorityHistoryPage, 1), totalPages)
+  const start = (priorityHistoryPage - 1) * priorityHistoryPageSize
+  const rows = priorityHistoryRecords.slice(start, start + priorityHistoryPageSize)
+  $('#priority-history-body').innerHTML = rows.length ? rows.map((row) => `<tr>
     <td>${row.profile === 'grok' ? 'Grok' : 'Codex'}</td>
     <td>${time(row.started_at)}</td><td>${row.trigger_type === 'automatic' ? '自动' : '手动'}</td>
     <td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.created_by)}</td>
@@ -351,6 +358,15 @@ async function loadPriorityHistory() {
     <td>${time(row.completed_at)}</td>
     <td>${row.duration_ms == null ? '—' : `${number(Number(row.duration_ms) / 1000, 1)} 秒`}</td>
   </tr>`).join('') : '<tr><td colspan="9" class="empty">暂无调整记录</td></tr>'
+  $('#history-page-state').textContent = totalRecords ? `${priorityHistoryPage} / ${totalPages} · 共 ${number(totalRecords)} 条` : '0 条'
+  $('#history-prev').disabled = priorityHistoryPage <= 1
+  $('#history-next').disabled = priorityHistoryPage >= totalPages
+}
+
+async function loadPriorityHistory() {
+  const data = await requestJson('/api/operations/priority-history')
+  priorityHistoryRecords = data.records ?? []
+  renderPriorityHistoryPage()
 }
 
 async function loadPriorityAutomation() {
@@ -377,6 +393,14 @@ async function setupPriorityPanel(options) {
     clearPriorityPlan('样本档位已变化，请刷新当前状态或生成新计划')
   })
   $('#refresh-history').addEventListener('click', () => void loadPriorityHistory().catch(() => undefined))
+  $('#history-prev').addEventListener('click', () => {
+    priorityHistoryPage -= 1
+    renderPriorityHistoryPage()
+  })
+  $('#history-next').addEventListener('click', () => {
+    priorityHistoryPage += 1
+    renderPriorityHistoryPage()
+  })
   $('#automation-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     const input = {

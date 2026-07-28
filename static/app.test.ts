@@ -34,3 +34,14 @@ test("manual plan confirmation allows paced batches to finish before the browser
 
   expect(handler).toContain("600000");
 });
+
+test("priority adjustment history is paginated instead of growing without bound", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+
+  expect(app).toContain("const priorityHistoryPageSize = 10");
+  expect(app).toContain("priorityHistoryRecords.slice(start, start + priorityHistoryPageSize)");
+  expect(html).toContain('id="history-prev"');
+  expect(html).toContain('id="history-page-state"');
+  expect(html).toContain('id="history-next"');
+});

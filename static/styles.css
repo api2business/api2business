@@ -166,6 +166,9 @@ button:disabled { cursor: wait; opacity: .48; }
   color: var(--muted);
   font-family: var(--mono);
 }
+.table-toolbar .section-state {
+  margin: 0;
+}
 
 .operation-progress {
   min-height: 0;

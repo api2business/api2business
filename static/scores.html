@@ -60,7 +60,15 @@
       <p id="automation-state" class="section-state">正在读取配置…</p>
     </section>
     <section class="table-section">
-      <div class="table-toolbar"><h2>调整记录</h2><button id="refresh-history" class="query-command" type="button">刷新记录</button></div>
+      <div class="table-toolbar">
+        <h2>调整记录</h2>
+        <div class="score-query-controls">
+          <button id="history-prev" class="query-command" type="button" disabled>上一页</button>
+          <span id="history-page-state" class="section-state" aria-live="polite">正在读取…</span>
+          <button id="history-next" class="query-command" type="button" disabled>下一页</button>
+          <button id="refresh-history" class="query-command" type="button">刷新记录</button>
+        </div>
+      </div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>调优池</th><th>开始时间</th><th>方式</th><th>状态</th><th>操作者</th><th>样本</th><th>调整数</th><th>完成时间</th><th>耗时</th></tr></thead><tbody id="priority-history-body"><tr><td colspan="9" class="empty">正在读取调整记录</td></tr></tbody></table></div>
     </section>
   </main>
