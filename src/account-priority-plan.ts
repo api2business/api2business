@@ -183,7 +183,7 @@ function buildPriorityProfile(
       target: config.monitor.target,
       writeMode: "backend-api-paced",
       batchSize: config.operations.priorityWrite.batchSize,
-      verification: "postgresql-direct",
+      verification: "native-api-read-broker",
     },
   };
 }
