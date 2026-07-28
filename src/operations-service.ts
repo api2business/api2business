@@ -4,7 +4,12 @@ import type { AppConfig } from "./config";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
 import { OperationsStore, type CashDirection } from "./operations-store";
-import { preparePriorityAutomationBatch } from "./priority-automation-safety";
+import {
+  buildPriorityWriteBatches,
+  exponentialRetryDelayMs,
+  preparePriorityAutomationBatch,
+  randomIntervalMs,
+} from "./priority-automation-safety";
 import { scoreDatabasePool } from "./score-database-pool";
 
 function records(value: unknown): Array<Record<string, unknown>> {
@@ -106,7 +111,11 @@ export class OperationsService {
     let result = candidate;
     let priorities = candidate.priorities as Record<string, number>;
     if (triggerType === "automatic") {
-      const prepared = preparePriorityAutomationBatch(candidate, this.config.operations.automationSafety);
+      const prepared = preparePriorityAutomationBatch(
+        candidate,
+        this.config.operations.automationSafety,
+        this.config.operations.priorityWrite.batchSize,
+      );
       priorities = prepared.selectedPriorities as Record<string, number>;
       const {
         selectedPriorities: _selectedPriorities,
@@ -141,37 +150,56 @@ export class OperationsService {
     return { ...result, refreshedAt: new Date().toISOString() };
   }
 
-  private async verifyPriorities(priorities: Record<string, number>) {
+  private async verifyPriorities(
+    priorities: Record<string, number>,
+    timeoutMs = this.config.operations.priorityVerificationTimeoutMs,
+  ) {
     const expected = new Map(Object.entries(priorities).map(([id, priority]) => [id, Number(priority)]));
+    const expectedIds = [...expected.keys()].map((id) => Number(id));
+    if (expectedIds.some((id) => !Number.isInteger(id) || id < 1)) {
+      throw new Error("priority verification requires stable numeric account IDs");
+    }
     const startedAt = Date.now();
-    const deadline = startedAt + this.config.operations.priorityVerificationTimeoutMs;
+    const deadline = startedAt + Math.max(0, timeoutMs);
     let verifiedCount = 0;
+    let unmatchedPriorities = { ...priorities };
     do {
       const sql = scoreDatabasePool(this.scoreDatabaseUrl);
       const rows = await sql.begin(async (tx) => {
           await tx.unsafe("SET TRANSACTION READ ONLY");
           await tx.unsafe(`SET LOCAL statement_timeout = '${this.config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
-          return await tx`SELECT id::text AS id, priority::int AS priority FROM accounts`;
+          return await tx`
+            SELECT id::text AS id, priority::int AS priority
+            FROM accounts
+            WHERE id = ANY(${expectedIds}::bigint[])
+          `;
       });
       const actual = new Map((rows as Array<Record<string, unknown>>).map((row) => [String(row.id), Number(row.priority)]));
       verifiedCount = [...expected].filter(([id, priority]) => actual.get(id) === priority).length;
+      unmatchedPriorities = Object.fromEntries(
+        [...expected].filter(([id, priority]) => actual.get(id) !== priority),
+      );
       if (verifiedCount === expected.size) {
         return {
+          complete: true,
           verification: "postgresql-direct",
           verifiedCount,
           verificationDurationMs: Date.now() - startedAt,
+          unmatchedPriorities: {},
         };
       }
-      await Bun.sleep(this.config.operations.priorityVerificationPollMs);
+      if (Date.now() < deadline) await Bun.sleep(this.config.operations.priorityVerificationPollMs);
     } while (Date.now() < deadline);
-    throw new Error(`优先级写入后 PostgreSQL 回读超时（已验证 ${verifiedCount}/${expected.size}）`);
+    return {
+      complete: false,
+      verification: "postgresql-direct",
+      verifiedCount,
+      verificationDurationMs: Date.now() - startedAt,
+      unmatchedPriorities,
+    };
   }
 
-  async confirmPriorityPlan(id: string, operator: string) {
-    const plan = await this.store.getPlan(id);
-    if (plan.status !== "pending") throw new Error("priority plan is not pending");
-    if (new Date(String(plan.expires_at)).getTime() <= Date.now()) throw new Error("priority plan has expired");
-    const priorities = plan.priorities as Record<string, number>;
+  private async writePriorityBatch(priorities: Record<string, number>) {
     const args = [
       this.config.monitor.cli.entrypoint, "platform-infra", "sub2api", "codex-pool", "runtime", "apply",
       "--target", this.config.monitor.target, "--kind", "priority",
@@ -180,6 +208,7 @@ export class OperationsService {
     const proc = Bun.spawn([this.config.monitor.cli.executable, ...args], {
       cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe",
     });
+    const startedAt = Date.now();
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -189,35 +218,170 @@ export class OperationsService {
       new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
     ]);
     clearTimeout(timeout);
-    const writeResult = {
-      exitCode, timedOut, output: stdout.slice(-4000), error: stderr.slice(-1000),
-      changedCount: Object.keys(priorities).length, writeMode: "backend-api-only",
+    return {
+      ok: !timedOut && exitCode === 0,
+      exitCode,
+      timedOut,
+      writeDurationMs: Date.now() - startedAt,
+      outputAvailable: stdout.length > 0,
+      error: stderr.slice(-1000),
     };
-    if (timedOut || exitCode !== 0) {
-      await this.store.finishPlan(id, "failed", writeResult);
-      await this.store.audit("priority.plan.confirm", "failed", operator,
-        { planId: id, changedCount: Object.keys(priorities).length },
-        { exitCode, timedOut, writeMode: "backend-api-only", verification: "not-started" });
-      if (timedOut) throw new Error("优先级调整执行超时");
-      throw new Error("优先级调整失败");
+  }
+
+  private async applyPriorityBatch(
+    priorities: Record<string, number>,
+    batchNumber: number,
+    batchCount: number,
+  ): Promise<Record<string, unknown> & { ok: boolean }> {
+    const policy = this.config.operations.priorityWrite;
+    const attempts: Array<Record<string, unknown>> = [];
+    let pending = priorities;
+    let reconciled = false;
+    for (let attempt = 1; attempt <= policy.maximumRetries + 1; attempt += 1) {
+      const write = await this.writePriorityBatch(pending);
+      let verification = await this.verifyPriorities(priorities);
+      const attemptResult: Record<string, unknown> = {
+        attempt,
+        requestedCount: Object.keys(pending).length,
+        exitCode: write.exitCode,
+        timedOut: write.timedOut,
+        writeDurationMs: write.writeDurationMs,
+        outputAvailable: write.outputAvailable,
+        error: write.error,
+        verifiedCount: verification.verifiedCount,
+        verificationDurationMs: verification.verificationDurationMs,
+        complete: verification.complete,
+      };
+      attempts.push(attemptResult);
+      if (verification.complete) {
+        reconciled ||= !write.ok;
+        return {
+          ok: true,
+          batchNumber,
+          batchCount,
+          changedCount: Object.keys(priorities).length,
+          attemptCount: attempt,
+          retryCount: attempt - 1,
+          reconciled,
+          verification: "postgresql-direct",
+          verifiedCount: verification.verifiedCount,
+          attempts,
+        };
+      }
+      if (attempt > policy.maximumRetries) {
+        return {
+          ok: false,
+          batchNumber,
+          batchCount,
+          changedCount: Object.keys(priorities).length,
+          attemptCount: attempt,
+          retryCount: attempt - 1,
+          reconciled,
+          verification: "postgresql-direct",
+          verifiedCount: verification.verifiedCount,
+          unmatchedCount: Object.keys(verification.unmatchedPriorities).length,
+          failure: write.timedOut ? "write-timeout-and-verification-incomplete" : "write-or-verification-failed",
+          attempts,
+        };
+      }
+      const backoffDelayMs = exponentialRetryDelayMs(
+        policy.retryInitialDelayMs,
+        attempt,
+        policy.retryJitterPercent,
+      );
+      attemptResult.backoffDelayMs = backoffDelayMs;
+      await Bun.sleep(backoffDelayMs);
+      verification = await this.verifyPriorities(priorities, 0);
+      if (verification.complete) {
+        return {
+          ok: true,
+          batchNumber,
+          batchCount,
+          changedCount: Object.keys(priorities).length,
+          attemptCount: attempt,
+          retryCount: attempt - 1,
+          reconciled: true,
+          verification: "postgresql-direct",
+          verifiedCount: verification.verifiedCount,
+          attempts,
+        };
+      }
+      pending = verification.unmatchedPriorities;
     }
-    try {
-      const verification = await this.verifyPriorities(priorities);
-      const result = { ...writeResult, ...verification };
-      await this.store.finishPlan(id, "applied", result);
-      await this.store.audit("priority.plan.confirm", "succeeded", operator,
-        { planId: id, changedCount: Object.keys(priorities).length },
-        { exitCode, timedOut, writeMode: "backend-api-only", ...verification });
-      return { ok: true, planId: id, ...result };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const result = { ...writeResult, verification: "postgresql-direct", verificationError: message };
-      await this.store.finishPlan(id, "failed", result);
-      await this.store.audit("priority.plan.confirm", "failed", operator,
-        { planId: id, changedCount: Object.keys(priorities).length },
-        { exitCode, timedOut, writeMode: "backend-api-only", verification: "postgresql-direct", error: message });
-      throw error;
+    throw new Error("priority batch retry loop exhausted unexpectedly");
+  }
+
+  async confirmPriorityPlan(id: string, operator: string) {
+    const plan = await this.store.getPlan(id);
+    if (plan.status !== "pending") throw new Error("priority plan is not pending");
+    if (new Date(String(plan.expires_at)).getTime() <= Date.now()) throw new Error("priority plan has expired");
+    const priorities = object(plan.priorities) as Record<string, number>;
+    const planResult = object(plan.result);
+    const batches = buildPriorityWriteBatches(
+      { priorities, changes: planResult.changes },
+      this.config.operations.priorityWrite.batchSize,
+    );
+    const batchResults: Array<Record<string, unknown>> = [];
+    let completedChangedCount = 0;
+    for (let index = 0; index < batches.length; index += 1) {
+      const interBatchDelayMs = index === 0
+        ? 0
+        : randomIntervalMs(
+          this.config.operations.priorityWrite.interBatchMinimumDelayMs,
+          this.config.operations.priorityWrite.interBatchMaximumDelayMs,
+        );
+      if (interBatchDelayMs > 0) await Bun.sleep(interBatchDelayMs);
+      const batchResult = await this.applyPriorityBatch(batches[index]!, index + 1, batches.length);
+      batchResults.push({ ...batchResult, interBatchDelayMs });
+      if (!batchResult.ok) {
+        const result = {
+          changedCount: Object.keys(priorities).length,
+          completedChangedCount,
+          writeMode: "backend-api-paced",
+          batchSize: this.config.operations.priorityWrite.batchSize,
+          batchCount: batches.length,
+          completedBatchCount: index,
+          maximumRetries: this.config.operations.priorityWrite.maximumRetries,
+          verification: "postgresql-direct",
+          batches: batchResults,
+        };
+        await this.store.finishPlan(id, "failed", result);
+        await this.store.audit("priority.plan.confirm", "failed", operator,
+          { planId: id, changedCount: Object.keys(priorities).length },
+          {
+            writeMode: "backend-api-paced",
+            batchCount: batches.length,
+            completedBatchCount: index,
+            failedBatchNumber: index + 1,
+            verification: "postgresql-direct",
+          });
+        throw new Error("优先级分轮写入重试耗尽，已停止后续轮次");
+      }
+      completedChangedCount += Number(batchResult.changedCount);
     }
+    const result = {
+      changedCount: Object.keys(priorities).length,
+      completedChangedCount,
+      writeMode: "backend-api-paced",
+      batchSize: this.config.operations.priorityWrite.batchSize,
+      batchCount: batches.length,
+      completedBatchCount: batches.length,
+      maximumRetries: this.config.operations.priorityWrite.maximumRetries,
+      verification: "postgresql-direct",
+      verifiedCount: completedChangedCount,
+      batches: batchResults,
+    };
+    await this.store.finishPlan(id, "applied", result);
+    await this.store.audit("priority.plan.confirm", "succeeded", operator,
+      { planId: id, changedCount: Object.keys(priorities).length },
+      {
+        writeMode: "backend-api-paced",
+        batchCount: batches.length,
+        completedBatchCount: batches.length,
+        verification: "postgresql-direct",
+        verifiedCount: completedChangedCount,
+      });
+    return { ok: true, planId: id, ...result };
   }
 
   async priorityHistory() {
@@ -238,6 +402,8 @@ export class OperationsService {
           not_selected_changed_count: Number(object(result).notSelectedChangedCount ?? 0),
           automation_mode: automationSafety.mode ?? null,
           automation_batching_reasons: automationSafety.batchingReasons ?? [],
+          automation_write_batch_size: Number(automationSafety.writeBatchSize ?? 0),
+          automation_write_batch_count: Number(automationSafety.writeBatchCount ?? 0),
         };
       }),
     };
@@ -286,10 +452,12 @@ export class OperationsService {
   }
 
   async runDueAutomation() {
-    const policy = await this.store.claimDueAutomation(this.config.operations.automationJitterPercent);
+    const policy = await this.store.claimDueAutomation();
     if (!policy) return { ok: true, due: false };
     const operator = "scheduler";
     let plan: Record<string, unknown> | null = null;
+    let completionStatus = "failed";
+    let runError: unknown = null;
     try {
       plan = await this.generatePriorityPlan(Number(policy.recent_call_limit), operator, "automatic");
       const safety = object(plan.automationSafety);
@@ -307,6 +475,7 @@ export class OperationsService {
         await this.store.audit("priority.automation.run", "blocked", operator,
           { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
           { planId: plan.planId, ...result });
+        completionStatus = "skipped";
         return { ok: true, due: true, planId: plan.planId, ...result };
       }
       if (Number(plan.changedCount) === 0) {
@@ -323,6 +492,7 @@ export class OperationsService {
         await this.store.audit("priority.automation.run", "succeeded", operator,
         { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
         { ...result, profiles: plan.profiles });
+        completionStatus = "succeeded";
         return { ok: true, due: true, planId: plan.planId, ...result };
       }
       const result = await this.confirmPriorityPlan(String(plan.planId), operator);
@@ -340,12 +510,41 @@ export class OperationsService {
           profiles: plan.profiles,
           ...batch,
         });
+      completionStatus = "succeeded";
       return { due: true, ...result, ...batch };
     } catch (error) {
-      await this.store.audit("priority.automation.run", "failed", operator,
-        { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
-        { planId: plan?.planId ?? null, error: error instanceof Error ? error.message : String(error) });
+      runError = error;
+      completionStatus = "failed";
+      try {
+        await this.store.audit("priority.automation.run", "failed", operator,
+          { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
+          { planId: plan?.planId ?? null, error: error instanceof Error ? error.message : String(error) });
+      } catch (auditError) {
+        console.error(JSON.stringify({
+          component: "priority-automation",
+          event: "failure-audit-failed",
+          error: auditError instanceof Error ? auditError.message : String(auditError),
+          valuesPrinted: false,
+        }));
+      }
       throw error;
+    } finally {
+      try {
+        const completed = await this.store.completeAutomationRun(
+          String(policy.run_id),
+          this.config.operations.automationJitterPercent,
+          completionStatus,
+        );
+        if (!completed) throw new Error("priority automation run token no longer exists");
+      } catch (completionError) {
+        if (runError === null) throw completionError;
+        console.error(JSON.stringify({
+          component: "priority-automation",
+          event: "run-completion-failed",
+          error: completionError instanceof Error ? completionError.message : String(completionError),
+          valuesPrinted: false,
+        }));
+      }
     }
   }
 

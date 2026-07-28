@@ -117,8 +117,14 @@ export interface AppConfig {
     automationJitterPercent: number;
     automationSafety: {
       maximumScoreQueryDurationMs: number;
-      maximumChangedAccounts: number;
-      maximumChangedFraction: number;
+    };
+    priorityWrite: {
+      batchSize: number;
+      interBatchMinimumDelayMs: number;
+      interBatchMaximumDelayMs: number;
+      maximumRetries: number;
+      retryInitialDelayMs: number;
+      retryJitterPercent: number;
     };
   };
   temporal: {
@@ -374,6 +380,24 @@ export function loadConfig(path: string): AppConfig {
   const records = object(raw.records, "records");
   const operations = object(raw.operations, "operations");
   const automationSafety = object(operations.automationSafety, "operations.automationSafety");
+  const priorityWrite = object(operations.priorityWrite, "operations.priorityWrite");
+  const interBatchMinimumDelayMs = integerValue(
+    priorityWrite,
+    "interBatchMinimumDelayMs",
+    "operations.priorityWrite",
+    0,
+    120000,
+  );
+  const interBatchMaximumDelayMs = integerValue(
+    priorityWrite,
+    "interBatchMaximumDelayMs",
+    "operations.priorityWrite",
+    0,
+    120000,
+  );
+  if (interBatchMaximumDelayMs < interBatchMinimumDelayMs) {
+    throw new Error("operations.priorityWrite.interBatchMaximumDelayMs must be >= interBatchMinimumDelayMs");
+  }
   const temporal = object(raw.temporal, "temporal");
   const temporalRetry = object(temporal.retry, "temporal.retry");
   const runtime = object(raw.runtime, "runtime");
@@ -539,19 +563,25 @@ export function loadConfig(path: string): AppConfig {
           100,
           120000,
         ),
-        maximumChangedAccounts: integerValue(
-          automationSafety,
-          "maximumChangedAccounts",
-          "operations.automationSafety",
-          1,
-          1000,
+      },
+      priorityWrite: {
+        batchSize: integerValue(priorityWrite, "batchSize", "operations.priorityWrite", 1, 100),
+        interBatchMinimumDelayMs,
+        interBatchMaximumDelayMs,
+        maximumRetries: integerValue(priorityWrite, "maximumRetries", "operations.priorityWrite", 0, 3),
+        retryInitialDelayMs: integerValue(
+          priorityWrite,
+          "retryInitialDelayMs",
+          "operations.priorityWrite",
+          100,
+          120000,
         ),
-        maximumChangedFraction: numberValue(
-          automationSafety,
-          "maximumChangedFraction",
-          "operations.automationSafety",
-          0.01,
-          1,
+        retryJitterPercent: numberValue(
+          priorityWrite,
+          "retryJitterPercent",
+          "operations.priorityWrite",
+          0,
+          0.5,
         ),
       },
     },

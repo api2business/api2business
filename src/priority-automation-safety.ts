@@ -1,7 +1,5 @@
 export interface PriorityAutomationSafetyPolicy {
   maximumScoreQueryDurationMs: number;
-  maximumChangedAccounts: number;
-  maximumChangedFraction: number;
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -23,28 +21,8 @@ function priorityEntries(plan: Record<string, unknown>): Array<[string, number]>
     });
 }
 
-export function preparePriorityAutomationBatch(
-  plan: Record<string, unknown>,
-  policy: PriorityAutomationSafetyPolicy,
-): Record<string, unknown> & { allowed: boolean } {
-  const queryDurationMs = finiteNumber(plan.queryDurationMs);
-  const eligibleCount = Math.max(0, finiteNumber(plan.eligibleCount) ?? 0);
+function orderedPriorityEntries(plan: Record<string, unknown>): Array<[string, number]> {
   const entries = priorityEntries(plan);
-  const fullChangedCount = entries.length;
-  const changedFraction = eligibleCount > 0 ? fullChangedCount / eligibleCount : 0;
-  const blockedReasons: string[] = [];
-  const batchingReasons: string[] = [];
-
-  if (queryDurationMs === null || queryDurationMs > policy.maximumScoreQueryDurationMs) {
-    blockedReasons.push("score-query-slow-or-unknown");
-  }
-  if (fullChangedCount > policy.maximumChangedAccounts) {
-    batchingReasons.push("changed-account-limit-exceeded");
-  }
-  if (changedFraction > policy.maximumChangedFraction) {
-    batchingReasons.push("changed-fraction-limit-exceeded");
-  }
-
   const changes = new Map(
     (Array.isArray(plan.changes) ? plan.changes : [])
       .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null && !Array.isArray(row))
@@ -61,25 +39,75 @@ export function preparePriorityAutomationBatch(
     if (leftDelta !== rightDelta) return rightDelta - leftDelta;
     return Number(leftId) - Number(rightId);
   });
+  return entries;
+}
 
-  const fractionLimit = eligibleCount > 0
-    ? Math.max(1, Math.floor(eligibleCount * policy.maximumChangedFraction))
-    : policy.maximumChangedAccounts;
-  const batchLimit = Math.max(1, Math.min(policy.maximumChangedAccounts, fractionLimit));
-  const selectedEntries = blockedReasons.length === 0 ? entries.slice(0, batchLimit) : [];
+export function buildPriorityWriteBatches(
+  plan: Record<string, unknown>,
+  batchSize: number,
+): Array<Record<string, number>> {
+  const size = Math.max(1, Math.floor(batchSize));
+  const entries = orderedPriorityEntries(plan);
+  const batches: Array<Record<string, number>> = [];
+  for (let index = 0; index < entries.length; index += size) {
+    batches.push(Object.fromEntries(entries.slice(index, index + size)));
+  }
+  return batches;
+}
+
+export function randomIntervalMs(minimumMs: number, maximumMs: number, random = Math.random): number {
+  if (maximumMs <= minimumMs) return Math.max(0, Math.round(minimumMs));
+  const sample = Math.max(0, Math.min(0.999999999, random()));
+  return Math.round(minimumMs + sample * (maximumMs - minimumMs));
+}
+
+export function exponentialRetryDelayMs(
+  initialDelayMs: number,
+  retryNumber: number,
+  jitterPercent: number,
+  random = Math.random,
+): number {
+  const base = initialDelayMs * 2 ** Math.max(0, retryNumber - 1);
+  const sample = Math.max(0, Math.min(0.999999999, random()));
+  const jitterFactor = 1 - jitterPercent + sample * jitterPercent * 2;
+  return Math.max(0, Math.round(base * jitterFactor));
+}
+
+export function preparePriorityAutomationBatch(
+  plan: Record<string, unknown>,
+  policy: PriorityAutomationSafetyPolicy,
+  writeBatchSize: number,
+): Record<string, unknown> & { allowed: boolean } {
+  const queryDurationMs = finiteNumber(plan.queryDurationMs);
+  const eligibleCount = Math.max(0, finiteNumber(plan.eligibleCount) ?? 0);
+  const entries = orderedPriorityEntries(plan);
+  const fullChangedCount = entries.length;
+  const changedFraction = eligibleCount > 0 ? fullChangedCount / eligibleCount : 0;
+  const blockedReasons: string[] = [];
+
+  if (queryDurationMs === null || queryDurationMs > policy.maximumScoreQueryDurationMs) {
+    blockedReasons.push("score-query-slow-or-unknown");
+  }
+
+  const selectedEntries = blockedReasons.length === 0 ? entries : [];
   const notSelectedEntries = entries.slice(selectedEntries.length);
   const selectedPriorities = Object.fromEntries(selectedEntries);
-  const limited = blockedReasons.length === 0 && notSelectedEntries.length > 0;
+  const batchSize = Math.max(1, Math.floor(writeBatchSize));
+  const writeBatchCount = selectedEntries.length === 0 ? 0 : Math.ceil(selectedEntries.length / batchSize);
+  const paced = blockedReasons.length === 0 && writeBatchCount > 1;
+  const batchingReasons = paced ? ["paced-write-required"] : [];
 
   return {
     allowed: blockedReasons.length === 0,
-    mode: blockedReasons.length > 0 ? "blocked" : limited ? "bounded" : "full",
+    mode: blockedReasons.length > 0 ? "blocked" : paced ? "paced" : "full",
     blockedReasons,
     batchingReasons,
     queryDurationMs,
     fullChangedCount,
     selectedChangedCount: selectedEntries.length,
     notSelectedChangedCount: notSelectedEntries.length,
+    writeBatchSize: batchSize,
+    writeBatchCount,
     eligibleCount,
     changedFraction: Math.round(changedFraction * 1_000_000) / 1_000_000,
     selectedPriorities,

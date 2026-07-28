@@ -51,6 +51,14 @@ export class OperationsStore {
         updated_at timestamptz NOT NULL DEFAULT now(),
         updated_by text NOT NULL
       );
+      ALTER TABLE apistate_priority_automation
+        ADD COLUMN IF NOT EXISTS run_id uuid;
+      ALTER TABLE apistate_priority_automation
+        ADD COLUMN IF NOT EXISTS run_started_at timestamptz;
+      ALTER TABLE apistate_priority_automation
+        ADD COLUMN IF NOT EXISTS last_completed_at timestamptz;
+      ALTER TABLE apistate_priority_automation
+        ADD COLUMN IF NOT EXISTS last_run_status text;
       CREATE TABLE IF NOT EXISTS apistate_operation_audit (
         id uuid PRIMARY KEY,
         action text NOT NULL,
@@ -152,7 +160,8 @@ export class OperationsStore {
   async getAutomation() {
     const [row] = await this.sql`
       SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at,
-        created_at, updated_at, updated_by
+        created_at, updated_at, updated_by, run_id, run_started_at,
+        last_completed_at, last_run_status
       FROM apistate_priority_automation WHERE id='default'
     `;
     return row ?? null;
@@ -176,7 +185,9 @@ export class OperationsStore {
       UPDATE apistate_priority_automation
       SET enabled=${input.enabled}, interval_seconds=${input.intervalSeconds},
         recent_call_limit=${input.recentCallLimit},
-        next_run_at=now() + make_interval(secs => ${nextDelay}),
+        next_run_at=CASE WHEN run_id IS NULL
+          THEN now() + make_interval(secs => ${nextDelay})
+          ELSE next_run_at END,
         updated_at=now(), updated_by=${input.operator}
       WHERE id='default' RETURNING *
     `;
@@ -192,23 +203,51 @@ export class OperationsStore {
     return row;
   }
 
-  async claimDueAutomation(jitterPercent: number) {
+  async claimDueAutomation() {
     return await this.sql.begin(async (tx) => {
       const [row] = await tx`
         SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at
         FROM apistate_priority_automation
-        WHERE id='default' AND enabled=true AND next_run_at <= now()
+        WHERE id='default' AND enabled=true AND run_id IS NULL
+          AND next_run_at <= now()
         FOR UPDATE SKIP LOCKED
       `;
       if (!row) return null;
-      const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
-      await tx`
+      const runId = crypto.randomUUID();
+      const [claimed] = await tx`
         UPDATE apistate_priority_automation
-        SET next_run_at=now() + make_interval(secs => ${nextDelay}),
+        SET run_id=${runId}, run_started_at=now(),
+          next_run_at=now() + make_interval(secs => interval_seconds),
           updated_at=now()
         WHERE id='default'
+        RETURNING id, enabled, interval_seconds, recent_call_limit,
+          next_run_at, run_id, run_started_at
       `;
-      return row;
+      return claimed ?? null;
+    });
+  }
+
+  async completeAutomationRun(runId: string, jitterPercent: number, status: string) {
+    return await this.sql.begin(async (tx) => {
+      const [row] = await tx`
+        SELECT interval_seconds
+        FROM apistate_priority_automation
+        WHERE id='default' AND run_id=${runId}
+        FOR UPDATE
+      `;
+      if (!row) return null;
+      const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
+      const [completed] = await tx`
+        UPDATE apistate_priority_automation
+        SET run_id=NULL, run_started_at=NULL, last_completed_at=now(),
+          last_run_status=${status},
+          next_run_at=now() + make_interval(secs => ${nextDelay}),
+          updated_at=now()
+        WHERE id='default' AND run_id=${runId}
+        RETURNING id, enabled, interval_seconds, recent_call_limit,
+          next_run_at, last_completed_at, last_run_status
+      `;
+      return completed ?? null;
     });
   }
 
