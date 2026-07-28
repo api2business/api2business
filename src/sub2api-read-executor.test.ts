@@ -217,4 +217,8 @@ test("worker and CLI cannot instantiate or import the Sub2API database owner", (
   }
   expect(worker).not.toContain("OperationsStore");
   expect(worker).not.toContain("createServerContext");
+  expect(worker).toContain(
+    "const workflowEnabled = config.monitor.automaticRefresh.enabled",
+  );
+  expect(worker).toContain("else await standaloneStop");
 });

@@ -28,6 +28,16 @@ function running(pid: number | null): boolean {
   }
 }
 
+export function nativeComponentRequiresTemporalAddress(
+  config: AppConfig,
+  component: NativeServiceId,
+): boolean {
+  return config.monitor.automaticRefresh.enabled
+    && config.runtime.native.services[component].envKeys.includes(
+      config.temporal.addressEnv,
+    );
+}
+
 function nativeEnvironment(
   config: AppConfig,
   component: NativeServiceId,
@@ -40,7 +50,7 @@ function nativeEnvironment(
     const ref = config.runtime.native.env[targetKey];
     if (ref) env[targetKey] = readSecret(config, ref);
   }
-  if (envKeys.has(config.temporal.addressEnv)) {
+  if (nativeComponentRequiresTemporalAddress(config, component)) {
     const ref = config.runtime.native.temporalServiceRef;
     const kubectlArgs = [
       "-n",

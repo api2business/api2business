@@ -16,18 +16,23 @@ if (!internalTarget || internalTarget.mode !== "http") {
   throw new Error("worker requires runtime.overApiTarget to reference the Native API");
 }
 const internal = new AdminHttpClient(config, internalTarget);
-const connection = await NativeConnection.connect({ address: temporalAddress(config) });
-const worker = await Worker.create({
-  connection,
-  namespace: config.temporal.namespace,
-  taskQueue: target.temporalTaskQueue,
-  workflowsPath: fileURLToPath(new URL("./workflows.ts", import.meta.url)),
-  activities: {
-    executeOperation: async (operation: OperationRequest) =>
-      await internal.executeOperation(operation),
-  },
-});
-const temporal = config.monitor.automaticRefresh.enabled
+const workflowEnabled = config.monitor.automaticRefresh.enabled;
+const connection = workflowEnabled
+  ? await NativeConnection.connect({ address: temporalAddress(config) })
+  : null;
+const worker = connection
+  ? await Worker.create({
+    connection,
+    namespace: config.temporal.namespace,
+    taskQueue: target.temporalTaskQueue,
+    workflowsPath: fileURLToPath(new URL("./workflows.ts", import.meta.url)),
+    activities: {
+      executeOperation: async (operation: OperationRequest) =>
+        await internal.executeOperation(operation),
+    },
+  })
+  : null;
+const temporal = workflowEnabled
   ? await TemporalGateway.connect(config, {
     taskQueue: target.temporalTaskQueue,
     scoreScheduleWorkflowId: target.scoreScheduleWorkflowId,
@@ -48,8 +53,9 @@ const health = Bun.serve({
     ok: state === "ready",
     component: "apistate-worker",
     state,
-    namespace: config.temporal.namespace,
-    taskQueue: target.temporalTaskQueue,
+    workflowMode: workflowEnabled ? "temporal" : "disabled",
+    namespace: workflowEnabled ? config.temporal.namespace : null,
+    taskQueue: workflowEnabled ? target.temporalTaskQueue : null,
     schedule,
   }, { status: state === "ready" ? 200 : 503 }),
 });
@@ -59,8 +65,9 @@ console.log(JSON.stringify({
   component: "apistate-worker",
   runtime: runtimeId,
   health: health.url.toString(),
-  temporalNamespace: config.temporal.namespace,
-  temporalTaskQueue: target.temporalTaskQueue,
+  workflowMode: workflowEnabled ? "temporal" : "disabled",
+  temporalNamespace: workflowEnabled ? config.temporal.namespace : null,
+  temporalTaskQueue: workflowEnabled ? target.temporalTaskQueue : null,
   schedule,
   valuesPrinted: false,
 }));
@@ -80,20 +87,29 @@ const automationLoop = (async () => {
     if (!stopping) await Bun.sleep(config.operations.automationPollMs);
   }
 })();
+let resolveStandaloneStop = () => {};
+const standaloneStop = new Promise<void>((resolve) => {
+  resolveStandaloneStop = resolve;
+});
 async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
   state = "stopping";
   health.stop(true);
-  worker.shutdown();
+  if (worker) worker.shutdown();
+  else resolveStandaloneStop();
 }
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => void stop());
 
 try {
-  await worker.run();
+  if (worker) await worker.run();
+  else await standaloneStop;
 } finally {
+  stopping = true;
+  state = "stopping";
+  health.stop(true);
   await automationLoop;
   if (temporal) await temporal.close();
-  await connection.close();
+  if (connection) await connection.close();
   console.log(JSON.stringify({ ok: true, component: "apistate-worker", state: "stopped", valuesPrinted: false }));
 }
