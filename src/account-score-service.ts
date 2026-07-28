@@ -5,6 +5,7 @@ import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import type { AppConfig } from "./config";
 import type { Sub2ApiClient } from "./sub2api-client";
 import type { RuntimePolicyEventSource } from "./runtime-policy-events";
+import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 interface ScoreSnapshot {
   ok: boolean;
@@ -38,7 +39,7 @@ export class AccountScoreService {
     private readonly cachePath: string,
     private readonly sub2api: Sub2ApiClient,
     private readonly policyEvents: RuntimePolicyEventSource,
-    private readonly scoreDatabaseUrl: string | null = null,
+    private readonly reads: Sub2ApiReadClient | null = null,
   ) {
     this.snapshot = this.readCache();
   }
@@ -47,12 +48,14 @@ export class AccountScoreService {
     if (!this.config.monitor.recentCallOptions.includes(recentCallLimit)) {
       throw new Error(`recentCallLimit must be one of: ${this.config.monitor.recentCallOptions.join(", ")}`);
     }
+    if (!this.reads) throw new Error("scores.rank requires the Native API read executor");
     const result = await collectRecentCallScoresFromDatabase(
       this.config,
       recentCallLimit,
+      this.reads,
       accountSelector,
       groupSelector,
-      this.scoreDatabaseUrl,
+      "manual",
     );
     const groupNames = [...new Set(result.accounts.flatMap((row) =>
       Array.isArray(row.groupNames) ? row.groupNames.map(String) : [],
@@ -102,12 +105,14 @@ export class AccountScoreService {
     const startedAt = new Date();
     this.snapshot = { ...this.snapshot, status: "refreshing", refreshStartedAt: startedAt.toISOString(), error: null };
     try {
+      if (!this.reads) throw new Error("scores.refresh requires the Native API read executor");
       const collected = await collectRecentCallScoresFromDatabase(
         this.config,
         this.config.monitor.recentCallLimit,
+        this.reads,
         null,
         null,
-        this.scoreDatabaseUrl,
+        "automatic",
       );
       const refreshedAt = new Date();
       const accounts = mergeAccountScores(collected.accounts);

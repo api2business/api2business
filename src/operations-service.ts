@@ -3,6 +3,11 @@ import { parse } from "yaml";
 import type { AppConfig } from "./config";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
+import { collectErrorAggregateFromDatabase } from "./error-aggregate-database";
+import {
+  collectErrorListFromDatabase,
+  collectErrorRequestFromDatabase,
+} from "./error-detail-database";
 import {
   OperationsStore,
   type CashDirection,
@@ -14,7 +19,28 @@ import {
   preparePriorityAutomationBatch,
   randomIntervalMs,
 } from "./priority-automation-safety";
-import { scoreDatabasePool } from "./score-database-pool";
+import type {
+  Sub2ApiReadClient,
+  Sub2ApiReadPriority,
+} from "./sub2api-read-executor";
+import { collectUserImpactFromDatabase } from "./user-impact-database";
+
+const alipayRevenueSql = `
+SELECT count(*)::int AS completed_orders,
+  COALESCE(sum(o.pay_amount), 0)::float8 AS revenue_cny
+FROM payment_orders o JOIN users u ON u.id=o.user_id
+WHERE lower(COALESCE(u.role, '')) <> 'admin'
+  AND o.provider_key='alipay' AND o.payment_type='alipay'
+  AND o.status='COMPLETED'
+  AND to_char(COALESCE(o.paid_at, o.completed_at, o.created_at)
+    AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM')=$1
+`;
+
+const prioritiesByIdSql = `
+SELECT id::text AS id, priority::int AS priority
+FROM accounts
+WHERE id = ANY(string_to_array($1, ',')::bigint[])
+`;
 
 function records(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
@@ -37,7 +63,7 @@ export class OperationsService {
   constructor(
     private readonly config: AppConfig,
     private readonly store: OperationsStore,
-    private readonly scoreDatabaseUrl: string,
+    private readonly reads: Sub2ApiReadClient,
   ) {}
 
   async initialize(): Promise<void> {
@@ -57,22 +83,19 @@ export class OperationsService {
   }
 
   private async alipay(period: string): Promise<{ completedOrders: number; revenueCny: number }> {
-    const sql = scoreDatabasePool(this.scoreDatabaseUrl);
-    return await sql.begin(async (tx) => {
-        await tx.unsafe("SET TRANSACTION READ ONLY");
-        await tx.unsafe(`SET LOCAL statement_timeout = '${this.config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
-        const [row] = await tx`
-          SELECT count(*)::int AS completed_orders,
-            COALESCE(sum(o.pay_amount), 0)::float8 AS revenue_cny
-          FROM payment_orders o JOIN users u ON u.id=o.user_id
-          WHERE lower(COALESCE(u.role, '')) <> 'admin'
-            AND o.provider_key='alipay' AND o.payment_type='alipay'
-            AND o.status='COMPLETED'
-            AND to_char(COALESCE(o.paid_at, o.completed_at, o.created_at)
-              AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM')=${period}
-        `;
-        return { completedOrders: Number(row?.completed_orders ?? 0), revenueCny: money(row?.revenue_cny) };
+    const query = await this.reads.query<Record<string, unknown>>({
+      key: JSON.stringify(["operations.alipay", period]),
+      kind: "operations.alipay",
+      sql: alipayRevenueSql,
+      parameters: [period],
+      priority: "manual",
+      cacheMode: "prefer-cache",
     });
+    const row = query.rows[0];
+    return {
+      completedOrders: Number(row?.completed_orders ?? 0),
+      revenueCny: money(row?.revenue_cny),
+    };
   }
 
   async ledger(period = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 7)) {
@@ -112,7 +135,10 @@ export class OperationsService {
     triggerType: "manual" | "automatic" = "manual",
     executionStartedAt: string | null = null,
   ): Promise<Record<string, unknown>> {
-    const candidate = await this.priorityState(recentCallLimit);
+    const candidate = await this.priorityState(
+      recentCallLimit,
+      triggerType === "automatic" ? "automatic" : "manual",
+    );
     let result = candidate;
     let priorities = candidate.priorities as Record<string, number>;
     if (triggerType === "automatic") {
@@ -155,8 +181,20 @@ export class OperationsService {
     return { ...result, planId: plan.id, expiresAt: plan.expiresAt };
   }
 
-  async priorityState(recentCallLimit: number): Promise<Record<string, unknown>> {
-    const ranking = await collectRecentCallScoresFromDatabase(this.config, recentCallLimit, null, null, this.scoreDatabaseUrl);
+  async priorityState(
+    recentCallLimit: number,
+    priority: Sub2ApiReadPriority = "manual",
+    accountSelector: string | null = null,
+    groupSelector: string | null = null,
+  ): Promise<Record<string, unknown>> {
+    const ranking = await collectRecentCallScoresFromDatabase(
+      this.config,
+      recentCallLimit,
+      this.reads,
+      accountSelector,
+      groupSelector,
+      priority,
+    );
     const result = buildAccountPriorityPlan(ranking, this.config);
     return { ...result, refreshedAt: new Date().toISOString() };
   }
@@ -176,17 +214,18 @@ export class OperationsService {
     let verifiedCount = 0;
     let unmatchedPriorities = { ...priorities };
     do {
-      const sql = scoreDatabasePool(this.scoreDatabaseUrl);
-      const rows = await sql.begin(async (tx) => {
-          await tx.unsafe("SET TRANSACTION READ ONLY");
-          await tx.unsafe(`SET LOCAL statement_timeout = '${this.config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
-          return await tx`
-            SELECT id::text AS id, priority::int AS priority
-            FROM accounts
-            WHERE id = ANY(string_to_array(${expectedIdsCsv}, ',')::bigint[])
-          `;
+      const query = await this.reads.query<Record<string, unknown>>({
+        key: JSON.stringify(["priorities.verify", expectedIdsCsv]),
+        kind: "priorities.verify",
+        sql: prioritiesByIdSql,
+        parameters: [expectedIdsCsv],
+        priority: "manual",
+        cacheMode: "bypass-cache",
       });
-      const actual = new Map((rows as Array<Record<string, unknown>>).map((row) => [String(row.id), Number(row.priority)]));
+      const actual = new Map(query.rows.map((row) => [
+        String(row.id),
+        Number(row.priority),
+      ]));
       verifiedCount = [...expected].filter(([id, priority]) => actual.get(id) === priority).length;
       unmatchedPriorities = Object.fromEntries(
         [...expected].filter(([id, priority]) => actual.get(id) !== priority),
@@ -194,7 +233,7 @@ export class OperationsService {
       if (verifiedCount === expected.size) {
         return {
           complete: true,
-          verification: "postgresql-direct",
+          verification: "native-api-read-broker",
           verifiedCount,
           verificationDurationMs: Date.now() - startedAt,
           unmatchedPriorities: {},
@@ -204,7 +243,7 @@ export class OperationsService {
     } while (Date.now() < deadline);
     return {
       complete: false,
-      verification: "postgresql-direct",
+      verification: "native-api-read-broker",
       verifiedCount,
       verificationDurationMs: Date.now() - startedAt,
       unmatchedPriorities,
@@ -258,7 +297,7 @@ export class OperationsService {
         attemptCount: 0,
         retryCount: 0,
         reconciled: true,
-        verification: "postgresql-direct",
+        verification: "native-api-read-broker",
         verifiedCount: preflightVerifiedCount,
         preflightVerifiedCount,
         attempts,
@@ -292,7 +331,7 @@ export class OperationsService {
           attemptCount: attempt,
           retryCount: attempt - 1,
           reconciled,
-          verification: "postgresql-direct",
+          verification: "native-api-read-broker",
           verifiedCount: verification.verifiedCount,
           preflightVerifiedCount,
           attempts,
@@ -307,7 +346,7 @@ export class OperationsService {
           attemptCount: attempt,
           retryCount: attempt - 1,
           reconciled,
-          verification: "postgresql-direct",
+          verification: "native-api-read-broker",
           verifiedCount: verification.verifiedCount,
           preflightVerifiedCount,
           unmatchedCount: Object.keys(verification.unmatchedPriorities).length,
@@ -332,7 +371,7 @@ export class OperationsService {
           attemptCount: attempt,
           retryCount: attempt - 1,
           reconciled: true,
-          verification: "postgresql-direct",
+          verification: "native-api-read-broker",
           verifiedCount: verification.verifiedCount,
           preflightVerifiedCount,
           attempts,
@@ -407,7 +446,7 @@ export class OperationsService {
             batchCount: batches.length,
             completedBatchCount,
             maximumRetries: this.config.operations.priorityWrite.maximumRetries,
-            verification: "postgresql-direct",
+            verification: "native-api-read-broker",
             batches: batchResults,
           };
           const completion = await this.store.finishPlan(
@@ -427,7 +466,7 @@ export class OperationsService {
               batchCount: batches.length,
               completedBatchCount,
               failedBatchNumber: completedBatchCount + 1,
-              verification: "postgresql-direct",
+              verification: "native-api-read-broker",
               nextAutomaticRunAt: completion.next_run_at,
             });
           throw new Error("优先级分轮写入重试耗尽，已停止后续轮次");
@@ -446,7 +485,7 @@ export class OperationsService {
       batchCount: batches.length,
       completedBatchCount: batches.length,
       maximumRetries: this.config.operations.priorityWrite.maximumRetries,
-      verification: "postgresql-direct",
+      verification: "native-api-read-broker",
       verifiedCount: completedChangedCount,
       batches: batchResults,
     };
@@ -465,7 +504,7 @@ export class OperationsService {
         profiles,
         batchCount: batches.length,
         completedBatchCount: batches.length,
-        verification: "postgresql-direct",
+        verification: "native-api-read-broker",
         verifiedCount: completedChangedCount,
       });
     return {
@@ -647,7 +686,7 @@ export class OperationsService {
           notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
           automationMode: safety.mode ?? "full",
           writeMode: "no-change",
-          verification: "postgresql-direct",
+          verification: "native-api-read-broker",
           verifiedCount: 0,
         };
         await this.store.finishPlan(
@@ -717,7 +756,12 @@ export class OperationsService {
 
   async procurement(budgetCny: number, operator: string) {
     const ranking = await collectRecentCallScoresFromDatabase(
-      this.config, this.config.monitor.recentCallLimit, null, null, this.scoreDatabaseUrl,
+      this.config,
+      this.config.monitor.recentCallLimit,
+      this.reads,
+      null,
+      null,
+      "manual",
     );
     const priority = buildAccountPriorityPlan(ranking, this.config);
     const candidates = records((priority.procurementAdvice as Record<string, unknown>)?.recommendations);
@@ -737,6 +781,63 @@ export class OperationsService {
     await this.store.audit("procurement.calculate", "succeeded", operator,
       { budgetCny }, { allocatedCny: result.allocatedCny, unallocatedCny: remaining, siteCount: new Set(allocations.map((row) => row.billingSite)).size });
     return result;
+  }
+
+  readStatus() {
+    return {
+      ok: true,
+      readExecutor: this.reads.status(),
+    };
+  }
+
+  async errorAggregate(
+    limit: number,
+    top: number,
+    accountSelector: string | null,
+    groupSelector: string | null,
+  ) {
+    return await collectErrorAggregateFromDatabase(
+      this.config,
+      this.reads,
+      limit,
+      top,
+      accountSelector,
+      groupSelector,
+      "manual",
+    );
+  }
+
+  async errorList(limit: number) {
+    return await collectErrorListFromDatabase(
+      this.config,
+      this.reads,
+      limit,
+      "manual",
+    );
+  }
+
+  async errorRequest(requestId: string) {
+    return await collectErrorRequestFromDatabase(
+      this.config,
+      this.reads,
+      requestId,
+      "manual",
+    );
+  }
+
+  async userImpact(
+    start: string,
+    end: string,
+    affectedOnly: boolean,
+  ) {
+    return await collectUserImpactFromDatabase(
+      this.config,
+      this.reads,
+      start,
+      end,
+      affectedOnly,
+      "manual",
+    );
   }
 
   async audits() {

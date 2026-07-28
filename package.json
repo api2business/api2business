@@ -8,7 +8,6 @@
     "api": "bun --hot src/api.ts --config config/sub2rank.yaml --runtime native",
     "worker": "bun src/worker.ts --config config/sub2rank.yaml --runtime native",
     "dev:web": "APISTATE_CONFIG_PATH=config/sub2rank.yaml APISTATE_RUNTIME_ID=native bunx vite --config vite.config.ts",
-    "server": "bun src/api.ts --config config/sub2rank.yaml --runtime k8s",
     "check": "bunx tsc --noEmit"
   },
   "dependencies": {

@@ -1,6 +1,8 @@
 import type { AppConfig } from "./config";
-import { readSecret } from "./secrets";
-import { scoreDatabasePool } from "./score-database-pool";
+import type {
+  Sub2ApiReadClient,
+  Sub2ApiReadPriority,
+} from "./sub2api-read-executor";
 
 type Row = Record<string, unknown>;
 
@@ -189,11 +191,12 @@ export function projectErrorAggregateRow(row: Row, timezone: string): Row {
 
 export async function collectErrorAggregateFromDatabase(
   config: AppConfig,
+  reads: Sub2ApiReadClient,
   limit: number,
   top: number,
   accountSelector: string | null = null,
   groupSelector: string | null = null,
-  databaseUrlOverride: string | null = null,
+  priority: Sub2ApiReadPriority = "manual",
 ): Promise<Row> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 10000) {
     throw new Error("error aggregate limit must be an integer from 1 to 10000");
@@ -201,18 +204,22 @@ export async function collectErrorAggregateFromDatabase(
   if (!Number.isInteger(top) || top < 1 || top > 100) {
     throw new Error("error aggregate top must be an integer from 1 to 100");
   }
-  const databaseUrl = databaseUrlOverride ?? readSecret(config, config.sub2api.scoreDatabase);
-  const database = scoreDatabasePool(databaseUrl);
   const startedAt = performance.now();
-  let queryDurationMs = 0;
-  const rows = await database.begin(async (transaction) => {
-      await transaction.unsafe("SET TRANSACTION READ ONLY");
-      await transaction.unsafe(`SET LOCAL statement_timeout = '${config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
-      const queryStartedAt = performance.now();
-      const result = await transaction.unsafe(errorAggregateSql, [limit, accountSelector, groupSelector, top]);
-      queryDurationMs = Math.round((performance.now() - queryStartedAt) * 10) / 10;
-      return result;
-    }) as unknown as Row[];
+  const query = await reads.query<Row>({
+    key: JSON.stringify([
+      "errors.aggregate",
+      limit,
+      top,
+      accountSelector,
+      groupSelector,
+    ]),
+    kind: "errors.aggregate",
+    sql: errorAggregateSql,
+    parameters: [limit, accountSelector, groupSelector, top],
+    priority,
+    cacheMode: "prefer-cache",
+  });
+  const rows = query.rows;
     if (accountSelector !== null && integer(rows[0]?.sampled_error_rows) === 0) {
       throw new Error(`account selector resolved no recent errors: ${accountSelector}`);
     }
@@ -227,9 +234,14 @@ export async function collectErrorAggregateFromDatabase(
       accountSelector,
       groupSelector,
       timezone: config.monitor.timezone,
-      databaseQueries: 1,
-      queryDurationMs,
+      databaseQueries: query.cached ? 0 : 1,
+      queueDurationMs: query.queueDurationMs,
+      queryDurationMs: query.queryDurationMs,
       totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+      queryStartedAt: query.queryStartedAt,
+      queryCompletedAt: query.queryCompletedAt,
+      deduplicated: query.deduplicated,
+      cached: query.cached,
       ...projectErrorAggregateRow(rows[0] ?? {}, config.monitor.timezone),
       valuesPrinted: false,
   };

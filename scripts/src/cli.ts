@@ -1,9 +1,5 @@
 import { AdminHttpClient } from "../../src/admin-http-client";
 import { mergeAccountScores } from "../../src/account-score-aggregation";
-import { collectRecentCallScoresFromDatabase } from "../../src/account-score-database";
-import { buildAccountPriorityPlan } from "../../src/account-priority-plan";
-import { collectErrorAggregateFromDatabase } from "../../src/error-aggregate-database";
-import { collectErrorListFromDatabase, collectErrorRequestFromDatabase } from "../../src/error-detail-database";
 import { createEmbeddedContext } from "../../src/bootstrap";
 import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServiceId } from "../../src/config";
 import type { AppCommand } from "../../src/contracts";
@@ -11,7 +7,6 @@ import { usesWorkflow } from "../../src/contracts";
 import { ApplicationDispatcher } from "../../src/dispatcher";
 import { nativeAll, nativeLogs, nativeStart, nativeStatus, nativeStop } from "../../src/native-services";
 import { TemporalGateway } from "../../src/temporal-client";
-import { collectUserImpactFromDatabase } from "../../src/user-impact-database";
 import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
 import { emitPriorityPlan } from "./priority-plan-output";
@@ -112,6 +107,7 @@ function help(): Record<string, unknown> {
       "config validate",
       "backend check",
       "scores get|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
+      "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors list [--limit N]",
       "errors get --request-id <request-id>",
@@ -223,22 +219,14 @@ function isAppCommand(value: AppCommand | Record<string, unknown>): value is App
 
 async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: EmbeddedCliTarget): Promise<unknown> {
   if (parsed.command[0] === "priority") throw new Error("priority runtime CRUD requires --over-api");
-  if (parsed.command.join(" ") === "scores priority-plan") {
-    const ranking = await collectRecentCallScoresFromDatabase(
-      config,
-      parsed.calls ?? config.monitor.recentCallLimit,
-      parsed.account,
-      parsed.group,
-    );
-    return buildAccountPriorityPlan(ranking, config);
-  }
-  if (parsed.command.join(" ") === "scores rank") {
-    return await collectRecentCallScoresFromDatabase(
-      config,
-      parsed.calls ?? config.monitor.recentCallLimit,
-      parsed.account,
-      parsed.group,
-    );
+  if (
+    parsed.command.join(" ") === "scores priority-plan"
+    || parsed.command.join(" ") === "scores rank"
+    || parsed.command[0] === "errors"
+    || parsed.command.join(" ") === "users impact"
+    || parsed.command.join(" ") === "reads status"
+  ) {
+    throw new Error("Sub2API production reads require the Native API transport");
   }
   if (parsed.command.join(" ") === "scores refresh" || parsed.command.join(" ") === "workflow status") {
     const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue });
@@ -289,6 +277,33 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
   if (group === "scores" && action === "rank") {
     return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account, parsed.group);
+  }
+  if (group === "scores" && action === "priority-plan") {
+    return await client.priorityState(
+      parsed.calls ?? config.monitor.recentCallLimit,
+      parsed.account,
+      parsed.group,
+    );
+  }
+  if (group === "reads" && action === "status") return await client.readStatus();
+  if (group === "errors" && action === "aggregate") {
+    return await client.errorAggregate(
+      parsed.limit ?? config.monitor.errorAggregateLimit,
+      parsed.top ?? config.monitor.errorAggregateTop,
+      parsed.account,
+      parsed.group,
+    );
+  }
+  if (group === "errors" && action === "list") {
+    return await client.errorList(parsed.limit ?? config.monitor.errorAggregateLimit);
+  }
+  if (group === "errors" && action === "get") {
+    if (!parsed.requestId) throw new Error("errors get requires --request-id");
+    return await client.errorRequest(parsed.requestId);
+  }
+  if (group === "users" && action === "impact") {
+    if (!parsed.start || !parsed.end) throw new Error("users impact requires --start and --end");
+    return await client.userImpact(parsed.start, parsed.end, parsed.affectedOnly);
   }
   if (group === "workflow" && action === "status") {
     if (!parsed.id) throw new Error("workflow status requires --id");
@@ -358,34 +373,6 @@ export async function runCli(args: string[]): Promise<void> {
       automaticCreditEnabled: config.lottery.automaticCredit.enabled, valuesPrinted: false,
     }, parsed.json);
     if (parsed.command.join(" ") === "scores aggregate-smoke") return emit(aggregateSmoke(), parsed.json);
-    if (parsed.command.join(" ") === "errors aggregate") {
-      if (parsed.overApi) throw new Error("errors aggregate uses direct PostgreSQL and does not support --over-api");
-      const result = await collectErrorAggregateFromDatabase(
-        config,
-        parsed.limit ?? config.monitor.errorAggregateLimit,
-        parsed.top ?? config.monitor.errorAggregateTop,
-        parsed.account,
-        parsed.group,
-      );
-      return emitErrorAggregate({ target: "database", transport: "postgresql-direct", ...result }, parsed.json);
-    }
-    if (parsed.command.join(" ") === "errors list") {
-      if (parsed.overApi) throw new Error("errors list uses direct PostgreSQL and does not support --over-api");
-      const result = await collectErrorListFromDatabase(config, parsed.limit ?? config.monitor.errorAggregateLimit);
-      return emit({ target: "database", transport: "postgresql-direct", ...result }, parsed.json);
-    }
-    if (parsed.command.join(" ") === "errors get") {
-      if (parsed.overApi) throw new Error("errors get uses direct PostgreSQL and does not support --over-api");
-      if (!parsed.requestId) throw new Error("errors get requires --request-id");
-      const result = await collectErrorRequestFromDatabase(config, parsed.requestId);
-      return emit({ target: "database", transport: "postgresql-direct", ...result }, parsed.json);
-    }
-    if (parsed.command.join(" ") === "users impact") {
-      if (parsed.overApi) throw new Error("users impact uses direct PostgreSQL and does not support --over-api");
-      if (!parsed.start || !parsed.end) throw new Error("users impact requires --start and --end");
-      const result = await collectUserImpactFromDatabase(config, parsed.start, parsed.end, parsed.affectedOnly);
-      return emitUserImpact({ target: "database", transport: "postgresql-direct", ...result }, parsed.json);
-    }
     if (parsed.command[0] === "native") {
       const action = parsed.command[1];
       if (action !== "start" && action !== "stop" && action !== "status" && action !== "logs") {
@@ -400,7 +387,18 @@ export async function runCli(args: string[]): Promise<void> {
         : nativeLogs(config, parsed.component, parsed.tail ?? 40);
       return emit(result, parsed.json);
     }
-    const targetId = parsed.targetId ?? (parsed.overApi ? config.runtime.overApiTarget : config.runtime.defaultCliTarget);
+    const nativeReadCommand = (
+      parsed.command.join(" ") === "scores rank"
+      || parsed.command.join(" ") === "scores priority-plan"
+      || parsed.command.join(" ") === "reads status"
+      || parsed.command[0] === "errors"
+      || parsed.command.join(" ") === "users impact"
+    );
+    const targetId = parsed.targetId ?? (
+      parsed.overApi || nativeReadCommand
+        ? config.runtime.overApiTarget
+        : config.runtime.defaultCliTarget
+    );
     const target = config.runtime.cliTargets[targetId];
     if (!target) throw new Error(`runtime.cliTargets.${targetId} does not exist`);
     if (parsed.overApi && target.mode !== "http") throw new Error(`--over-api requires an http target; ${targetId} is ${target.mode}`);
@@ -408,6 +406,8 @@ export async function runCli(args: string[]): Promise<void> {
     const output = { target: targetId, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...result as Record<string, unknown> };
     if (parsed.command.join(" ") === "scores rank") emitScoreRanking(output, parsed.json);
     else if (parsed.command.join(" ") === "scores priority-plan") emitPriorityPlan(output, parsed.json);
+    else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
+    else if (parsed.command.join(" ") === "users impact") emitUserImpact(output, parsed.json);
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);

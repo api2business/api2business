@@ -1,6 +1,8 @@
 import type { AppConfig } from "./config";
-import { readSecret } from "./secrets";
-import { scoreDatabasePool } from "./score-database-pool";
+import type {
+  Sub2ApiReadClient,
+  Sub2ApiReadPriority,
+} from "./sub2api-read-executor";
 
 type Row = Record<string, unknown>;
 
@@ -167,47 +169,54 @@ export function projectErrorDetailRow(row: Row, timezone: string): Row {
 }
 
 async function query(
-  config: AppConfig,
+  reads: Sub2ApiReadClient,
+  key: string,
+  kind: string,
   sqlText: string,
   params: unknown[],
-  databaseUrlOverride: string | null,
-): Promise<{ rows: Row[]; queryDurationMs: number; totalDurationMs: number }> {
-  const databaseUrl = databaseUrlOverride ?? readSecret(config, config.sub2api.scoreDatabase);
-  const database = scoreDatabasePool(databaseUrl);
-  const startedAt = performance.now();
-  let queryDurationMs = 0;
-  const rows = await database.begin(async (transaction) => {
-      await transaction.unsafe("SET TRANSACTION READ ONLY");
-      await transaction.unsafe(`SET LOCAL statement_timeout = '${config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
-      const queryStartedAt = performance.now();
-      const result = await transaction.unsafe(sqlText, params);
-      queryDurationMs = Math.round((performance.now() - queryStartedAt) * 10) / 10;
-      return result;
-    }) as unknown as Row[];
-  return {
-      rows,
-      queryDurationMs,
-      totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
-  };
+  priority: Sub2ApiReadPriority,
+) {
+  return await reads.query<Row>({
+    key,
+    kind,
+    sql: sqlText,
+    parameters: params,
+    priority,
+    cacheMode: "prefer-cache",
+  });
 }
 
 export async function collectErrorListFromDatabase(
   config: AppConfig,
+  reads: Sub2ApiReadClient,
   limit: number,
-  databaseUrlOverride: string | null = null,
+  priority: Sub2ApiReadPriority = "manual",
 ): Promise<Row> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 10000) {
     throw new Error("error list limit must be an integer from 1 to 10000");
   }
-  const result = await query(config, errorListSql, [limit], databaseUrlOverride);
+  const startedAt = performance.now();
+  const result = await query(
+    reads,
+    JSON.stringify(["errors.list", limit]),
+    "errors.list",
+    errorListSql,
+    [limit],
+    priority,
+  );
   return {
     ok: true,
     mode: "error-list-postgresql",
     limit,
     timezone: config.monitor.timezone,
-    databaseQueries: 1,
+    databaseQueries: result.cached ? 0 : 1,
+    queueDurationMs: result.queueDurationMs,
     queryDurationMs: result.queryDurationMs,
-    totalDurationMs: result.totalDurationMs,
+    totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+    queryStartedAt: result.queryStartedAt,
+    queryCompletedAt: result.queryCompletedAt,
+    deduplicated: result.deduplicated,
+    cached: result.cached,
     records: result.rows.map((row) => projectErrorDetailRow(row, config.monitor.timezone)),
     valuesPrinted: false,
   };
@@ -215,20 +224,34 @@ export async function collectErrorListFromDatabase(
 
 export async function collectErrorRequestFromDatabase(
   config: AppConfig,
+  reads: Sub2ApiReadClient,
   requestId: string,
-  databaseUrlOverride: string | null = null,
+  priority: Sub2ApiReadPriority = "manual",
 ): Promise<Row> {
   if (!requestId.trim()) throw new Error("request id is required");
-  const result = await query(config, errorGetSql, [requestId.trim()], databaseUrlOverride);
+  const startedAt = performance.now();
+  const result = await query(
+    reads,
+    JSON.stringify(["errors.get", requestId.trim()]),
+    "errors.get",
+    errorGetSql,
+    [requestId.trim()],
+    priority,
+  );
   if (result.rows.length === 0) throw new Error(`request id not found: ${requestId}`);
   return {
     ok: true,
     mode: "error-request-postgresql",
     requestId,
     timezone: config.monitor.timezone,
-    databaseQueries: 1,
+    databaseQueries: result.cached ? 0 : 1,
+    queueDurationMs: result.queueDurationMs,
     queryDurationMs: result.queryDurationMs,
-    totalDurationMs: result.totalDurationMs,
+    totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+    queryStartedAt: result.queryStartedAt,
+    queryCompletedAt: result.queryCompletedAt,
+    deduplicated: result.deduplicated,
+    cached: result.cached,
     attempts: result.rows.map((row) => projectErrorDetailRow(row, config.monitor.timezone)),
     recovered: result.rows.some((row) => row.recovered === true),
     customerVisible: result.rows.some((row) =>

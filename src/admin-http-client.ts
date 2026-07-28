@@ -1,4 +1,5 @@
 import type { AppConfig, HttpCliTarget } from "./config";
+import type { OperationRequest } from "./contracts";
 import { readSecret } from "./secrets";
 
 export class AdminHttpClient {
@@ -63,5 +64,78 @@ export class AdminHttpClient {
   }
   deletePriorityAutomation(): Promise<Record<string, unknown>> {
     return this.request("/api/operations/priority-automation", { method: "DELETE" });
+  }
+  priorityState(
+    recentCallLimit: number,
+    account: string | null,
+    group: string | null,
+  ): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ recentCallLimit: String(recentCallLimit) });
+    if (account) query.set("account", account);
+    if (group) query.set("group", group);
+    return this.request(
+      `/api/operations/priority-state?${query}`,
+      {},
+      60000,
+    );
+  }
+  ledger(period?: string): Promise<Record<string, unknown>> {
+    const query = period ? `?period=${encodeURIComponent(period)}` : "";
+    return this.request(`/api/operations/ledger${query}`, {}, 60000);
+  }
+  readStatus(): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/read-status");
+  }
+  errorAggregate(
+    limit: number,
+    top: number,
+    account: string | null,
+    group: string | null,
+  ): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({
+      limit: String(limit),
+      top: String(top),
+    });
+    if (account) query.set("account", account);
+    if (group) query.set("group", group);
+    return this.request(`/api/admin/errors/aggregate?${query}`, {}, 60000);
+  }
+  errorList(limit: number): Promise<Record<string, unknown>> {
+    return this.request(`/api/admin/errors?limit=${limit}`, {}, 60000);
+  }
+  errorRequest(requestId: string): Promise<Record<string, unknown>> {
+    return this.request(
+      `/api/admin/errors/${encodeURIComponent(requestId)}`,
+      {},
+      60000,
+    );
+  }
+  userImpact(
+    start: string,
+    end: string,
+    affectedOnly: boolean,
+  ): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/users/impact", {
+      method: "POST",
+      body: JSON.stringify({ start, end, affectedOnly }),
+    }, 60000);
+  }
+  async executeOperation(operation: OperationRequest): Promise<unknown> {
+    const response = await this.request<Record<string, unknown>>(
+      "/api/internal/execute-operation",
+      { method: "POST", body: JSON.stringify(operation) },
+      60000,
+    );
+    if (response.operationId !== operation.operationId) {
+      throw new Error("ApiState internal operation response identity mismatch");
+    }
+    return response.result;
+  }
+  runDueAutomation(): Promise<Record<string, unknown>> {
+    return this.request(
+      "/api/internal/priority-automation/run-due",
+      { method: "POST", body: "{}" },
+      240000,
+    );
   }
 }

@@ -6,6 +6,7 @@ import { requiredOption } from "./runtime-args";
 import { TemporalGateway } from "./temporal-client";
 import { OperationsStore } from "./operations-store";
 import { OperationsService } from "./operations-service";
+import { SingleConnectionSub2ApiReadExecutor } from "./sub2api-read-executor";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -14,7 +15,13 @@ if (!target) throw new Error(`runtime.serverTargets.${runtimeId} does not exist`
 const adminToken = process.env[target.adminTokenEnv];
 if (!adminToken) throw new Error(`server target requires env ${target.adminTokenEnv}`);
 
-const context = createServerContext(config, target);
+const scoreDatabaseUrl = process.env[target.scoreDatabaseUrlEnv];
+if (!scoreDatabaseUrl) throw new Error(`server target requires env ${target.scoreDatabaseUrlEnv}`);
+const reads = new SingleConnectionSub2ApiReadExecutor(
+  scoreDatabaseUrl,
+  config.sub2api.scoreDatabase,
+);
+const context = createServerContext(config, target, reads);
 const temporalAddress = process.env[config.temporal.addressEnv];
 if (runtimeId !== "native" && !temporalAddress) throw new Error(`server target requires env ${config.temporal.addressEnv}`);
 const temporal = temporalAddress
@@ -23,7 +30,11 @@ const temporal = temporalAddress
 const dispatcher = new ApplicationDispatcher({ lottery: context.service, scores: context.monitor }, temporal);
 const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
 if (!operationsDatabaseUrl) throw new Error(`server target requires env ${config.operations.databaseUrlEnv}`);
-const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), process.env[target.scoreDatabaseUrlEnv]!);
+const operations = new OperationsService(
+  config,
+  new OperationsStore(operationsDatabaseUrl),
+  reads,
+);
 await operations.initialize();
 const server = Bun.serve({
   hostname: target.listenHost,
@@ -50,6 +61,7 @@ async function stop(): Promise<void> {
   server.stop(true);
   context.close();
   await operations.close();
+  await reads.close();
   if (temporal) await temporal.close();
   process.exit(0);
 }

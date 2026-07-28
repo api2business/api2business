@@ -40,7 +40,7 @@ test("priority plan text includes review evidence and exact priorities", () => {
       target: "NC01-DOCKER",
       writeMode: "backend-api-paced",
       batchSize: 3,
-      verification: "postgresql-direct",
+      verification: "native-api-read-broker",
     },
   });
 

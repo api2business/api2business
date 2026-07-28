@@ -39,6 +39,10 @@ export class ApplicationDispatcher {
     return await this.temporal.execute(command);
   }
 
+  async executeDirect(command: AppCommand): Promise<unknown> {
+    return await dispatchDirect(this.services, command);
+  }
+
   async submit(command: AppCommand): Promise<unknown> {
     if (!usesWorkflow(command)) throw new Error(`command ${command.kind} does not use Temporal`);
     if (!this.temporal) throw new Error(`command ${command.kind} requires Temporal`);

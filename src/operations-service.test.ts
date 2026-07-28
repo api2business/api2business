@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import type { AppConfig } from "./config";
 import { OperationsService } from "./operations-service";
 import type { OperationsStore } from "./operations-store";
+import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+
+const unusedReads = {} as Sub2ApiReadClient;
 
 const automationSafety = {
   maximumScoreQueryDurationMs: 3000,
@@ -47,7 +50,7 @@ function serviceFixture(candidate: Record<string, unknown>) {
       },
     },
   } as AppConfig;
-  const service = new OperationsService(config, store, "postgres://unused");
+  const service = new OperationsService(config, store, unusedReads);
   service.priorityState = async () => candidate;
   return { service, created };
 }
@@ -142,7 +145,7 @@ test("confirming nine changes writes three sequential rounds of three", async ()
       },
     },
   } as AppConfig;
-  const service = new OperationsService(config, store, "postgres://unused");
+  const service = new OperationsService(config, store, unusedReads);
   const internals = service as unknown as {
     applyPriorityBatch(
       batch: Record<string, number>,
@@ -157,7 +160,7 @@ test("confirming nine changes writes three sequential rounds of three", async ()
       batchNumber,
       batchCount,
       changedCount: Object.keys(batch).length,
-      verification: "postgresql-direct",
+      verification: "native-api-read-broker",
       verifiedCount: Object.keys(batch).length,
     };
   };
@@ -219,7 +222,7 @@ test("priority history emits separate codex and grok rows with elapsed time", as
   const config = {
     operations: { auditLimit: 100 },
   } as AppConfig;
-  const service = new OperationsService(config, store, "postgres://unused");
+  const service = new OperationsService(config, store, unusedReads);
 
   const result = await service.priorityHistory();
   expect(result.records).toHaveLength(2);
@@ -256,7 +259,7 @@ test("one round stops after the initial write and three exponential retries", as
       },
     },
   } as AppConfig;
-  const service = new OperationsService(config, {} as OperationsStore, "postgres://unused");
+  const service = new OperationsService(config, {} as OperationsStore, unusedReads);
   let writes = 0;
   const internals = service as unknown as {
     writePriorityBatch(batch: Record<string, number>): Promise<Record<string, unknown> & { ok: boolean }>;
@@ -273,7 +276,7 @@ test("one round stops after the initial write and three exponential retries", as
   };
   internals.verifyPriorities = async (batch) => ({
     complete: false,
-    verification: "postgresql-direct",
+    verification: "native-api-read-broker",
     verifiedCount: 0,
     verificationDurationMs: 1,
     unmatchedPriorities: batch,
@@ -289,7 +292,7 @@ test("one round stops after the initial write and three exponential retries", as
   });
 });
 
-test("one round skips backend writes when direct preflight readback is already complete", async () => {
+test("one round skips backend writes when broker preflight readback is already complete", async () => {
   const config = {
     operations: {
       priorityVerificationTimeoutMs: 0,
@@ -304,7 +307,7 @@ test("one round skips backend writes when direct preflight readback is already c
       },
     },
   } as AppConfig;
-  const service = new OperationsService(config, {} as OperationsStore, "postgres://unused");
+  const service = new OperationsService(config, {} as OperationsStore, unusedReads);
   let writes = 0;
   const internals = service as unknown as {
     writePriorityBatch(batch: Record<string, number>): Promise<Record<string, unknown> & { ok: boolean }>;
@@ -321,7 +324,7 @@ test("one round skips backend writes when direct preflight readback is already c
   };
   internals.verifyPriorities = async (batch, timeoutMs) => ({
     complete: true,
-    verification: "postgresql-direct",
+    verification: "native-api-read-broker",
     verifiedCount: Object.keys(batch).length,
     verificationDurationMs: 1,
     unmatchedPriorities: {},
@@ -357,7 +360,7 @@ test("the next automatic interval starts only after queued writes fully complete
       automationJitterPercent: 0.1,
     },
   } as AppConfig;
-  const service = new OperationsService(config, store, "postgres://unused");
+  const service = new OperationsService(config, store, unusedReads);
   const methods = service as unknown as {
     generatePriorityPlan(): Promise<Record<string, unknown>>;
     confirmPriorityPlan(): Promise<Record<string, unknown>>;
@@ -376,7 +379,7 @@ test("the next automatic interval starts only after queued writes fully complete
     events.push("write-finished");
     return {
       changedCount: 1,
-      verification: "postgresql-direct",
+      verification: "native-api-read-broker",
     };
   };
 

@@ -1,6 +1,8 @@
 import type { AppConfig } from "./config";
-import { readSecret } from "./secrets";
-import { scoreDatabasePool } from "./score-database-pool";
+import type {
+  Sub2ApiReadClient,
+  Sub2ApiReadPriority,
+} from "./sub2api-read-executor";
 
 type Row = Record<string, unknown>;
 
@@ -317,9 +319,10 @@ function sortScores(rows: Row[]): Row[] {
 export async function collectRecentCallScoresFromDatabase(
   config: AppConfig,
   recentCallLimit: number,
+  reads: Sub2ApiReadClient,
   accountSelector: string | null = null,
   groupSelector: string | null = null,
-  databaseUrlOverride: string | null = null,
+  priority: Sub2ApiReadPriority = "manual",
 ): Promise<{
   ok: true;
   mode: string;
@@ -328,42 +331,45 @@ export async function collectRecentCallScoresFromDatabase(
   groupSelector: string | null;
   accountCount: number;
   databaseQueries: number;
+  queueDurationMs: number;
   queryDurationMs: number;
   totalDurationMs: number;
   collectionStartedAt: string;
   queryStartedAt: string;
   queryCompletedAt: string;
   collectedAt: string;
+  deduplicated: boolean;
+  cached: boolean;
   accounts: Row[];
 }> {
   if (!Number.isInteger(recentCallLimit) || recentCallLimit < 1 || recentCallLimit > 10000) {
     throw new Error("recent call limit must be an integer from 1 to 10000");
   }
-  const databaseUrl = databaseUrlOverride ?? readSecret(config, config.sub2api.scoreDatabase);
-  const database = scoreDatabasePool(databaseUrl);
   const startedAt = performance.now();
   const collectionStartedAt = new Date().toISOString();
-  let queryStartedAt = collectionStartedAt;
-  let queryCompletedAt = collectionStartedAt;
-  let queryDurationMs = 0;
-  const rows = await database.begin(async (transaction) => {
-      await transaction.unsafe("SET TRANSACTION READ ONLY");
-      await transaction.unsafe(`SET LOCAL statement_timeout = '${config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
-      // PK01 的评分热数据常驻缓存；降低本事务随机页成本，避免规划器为每个
-      // 账号反复扫描全局 created_at 索引，优先使用 account_id 复合索引。
-      await transaction.unsafe("SET LOCAL random_page_cost = 1");
-      const queryStartedAtMs = performance.now();
-      queryStartedAt = new Date().toISOString();
-      const result = await transaction.unsafe(recentAccountAggregateSql, [
-        recentCallLimit,
-        accountSelector,
-        groupSelector,
-        Math.min(recentCallLimit, config.sub2api.scorePolicy.failureBurstCallLimit),
-      ]);
-      queryDurationMs = Math.round((performance.now() - queryStartedAtMs) * 10) / 10;
-      queryCompletedAt = new Date().toISOString();
-      return result;
-    }) as unknown as Row[];
+  const query = await reads.query<Row>({
+    key: JSON.stringify([
+      "scores.rank",
+      recentCallLimit,
+      accountSelector,
+      groupSelector,
+      Math.min(recentCallLimit, config.sub2api.scorePolicy.failureBurstCallLimit),
+    ]),
+    kind: "scores.rank",
+    sql: recentAccountAggregateSql,
+    parameters: [
+      recentCallLimit,
+      accountSelector,
+      groupSelector,
+      Math.min(recentCallLimit, config.sub2api.scorePolicy.failureBurstCallLimit),
+    ],
+    priority,
+    cacheMode: priority === "automatic" ? "prefer-cache" : "bypass-cache",
+    // PK01 的评分热数据常驻缓存；降低本事务随机页成本，避免规划器为每个
+    // 账号反复扫描全局 created_at 索引，优先使用 account_id 复合索引。
+    setupStatements: ["SET LOCAL random_page_cost = 1"],
+  });
+  const rows = query.rows;
     const selected = rows.filter((row) => accountSelector === null
       || String(row.account_id) === accountSelector
       || String(row.account_name) === accountSelector);
@@ -381,13 +387,16 @@ export async function collectRecentCallScoresFromDatabase(
       accountSelector,
       groupSelector,
       accountCount: accounts.length,
-    databaseQueries: 1,
-    queryDurationMs,
+    databaseQueries: query.cached ? 0 : 1,
+    queueDurationMs: query.queueDurationMs,
+    queryDurationMs: query.queryDurationMs,
     totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
     collectionStartedAt,
-    queryStartedAt,
-    queryCompletedAt,
+    queryStartedAt: query.queryStartedAt,
+    queryCompletedAt: query.queryCompletedAt,
     collectedAt: new Date().toISOString(),
+    deduplicated: query.deduplicated,
+    cached: query.cached,
     accounts,
   };
 }

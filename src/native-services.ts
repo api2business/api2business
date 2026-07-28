@@ -28,14 +28,21 @@ function running(pid: number | null): boolean {
   }
 }
 
-function nativeEnvironment(config: AppConfig): Record<string, string> {
+function nativeEnvironment(
+  config: AppConfig,
+  component: NativeServiceId,
+): Record<string, string> {
   const env: Record<string, string> = { ...process.env } as Record<string, string>;
-  for (const [targetKey, ref] of Object.entries(config.runtime.native.env)) env[targetKey] = readSecret(config, ref);
-  if (!env[config.temporal.addressEnv]) {
+  for (const targetKey of Object.keys(config.runtime.native.env)) delete env[targetKey];
+  delete env[config.temporal.addressEnv];
+  const envKeys = new Set(config.runtime.native.services[component].envKeys);
+  for (const targetKey of envKeys) {
+    const ref = config.runtime.native.env[targetKey];
+    if (ref) env[targetKey] = readSecret(config, ref);
+  }
+  if (envKeys.has(config.temporal.addressEnv)) {
     const ref = config.runtime.native.temporalServiceRef;
-    const result = spawnSync("trans", [
-      ref.route,
-      "kubectl",
+    const kubectlArgs = [
       "-n",
       ref.namespace,
       "get",
@@ -43,7 +50,15 @@ function nativeEnvironment(config: AppConfig): Record<string, string> {
       ref.service,
       "-o",
       `jsonpath={.spec.clusterIP}:{.spec.ports[?(@.name=="${ref.portName}")].port}`,
-    ], { encoding: "utf8", timeout: 10_000 });
+    ];
+    const command = ref.executionPlane === "local-k3s" ? "kubectl" : "trans";
+    const args = ref.executionPlane === "local-k3s"
+      ? ["--kubeconfig", ref.kubeconfig, ...kubectlArgs]
+      : [ref.route, "kubectl", ...kubectlArgs];
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
     const address = result.stdout.trim();
     if (result.status !== 0 || !/^[0-9a-f:.]+:[1-9][0-9]*$/iu.test(address)) {
       throw new Error(`native temporal service resolution failed for ${ref.namespace}/${ref.service}`);
@@ -76,7 +91,7 @@ export function nativeStart(
 ): Record<string, unknown> {
   const current = nativeStatus(config, component);
   if (current.state === "running") return { ...current, mutation: false, reason: "already-running" };
-  const env = preparedEnvironment ?? nativeEnvironment(config);
+  const env = preparedEnvironment ?? nativeEnvironment(config, component);
   const service = config.runtime.native.services[component];
   const target = paths(config, component);
   mkdirSync(target.stateDir, { recursive: true });
@@ -122,9 +137,8 @@ export function nativeAll(
   tail = 40,
 ): Record<string, unknown> {
   const components = action === "stop" ? [...nativeComponents].reverse() : nativeComponents;
-  const environment = action === "start" ? nativeEnvironment(config) : undefined;
   const results = components.map((component) =>
-    action === "start" ? nativeStart(config, component, environment)
+    action === "start" ? nativeStart(config, component)
       : action === "stop" ? nativeStop(config, component)
         : action === "status" ? nativeStatus(config, component)
           : nativeLogs(config, component, tail)

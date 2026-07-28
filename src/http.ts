@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import type { AppConfig } from "./config";
 import type { ApplicationDispatcher } from "./dispatcher";
 import type { OperationsService } from "./operations-service";
+import type { AppCommand, OperationRequest } from "./contracts";
 import {
   apiKeyAuthorized,
   clearSessionCookie,
@@ -30,6 +31,22 @@ function errorResponse(error: unknown): Response {
   const status = /does not exist|no draw chance|no eligible/u.test(message) ? 409 : 500;
   if (status >= 500) console.error(JSON.stringify({ ok: false, component: "http", error: message }));
   return json({ ok: false, error: status >= 500 ? "服务暂时不可用，请稍后重试" : message }, status);
+}
+
+function positiveInteger(value: string | null, fallback: number): number | null {
+  if (value === null) return fallback;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function operationRequest(value: Record<string, unknown>): OperationRequest | null {
+  const command = value.command as Record<string, unknown> | undefined;
+  if (typeof value.operationId !== "string" || !value.operationId.trim()) return null;
+  if (!command || typeof command.kind !== "string") return null;
+  return {
+    operationId: value.operationId,
+    command: command as AppCommand,
+  };
 }
 
 async function staticFile(name: string, contentType: string): Promise<Response> {
@@ -78,6 +95,20 @@ export function createHandler(
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+      if (request.method === "POST" && url.pathname === "/api/internal/execute-operation") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const operation = operationRequest(await body(request));
+        if (!operation) return json({ ok: false, error: "invalid operation request" }, 400);
+        return json({
+          ok: true,
+          operationId: operation.operationId,
+          result: await dispatcher.executeDirect(operation.command),
+        });
+      }
+      if (request.method === "POST" && url.pathname === "/api/internal/priority-automation/run-due") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        return json(await operations.runDueAutomation());
+      }
       if (request.method === "GET" && url.pathname === "/api/status") {
         const scores = await dispatcher.dispatch({ kind: "scores.get" }) as Record<string, unknown>;
         return json({ ok: true, service: "apistate", scoreStatus: scores.status, refreshedAt: scores.refreshedAt, nextRefreshAt: scores.nextRefreshAt });
@@ -145,7 +176,12 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/operations/priority-state") {
         const limit = Number(url.searchParams.get("recentCallLimit") ?? config.monitor.recentCallLimit);
         if (!config.monitor.recentCallOptions.includes(limit)) return json({ ok: false, error: "评分样本档位无效" }, 400);
-        return json(await operations.priorityState(limit));
+        return json(await operations.priorityState(
+          limit,
+          "manual",
+          url.searchParams.get("account"),
+          url.searchParams.get("group"),
+        ));
       }
       if (request.method === "GET" && url.pathname === "/api/operations/priority-history") {
         return json(await operations.priorityHistory());
@@ -179,6 +215,64 @@ export function createHandler(
         return json(await operations.procurement(budget, config.webAuth.username));
       }
       if (request.method === "GET" && url.pathname === "/api/operations/audits") return json(await operations.audits());
+      if (request.method === "GET" && url.pathname === "/api/admin/read-status") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        return json(operations.readStatus());
+      }
+      if (request.method === "GET" && url.pathname === "/api/admin/errors/aggregate") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const limit = positiveInteger(
+          url.searchParams.get("limit"),
+          config.monitor.errorAggregateLimit,
+        );
+        const top = positiveInteger(
+          url.searchParams.get("top"),
+          config.monitor.errorAggregateTop,
+        );
+        if (limit === null || top === null) {
+          return json({ ok: false, error: "limit and top must be positive integers" }, 400);
+        }
+        return json(await operations.errorAggregate(
+          limit,
+          top,
+          url.searchParams.get("account"),
+          url.searchParams.get("group"),
+        ));
+      }
+      if (request.method === "GET" && url.pathname === "/api/admin/errors") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const limit = positiveInteger(
+          url.searchParams.get("limit"),
+          config.monitor.errorAggregateLimit,
+        );
+        if (limit === null) return json({ ok: false, error: "limit must be a positive integer" }, 400);
+        return json(await operations.errorList(limit));
+      }
+      if (request.method === "GET" && url.pathname.startsWith("/api/admin/errors/")) {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const requestId = decodeURIComponent(url.pathname.slice("/api/admin/errors/".length));
+        if (!requestId) return json({ ok: false, error: "request id is required" }, 400);
+        return json(await operations.errorRequest(requestId));
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/users/impact") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const input = await body(request);
+        if (
+          typeof input.start !== "string"
+          || typeof input.end !== "string"
+          || typeof input.affectedOnly !== "boolean"
+        ) {
+          return json({
+            ok: false,
+            error: "start, end, and affectedOnly are required",
+          }, 400);
+        }
+        return json(await operations.userImpact(
+          input.start,
+          input.end,
+          input.affectedOnly,
+        ));
+      }
 
       if (!url.pathname.startsWith("/api/admin/")) return json({ ok: false, error: "not found" }, 404);
       if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);

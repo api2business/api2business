@@ -1,34 +1,45 @@
 import { fileURLToPath } from "node:url";
 import { NativeConnection, Worker } from "@temporalio/worker";
-import { createServerContext } from "./bootstrap";
 import { loadConfig } from "./config";
-import { createActivities } from "./dispatcher";
+import { AdminHttpClient } from "./admin-http-client";
+import type { OperationRequest } from "./contracts";
 import { requiredOption } from "./runtime-args";
 import { temporalAddress, TemporalGateway } from "./temporal-client";
-import { OperationsService } from "./operations-service";
-import { OperationsStore } from "./operations-store";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
 const target = config.runtime.serverTargets[runtimeId];
 if (!target) throw new Error(`runtime.serverTargets.${runtimeId} does not exist`);
 
-const context = createServerContext(config, target);
-const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
-const scoreDatabaseUrl = process.env[target.scoreDatabaseUrlEnv];
-if (!operationsDatabaseUrl || !scoreDatabaseUrl) throw new Error("worker is missing declared operations or score database URL");
-const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), scoreDatabaseUrl);
-await operations.initialize();
+const internalTarget = config.runtime.cliTargets[config.runtime.overApiTarget];
+if (!internalTarget || internalTarget.mode !== "http") {
+  throw new Error("worker requires runtime.overApiTarget to reference the Native API");
+}
+const internal = new AdminHttpClient(config, internalTarget);
 const connection = await NativeConnection.connect({ address: temporalAddress(config) });
 const worker = await Worker.create({
   connection,
   namespace: config.temporal.namespace,
   taskQueue: target.temporalTaskQueue,
   workflowsPath: fileURLToPath(new URL("./workflows.ts", import.meta.url)),
-  activities: createActivities({ lottery: context.service, scores: context.monitor }),
+  activities: {
+    executeOperation: async (operation: OperationRequest) =>
+      await internal.executeOperation(operation),
+  },
 });
-const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId });
-const schedule = await temporal.ensureScoreSchedule();
+const temporal = config.monitor.automaticRefresh.enabled
+  ? await TemporalGateway.connect(config, {
+    taskQueue: target.temporalTaskQueue,
+    scoreScheduleWorkflowId: target.scoreScheduleWorkflowId,
+  })
+  : null;
+const schedule = temporal
+  ? await temporal.ensureScoreSchedule()
+  : {
+    enabled: false,
+    started: false,
+    workflowId: target.scoreScheduleWorkflowId,
+  };
 let state: "ready" | "stopping" = "ready";
 const health = Bun.serve({
   hostname: target.workerHealthHost,
@@ -58,7 +69,7 @@ let stopping = false;
 const automationLoop = (async () => {
   while (!stopping) {
     try {
-      const result = await operations.runDueAutomation();
+      const result = await internal.runDueAutomation();
       if (result.due) console.log(JSON.stringify({ component: "priority-automation", ...result, valuesPrinted: false }));
     } catch (error) {
       console.error(JSON.stringify({
@@ -82,9 +93,7 @@ try {
   await worker.run();
 } finally {
   await automationLoop;
-  await operations.close();
-  await temporal.close();
+  if (temporal) await temporal.close();
   await connection.close();
-  context.close();
   console.log(JSON.stringify({ ok: true, component: "apistate-worker", state: "stopped", valuesPrinted: false }));
 }

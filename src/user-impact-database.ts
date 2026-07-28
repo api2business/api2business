@@ -1,7 +1,9 @@
 import { DateTime } from "luxon";
 import type { AppConfig } from "./config";
-import { readSecret } from "./secrets";
-import { scoreDatabasePool } from "./score-database-pool";
+import type {
+  Sub2ApiReadClient,
+  Sub2ApiReadPriority,
+} from "./sub2api-read-executor";
 
 type Row = Record<string, unknown>;
 
@@ -171,24 +173,28 @@ function projectRow(row: Row, timezone: string): Row {
 
 export async function collectUserImpactFromDatabase(
   config: AppConfig,
+  reads: Sub2ApiReadClient,
   start: string,
   end: string,
   affectedOnly = false,
-  databaseUrlOverride: string | null = null,
+  priority: Sub2ApiReadPriority = "manual",
 ): Promise<Row> {
   const window = parseImpactWindow(start, end, config.monitor.timezone);
-  const databaseUrl = databaseUrlOverride ?? readSecret(config, config.sub2api.scoreDatabase);
-  const database = scoreDatabasePool(databaseUrl);
   const startedAt = performance.now();
-  let queryDurationMs = 0;
-  const rows = await database.begin(async (transaction) => {
-      await transaction.unsafe("SET TRANSACTION READ ONLY");
-      await transaction.unsafe(`SET LOCAL statement_timeout = '${config.sub2api.scoreDatabase.statementTimeoutMs}ms'`);
-      const queryStartedAt = performance.now();
-      const result = await transaction.unsafe(userImpactSql, [window.startUtc, window.endUtc]);
-      queryDurationMs = Math.round((performance.now() - queryStartedAt) * 10) / 10;
-      return result;
-    }) as unknown as Row[];
+  const query = await reads.query<Row>({
+    key: JSON.stringify([
+      "users.impact",
+      window.startUtc,
+      window.endUtc,
+      affectedOnly,
+    ]),
+    kind: "users.impact",
+    sql: userImpactSql,
+    parameters: [window.startUtc, window.endUtc],
+    priority,
+    cacheMode: "prefer-cache",
+  });
+  const rows = query.rows;
     const projected = rows.map((row) => projectRow(row, window.timezone));
     const users = affectedOnly ? projected.filter((row) => row.affected === true) : projected;
   return {
@@ -199,9 +205,14 @@ export async function collectUserImpactFromDatabase(
       userCount: users.length,
       activeUserCount: projected.length,
       affectedUserCount: projected.filter((row) => row.affected === true).length,
-      databaseQueries: 1,
-      queryDurationMs,
+      databaseQueries: query.cached ? 0 : 1,
+      queueDurationMs: query.queueDurationMs,
+      queryDurationMs: query.queryDurationMs,
       totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+      queryStartedAt: query.queryStartedAt,
+      queryCompletedAt: query.queryCompletedAt,
+      deduplicated: query.deduplicated,
+      cached: query.cached,
       users,
       valuesPrinted: false,
   };

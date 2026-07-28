@@ -64,6 +64,9 @@ export interface AppConfig {
   monitor: {
     timezone: string;
     refreshIntervalMinutes: number;
+    automaticRefresh: {
+      enabled: boolean;
+    };
     recentCallLimit: number;
     errorAggregateLimit: number;
     errorAggregateTop: number;
@@ -76,7 +79,12 @@ export interface AppConfig {
     baseUrl: string;
     requestTimeoutMs: number;
     pageSize: number;
-    scoreDatabase: SecretRef & { statementTimeoutMs: number };
+    scoreDatabase: SecretRef & {
+      statementTimeoutMs: number;
+      queueTimeoutMs: number;
+      cacheTtlMs: number;
+      cacheMaxEntries: number;
+    };
     scorePolicy: ScorePolicy;
     grokScorePolicy: ScorePolicy;
     priorityPlan: PriorityPlanPolicy;
@@ -146,7 +154,9 @@ export interface AppConfig {
       stateDir: string;
       env: Record<string, SecretRef>;
       temporalServiceRef: {
+        executionPlane: "local-k3s" | "route";
         route: string;
+        kubeconfig: string;
         namespace: string;
         service: string;
         portName: string;
@@ -200,6 +210,7 @@ export interface ServerTarget {
 export type NativeServiceId = "api" | "worker" | "web";
 
 export interface NativeServiceConfig {
+  envKeys: string[];
   command: string[];
   pidFile: string;
   logFile: string;
@@ -366,6 +377,7 @@ export function loadConfig(path: string): AppConfig {
   const metadata = object(raw.metadata, "metadata");
   const sub2api = object(raw.sub2api, "sub2api");
   const monitor = object(raw.monitor, "monitor");
+  const automaticRefresh = object(monitor.automaticRefresh, "monitor.automaticRefresh");
   const monitorCli = object(monitor.cli, "monitor.cli");
   const webAuth = object(raw.webAuth, "webAuth");
   const adminCredentials = object(sub2api.adminCredentials, "sub2api.adminCredentials");
@@ -405,6 +417,19 @@ export function loadConfig(path: string): AppConfig {
   const nativeServicesRaw = object(native.services, "runtime.native.services");
   const nativeEnvRaw = object(native.env, "runtime.native.env");
   const nativeTemporalServiceRef = object(native.temporalServiceRef, "runtime.native.temporalServiceRef");
+  const nativeTemporalExecutionPlane = stringValue(
+    nativeTemporalServiceRef,
+    "executionPlane",
+    "runtime.native.temporalServiceRef",
+  );
+  if (
+    nativeTemporalExecutionPlane !== "local-k3s"
+    && nativeTemporalExecutionPlane !== "route"
+  ) {
+    throw new Error(
+      "runtime.native.temporalServiceRef.executionPlane must be local-k3s or route",
+    );
+  }
   const secretSourcePathsRaw = object(runtime.secretSourcePaths, "runtime.secretSourcePaths");
   const cliTargetsRaw = object(runtime.cliTargets, "runtime.cliTargets");
   const serverTargetsRaw = object(runtime.serverTargets, "runtime.serverTargets");
@@ -458,9 +483,20 @@ export function loadConfig(path: string): AppConfig {
   const nativeServices = {} as Record<NativeServiceId, NativeServiceConfig>;
   for (const id of ["api", "worker", "web"] as const) {
     const service = object(nativeServicesRaw[id], `runtime.native.services.${id}`);
+    const envKeys = strings(service, "envKeys", `runtime.native.services.${id}`);
+    const supportedEnvKeys = new Set([
+      ...Object.keys(nativeEnvRaw),
+      stringValue(temporal, "addressEnv", "temporal"),
+    ]);
+    for (const envKey of envKeys) {
+      if (!supportedEnvKeys.has(envKey)) {
+        throw new Error(`runtime.native.services.${id}.envKeys contains undeclared key ${envKey}`);
+      }
+    }
     const command = strings(service, "command", `runtime.native.services.${id}`);
     if (command.length === 0) throw new Error(`runtime.native.services.${id}.command must not be empty`);
     nativeServices[id] = {
+      envKeys,
       command,
       pidFile: nativeFile(service, "pidFile", `runtime.native.services.${id}`),
       logFile: nativeFile(service, "logFile", `runtime.native.services.${id}`),
@@ -473,6 +509,9 @@ export function loadConfig(path: string): AppConfig {
     monitor: {
       timezone: timezoneValue(monitor, "timezone", "monitor"),
       refreshIntervalMinutes: integerValue(monitor, "refreshIntervalMinutes", "monitor", 1, 1440),
+      automaticRefresh: {
+        enabled: booleanValue(automaticRefresh, "enabled", "monitor.automaticRefresh"),
+      },
       recentCallLimit: integerValue(monitor, "recentCallLimit", "monitor", 1, 10000),
       errorAggregateLimit: integerValue(monitor, "errorAggregateLimit", "monitor", 1, 10000),
       errorAggregateTop: integerValue(monitor, "errorAggregateTop", "monitor", 1, 100),
@@ -499,6 +538,9 @@ export function loadConfig(path: string): AppConfig {
         sourceRef: stringValue(scoreDatabase, "sourceRef", "sub2api.scoreDatabase"),
         sourceKey: stringValue(scoreDatabase, "sourceKey", "sub2api.scoreDatabase"),
         statementTimeoutMs: integerValue(scoreDatabase, "statementTimeoutMs", "sub2api.scoreDatabase", 1000, 60000),
+        queueTimeoutMs: integerValue(scoreDatabase, "queueTimeoutMs", "sub2api.scoreDatabase", 1000, 120000),
+        cacheTtlMs: integerValue(scoreDatabase, "cacheTtlMs", "sub2api.scoreDatabase", 0, 60000),
+        cacheMaxEntries: integerValue(scoreDatabase, "cacheMaxEntries", "sub2api.scoreDatabase", 1, 1000),
       },
       scorePolicy: readScorePolicy(sub2api.scorePolicy, "sub2api.scorePolicy"),
       grokScorePolicy: readScorePolicy(sub2api.grokScorePolicy, "sub2api.grokScorePolicy"),
@@ -607,7 +649,9 @@ export function loadConfig(path: string): AppConfig {
         stateDir: stringValue(native, "stateDir", "runtime.native"),
         env: Object.fromEntries(Object.entries(nativeEnvRaw).map(([targetKey, value]) => [targetKey, secretRef(value, `runtime.native.env.${targetKey}`)])),
         temporalServiceRef: {
+          executionPlane: nativeTemporalExecutionPlane,
           route: stringValue(nativeTemporalServiceRef, "route", "runtime.native.temporalServiceRef"),
+          kubeconfig: stringValue(nativeTemporalServiceRef, "kubeconfig", "runtime.native.temporalServiceRef"),
           namespace: stringValue(nativeTemporalServiceRef, "namespace", "runtime.native.temporalServiceRef"),
           service: stringValue(nativeTemporalServiceRef, "service", "runtime.native.temporalServiceRef"),
           portName: stringValue(nativeTemporalServiceRef, "portName", "runtime.native.temporalServiceRef"),
