@@ -56,6 +56,12 @@ export class AdminHttpClient {
   }
   priorityAutomation(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-automation"); }
   priorityHistory(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-history"); }
+  createPriorityPlan(recentCallLimit: number): Promise<Record<string, unknown>> {
+    return this.request("/api/operations/priority-plans", { method: "POST", body: JSON.stringify({ recentCallLimit }) }, 60000);
+  }
+  confirmPriorityPlan(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/operations/priority-plans/${encodeURIComponent(id)}/confirm`, { method: "POST", body: "{}" }, 240000);
+  }
   createPriorityAutomation(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request("/api/operations/priority-automation", { method: "POST", body: JSON.stringify(input) });
   }

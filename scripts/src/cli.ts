@@ -118,6 +118,8 @@ function help(): Record<string, unknown> {
       "api smoke --over-api",
       "workflow status --id <workflow-id>",
       "priority automation get|create|update|delete --over-api [--interval-seconds N --calls N --enabled true|false] [--confirm]",
+      "priority plan create --over-api [--calls N]",
+      "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
@@ -255,6 +257,16 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   const client = new AdminHttpClient(config, target);
   const [group, action] = parsed.command;
   if (group === "priority" && action === "history") return await client.priorityHistory();
+  if (group === "priority" && action === "plan") {
+    const verb = parsed.command[2];
+    if (verb === "create") return await client.createPriorityPlan(parsed.calls ?? config.monitor.recentCallLimit);
+    if (verb === "confirm") {
+      if (!parsed.id) throw new Error("priority plan confirm requires --id");
+      return parsed.confirm ? await client.confirmPriorityPlan(parsed.id)
+        : { ok: true, mutation: false, id: parsed.id, hint: "add --confirm to execute" };
+    }
+    throw new Error("priority plan requires create or confirm");
+  }
   if (group === "priority" && parsed.command[1] === "automation") {
     const verb = parsed.command[2];
     if (verb === "get") return await client.priorityAutomation();

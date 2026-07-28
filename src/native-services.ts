@@ -1,10 +1,34 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import type { AppConfig, NativeServiceId } from "./config";
 import { readSecret } from "./secrets";
 
 const nativeComponents: NativeServiceId[] = ["api", "worker", "web"];
+
+function composeArgs(config: AppConfig, action: string, component?: NativeServiceId): string[] {
+  const n = config.runtime.native;
+  const args = ["compose", "--project-name", n.composeProject, "--file", resolve(config.rootDirectory, n.composeFile), "--env-file", resolve(config.rootDirectory, n.composeEnvFile), action];
+  if (action === "up") args.push("--detach", "--build");
+  if (component) args.push(component);
+  return args;
+}
+
+function composeRun(config: AppConfig, action: string, component?: NativeServiceId, tail = 40): Record<string, unknown> {
+  if (action === "up") {
+    const envPath = resolve(config.rootDirectory, config.runtime.native.composeEnvFile);
+    mkdirSync(resolve(envPath, ".."), { recursive: true, mode: 0o700 });
+    const lines = Object.entries(config.runtime.native.env).map(([key, ref]) => `${key}=${readSecret(config, ref).replace(/\\/gu, "\\\\").replace(/\n/gu, "\\n")}`);
+    writeFileSync(envPath, `${lines.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+    chmodSync(envPath, 0o600);
+  }
+  const args = composeArgs(config, action, component);
+  if (action === "logs") args.push("--tail", String(tail));
+  const result = spawnSync("docker", args, { cwd: config.rootDirectory, encoding: "utf8", timeout: 120_000 });
+  if (result.status !== 0) throw new Error((result.stderr || result.stdout || `docker compose ${action} failed`).trim());
+  if (action === "ps") return { ok: true, component: component ?? "all", action, output: result.stdout.trim(), mutation: false, valuesPrinted: false };
+  return { ok: true, component: component ?? "all", action, output: result.stdout.trim(), mutation: action === "up" || action === "stop" || action === "down", valuesPrinted: false };
+}
 
 function paths(config: AppConfig, component: NativeServiceId): { stateDir: string; pid: string; log: string } {
   const service = config.runtime.native.services[component];
@@ -81,6 +105,7 @@ function nativeEnvironment(
 }
 
 export function nativeStatus(config: AppConfig, component: NativeServiceId): Record<string, unknown> {
+  if (config.runtime.native.mode === "docker-compose") return composeRun(config, "ps", component);
   const target = paths(config, component);
   const pid = processId(target.pid);
   return {
@@ -99,6 +124,7 @@ export function nativeStart(
   component: NativeServiceId,
   preparedEnvironment?: Record<string, string>,
 ): Record<string, unknown> {
+  if (config.runtime.native.mode === "docker-compose") return composeRun(config, "up", component);
   const current = nativeStatus(config, component);
   if (current.state === "running") return { ...current, mutation: false, reason: "already-running" };
   const env = preparedEnvironment ?? nativeEnvironment(config, component);
@@ -124,6 +150,7 @@ export function nativeStart(
 }
 
 export function nativeStop(config: AppConfig, component: NativeServiceId): Record<string, unknown> {
+  if (config.runtime.native.mode === "docker-compose") return composeRun(config, "stop", component);
   const target = paths(config, component);
   const pid = processId(target.pid);
   if (!running(pid)) {
@@ -136,6 +163,7 @@ export function nativeStop(config: AppConfig, component: NativeServiceId): Recor
 }
 
 export function nativeLogs(config: AppConfig, component: NativeServiceId, tail: number): Record<string, unknown> {
+  if (config.runtime.native.mode === "docker-compose") return composeRun(config, "logs", component, tail);
   const target = paths(config, component);
   const lines = existsSync(target.log) ? readFileSync(target.log, "utf8").split(/\r?\n/u).filter(Boolean).slice(-tail) : [];
   return { ok: true, component, logFile: target.log, lines, lineCount: lines.length, mutation: false, valuesPrinted: false };

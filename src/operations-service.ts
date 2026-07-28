@@ -283,6 +283,7 @@ export class OperationsService {
     ];
     const proc = Bun.spawn([this.config.monitor.cli.executable, ...args], {
       cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe",
+      env: { ...Bun.env, UNIDESK_MAIN_SERVER_IP: this.config.monitor.cli.mainServerHost },
     });
     const startedAt = Date.now();
     let timedOut = false;

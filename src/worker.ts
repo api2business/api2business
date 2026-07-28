@@ -15,7 +15,9 @@ const internalTarget = config.runtime.cliTargets[config.runtime.overApiTarget];
 if (!internalTarget || internalTarget.mode !== "http") {
   throw new Error("worker requires runtime.overApiTarget to reference the Native API");
 }
-const internal = new AdminHttpClient(config, internalTarget);
+const internal = new AdminHttpClient(config, runtimeId === "compose"
+  ? { ...internalTarget, baseUrl: "http://127.0.0.1:8080", adminToken: { envKey: target.adminTokenEnv } }
+  : internalTarget);
 const workflowEnabled = config.monitor.automaticRefresh.enabled;
 const connection = workflowEnabled
   ? await NativeConnection.connect({ address: temporalAddress(config) })

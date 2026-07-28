@@ -1,0 +1,28 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    env_file: .state/compose/apistate.env
+    volumes:
+      - /workspace/unidesk:/workspace/unidesk:ro
+      - /opt/unidesk/platform-infra/sub2api-nc01:/opt/unidesk/platform-infra/sub2api-nc01:ro
+    command: ["bun", "src/api.ts", "--config", "config/sub2rank.yaml", "--runtime", "compose"]
+  worker:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    env_file: .state/compose/apistate.env
+    volumes: ["/workspace/unidesk:/workspace/unidesk:ro"]
+    command: ["bun", "src/worker.ts", "--config", "config/sub2rank.yaml", "--runtime", "compose"]
+    depends_on: [api]
+  web:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    env_file: .state/compose/apistate.env
+    environment:
+      APISTATE_CONFIG_PATH: config/sub2rank.yaml
+      APISTATE_RUNTIME_ID: compose
+    command: ["bunx", "vite", "--config", "vite.config.ts", "--host", "0.0.0.0"]
+    depends_on: [api]

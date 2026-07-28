@@ -152,6 +152,10 @@ export interface AppConfig {
     overApiTarget: string;
     cliTargets: Record<string, EmbeddedCliTarget | HttpCliTarget>;
     native: {
+      mode: "native" | "docker-compose";
+      composeFile: string;
+      composeProject: string;
+      composeEnvFile: string;
       stateDir: string;
       env: Record<string, SecretRef>;
       temporalServiceRef: {
@@ -425,6 +429,8 @@ export function loadConfig(path: string): AppConfig {
   const temporalRetry = object(temporal.retry, "temporal.retry");
   const runtime = object(raw.runtime, "runtime");
   const native = object(runtime.native, "runtime.native");
+  const nativeMode = stringValue(native, "mode", "runtime.native");
+  if (nativeMode !== "native" && nativeMode !== "docker-compose") throw new Error("runtime.native.mode must be native or docker-compose");
   const nativeServicesRaw = object(native.services, "runtime.native.services");
   const nativeEnvRaw = object(native.env, "runtime.native.env");
   const nativeTemporalServiceRef = object(native.temporalServiceRef, "runtime.native.temporalServiceRef");
@@ -657,6 +663,10 @@ export function loadConfig(path: string): AppConfig {
       overApiTarget,
       cliTargets,
       native: {
+        mode: nativeMode,
+        composeFile: stringValue(native, "composeFile", "runtime.native"),
+        composeProject: stringValue(native, "composeProject", "runtime.native"),
+        composeEnvFile: stringValue(native, "composeEnvFile", "runtime.native"),
         stateDir: stringValue(native, "stateDir", "runtime.native"),
         env: Object.fromEntries(Object.entries(nativeEnvRaw).map(([targetKey, value]) => [targetKey, secretRef(value, `runtime.native.env.${targetKey}`)])),
         temporalServiceRef: {
