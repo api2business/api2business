@@ -88,6 +88,6 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
-  expect(html).toContain("/app.js?v=priority-history-v1");
-  expect(html).toContain("/styles.css?v=priority-history-v1");
+  expect(html).toContain("/app.js?v=availability-reasons-v1");
+  expect(html).toContain("/styles.css?v=availability-reasons-v1");
 });
