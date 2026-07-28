@@ -226,14 +226,18 @@ export class OperationsService {
 
   async createPriorityAutomation(input: { enabled: unknown; intervalSeconds: unknown; recentCallLimit: unknown }, operator: string) {
     const values = this.validateAutomation(input);
-    const automation = await this.store.createAutomation({ ...values, operator });
+    const automation = await this.store.createAutomation({
+      ...values, operator, jitterPercent: this.config.operations.automationJitterPercent,
+    });
     await this.store.audit("priority.automation.create", "succeeded", operator, values, { intervalSeconds: values.intervalSeconds });
     return { ok: true, automation };
   }
 
   async updatePriorityAutomation(input: { enabled: unknown; intervalSeconds: unknown; recentCallLimit: unknown }, operator: string) {
     const values = this.validateAutomation(input);
-    const automation = await this.store.updateAutomation({ ...values, operator });
+    const automation = await this.store.updateAutomation({
+      ...values, operator, jitterPercent: this.config.operations.automationJitterPercent,
+    });
     await this.store.audit("priority.automation.update", "succeeded", operator, values, { intervalSeconds: values.intervalSeconds });
     return { ok: true, automation };
   }
@@ -245,7 +249,7 @@ export class OperationsService {
   }
 
   async runDueAutomation() {
-    const policy = await this.store.claimDueAutomation();
+    const policy = await this.store.claimDueAutomation(this.config.operations.automationJitterPercent);
     if (!policy) return { ok: true, due: false };
     const operator = "scheduler";
     const plan = await this.generatePriorityPlan(Number(policy.recent_call_limit), operator, "automatic");
@@ -254,17 +258,18 @@ export class OperationsService {
         const result = { changedCount: 0, writeMode: "no-change", verification: "postgresql-direct", verifiedCount: 0 };
         await this.store.finishPlan(String(plan.planId), "applied", result);
         await this.store.audit("priority.automation.run", "succeeded", operator,
-          { recentCallLimit: Number(policy.recent_call_limit) }, result);
+        { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
+        { ...result, profiles: plan.profiles });
         return { ok: true, due: true, planId: plan.planId, ...result };
       }
       const result = await this.confirmPriorityPlan(String(plan.planId), operator);
       await this.store.audit("priority.automation.run", "succeeded", operator,
-        { recentCallLimit: Number(policy.recent_call_limit) },
-        { planId: plan.planId, changedCount: result.changedCount, verification: result.verification });
+        { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
+        { planId: plan.planId, changedCount: result.changedCount, verification: result.verification, profiles: plan.profiles });
       return { due: true, ...result };
     } catch (error) {
       await this.store.audit("priority.automation.run", "failed", operator,
-        { recentCallLimit: Number(policy.recent_call_limit) },
+        { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
         { planId: plan.planId, error: error instanceof Error ? error.message : String(error) });
       throw error;
     }

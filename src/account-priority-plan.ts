@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config";
+import type { PriorityPlanPolicy } from "./config";
 import { buildProcurementAdvice } from "./account-procurement-advice";
 
 type ScoreRow = Record<string, unknown>;
@@ -12,11 +13,12 @@ function costRate(row: ScoreRow): number | null {
   return number((row.usage as ScoreRow).costRateCnyPerApiUsd);
 }
 
-export function buildAccountPriorityPlan(
+function buildPriorityProfile(
   ranking: Record<string, unknown>,
   config: AppConfig,
+  profile: "codex" | "grok",
+  policy: PriorityPlanPolicy,
 ): Record<string, unknown> {
-  const policy = config.sub2api.priorityPlan;
   if (policy.maximumPriority < policy.minimumPriority) {
     throw new Error("sub2api.priorityPlan.maximumPriority must be >= minimumPriority");
   }
@@ -46,7 +48,25 @@ export function buildAccountPriorityPlan(
       : [];
   });
   const costEvidence = costs.length > 0 ? costs : fallbackCosts;
-  if (costEvidence.length === 0) throw new Error("priority plan has no accounts with known cost");
+  if (costEvidence.length === 0) {
+    return {
+      ok: true,
+      action: "scores-priority-plan",
+      mutation: false,
+      recentCallLimit: ranking.recentCallLimit,
+      profile,
+      policy,
+      anchorScore: null,
+      costRange: null,
+      eligibleCount: 0,
+      changedCount: 0,
+      priorities: {},
+      changes: [],
+      procurementAdvice: profile === "codex"
+        ? buildProcurementAdvice(rows, config, { minimum: 0, maximum: 0 })
+        : { enabled: false, statusAlerts: [], recommendations: [] },
+    };
+  }
   const minimumCost = Math.min(...costEvidence);
   const maximumCost = Math.max(...costEvidence);
   const economicScore = (row: ScoreRow): number => {
@@ -82,6 +102,7 @@ export function buildAccountPriorityPlan(
     const desired = Math.abs(before - floored) < policy.minimumChange ? before : floored;
     if (before !== desired) priorities[String(accountId)] = desired;
     return {
+      profile,
       accountId,
       accountName: row.accountName,
       score,
@@ -106,12 +127,15 @@ export function buildAccountPriorityPlan(
       change: before === desired ? "noop" : "update",
     };
   });
-  const procurementAdvice = buildProcurementAdvice(rows, config, { minimum: minimumCost, maximum: maximumCost });
+  const procurementAdvice = profile === "codex"
+    ? buildProcurementAdvice(rows, config, { minimum: minimumCost, maximum: maximumCost })
+    : { enabled: false, statusAlerts: [], recommendations: [] };
   return {
     ok: true,
     action: "scores-priority-plan",
     mutation: false,
     recentCallLimit: ranking.recentCallLimit,
+    profile,
     policy,
     anchorScore,
     costRange: { minimumCostRateCnyPerApiUsd: minimumCost, maximumCostRateCnyPerApiUsd: maximumCost },
@@ -124,5 +148,43 @@ export function buildAccountPriorityPlan(
       command: "bun scripts/cli.ts platform-infra sub2api codex-pool runtime apply --target PK01 --kind priority --priorities-json '<priorities>' --write-only --confirm",
       oneBatch: true,
     },
+  };
+}
+
+export function buildAccountPriorityPlan(
+  ranking: Record<string, unknown>,
+  config: AppConfig,
+): Record<string, unknown> {
+  const codex = buildPriorityProfile(ranking, config, "codex", config.sub2api.priorityPlan);
+  const grok = buildPriorityProfile(ranking, config, "grok", config.sub2api.grokPriorityPlan);
+  const priorities = {
+    ...(codex.priorities as Record<string, number>),
+    ...(grok.priorities as Record<string, number>),
+  };
+  const changes = [
+    ...(codex.changes as Array<Record<string, unknown>>),
+    ...(grok.changes as Array<Record<string, unknown>>),
+  ];
+  return {
+    ...codex,
+    policy: { codex: config.sub2api.priorityPlan, grok: config.sub2api.grokPriorityPlan },
+    profiles: {
+      codex: {
+        eligibleCount: codex.eligibleCount,
+        changedCount: codex.changedCount,
+        anchorScore: codex.anchorScore,
+        costRange: codex.costRange,
+      },
+      grok: {
+        eligibleCount: grok.eligibleCount,
+        changedCount: grok.changedCount,
+        anchorScore: grok.anchorScore,
+        costRange: grok.costRange,
+      },
+    },
+    eligibleCount: Number(codex.eligibleCount) + Number(grok.eligibleCount),
+    changedCount: Object.keys(priorities).length,
+    priorities,
+    changes,
   };
 }

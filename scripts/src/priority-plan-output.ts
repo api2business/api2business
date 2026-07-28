@@ -28,8 +28,9 @@ export function renderPriorityPlanLines(value: Row): string[] {
   ];
   const changes = rows(value.changes).filter((row) => row.change === "update");
   if (changes.length > 0) {
-    lines.push("", "ACCOUNT_ID  BEFORE  AFTER     N  FAIL%  SWITCH%  TTFT_P95  QUALITY   COST  VALUE  ACCOUNT");
+    lines.push("", "PROFILE  ACCOUNT_ID  BEFORE  AFTER     N  FAIL%  SWITCH%  TTFT_P95  QUALITY   COST  VALUE  ACCOUNT");
     for (const row of changes) lines.push([
+      String(row.profile ?? "-").padEnd(7),
       String(row.accountId ?? "-").padEnd(10),
       String(row.beforePriority ?? "-").padStart(6),
       String(row.desiredPriority ?? "-").padStart(5),
@@ -46,7 +47,9 @@ export function renderPriorityPlanLines(value: Row): string[] {
   const advice = record(value.procurementAdvice);
   const summary = record(advice.summary);
   lines.push("", `PROCUREMENT redundancy=${String(summary.redundancyStatus ?? "disabled")} suppliers=${String(summary.stableSupplierCount ?? 0)} largestShare=${typeof summary.largestSupplierShare === "number" ? `${(summary.largestSupplierShare * 100).toFixed(1)}%` : "-"} unavailable=${String(summary.unavailableAccountCount ?? 0)} billing=${String(summary.billingDepletedAccountCount ?? 0)}`);
-  const alertLimit = Number(record(record(value.policy).procurementAdvice).statusAlertLimit ?? 0);
+  const policy = record(value.policy);
+  const codexPolicy = Object.keys(record(policy.codex)).length > 0 ? record(policy.codex) : policy;
+  const alertLimit = Number(record(codexPolicy.procurementAdvice).statusAlertLimit ?? 0);
   const alerts = rows(advice.statusAlerts).slice(0, alertLimit);
   if (alerts.length > 0) {
     lines.push("", "KIND                 SCORE  CHANNELS  AVAILABLE  BILLING_SITE");

@@ -29,6 +29,31 @@ const config = {
         billingErrorPatterns: ["insufficient account balance", "余额不足"],
       },
     },
+    grokPriorityPlan: {
+      platform: "grok",
+      eligibleGroupIds: [6],
+      requiredConfidence: "high",
+      requireCurrentAvailable: true,
+      qualityWeight: 85,
+      costWeight: 15,
+      pointsPerScore: 8,
+      minimumChange: 5,
+      minimumPriority: 1,
+      maximumPriority: 1000,
+      reservePolicies: {},
+      procurementAdvice: {
+        enabled: false,
+        minimumQualityScore: 80,
+        valueWeight: 80,
+        redundancyWeight: 20,
+        recommendationLimit: 3,
+        statusAlertLimit: 20,
+        maximumRecommendationsPerSupplier: 1,
+        minimumSupplierCount: 3,
+        maximumSupplierShare: 0.5,
+        billingErrorPatterns: ["insufficient account balance"],
+      },
+    },
   },
 } as AppConfig;
 
@@ -135,4 +160,30 @@ test("shared-balance channels produce one website-level alert and recommendation
   expect(advice.recommendations[0]).toMatchObject({ billingSite: "shared.example", channelCount: 2, action: "renew-balance" });
   expect(advice.recommendations[0]).not.toHaveProperty("accountIds");
   expect(Object.keys(plan.priorities as Record<string, number>)).toHaveLength(0);
+});
+
+test("codex and grok use independent anchors and merge into one adjustment plan", () => {
+  const grokAccount = {
+    ...account(10, "https://grok-a.example grok 0.02", 95),
+    platform: "grok",
+    groupIds: [6],
+    priority: 200,
+    usage: { costRateCnyPerApiUsd: 0.02 },
+  };
+  const plan = buildAccountPriorityPlan({
+    recentCallLimit: 500,
+    accounts: [
+      account(1, "https://codex-a.example plus 0.1", 90),
+      grokAccount,
+      { ...grokAccount, accountId: 11, accountName: "https://grok-b.example grok 0.05", score: 70, priority: 300,
+        usage: { costRateCnyPerApiUsd: 0.05 } },
+    ],
+  }, config);
+  expect(plan.profiles).toMatchObject({
+    codex: { eligibleCount: 1 },
+    grok: { eligibleCount: 2 },
+  });
+  expect((plan.changes as Array<Record<string, unknown>>).filter((row) => row.profile === "grok")).toHaveLength(2);
+  expect(plan.priorities).toHaveProperty("10");
+  expect(plan.priorities).toHaveProperty("11");
 });

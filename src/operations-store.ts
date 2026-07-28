@@ -1,4 +1,5 @@
 import { SQL } from "bun";
+import { jitteredIntervalSeconds } from "./priority-automation-schedule";
 
 export type CashDirection = "income" | "expense";
 
@@ -157,23 +158,25 @@ export class OperationsStore {
     return row ?? null;
   }
 
-  async createAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string }) {
+  async createAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string; jitterPercent: number }) {
+    const nextDelay = jitteredIntervalSeconds(input.intervalSeconds, input.jitterPercent);
     const [row] = await this.sql`
       INSERT INTO apistate_priority_automation
         (id, enabled, interval_seconds, recent_call_limit, next_run_at, updated_by)
       VALUES ('default', ${input.enabled}, ${input.intervalSeconds}, ${input.recentCallLimit},
-        now() + make_interval(secs => ${input.intervalSeconds}), ${input.operator})
+        now() + make_interval(secs => ${nextDelay}), ${input.operator})
       RETURNING *
     `;
     return row;
   }
 
-  async updateAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string }) {
+  async updateAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string; jitterPercent: number }) {
+    const nextDelay = jitteredIntervalSeconds(input.intervalSeconds, input.jitterPercent);
     const [row] = await this.sql`
       UPDATE apistate_priority_automation
       SET enabled=${input.enabled}, interval_seconds=${input.intervalSeconds},
         recent_call_limit=${input.recentCallLimit},
-        next_run_at=now() + make_interval(secs => ${input.intervalSeconds}),
+        next_run_at=now() + make_interval(secs => ${nextDelay}),
         updated_at=now(), updated_by=${input.operator}
       WHERE id='default' RETURNING *
     `;
@@ -189,7 +192,7 @@ export class OperationsStore {
     return row;
   }
 
-  async claimDueAutomation() {
+  async claimDueAutomation(jitterPercent: number) {
     return await this.sql.begin(async (tx) => {
       const [row] = await tx`
         SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at
@@ -198,9 +201,10 @@ export class OperationsStore {
         FOR UPDATE SKIP LOCKED
       `;
       if (!row) return null;
+      const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
       await tx`
         UPDATE apistate_priority_automation
-        SET next_run_at=now() + make_interval(secs => ${Number(row.interval_seconds)}),
+        SET next_run_at=now() + make_interval(secs => ${nextDelay}),
           updated_at=now()
         WHERE id='default'
       `;

@@ -14,6 +14,48 @@ export interface EnvSecretRef {
   envKey: string;
 }
 
+export interface ScorePolicy {
+  reliabilityWeight: number;
+  failoverWeight: number;
+  latencyWeight: number;
+  baselineWeight: number;
+  failureZeroScoreRate: number;
+  failureBurstCallLimit: number;
+  failoverZeroScoreRate: number;
+  ttftFullScoreMs: number;
+  ttftZeroScoreMs: number;
+}
+
+export interface PriorityPlanPolicy {
+  platform: string;
+  eligibleGroupIds: number[];
+  requiredConfidence: string;
+  requireCurrentAvailable: boolean;
+  qualityWeight: number;
+  costWeight: number;
+  pointsPerScore: number;
+  minimumChange: number;
+  minimumPriority: number;
+  maximumPriority: number;
+  reservePolicies: Record<string, {
+    lowRemainingThresholdPercent: number;
+    normalPriorityFloor: number;
+    lowRemainingPriority: number;
+  }>;
+  procurementAdvice: {
+    enabled: boolean;
+    minimumQualityScore: number;
+    valueWeight: number;
+    redundancyWeight: number;
+    recommendationLimit: number;
+    statusAlertLimit: number;
+    maximumRecommendationsPerSupplier: number;
+    minimumSupplierCount: number;
+    maximumSupplierShare: number;
+    billingErrorPatterns: string[];
+  };
+}
+
 export interface AppConfig {
   apiVersion: string;
   kind: string;
@@ -34,46 +76,10 @@ export interface AppConfig {
     requestTimeoutMs: number;
     pageSize: number;
     scoreDatabase: SecretRef & { statementTimeoutMs: number };
-    scorePolicy: {
-      reliabilityWeight: number;
-      failoverWeight: number;
-      latencyWeight: number;
-      baselineWeight: number;
-      failureZeroScoreRate: number;
-      failureBurstCallLimit: number;
-      failoverZeroScoreRate: number;
-      ttftFullScoreMs: number;
-      ttftZeroScoreMs: number;
-    };
-    priorityPlan: {
-      platform: string;
-      eligibleGroupIds: number[];
-      requiredConfidence: string;
-      requireCurrentAvailable: boolean;
-      qualityWeight: number;
-      costWeight: number;
-      pointsPerScore: number;
-      minimumChange: number;
-      minimumPriority: number;
-      maximumPriority: number;
-      reservePolicies: Record<string, {
-        lowRemainingThresholdPercent: number;
-        normalPriorityFloor: number;
-        lowRemainingPriority: number;
-      }>;
-      procurementAdvice: {
-        enabled: boolean;
-        minimumQualityScore: number;
-        valueWeight: number;
-        redundancyWeight: number;
-        recommendationLimit: number;
-        statusAlertLimit: number;
-        maximumRecommendationsPerSupplier: number;
-        minimumSupplierCount: number;
-        maximumSupplierShare: number;
-        billingErrorPatterns: string[];
-      };
-    };
+    scorePolicy: ScorePolicy;
+    grokScorePolicy: ScorePolicy;
+    priorityPlan: PriorityPlanPolicy;
+    grokPriorityPlan: PriorityPlanPolicy;
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
   };
   lottery: {
@@ -107,6 +113,7 @@ export interface AppConfig {
     priorityVerificationTimeoutMs: number;
     priorityVerificationPollMs: number;
     automationPollMs: number;
+    automationJitterPercent: number;
   };
   temporal: {
     addressEnv: string;
@@ -277,6 +284,63 @@ function nativeFile(parent: ObjectValue, key: string, path: string): string {
   return value;
 }
 
+function readScorePolicy(raw: unknown, path: string): ScorePolicy {
+  const policy = object(raw, path);
+  return {
+    reliabilityWeight: numberValue(policy, "reliabilityWeight", path, 0, 100),
+    failoverWeight: numberValue(policy, "failoverWeight", path, 0, 100),
+    latencyWeight: numberValue(policy, "latencyWeight", path, 0, 100),
+    baselineWeight: numberValue(policy, "baselineWeight", path, 0, 100),
+    failureZeroScoreRate: numberValue(policy, "failureZeroScoreRate", path, 0.000001, 1),
+    failureBurstCallLimit: integerValue(policy, "failureBurstCallLimit", path, 1),
+    failoverZeroScoreRate: numberValue(policy, "failoverZeroScoreRate", path, 0.000001, 1),
+    ttftFullScoreMs: integerValue(policy, "ttftFullScoreMs", path, 0),
+    ttftZeroScoreMs: integerValue(policy, "ttftZeroScoreMs", path, 1),
+  };
+}
+
+function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy {
+  const policy = object(raw, path);
+  const reserveRaw = object(policy.reservePolicies, `${path}.reservePolicies`);
+  const reservePolicies = Object.fromEntries(Object.keys(reserveRaw).map((accountId) => {
+    if (!/^[1-9][0-9]*$/u.test(accountId)) throw new Error(`${path}.reservePolicies keys must be positive account IDs`);
+    const itemPath = `${path}.reservePolicies.${accountId}`;
+    const item = object(reserveRaw[accountId], itemPath);
+    return [accountId, {
+      lowRemainingThresholdPercent: numberValue(item, "lowRemainingThresholdPercent", itemPath, 0, 100),
+      normalPriorityFloor: integerValue(item, "normalPriorityFloor", itemPath, 1, 1000),
+      lowRemainingPriority: integerValue(item, "lowRemainingPriority", itemPath, 1, 1000),
+    }];
+  }));
+  const advicePath = `${path}.procurementAdvice`;
+  const advice = object(policy.procurementAdvice, advicePath);
+  return {
+    platform: stringValue(policy, "platform", path),
+    eligibleGroupIds: integers(policy, "eligibleGroupIds", path, 1, Number.MAX_SAFE_INTEGER),
+    requiredConfidence: stringValue(policy, "requiredConfidence", path),
+    requireCurrentAvailable: booleanValue(policy, "requireCurrentAvailable", path),
+    qualityWeight: numberValue(policy, "qualityWeight", path, 0, 100),
+    costWeight: numberValue(policy, "costWeight", path, 0, 100),
+    pointsPerScore: numberValue(policy, "pointsPerScore", path, 0.01, 1000),
+    minimumChange: integerValue(policy, "minimumChange", path, 1, 1000),
+    minimumPriority: integerValue(policy, "minimumPriority", path, 1, 1000),
+    maximumPriority: integerValue(policy, "maximumPriority", path, 1, 1000),
+    reservePolicies,
+    procurementAdvice: {
+      enabled: booleanValue(advice, "enabled", advicePath),
+      minimumQualityScore: numberValue(advice, "minimumQualityScore", advicePath, 0, 100),
+      valueWeight: numberValue(advice, "valueWeight", advicePath, 0, 100),
+      redundancyWeight: numberValue(advice, "redundancyWeight", advicePath, 0, 100),
+      recommendationLimit: integerValue(advice, "recommendationLimit", advicePath, 1, 100),
+      statusAlertLimit: integerValue(advice, "statusAlertLimit", advicePath, 1, 100),
+      maximumRecommendationsPerSupplier: integerValue(advice, "maximumRecommendationsPerSupplier", advicePath, 1, 100),
+      minimumSupplierCount: integerValue(advice, "minimumSupplierCount", advicePath, 1, 100),
+      maximumSupplierShare: numberValue(advice, "maximumSupplierShare", advicePath, 0.01, 1),
+      billingErrorPatterns: strings(advice, "billingErrorPatterns", advicePath),
+    },
+  };
+}
+
 export function loadConfig(path: string): AppConfig {
   const configPath = resolve(path);
   const rootDirectory = resolve(dirname(configPath), "..");
@@ -288,22 +352,6 @@ export function loadConfig(path: string): AppConfig {
   const webAuth = object(raw.webAuth, "webAuth");
   const adminCredentials = object(sub2api.adminCredentials, "sub2api.adminCredentials");
   const scoreDatabase = object(sub2api.scoreDatabase, "sub2api.scoreDatabase");
-  const scorePolicy = object(sub2api.scorePolicy, "sub2api.scorePolicy");
-  const priorityPlan = object(sub2api.priorityPlan, "sub2api.priorityPlan");
-  const reservePoliciesRaw = object(priorityPlan.reservePolicies, "sub2api.priorityPlan.reservePolicies");
-  const reservePolicies = Object.fromEntries(Object.keys(reservePoliciesRaw).map((accountId) => {
-    if (!/^[1-9][0-9]*$/u.test(accountId)) {
-      throw new Error("sub2api.priorityPlan.reservePolicies keys must be positive account IDs");
-    }
-    const path = `sub2api.priorityPlan.reservePolicies.${accountId}`;
-    const policy = object(reservePoliciesRaw[accountId], path);
-    return [accountId, {
-      lowRemainingThresholdPercent: numberValue(policy, "lowRemainingThresholdPercent", path, 0, 100),
-      normalPriorityFloor: integerValue(policy, "normalPriorityFloor", path, 1, 1000),
-      lowRemainingPriority: integerValue(policy, "lowRemainingPriority", path, 1, 1000),
-    }];
-  }));
-  const procurementAdvice = object(priorityPlan.procurementAdvice, "sub2api.priorityPlan.procurementAdvice");
   const lottery = object(raw.lottery, "lottery");
   const dailyGrant = object(lottery.dailyGrant, "lottery.dailyGrant");
   const eligibility = object(lottery.eligibility, "lottery.eligibility");
@@ -415,42 +463,10 @@ export function loadConfig(path: string): AppConfig {
         sourceKey: stringValue(scoreDatabase, "sourceKey", "sub2api.scoreDatabase"),
         statementTimeoutMs: integerValue(scoreDatabase, "statementTimeoutMs", "sub2api.scoreDatabase", 1000, 60000),
       },
-      scorePolicy: {
-        reliabilityWeight: numberValue(scorePolicy, "reliabilityWeight", "sub2api.scorePolicy", 0, 100),
-        failoverWeight: numberValue(scorePolicy, "failoverWeight", "sub2api.scorePolicy", 0, 100),
-        latencyWeight: numberValue(scorePolicy, "latencyWeight", "sub2api.scorePolicy", 0, 100),
-        baselineWeight: numberValue(scorePolicy, "baselineWeight", "sub2api.scorePolicy", 0, 100),
-        failureZeroScoreRate: numberValue(scorePolicy, "failureZeroScoreRate", "sub2api.scorePolicy", 0.000001, 1),
-        failureBurstCallLimit: integerValue(scorePolicy, "failureBurstCallLimit", "sub2api.scorePolicy", 1),
-        failoverZeroScoreRate: numberValue(scorePolicy, "failoverZeroScoreRate", "sub2api.scorePolicy", 0.000001, 1),
-        ttftFullScoreMs: integerValue(scorePolicy, "ttftFullScoreMs", "sub2api.scorePolicy", 0),
-        ttftZeroScoreMs: integerValue(scorePolicy, "ttftZeroScoreMs", "sub2api.scorePolicy", 1),
-      },
-      priorityPlan: {
-        platform: stringValue(priorityPlan, "platform", "sub2api.priorityPlan"),
-        eligibleGroupIds: integers(priorityPlan, "eligibleGroupIds", "sub2api.priorityPlan", 1, Number.MAX_SAFE_INTEGER),
-        requiredConfidence: stringValue(priorityPlan, "requiredConfidence", "sub2api.priorityPlan"),
-        requireCurrentAvailable: booleanValue(priorityPlan, "requireCurrentAvailable", "sub2api.priorityPlan"),
-        qualityWeight: numberValue(priorityPlan, "qualityWeight", "sub2api.priorityPlan", 0, 100),
-        costWeight: numberValue(priorityPlan, "costWeight", "sub2api.priorityPlan", 0, 100),
-        pointsPerScore: numberValue(priorityPlan, "pointsPerScore", "sub2api.priorityPlan", 0.01, 1000),
-        minimumChange: integerValue(priorityPlan, "minimumChange", "sub2api.priorityPlan", 1, 1000),
-        minimumPriority: integerValue(priorityPlan, "minimumPriority", "sub2api.priorityPlan", 1, 1000),
-        maximumPriority: integerValue(priorityPlan, "maximumPriority", "sub2api.priorityPlan", 1, 1000),
-        reservePolicies,
-        procurementAdvice: {
-          enabled: booleanValue(procurementAdvice, "enabled", "sub2api.priorityPlan.procurementAdvice"),
-          minimumQualityScore: numberValue(procurementAdvice, "minimumQualityScore", "sub2api.priorityPlan.procurementAdvice", 0, 100),
-          valueWeight: numberValue(procurementAdvice, "valueWeight", "sub2api.priorityPlan.procurementAdvice", 0, 100),
-          redundancyWeight: numberValue(procurementAdvice, "redundancyWeight", "sub2api.priorityPlan.procurementAdvice", 0, 100),
-          recommendationLimit: integerValue(procurementAdvice, "recommendationLimit", "sub2api.priorityPlan.procurementAdvice", 1, 100),
-          statusAlertLimit: integerValue(procurementAdvice, "statusAlertLimit", "sub2api.priorityPlan.procurementAdvice", 1, 100),
-          maximumRecommendationsPerSupplier: integerValue(procurementAdvice, "maximumRecommendationsPerSupplier", "sub2api.priorityPlan.procurementAdvice", 1, 100),
-          minimumSupplierCount: integerValue(procurementAdvice, "minimumSupplierCount", "sub2api.priorityPlan.procurementAdvice", 1, 100),
-          maximumSupplierShare: numberValue(procurementAdvice, "maximumSupplierShare", "sub2api.priorityPlan.procurementAdvice", 0.01, 1),
-          billingErrorPatterns: strings(procurementAdvice, "billingErrorPatterns", "sub2api.priorityPlan.procurementAdvice"),
-        },
-      },
+      scorePolicy: readScorePolicy(sub2api.scorePolicy, "sub2api.scorePolicy"),
+      grokScorePolicy: readScorePolicy(sub2api.grokScorePolicy, "sub2api.grokScorePolicy"),
+      priorityPlan: readPriorityPlanPolicy(sub2api.priorityPlan, "sub2api.priorityPlan"),
+      grokPriorityPlan: readPriorityPlanPolicy(sub2api.grokPriorityPlan, "sub2api.grokPriorityPlan"),
       adminCredentials: {
         sourceRef: stringValue(adminCredentials, "sourceRef", "sub2api.adminCredentials"),
         emailKey: stringValue(adminCredentials, "emailKey", "sub2api.adminCredentials"),
@@ -501,6 +517,7 @@ export function loadConfig(path: string): AppConfig {
       priorityVerificationTimeoutMs: integerValue(operations, "priorityVerificationTimeoutMs", "operations", 1000, 120000),
       priorityVerificationPollMs: integerValue(operations, "priorityVerificationPollMs", "operations", 100, 10000),
       automationPollMs: integerValue(operations, "automationPollMs", "operations", 100, 60000),
+      automationJitterPercent: numberValue(operations, "automationJitterPercent", "operations", 0, 0.5),
     },
     temporal: {
       addressEnv: stringValue(temporal, "addressEnv", "temporal"),

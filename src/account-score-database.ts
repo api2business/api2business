@@ -349,7 +349,11 @@ export async function collectRecentCallScoresFromDatabase(
       || String(row.account_name) === accountSelector);
     if (accountSelector !== null && selected.length !== 1) throw new Error(`account selector did not resolve exactly once: ${accountSelector}`);
     if (groupSelector !== null && selected.length === 0) throw new Error(`group selector resolved no scoreable accounts: ${groupSelector}`);
-    const accounts = sortScores(selected.map((row) => scoreRecentDatabaseRow(row, recentCallLimit, config.sub2api.scorePolicy)));
+    const accounts = sortScores(selected.map((row) => scoreRecentDatabaseRow(
+      row,
+      recentCallLimit,
+      String(row.platform) === "grok" ? config.sub2api.grokScorePolicy : config.sub2api.scorePolicy,
+    )));
   return {
       ok: true,
       mode: "recent-account-calls-postgresql-local-score",
