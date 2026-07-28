@@ -11,6 +11,7 @@ const config = {
       requireCurrentAvailable: true,
       qualityWeight: 80,
       costWeight: 20,
+      referenceScore: 92,
       pointsPerScore: 10,
       minimumChange: 5,
       minimumPriority: 1,
@@ -36,6 +37,7 @@ const config = {
       requireCurrentAvailable: true,
       qualityWeight: 85,
       costWeight: 15,
+      referenceScore: 80,
       pointsPerScore: 8,
       minimumChange: 5,
       minimumPriority: 1,
@@ -158,6 +160,33 @@ test("reserve policy is unrestricted above half quota and weighted below it", ()
       mode: "weighted-reserve",
     },
   });
+});
+
+test("fixed reference prevents one leader fluctuation from shifting unchanged peers", () => {
+  const leader = account(1, "https://leader.example plus 0.1", 95);
+  leader.priority = 1;
+  const peer = account(2, "https://peer.example plus 0.1", 85);
+  peer.priority = 41;
+  const healthyPlan = buildAccountPriorityPlan({
+    recentCallLimit: 1000,
+    queryDurationMs: 800,
+    accounts: [leader, peer],
+  }, config);
+
+  const degradedLeader = { ...leader, score: 75 };
+  const degradedPlan = buildAccountPriorityPlan({
+    recentCallLimit: 1000,
+    queryDurationMs: 900,
+    accounts: [degradedLeader, peer],
+  }, config);
+  const healthyPeer = (healthyPlan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2);
+  const degradedPeer = (degradedPlan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2);
+
+  expect(healthyPlan.anchorScore).toBe(92);
+  expect(degradedPlan.anchorScore).toBe(92);
+  expect(healthyPlan.observedAnchorScore).not.toBe(degradedPlan.observedAnchorScore);
+  expect(healthyPeer).toMatchObject({ desiredPriority: 41, change: "noop" });
+  expect(degradedPeer).toMatchObject({ desiredPriority: 41, change: "noop" });
 });
 
 test("procurement recommendations remain supplier-diverse and do not treat limits as billing", () => {

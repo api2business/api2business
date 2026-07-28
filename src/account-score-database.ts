@@ -320,13 +320,31 @@ export async function collectRecentCallScoresFromDatabase(
   accountSelector: string | null = null,
   groupSelector: string | null = null,
   databaseUrlOverride: string | null = null,
-): Promise<{ ok: true; mode: string; recentCallLimit: number; accountSelector: string | null; groupSelector: string | null; accountCount: number; databaseQueries: number; queryDurationMs: number; totalDurationMs: number; accounts: Row[] }> {
+): Promise<{
+  ok: true;
+  mode: string;
+  recentCallLimit: number;
+  accountSelector: string | null;
+  groupSelector: string | null;
+  accountCount: number;
+  databaseQueries: number;
+  queryDurationMs: number;
+  totalDurationMs: number;
+  collectionStartedAt: string;
+  queryStartedAt: string;
+  queryCompletedAt: string;
+  collectedAt: string;
+  accounts: Row[];
+}> {
   if (!Number.isInteger(recentCallLimit) || recentCallLimit < 1 || recentCallLimit > 10000) {
     throw new Error("recent call limit must be an integer from 1 to 10000");
   }
   const databaseUrl = databaseUrlOverride ?? readSecret(config, config.sub2api.scoreDatabase);
   const database = scoreDatabasePool(databaseUrl);
   const startedAt = performance.now();
+  const collectionStartedAt = new Date().toISOString();
+  let queryStartedAt = collectionStartedAt;
+  let queryCompletedAt = collectionStartedAt;
   let queryDurationMs = 0;
   const rows = await database.begin(async (transaction) => {
       await transaction.unsafe("SET TRANSACTION READ ONLY");
@@ -334,14 +352,16 @@ export async function collectRecentCallScoresFromDatabase(
       // PK01 的评分热数据常驻缓存；降低本事务随机页成本，避免规划器为每个
       // 账号反复扫描全局 created_at 索引，优先使用 account_id 复合索引。
       await transaction.unsafe("SET LOCAL random_page_cost = 1");
-      const queryStartedAt = performance.now();
+      const queryStartedAtMs = performance.now();
+      queryStartedAt = new Date().toISOString();
       const result = await transaction.unsafe(recentAccountAggregateSql, [
         recentCallLimit,
         accountSelector,
         groupSelector,
         Math.min(recentCallLimit, config.sub2api.scorePolicy.failureBurstCallLimit),
       ]);
-      queryDurationMs = Math.round((performance.now() - queryStartedAt) * 10) / 10;
+      queryDurationMs = Math.round((performance.now() - queryStartedAtMs) * 10) / 10;
+      queryCompletedAt = new Date().toISOString();
       return result;
     }) as unknown as Row[];
     const selected = rows.filter((row) => accountSelector === null
@@ -361,10 +381,14 @@ export async function collectRecentCallScoresFromDatabase(
       accountSelector,
       groupSelector,
       accountCount: accounts.length,
-      databaseQueries: 1,
-      queryDurationMs,
-      totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
-      accounts,
+    databaseQueries: 1,
+    queryDurationMs,
+    totalDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+    collectionStartedAt,
+    queryStartedAt,
+    queryCompletedAt,
+    collectedAt: new Date().toISOString(),
+    accounts,
   };
 }
 

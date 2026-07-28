@@ -33,6 +33,7 @@ export interface PriorityPlanPolicy {
   requireCurrentAvailable: boolean;
   qualityWeight: number;
   costWeight: number;
+  referenceScore: number;
   pointsPerScore: number;
   minimumChange: number;
   minimumPriority: number;
@@ -114,6 +115,11 @@ export interface AppConfig {
     priorityVerificationPollMs: number;
     automationPollMs: number;
     automationJitterPercent: number;
+    automationSafety: {
+      maximumScoreQueryDurationMs: number;
+      maximumChangedAccounts: number;
+      maximumChangedFraction: number;
+    };
   };
   temporal: {
     addressEnv: string;
@@ -326,6 +332,7 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
     requireCurrentAvailable: booleanValue(policy, "requireCurrentAvailable", path),
     qualityWeight: numberValue(policy, "qualityWeight", path, 0, 100),
     costWeight: numberValue(policy, "costWeight", path, 0, 100),
+    referenceScore: numberValue(policy, "referenceScore", path, 0, 100),
     pointsPerScore: numberValue(policy, "pointsPerScore", path, 0.01, 1000),
     minimumChange: integerValue(policy, "minimumChange", path, 1, 1000),
     minimumPriority: integerValue(policy, "minimumPriority", path, 1, 1000),
@@ -366,6 +373,7 @@ export function loadConfig(path: string): AppConfig {
   const ranking = object(raw.ranking, "ranking");
   const records = object(raw.records, "records");
   const operations = object(raw.operations, "operations");
+  const automationSafety = object(operations.automationSafety, "operations.automationSafety");
   const temporal = object(raw.temporal, "temporal");
   const temporalRetry = object(temporal.retry, "temporal.retry");
   const runtime = object(raw.runtime, "runtime");
@@ -523,6 +531,29 @@ export function loadConfig(path: string): AppConfig {
       priorityVerificationPollMs: integerValue(operations, "priorityVerificationPollMs", "operations", 100, 10000),
       automationPollMs: integerValue(operations, "automationPollMs", "operations", 100, 60000),
       automationJitterPercent: numberValue(operations, "automationJitterPercent", "operations", 0, 0.5),
+      automationSafety: {
+        maximumScoreQueryDurationMs: integerValue(
+          automationSafety,
+          "maximumScoreQueryDurationMs",
+          "operations.automationSafety",
+          100,
+          120000,
+        ),
+        maximumChangedAccounts: integerValue(
+          automationSafety,
+          "maximumChangedAccounts",
+          "operations.automationSafety",
+          1,
+          1000,
+        ),
+        maximumChangedFraction: numberValue(
+          automationSafety,
+          "maximumChangedFraction",
+          "operations.automationSafety",
+          0.01,
+          1,
+        ),
+      },
     },
     temporal: {
       addressEnv: stringValue(temporal, "addressEnv", "temporal"),

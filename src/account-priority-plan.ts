@@ -8,6 +8,18 @@ function number(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function rankingMeasurement(ranking: Record<string, unknown>): Record<string, unknown> {
+  return {
+    databaseQueries: number(ranking.databaseQueries),
+    queryDurationMs: number(ranking.queryDurationMs),
+    totalDurationMs: number(ranking.totalDurationMs),
+    collectionStartedAt: ranking.collectionStartedAt ?? null,
+    queryStartedAt: ranking.queryStartedAt ?? null,
+    queryCompletedAt: ranking.queryCompletedAt ?? null,
+    collectedAt: ranking.collectedAt ?? null,
+  };
+}
+
 function costRate(row: ScoreRow): number | null {
   if (typeof row.usage !== "object" || row.usage === null || Array.isArray(row.usage)) return null;
   return number((row.usage as ScoreRow).costRateCnyPerApiUsd);
@@ -56,7 +68,10 @@ function buildPriorityProfile(
       recentCallLimit: ranking.recentCallLimit,
       profile,
       policy,
+      ...rankingMeasurement(ranking),
       anchorScore: null,
+      observedAnchorScore: null,
+      priorityReferenceScore: policy.referenceScore,
       costRange: null,
       eligibleCount: 0,
       changedCount: 0,
@@ -75,9 +90,10 @@ function buildPriorityProfile(
     const costScore = maximumCost === minimumCost ? 100 : 100 * (maximumCost - cost) / (maximumCost - minimumCost);
     return (quality * policy.qualityWeight + costScore * policy.costWeight) / totalWeight;
   };
-  const anchorScore = eligible.length === 0
+  const observedAnchorScore = eligible.length === 0
     ? null
     : eligible.reduce((best, row) => Math.max(best, economicScore(row)), -Infinity);
+  const priorityReferenceScore = policy.referenceScore;
   const priorities: Record<string, number> = {};
   const changes = eligible.map((row) => {
     const accountId = number(row.accountId);
@@ -89,7 +105,10 @@ function buildPriorityProfile(
     if (accountId === null || before === null) throw new Error("eligible score row is missing accountId or priority");
     const calculated = Math.min(
       policy.maximumPriority,
-      Math.max(policy.minimumPriority, policy.minimumPriority + Math.round((anchorScore! - combinedScore) * policy.pointsPerScore)),
+      Math.max(
+        policy.minimumPriority,
+        policy.minimumPriority + Math.round((priorityReferenceScore - combinedScore) * policy.pointsPerScore),
+      ),
     );
     const reservePolicy = policy.reservePolicies[String(accountId)] ?? null;
     const remainingPercent = number(row.weeklyRemainingPercent);
@@ -149,7 +168,10 @@ function buildPriorityProfile(
     recentCallLimit: ranking.recentCallLimit,
     profile,
     policy,
-    anchorScore,
+    ...rankingMeasurement(ranking),
+    anchorScore: eligible.length === 0 ? null : priorityReferenceScore,
+    observedAnchorScore,
+    priorityReferenceScore,
     costRange: { minimumCostRateCnyPerApiUsd: minimumCost, maximumCostRateCnyPerApiUsd: maximumCost },
     eligibleCount: eligible.length,
     changedCount: Object.keys(priorities).length,
@@ -185,12 +207,16 @@ export function buildAccountPriorityPlan(
         eligibleCount: codex.eligibleCount,
         changedCount: codex.changedCount,
         anchorScore: codex.anchorScore,
+        observedAnchorScore: codex.observedAnchorScore,
+        priorityReferenceScore: codex.priorityReferenceScore,
         costRange: codex.costRange,
       },
       grok: {
         eligibleCount: grok.eligibleCount,
         changedCount: grok.changedCount,
         anchorScore: grok.anchorScore,
+        observedAnchorScore: grok.observedAnchorScore,
+        priorityReferenceScore: grok.priorityReferenceScore,
         costRange: grok.costRange,
       },
     },

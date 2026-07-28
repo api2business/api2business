@@ -4,6 +4,7 @@ import type { AppConfig } from "./config";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
 import { OperationsStore, type CashDirection } from "./operations-store";
+import { preparePriorityAutomationBatch } from "./priority-automation-safety";
 import { scoreDatabasePool } from "./score-database-pool";
 
 function records(value: unknown): Array<Record<string, unknown>> {
@@ -15,6 +16,12 @@ function records(value: unknown): Array<Record<string, unknown>> {
 function money(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function object(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 export class OperationsService {
@@ -95,13 +102,36 @@ export class OperationsService {
     operator: string,
     triggerType: "manual" | "automatic" = "manual",
   ): Promise<Record<string, unknown>> {
-    const result = await this.priorityState(recentCallLimit);
-    const priorities = result.priorities as Record<string, number>;
+    const candidate = await this.priorityState(recentCallLimit);
+    let result = candidate;
+    let priorities = candidate.priorities as Record<string, number>;
+    if (triggerType === "automatic") {
+      const prepared = preparePriorityAutomationBatch(candidate, this.config.operations.automationSafety);
+      priorities = prepared.selectedPriorities as Record<string, number>;
+      const {
+        selectedPriorities: _selectedPriorities,
+        ...automationSafety
+      } = prepared;
+      result = {
+        ...candidate,
+        priorities,
+        changedCount: Object.keys(priorities).length,
+        candidateChangedCount: automationSafety.fullChangedCount,
+        notSelectedChangedCount: automationSafety.notSelectedChangedCount,
+        automationSafety,
+      };
+    }
     const plan = await this.store.createPlan({
       operator, recentCallLimit, ttlMinutes: this.config.operations.planTtlMinutes, priorities, result, triggerType,
     });
     await this.store.audit("priority.plan.generate", "succeeded", operator,
-      { recentCallLimit, triggerType }, { planId: plan.id, changedCount: Object.keys(priorities).length });
+      { recentCallLimit, triggerType }, {
+        planId: plan.id,
+        changedCount: Object.keys(priorities).length,
+        candidateChangedCount: result.candidateChangedCount ?? Object.keys(priorities).length,
+        notSelectedChangedCount: result.notSelectedChangedCount ?? 0,
+        automationMode: object(result.automationSafety).mode ?? null,
+      });
     return { ...result, planId: plan.id, expiresAt: plan.expiresAt };
   }
 
@@ -196,11 +226,18 @@ export class OperationsService {
       ok: true,
       records: rows.map((row) => {
         const priorities = typeof row.priorities === "string" ? JSON.parse(row.priorities) : row.priorities;
-        const { priorities: _hidden, ...visible } = row;
+        const result = typeof row.result === "string" ? JSON.parse(row.result) : object(row.result);
+        const automationSafety = object(object(result).automationSafety);
+        const { priorities: _hidden, result: _hiddenResult, ...visible } = row;
+        const changedCount = priorities && typeof priorities === "object" && !Array.isArray(priorities)
+          ? Object.keys(priorities).length : 0;
         return {
           ...visible,
-          changed_count: priorities && typeof priorities === "object" && !Array.isArray(priorities)
-            ? Object.keys(priorities).length : 0,
+          changed_count: changedCount,
+          candidate_changed_count: Number(object(result).candidateChangedCount ?? changedCount),
+          not_selected_changed_count: Number(object(result).notSelectedChangedCount ?? 0),
+          automation_mode: automationSafety.mode ?? null,
+          automation_batching_reasons: automationSafety.batchingReasons ?? [],
         };
       }),
     };
@@ -252,10 +289,36 @@ export class OperationsService {
     const policy = await this.store.claimDueAutomation(this.config.operations.automationJitterPercent);
     if (!policy) return { ok: true, due: false };
     const operator = "scheduler";
-    const plan = await this.generatePriorityPlan(Number(policy.recent_call_limit), operator, "automatic");
+    let plan: Record<string, unknown> | null = null;
     try {
+      plan = await this.generatePriorityPlan(Number(policy.recent_call_limit), operator, "automatic");
+      const safety = object(plan.automationSafety);
+      if (safety.allowed !== true) {
+        const result = {
+          changedCount: 0,
+          candidateChangedCount: Number(plan.candidateChangedCount ?? 0),
+          notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
+          writeMode: "cycle-skipped",
+          verification: "not-started",
+          safety,
+          profiles: plan.profiles,
+        };
+        await this.store.finishPlan(String(plan.planId), "failed", result);
+        await this.store.audit("priority.automation.run", "blocked", operator,
+          { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
+          { planId: plan.planId, ...result });
+        return { ok: true, due: true, planId: plan.planId, ...result };
+      }
       if (Number(plan.changedCount) === 0) {
-        const result = { changedCount: 0, writeMode: "no-change", verification: "postgresql-direct", verifiedCount: 0 };
+        const result = {
+          changedCount: 0,
+          candidateChangedCount: Number(plan.candidateChangedCount ?? 0),
+          notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
+          automationMode: safety.mode ?? "full",
+          writeMode: "no-change",
+          verification: "postgresql-direct",
+          verifiedCount: 0,
+        };
         await this.store.finishPlan(String(plan.planId), "applied", result);
         await this.store.audit("priority.automation.run", "succeeded", operator,
         { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
@@ -263,14 +326,25 @@ export class OperationsService {
         return { ok: true, due: true, planId: plan.planId, ...result };
       }
       const result = await this.confirmPriorityPlan(String(plan.planId), operator);
+      const batch = {
+        candidateChangedCount: Number(plan.candidateChangedCount ?? result.changedCount),
+        notSelectedChangedCount: Number(plan.notSelectedChangedCount ?? 0),
+        automationMode: safety.mode ?? "full",
+      };
       await this.store.audit("priority.automation.run", "succeeded", operator,
         { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
-        { planId: plan.planId, changedCount: result.changedCount, verification: result.verification, profiles: plan.profiles });
-      return { due: true, ...result };
+        {
+          planId: plan.planId,
+          changedCount: result.changedCount,
+          verification: result.verification,
+          profiles: plan.profiles,
+          ...batch,
+        });
+      return { due: true, ...result, ...batch };
     } catch (error) {
       await this.store.audit("priority.automation.run", "failed", operator,
         { recentCallLimit: Number(policy.recent_call_limit), jitterPercent: this.config.operations.automationJitterPercent },
-        { planId: plan.planId, error: error instanceof Error ? error.message : String(error) });
+        { planId: plan?.planId ?? null, error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
