@@ -202,3 +202,53 @@ test("one round stops after the initial write and three exponential retries", as
     unmatchedCount: 3,
   });
 });
+
+test("one round skips backend writes when direct preflight readback is already complete", async () => {
+  const config = {
+    operations: {
+      priorityVerificationTimeoutMs: 0,
+      priorityVerificationPollMs: 0,
+      priorityWrite: {
+        batchSize: 3,
+        interBatchMinimumDelayMs: 0,
+        interBatchMaximumDelayMs: 0,
+        maximumRetries: 3,
+        retryInitialDelayMs: 0,
+        retryJitterPercent: 0,
+      },
+    },
+  } as AppConfig;
+  const service = new OperationsService(config, {} as OperationsStore, "postgres://unused");
+  let writes = 0;
+  const internals = service as unknown as {
+    writePriorityBatch(batch: Record<string, number>): Promise<Record<string, unknown> & { ok: boolean }>;
+    verifyPriorities(batch: Record<string, number>, timeoutMs?: number): Promise<Record<string, unknown>>;
+    applyPriorityBatch(
+      batch: Record<string, number>,
+      batchNumber: number,
+      batchCount: number,
+    ): Promise<Record<string, unknown> & { ok: boolean }>;
+  };
+  internals.writePriorityBatch = async () => {
+    writes += 1;
+    return { ok: true, exitCode: 0, timedOut: false, writeDurationMs: 1, outputAvailable: true, error: "" };
+  };
+  internals.verifyPriorities = async (batch, timeoutMs) => ({
+    complete: true,
+    verification: "postgresql-direct",
+    verifiedCount: Object.keys(batch).length,
+    verificationDurationMs: 1,
+    unmatchedPriorities: {},
+    timeoutMs,
+  });
+
+  const result = await internals.applyPriorityBatch({ "1": 100, "2": 200, "3": 300 }, 1, 1);
+  expect(writes).toBe(0);
+  expect(result).toMatchObject({
+    ok: true,
+    attemptCount: 0,
+    retryCount: 0,
+    reconciled: true,
+    preflightVerifiedCount: 3,
+  });
+});

@@ -159,6 +159,7 @@ export class OperationsService {
     if (expectedIds.some((id) => !Number.isInteger(id) || id < 1)) {
       throw new Error("priority verification requires stable numeric account IDs");
     }
+    const expectedIdsCsv = expectedIds.join(",");
     const startedAt = Date.now();
     const deadline = startedAt + Math.max(0, timeoutMs);
     let verifiedCount = 0;
@@ -171,7 +172,7 @@ export class OperationsService {
           return await tx`
             SELECT id::text AS id, priority::int AS priority
             FROM accounts
-            WHERE id = ANY(${expectedIds}::bigint[])
+            WHERE id = ANY(string_to_array(${expectedIdsCsv}, ',')::bigint[])
           `;
       });
       const actual = new Map((rows as Array<Record<string, unknown>>).map((row) => [String(row.id), Number(row.priority)]));
@@ -235,8 +236,25 @@ export class OperationsService {
   ): Promise<Record<string, unknown> & { ok: boolean }> {
     const policy = this.config.operations.priorityWrite;
     const attempts: Array<Record<string, unknown>> = [];
-    let pending = priorities;
-    let reconciled = false;
+    const preflight = await this.verifyPriorities(priorities, 0);
+    const preflightVerifiedCount = Number(preflight.verifiedCount);
+    if (preflight.complete) {
+      return {
+        ok: true,
+        batchNumber,
+        batchCount,
+        changedCount: Object.keys(priorities).length,
+        attemptCount: 0,
+        retryCount: 0,
+        reconciled: true,
+        verification: "postgresql-direct",
+        verifiedCount: preflightVerifiedCount,
+        preflightVerifiedCount,
+        attempts,
+      };
+    }
+    let pending = preflight.unmatchedPriorities;
+    let reconciled = preflightVerifiedCount > 0;
     for (let attempt = 1; attempt <= policy.maximumRetries + 1; attempt += 1) {
       const write = await this.writePriorityBatch(pending);
       let verification = await this.verifyPriorities(priorities);
@@ -265,6 +283,7 @@ export class OperationsService {
           reconciled,
           verification: "postgresql-direct",
           verifiedCount: verification.verifiedCount,
+          preflightVerifiedCount,
           attempts,
         };
       }
@@ -279,6 +298,7 @@ export class OperationsService {
           reconciled,
           verification: "postgresql-direct",
           verifiedCount: verification.verifiedCount,
+          preflightVerifiedCount,
           unmatchedCount: Object.keys(verification.unmatchedPriorities).length,
           failure: write.timedOut ? "write-timeout-and-verification-incomplete" : "write-or-verification-failed",
           attempts,
@@ -303,6 +323,7 @@ export class OperationsService {
           reconciled: true,
           verification: "postgresql-direct",
           verifiedCount: verification.verifiedCount,
+          preflightVerifiedCount,
           attempts,
         };
       }
