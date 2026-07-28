@@ -57,6 +57,9 @@ account_stats AS (
       WHERE e.request_id IS NOT NULL AND f.triggered
     )::int AS failover_requests,
     COUNT(DISTINCT e.request_id) FILTER (
+      WHERE e.request_id IS NOT NULL AND f.triggered AND COALESCE(r.recovered, false)
+    )::int AS failover_recovered,
+    COUNT(DISTINCT e.request_id) FILTER (
       WHERE e.kind = 'error' AND e.scoreable AND e.request_id IS NOT NULL
     )::int AS failure_requests,
     COUNT(*) FILTER (
@@ -166,6 +169,14 @@ account_stats AS (
         AND system_log.message = 'openai.upstream_failover_switching'
     ) AS triggered
   ) f ON true
+  LEFT JOIN LATERAL (
+    SELECT EXISTS (
+      SELECT 1
+      FROM usage_logs recovery
+      WHERE recovery.request_id = e.request_id
+    ) AS recovered
+    WHERE f.triggered
+  ) r ON true
   GROUP BY a.account_id
 )
 SELECT a.*, s.*
@@ -217,6 +228,7 @@ export function scoreRecentDatabaseRow(
     : burstFailureRate === null ? failureRate : Math.max(failureRate, burstFailureRate);
   const attributedRequests = numeric(row.attributed_requests) ?? 0;
   const failoverRequests = numeric(row.failover_requests) ?? 0;
+  const failoverRecovered = Math.min(failoverRequests, numeric(row.failover_recovered) ?? 0);
   const failoverRate = attributedRequests > 0 ? Math.round(failoverRequests / attributedRequests * 1_000_000) / 1_000_000 : null;
   const firstTokenSamples = numeric(row.first_token_samples) ?? 0;
   const streamSuccessRequests = numeric(row.stream_success_requests) ?? 0;
@@ -282,6 +294,9 @@ export function scoreRecentDatabaseRow(
     effectiveFailureRate,
     attributedRequests,
     failoverRequests,
+    failoverRecovered,
+    failoverFailed: 0,
+    failoverOutcomeMissing: Math.max(0, failoverRequests - failoverRecovered),
     failoverRate,
     streamSuccessRequests,
     firstTokenSamples,

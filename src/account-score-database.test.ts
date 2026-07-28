@@ -22,6 +22,9 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("a.name = $2::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.name = $3::text");
+  expect(recentAccountAggregateQuery).toContain("recovery.request_id = e.request_id");
+  expect(recentAccountAggregateQuery).toContain("WHERE f.triggered");
+  expect(recentAccountAggregateQuery).toContain("AS failover_recovered");
   expect(recentAccountAggregateQuery).not.toContain("start_time");
 
   const row = scoreRecentDatabaseRow({
@@ -72,6 +75,49 @@ test("database aggregate accepts a 2000-call analysis window", () => {
     ttft_p95_ms: 5000,
     selected_calls: 2000,
   }, 2000, scorePolicy)).not.toThrow();
+});
+
+test("database score always projects failover and recovered request counts", () => {
+  const recovered = scoreRecentDatabaseRow({
+    account_id: 2,
+    account_name: "recovered 0.05",
+    status: "active",
+    schedulable: true,
+    priority: 1,
+    group_ids: [2],
+    group_names: ["pool"],
+    success_requests: 100,
+    attributed_requests: 100,
+    failover_requests: 3,
+    failover_recovered: 2,
+    failure_requests: 0,
+    stream_success_requests: 100,
+    first_token_samples: 100,
+    ttft_p95_ms: 5000,
+    selected_calls: 100,
+  }, 1000, scorePolicy);
+  const zero = scoreRecentDatabaseRow({
+    account_id: 3,
+    account_name: "zero 0.05",
+    status: "active",
+    schedulable: true,
+    priority: 1,
+    group_ids: [2],
+    group_names: ["pool"],
+    success_requests: 100,
+    attributed_requests: 100,
+    failure_requests: 0,
+    stream_success_requests: 100,
+    first_token_samples: 100,
+    ttft_p95_ms: 5000,
+    selected_calls: 100,
+  }, 1000, scorePolicy);
+
+  expect(recovered.failoverRequests).toBe(3);
+  expect(recovered.failoverRecovered).toBe(2);
+  expect(recovered.failoverOutcomeMissing).toBe(1);
+  expect(zero.failoverRequests).toBe(0);
+  expect(zero.failoverRecovered).toBe(0);
 });
 
 test("TTFT weight curve keeps latency above 20 seconds below grade A", () => {

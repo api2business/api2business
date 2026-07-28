@@ -169,7 +169,7 @@ function renderScoreRows() {
       <td>${compact(usage.requestCount)}</td>
       <td>${compact(usage.tokenCount)}</td>
       <td class="usd-cell">${usd(usage.apiAmountUsd)}</td>
-      <td>${number(row.failoverRecovered)} / ${number(row.failoverRequests)}</td>
+      <td>${number(row.failoverRequests)} / ${number(row.failoverRecovered)}</td>
       <td><span class="availability ${(row.currentAvailable ?? row.currentlyAvailable) ? 'is-up' : 'is-down'}">${(row.currentAvailable ?? row.currentlyAvailable) ? '可用' : '不可用'}</span></td>
     </tr>`
   }).join('') : '<tr><td colspan="17" class="empty">没有匹配的账号</td></tr>'
