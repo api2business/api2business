@@ -57,11 +57,13 @@ export class AccountScoreService {
       groupSelector,
       "manual",
     );
-    const groupNames = [...new Set(result.accounts.flatMap((row) =>
+    const accounts = this.poolAccounts(result.accounts);
+    const groupNames = [...new Set(accounts.flatMap((row) =>
       Array.isArray(row.groupNames) ? row.groupNames.map(String) : [],
     ))];
     return {
       ...result,
+      accounts,
       status: "ready",
       refreshedAt: new Date().toISOString(),
       nextRefreshAt: null,
@@ -115,7 +117,7 @@ export class AccountScoreService {
         "automatic",
       );
       const refreshedAt = new Date();
-      const accounts = mergeAccountScores(collected.accounts);
+      const accounts = this.poolAccounts(mergeAccountScores(collected.accounts));
       const groupNames = [...new Set(accounts.flatMap((row) =>
         Array.isArray(row.groupNames) ? row.groupNames.map(String) : [],
       ))];
@@ -149,6 +151,16 @@ export class AccountScoreService {
       this.writeCache(this.snapshot);
       return this.snapshot;
     }
+  }
+
+  private poolAccounts(accounts: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+    return accounts.filter((row) => {
+      const eligibleGroupIds = String(row.platform ?? "").toLowerCase() === "grok"
+        ? this.config.sub2api.grokPriorityPlan.eligibleGroupIds
+        : this.config.sub2api.priorityPlan.eligibleGroupIds;
+      const groupIds = Array.isArray(row.groupIds) ? row.groupIds.map(Number) : [];
+      return groupIds.some((id) => eligibleGroupIds.includes(id));
+    });
   }
 
   private readCache(): ScoreSnapshot {
