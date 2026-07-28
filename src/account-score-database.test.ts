@@ -23,6 +23,7 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.name = $3::text");
   expect(recentAccountAggregateQuery).toContain("recovery.request_id = e.request_id");
+  expect(recentAccountAggregateQuery).toContain("recovery.message = 'openai.request_completed'");
   expect(recentAccountAggregateQuery).toContain("WHERE f.triggered");
   expect(recentAccountAggregateQuery).toContain("AS failover_recovered");
   expect(recentAccountAggregateQuery).not.toContain("start_time");

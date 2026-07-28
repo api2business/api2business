@@ -172,8 +172,9 @@ account_stats AS (
   LEFT JOIN LATERAL (
     SELECT EXISTS (
       SELECT 1
-      FROM usage_logs recovery
+      FROM ops_system_logs recovery
       WHERE recovery.request_id = e.request_id
+        AND recovery.message = 'openai.request_completed'
     ) AS recovered
     WHERE f.triggered
   ) r ON true
