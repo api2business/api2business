@@ -39,7 +39,7 @@ export interface PriorityPlanPolicy {
   maximumPriority: number;
   reservePolicies: Record<string, {
     lowRemainingThresholdPercent: number;
-    normalPriorityFloor: number;
+    unrestrictedRemainingThresholdPercent: number;
     lowRemainingPriority: number;
   }>;
   procurementAdvice: {
@@ -306,9 +306,14 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
     if (!/^[1-9][0-9]*$/u.test(accountId)) throw new Error(`${path}.reservePolicies keys must be positive account IDs`);
     const itemPath = `${path}.reservePolicies.${accountId}`;
     const item = object(reserveRaw[accountId], itemPath);
+    const lowRemainingThresholdPercent = numberValue(item, "lowRemainingThresholdPercent", itemPath, 0, 100);
+    const unrestrictedRemainingThresholdPercent = numberValue(item, "unrestrictedRemainingThresholdPercent", itemPath, 0, 100);
+    if (unrestrictedRemainingThresholdPercent <= lowRemainingThresholdPercent) {
+      throw new Error(`${itemPath}.unrestrictedRemainingThresholdPercent must be greater than lowRemainingThresholdPercent`);
+    }
     return [accountId, {
-      lowRemainingThresholdPercent: numberValue(item, "lowRemainingThresholdPercent", itemPath, 0, 100),
-      normalPriorityFloor: integerValue(item, "normalPriorityFloor", itemPath, 1, 1000),
+      lowRemainingThresholdPercent,
+      unrestrictedRemainingThresholdPercent,
       lowRemainingPriority: integerValue(item, "lowRemainingPriority", itemPath, 1, 1000),
     }];
   }));

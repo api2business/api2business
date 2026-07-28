@@ -94,7 +94,7 @@ test("priority plan reports billing depletion without scheduling unavailable acc
 test("reserve policy dynamically lowers priority as weekly quota is depleted", () => {
   const reserveConfig = structuredClone(config);
   reserveConfig.sub2api.priorityPlan.reservePolicies = {
-    "2": { lowRemainingThresholdPercent: 20, normalPriorityFloor: 100, lowRemainingPriority: 600 },
+    "2": { lowRemainingThresholdPercent: 20, unrestrictedRemainingThresholdPercent: 50, lowRemainingPriority: 600 },
   };
   const reserveAccount: Record<string, unknown> = account(2, "stable reserve pro 0.1", 99);
   reserveAccount.weeklyRemainingPercent = 19;
@@ -110,10 +110,54 @@ test("reserve policy dynamically lowers priority as weekly quota is depleted", (
     reservePolicy: {
       weeklyRemainingPercent: 19,
       lowRemainingThresholdPercent: 20,
+      unrestrictedRemainingThresholdPercent: 50,
+      reserveWeight: 1,
       mode: "low-remaining-reserve",
     },
   });
   expect(plan.priorities).toMatchObject({ "2": 600 });
+});
+
+test("reserve policy is unrestricted above half quota and weighted below it", () => {
+  const reserveConfig = structuredClone(config);
+  reserveConfig.sub2api.priorityPlan.minimumChange = 1;
+  reserveConfig.sub2api.priorityPlan.reservePolicies = {
+    "2": { lowRemainingThresholdPercent: 20, unrestrictedRemainingThresholdPercent: 50, lowRemainingPriority: 600 },
+  };
+  const fullAccount: Record<string, unknown> = account(2, "stable reserve pro 0.1", 99);
+  fullAccount.weeklyRemainingPercent = 100;
+  const fullPlan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    account(1, "https://alpha.example plus 0.05", 90),
+    fullAccount,
+  ] }, reserveConfig);
+  const full = (fullPlan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2);
+  expect(full).toMatchObject({
+    configuredPriorityFloor: null,
+    priorityFloorApplied: false,
+    reservePolicy: {
+      weeklyRemainingPercent: 100,
+      reserveWeight: 0,
+      mode: "unrestricted-cost-aware",
+    },
+  });
+
+  const weightedAccount: Record<string, unknown> = account(2, "stable reserve pro 0.1", 99);
+  weightedAccount.weeklyRemainingPercent = 35;
+  const weightedPlan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    account(1, "https://alpha.example plus 0.05", 90),
+    weightedAccount,
+  ] }, reserveConfig);
+  const weighted = (weightedPlan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2)!;
+  const calculated = weighted.calculatedPriority as number;
+  expect(weighted).toMatchObject({
+    configuredPriorityFloor: Math.round(calculated + 0.5 * (600 - calculated)),
+    priorityFloorApplied: true,
+    reservePolicy: {
+      weeklyRemainingPercent: 35,
+      reserveWeight: 0.5,
+      mode: "weighted-reserve",
+    },
+  });
 });
 
 test("procurement recommendations remain supplier-diverse and do not treat limits as billing", () => {

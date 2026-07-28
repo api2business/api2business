@@ -95,9 +95,19 @@ function buildPriorityProfile(
     const remainingPercent = number(row.weeklyRemainingPercent);
     const lowRemaining = reservePolicy !== null
       && (remainingPercent === null || remainingPercent < reservePolicy.lowRemainingThresholdPercent);
-    const configuredFloor = reservePolicy === null
+    const unrestricted = reservePolicy !== null
+      && remainingPercent !== null
+      && remainingPercent > reservePolicy.unrestrictedRemainingThresholdPercent;
+    const reserveWeight = reservePolicy === null || unrestricted
+      ? 0
+      : lowRemaining
+        ? 1
+        : (reservePolicy.unrestrictedRemainingThresholdPercent - remainingPercent!)
+          / (reservePolicy.unrestrictedRemainingThresholdPercent - reservePolicy.lowRemainingThresholdPercent);
+    const weightedFloor = reservePolicy === null || unrestricted
       ? null
-      : lowRemaining ? reservePolicy.lowRemainingPriority : reservePolicy.normalPriorityFloor;
+      : Math.round(calculated + reserveWeight * (reservePolicy.lowRemainingPriority - calculated));
+    const configuredFloor = weightedFloor === null ? null : Math.max(calculated, weightedFloor);
     const floored = configuredFloor === null ? calculated : Math.max(calculated, configuredFloor);
     const desired = Math.abs(before - floored) < policy.minimumChange ? before : floored;
     if (before !== desired) priorities[String(accountId)] = desired;
@@ -121,7 +131,9 @@ function buildPriorityProfile(
       reservePolicy: reservePolicy === null ? null : {
         weeklyRemainingPercent: remainingPercent,
         lowRemainingThresholdPercent: reservePolicy.lowRemainingThresholdPercent,
-        mode: lowRemaining ? "low-remaining-reserve" : "normal-cost-aware",
+        unrestrictedRemainingThresholdPercent: reservePolicy.unrestrictedRemainingThresholdPercent,
+        reserveWeight,
+        mode: unrestricted ? "unrestricted-cost-aware" : lowRemaining ? "low-remaining-reserve" : "weighted-reserve",
       },
       desiredPriority: desired,
       change: before === desired ? "noop" : "update",
