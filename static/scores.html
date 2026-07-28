@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111412" />
   <title>账号评分 | ApiState</title>
   <link rel="stylesheet" href="/styles.css" />
-  <script src="/app.js?v=priority-history-v2" type="module"></script>
+  <script src="/app.js?v=merged-score-priority-v3" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -29,8 +29,10 @@
       <div class="table-toolbar">
         <div class="score-query-controls">
           <div class="filter-field"><span>筛选</span><input id="score-filter" type="search" placeholder="账号或分组" /></div>
-          <label class="select-field"><span>评分样本</span><select id="score-call-limit"></select></label>
-          <button id="query-scores" class="query-command" type="button">按调用次数查询</button>
+          <label class="select-field"><span>评分/计划样本</span><select id="score-call-limit"></select></label>
+          <button id="query-scores" class="query-command" type="button">刷新当前状态</button>
+          <button id="generate-plan" class="query-command" type="button">生成调整计划</button>
+          <button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button>
         </div>
         <div id="score-updated" class="refresh-clock">
           <span>上次更新时间</span>
@@ -38,18 +40,14 @@
           <small>距离下次更新 <b id="score-countdown">--:--</b></small>
         </div>
       </div>
+      <p id="plan-refresh-state" class="section-state">尚未生成调整计划</p>
+      <div id="plan-progress" class="operation-progress" aria-live="polite"></div>
       <div class="table-wrap">
         <table class="data-table" aria-label="所有分组账号评分">
-          <thead><tr><th>账号</th><th>分组</th><th>优先级</th><th>评分</th><th>等级</th><th>置信度</th><th>尝试</th><th>失败率</th><th>TTFT P95</th><th>请求</th><th>Token</th><th class="usd-cell">API USD</th><th>切号恢复</th><th>可用</th></tr></thead>
-          <tbody id="score-body"><tr><td colspan="14" class="empty">正在读取评分快照...</td></tr></tbody>
+          <thead><tr><th>账号</th><th>分组</th><th>当前优先级</th><th>计划优先级</th><th>变化</th><th>评分</th><th>成本</th><th>等级</th><th>置信度</th><th>尝试</th><th>失败率</th><th>TTFT P95</th><th>请求</th><th>Token</th><th class="usd-cell">API USD</th><th>切号恢复</th><th>可用</th></tr></thead>
+          <tbody id="score-body"><tr><td colspan="17" class="empty">正在读取评分快照...</td></tr></tbody>
         </table>
       </div>
-    </section>
-    <section class="table-section">
-      <div class="table-toolbar"><h2>优先级调整</h2><div class="score-query-controls"><label class="select-field"><span>样本</span><select id="plan-limit"></select></label><button id="refresh-priority" class="query-command" type="button">刷新当前状态</button><button id="generate-plan" class="query-command" type="button">生成调整计划</button><button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button></div></div>
-      <p id="plan-refresh-state" class="section-state">尚未刷新</p>
-      <div id="plan-progress" class="operation-progress" aria-live="polite"></div>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>账号</th><th>当前</th><th>计划</th><th>变化</th><th>评分</th><th>成本</th></tr></thead><tbody id="plan-body"><tr><td colspan="6" class="empty">正在加载当前状态</td></tr></tbody></table></div>
     </section>
     <section class="table-section">
       <div class="table-toolbar"><h2>定时自动调整</h2></div>

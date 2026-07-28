@@ -102,6 +102,8 @@ async function loginPage() {
 let scoreRows = []
 let scoreRefreshedAt = null
 let scoreNextRefreshAt = null
+let priorityPlanRows = new Map()
+let priorityPlanVisible = false
 
 function gradeClass(value) {
   const grade = String(value ?? '').toLowerCase()
@@ -135,11 +137,18 @@ function renderScoreRows() {
   const rows = scoreRows.filter((row) => `${row.accountName} ${row.groupName}`.toLowerCase().includes(term))
   $('#score-body').innerHTML = rows.length ? rows.map((row) => {
     const usage = row.usage ?? {}
+    const planRow = priorityPlanRows.get(String(row.accountId))
+    const desiredPriority = priorityPlanVisible && planRow ? Number(planRow.desiredPriority) : null
+    const priorityDelta = desiredPriority === null ? null : desiredPriority - Number(row.priority)
+    const costRate = planRow?.costRateCnyPerApiUsd ?? usage.costRateCnyPerApiUsd
     return `<tr>
       <td class="account-cell"><b>${escapeHtml(row.accountName)}</b><small>#${escapeHtml(row.accountId)}</small></td>
       <td>${groupLabels(row)}</td>
       <td>${number(row.priority)}</td>
+      <td>${desiredPriority === null ? '—' : number(desiredPriority)}</td>
+      <td>${priorityDelta === null ? '—' : signed(priorityDelta)}</td>
       <td><span class="score-value ${gradeClass(row.grade)}">${number(row.score, 1)}</span></td>
+      <td>${costRate == null ? '—' : number(costRate, 4)}</td>
       <td>${escapeHtml(row.grade ?? '—')}</td>
       <td>${escapeHtml(row.confidence ?? '—')}</td>
       <td>${number(row.observedAttempts)}</td>
@@ -151,20 +160,25 @@ function renderScoreRows() {
       <td>${number(row.failoverRecovered)} / ${number(row.failoverRequests)}</td>
       <td><span class="availability ${(row.currentAvailable ?? row.currentlyAvailable) ? 'is-up' : 'is-down'}">${(row.currentAvailable ?? row.currentlyAvailable) ? '可用' : '不可用'}</span></td>
     </tr>`
-  }).join('') : '<tr><td colspan="14" class="empty">没有匹配的账号</td></tr>'
+  }).join('') : '<tr><td colspan="17" class="empty">没有匹配的账号</td></tr>'
 }
 
 function renderScores(data) {
   scoreRows = data.accounts ?? []
+  const groups = data.groups ?? [...new Set(scoreRows.flatMap((row) =>
+    Array.isArray(row.groupNames) ? row.groupNames : [row.groupName].filter(Boolean)
+  ))]
   $('#metric-accounts').textContent = number(scoreRows.length)
-  $('#metric-groups').textContent = number((data.groups ?? []).length)
+  $('#metric-groups').textContent = number(groups.length)
   $('#metric-good').textContent = number(scoreRows.filter((row) => Number(row.score) >= 80).length)
   $('#metric-risk').textContent = number(scoreRows.filter((row) => Number(row.score) < 60).length)
-  $('#metric-window').textContent = data.window ?? '—'
-  $('#score-state').textContent = ({ ready: '已更新', refreshing: '刷新中', stale: '使用旧快照', unavailable: '暂无快照' })[data.status] ?? data.status
-  $('#score-state').dataset.state = data.status
-  scoreRefreshedAt = data.refreshedAt ?? scoreRefreshedAt
+  $('#metric-window').textContent = data.window ?? (data.recentCallLimit ? `最近 ${number(data.recentCallLimit)} 次` : '—')
+  const status = data.status ?? (scoreRows.length ? 'ready' : 'unavailable')
+  $('#score-state').textContent = ({ ready: '已更新', refreshing: '刷新中', stale: '使用旧快照', unavailable: '暂无快照' })[status] ?? status
+  $('#score-state').dataset.state = status
+  scoreRefreshedAt = data.refreshedAt ?? data.queryCompletedAt ?? data.collectedAt ?? scoreRefreshedAt
   scoreNextRefreshAt = data.nextRefreshAt ?? scoreNextRefreshAt
+  if (data.recentCallLimit && $('#score-call-limit')) $('#score-call-limit').value = String(data.recentCallLimit)
   renderRefreshClock()
   renderScoreRows()
 }
@@ -172,36 +186,22 @@ function renderScores(data) {
 async function scoresPage() {
   const select = $('#score-call-limit')
   $('#score-filter').addEventListener('input', renderScoreRows)
-  $('#query-scores').addEventListener('click', async () => {
-    const button = $('#query-scores')
-    const recentCallLimit = Number(select.value)
-    button.disabled = true
-    select.disabled = true
-    $('#score-state').textContent = '查询中'
-    try {
-      renderScores(await requestJson('/api/scores/rank', {
-        method: 'POST',
-        body: JSON.stringify({ recentCallLimit }),
-      }, 60000))
-    } catch (error) {
-      $('#score-state').textContent = '查询失败'
-      $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error)
-    } finally {
-      button.disabled = false
-      select.disabled = false
-    }
-  })
+  $('#query-scores').addEventListener('click', () => void refreshPriorityState().catch(() => undefined))
   $('#refresh-scores').addEventListener('click', async () => {
     const button = $('#refresh-scores')
     button.disabled = true
     $('#score-state').textContent = '刷新中'
-    try { renderScores(await requestJson('/api/scores/refresh', { method: 'POST', body: '{}' }, 200000)) }
+    try {
+      renderScores(await requestJson('/api/scores/refresh', { method: 'POST', body: '{}' }, 200000))
+      clearPriorityPlan('评分已刷新，请重新生成调整计划')
+    }
     catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }
   })
   const initial = await requestJson('/api/scores')
   const options = initial.availableCallOptions ?? []
-  select.innerHTML = options.map((value) => `<option value="${value}"${value === 500 ? ' selected' : ''}>最近 ${number(value)} 次</option>`).join('')
+  const preferredLimit = options.includes(1000) ? 1000 : options[0]
+  select.innerHTML = options.map((value) => `<option value="${value}"${value === preferredLimit ? ' selected' : ''}>最近 ${number(value)} 次</option>`).join('')
   renderScores(initial)
   await setupPriorityPanel(options)
   setInterval(renderRefreshClock, 1000)
@@ -268,7 +268,6 @@ function cny(value) {
 let activePlanId = null
 let priorityAutomationExists = false
 const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
-let priorityRows = []
 
 function signed(value) {
   const numeric = Number(value)
@@ -276,16 +275,36 @@ function signed(value) {
   return numeric > 0 ? `+${numeric}` : String(numeric)
 }
 
-function renderPriorityRows(rows, showPlan = false) {
-  priorityRows = rows ?? []
-  $('#plan-body').innerHTML = priorityRows.length ? priorityRows.map((row) => {
-    const delta = Number(row.desiredPriority) - Number(row.beforePriority)
-    return `<tr>
-      <td>${escapeHtml(row.accountName)}</td><td>${number(row.beforePriority)}</td>
-      <td>${showPlan ? number(row.desiredPriority) : '—'}</td>
-      <td>${showPlan ? signed(delta) : '—'}</td><td>${number(row.score, 1)}</td>
-      <td>${number(row.costRateCnyPerApiUsd, 4)}</td></tr>`
-  }).join('') : '<tr><td colspan="6" class="empty">没有符合当前评分条件的账号</td></tr>'
+function setPriorityPlan(rows, visible) {
+  priorityPlanRows = new Map((rows ?? []).map((row) => [String(row.accountId), row]))
+  priorityPlanVisible = visible
+  scoreRows = scoreRows.map((row) => {
+    const planRow = priorityPlanRows.get(String(row.accountId))
+    if (!planRow) return row
+    return {
+      ...row,
+      priority: planRow.beforePriority,
+      score: planRow.score,
+      confidence: planRow.confidence ?? row.confidence,
+      observedAttempts: planRow.observedAttempts ?? row.observedAttempts,
+      failureRate: planRow.failureRate ?? row.failureRate,
+      ttftP95Ms: planRow.ttftP95Ms ?? row.ttftP95Ms,
+      usage: {
+        ...(row.usage ?? {}),
+        costRateCnyPerApiUsd: planRow.costRateCnyPerApiUsd,
+      },
+    }
+  })
+  renderScoreRows()
+}
+
+function clearPriorityPlan(message = '尚未生成调整计划') {
+  activePlanId = null
+  priorityPlanRows = new Map()
+  priorityPlanVisible = false
+  $('#confirm-plan').disabled = true
+  $('#plan-refresh-state').textContent = message
+  renderScoreRows()
 }
 
 function planProgress(message, reset = false) {
@@ -296,22 +315,29 @@ function planProgress(message, reset = false) {
 }
 
 async function refreshPriorityState() {
-  const button = $('#refresh-priority')
-  const limit = Number($('#plan-limit').value)
+  const button = $('#query-scores')
+  const select = $('#score-call-limit')
+  const limit = Number(select.value)
   button.disabled = true
+  select.disabled = true
+  $('#score-state').textContent = '查询中'
   $('#plan-refresh-state').textContent = '正在刷新，保留当前显示数据…'
   try {
-    const state = await requestJson(`/api/operations/priority-state?recentCallLimit=${limit}`, {}, 90000)
-    renderPriorityRows(state.changes, false)
-    activePlanId = null
-    $('#confirm-plan').disabled = true
-    $('#plan-refresh-state').textContent = `上次刷新时间：${time(state.refreshedAt)} · 最近 ${number(limit)} 次`
+    const state = await requestJson('/api/scores/rank', {
+      method: 'POST',
+      body: JSON.stringify({ recentCallLimit: limit }),
+    }, 90000)
+    renderScores(state)
+    clearPriorityPlan()
+    $('#plan-refresh-state').textContent = `上次刷新时间：${time(state.refreshedAt ?? state.queryCompletedAt ?? state.collectedAt)} · 最近 ${number(limit)} 次`
     return state
   } catch (error) {
+    $('#score-state').textContent = '查询失败'
     $('#plan-refresh-state').textContent = `刷新失败：${error instanceof Error ? error.message : String(error)}`
     throw error
   } finally {
     button.disabled = false
+    select.disabled = false
   }
 }
 
@@ -346,9 +372,10 @@ async function loadPriorityAutomation() {
 }
 
 async function setupPriorityPanel(options) {
-  $('#plan-limit').innerHTML = options.map((value) => `<option value="${value}"${value === 500 ? ' selected' : ''}>最近 ${value} 条</option>`).join('')
   $('#automation-limit').innerHTML = options.map((value) => `<option value="${value}"${value === 500 ? ' selected' : ''}>最近 ${value} 条</option>`).join('')
-  $('#refresh-priority').addEventListener('click', () => void refreshPriorityState().catch(() => undefined))
+  $('#score-call-limit').addEventListener('change', () => {
+    clearPriorityPlan('样本档位已变化，请刷新当前状态或生成新计划')
+  })
   $('#refresh-history').addEventListener('click', () => void loadPriorityHistory().catch(() => undefined))
   $('#automation-form').addEventListener('submit', async (event) => {
     event.preventDefault()
@@ -370,11 +397,11 @@ async function setupPriorityPanel(options) {
     planProgress('开始读取最近调用并生成调整计划', true)
     try {
       const plan = await requestJson('/api/operations/priority-plans', {
-        method: 'POST', body: JSON.stringify({ recentCallLimit: Number($('#plan-limit').value) }),
+        method: 'POST', body: JSON.stringify({ recentCallLimit: Number($('#score-call-limit').value) }),
       }, 90000)
       activePlanId = plan.planId
       $('#confirm-plan').disabled = plan.changedCount === 0
-      renderPriorityRows(plan.changes, true)
+      setPriorityPlan(plan.changes, true)
       $('#plan-refresh-state').textContent = `计划生成时间：${time(plan.refreshedAt)} · 最近 ${number(plan.recentCallLimit)} 次`
       planProgress(`计划已生成，包含 ${number(plan.changedCount)} 项调整`)
       await loadPriorityHistory()
@@ -387,10 +414,10 @@ async function setupPriorityPanel(options) {
     const button = $('#confirm-plan')
     button.disabled = true
     $('#generate-plan').disabled = true
-    $('#refresh-priority').disabled = true
+    $('#query-scores').disabled = true
     planProgress('已提交确认，后端 API 正在批量写入；随后通过 PostgreSQL 直连回读')
     try {
-      const result = await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 190000)
+      const result = await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 600000)
       planProgress(`调整成功，后端已写入并由 PostgreSQL 验证 ${number(result.verifiedCount)} 个账号`)
       activePlanId = null
       await Promise.all([refreshPriorityState(), loadPriorityHistory(), loadPriorityAutomation()])
@@ -404,11 +431,10 @@ async function setupPriorityPanel(options) {
     } finally {
       button.disabled = true
       $('#generate-plan').disabled = false
-      $('#refresh-priority').disabled = false
+      $('#query-scores').disabled = false
     }
   })
   await Promise.all([
-    refreshPriorityState().catch(() => undefined),
     loadPriorityHistory(),
     loadPriorityAutomation(),
   ])
