@@ -49,9 +49,30 @@ function safeMessage(value: string): string {
 }
 
 export function importFailure(output: Record<string, unknown>): string {
+  const resultCandidates = [output.result];
+  const projection = output.projection && typeof output.projection === "object" && !Array.isArray(output.projection)
+    ? output.projection as Record<string, unknown> : null;
+  if (projection) resultCandidates.push(projection.result);
   const candidates: unknown[] = [output.error];
   const data = output.data && typeof output.data === "object" && !Array.isArray(output.data) ? output.data as Record<string, unknown> : null;
-  if (data) candidates.push(data.error, data.runtime && typeof data.runtime === "object" ? (data.runtime as Record<string, unknown>).error : null);
+  if (data) {
+    candidates.push(data.error, data.runtime && typeof data.runtime === "object" ? (data.runtime as Record<string, unknown>).error : null);
+    resultCandidates.push(data.result);
+  }
+  for (const candidate of resultCandidates) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const result = candidate as Record<string, unknown>;
+    const failures = Array.isArray(result.failures) ? result.failures : [];
+    const reasons = failures.flatMap((failure) => {
+      if (!failure || typeof failure !== "object" || Array.isArray(failure)) return [];
+      const item = failure as Record<string, unknown>;
+      if (typeof item.reason !== "string" || !item.reason.trim()) return [];
+      const index = Number.isInteger(item.index) ? `#${item.index} ` : "";
+      return [`${index}${item.reason.trim()}`];
+    });
+    if (reasons.length > 0) return safeMessage(`账号导入失败：${reasons.join("；")}`);
+    if (typeof result.failed === "number" && result.failed > 0) return `账号导入报告 ${result.failed} 个失败项，但未返回原因`;
+  }
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.trim()) return safeMessage(candidate);
     if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
@@ -105,17 +126,17 @@ export class AccountImportService {
         "--source-proxy-id", String(job.settings.sourceProxyId), "--shadow-proxy", String(job.settings.shadowProxy), "--json"];
       if (job.settings.confirm) args.push("--confirm");
       const child = Bun.spawn([this.config.monitor.cli.executable, ...args], { cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env });
-      const stderrTask = (async () => { for await (const line of child.stderr) {
-        const text = new TextDecoder().decode(line).trim();
-        if (!text) continue;
-        const stage = /stage=([^ ]+)/u.exec(text)?.[1] ?? "runtime";
-        const state = /state=([^ ]+)/u.exec(text)?.[1] ?? "progress";
-        this.log(job, stage, state, text.replace(/^.*?PROGRESS\s+/u, ""));
-      } })();
+      const stderrTask = this.captureProgress(job, child.stderr);
       const stdout = await new Response(child.stdout).text();
       const exitCode = await child.exited; await stderrTask;
       const output = JSON.parse(stdout) as Record<string, unknown>;
-      if (exitCode !== 0 || output.ok === false) throw new Error(importFailure(output));
+      if (exitCode !== 0 || output.ok === false) {
+        job.result = output;
+        job.state = "failed";
+        job.error = importFailure(output);
+        this.log(job, "job", "failed", job.error);
+        return;
+      }
       job.result = output; job.state = "succeeded"; this.log(job, "job", "done", "导入作业完成");
     } catch (error) {
       job.state = "failed"; job.error = safeMessage(error instanceof Error ? error.message : String(error));
@@ -123,5 +144,25 @@ export class AccountImportService {
     } finally {
       rmSync(dir, { recursive: true, force: true }); job.completedAt = new Date().toISOString();
     }
+  }
+
+  private async captureProgress(job: ImportJob, stream: ReadableStream<Uint8Array>): Promise<void> {
+    const decoder = new TextDecoder();
+    let pending = "";
+    const consume = (line: string) => {
+      const text = line.trim();
+      if (!text) return;
+      const stage = /stage=([^ ]+)/u.exec(text)?.[1] ?? "runtime";
+      const state = /state=([^ ]+)/u.exec(text)?.[1] ?? "progress";
+      this.log(job, stage, state, text.replace(/^.*?PROGRESS\s+/u, ""));
+    };
+    for await (const chunk of stream) {
+      pending += decoder.decode(chunk, { stream: true });
+      const lines = pending.split(/\r?\n/u);
+      pending = lines.pop() ?? "";
+      for (const line of lines) consume(line);
+    }
+    pending += decoder.decode();
+    consume(pending);
   }
 }
