@@ -13,7 +13,7 @@ balance_events AS (
   SELECT user_id, created_at AS occurred_at, -actual_cost::numeric AS delta, 'usage'::text AS source
   FROM usage_logs
   WHERE created_at >= (SELECT start_at FROM bounds)
-    AND LOWER(COALESCE(billing_type, 'balance')) = 'balance'
+    AND COALESCE(billing_type, 0) = 0
   UNION ALL
   SELECT used_by AS user_id, used_at AS occurred_at, value::numeric AS delta, 'redeem'::text AS source
   FROM redeem_codes

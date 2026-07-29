@@ -40,7 +40,7 @@ test("query replays persisted balance mutations per user before positive aggrega
   expect(dailyProfitFactsQuery).toContain("SUM(GREATEST(opening_balance, 0))");
   expect(dailyProfitFactsQuery).toContain("SUM(GREATEST(closing_balance, 0))");
   expect(dailyProfitFactsQuery).toContain("FROM usage_logs");
-  expect(dailyProfitFactsQuery).toContain("COALESCE(billing_type, 'balance')");
+  expect(dailyProfitFactsQuery).toContain("COALESCE(billing_type, 0) = 0");
   expect(dailyProfitFactsQuery).toContain("FROM redeem_codes");
   expect(dailyProfitFactsQuery).toContain("FROM user_affiliate_ledger");
   expect(dailyProfitFactsQuery).toContain("FROM promo_code_usages");
