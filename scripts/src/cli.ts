@@ -140,6 +140,7 @@ function help(): Record<string, unknown> {
       "errors get --request-id <request-id>",
       "users impact --start <ISO> --end <ISO> [--affected-only]",
       "users balance-liability [--over-api]",
+      "profit daily-facts --day YYYY-MM-DD [--over-api]",
       "lottery status|draw|reset",
       "records list|delete",
       "credit test",
@@ -259,6 +260,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || parsed.command[0] === "errors"
     || parsed.command.join(" ") === "users impact"
     || parsed.command.join(" ") === "users balance-liability"
+    || parsed.command.join(" ") === "profit daily-facts"
     || parsed.command.join(" ") === "accounts economics"
     || parsed.command.join(" ") === "payments alipay-revenue"
     || parsed.command.join(" ") === "reads status"
@@ -296,6 +298,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   }
   if (group === "users" && action === "balance-liability") {
     return await client.userBalanceLiability();
+  }
+  if (group === "profit" && action === "daily-facts") {
+    if (!parsed.day) throw new Error("profit daily-facts requires --day");
+    return await client.dailyProfitFacts(parsed.day);
   }
   if (group === "accounts" && action === "economics") {
     if (!parsed.accounts) throw new Error("accounts economics requires --accounts");
@@ -469,6 +475,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command[0] === "errors"
       || parsed.command.join(" ") === "users impact"
       || parsed.command.join(" ") === "users balance-liability"
+      || parsed.command.join(" ") === "profit daily-facts"
       || parsed.command.join(" ") === "accounts economics"
       || parsed.command.join(" ") === "payments alipay-revenue"
     );

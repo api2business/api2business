@@ -42,8 +42,9 @@ test("aggregates current non-admin balances through one uncached queued query", 
     negativeBalanceUsd: -30,
     databaseQueries: 1,
   });
-  expect(request?.cacheMode).toBe("bypass-cache");
-  expect(request?.parameters).toEqual([]);
+  const captured = request as Sub2ApiReadRequest | null;
+  expect(captured?.cacheMode).toBe("bypass-cache");
+  expect(captured?.parameters).toEqual([]);
 });
 
 test("excludes administrators and deleted users without exposing identity", () => {

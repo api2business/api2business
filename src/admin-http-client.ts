@@ -86,6 +86,12 @@ export class AdminHttpClient {
   userBalanceLiability(): Promise<Record<string, unknown>> {
     return this.request("/api/admin/users/balance-liability", {}, 60000);
   }
+  dailyProfitFacts(day: string): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/profit/daily-facts", {
+      method: "POST",
+      body: JSON.stringify({ day }),
+    }, 60000);
+  }
   createPriorityPlan(recentCallLimit: number): Promise<Record<string, unknown>> {
     return this.request("/api/operations/priority-plans", { method: "POST", body: JSON.stringify({ recentCallLimit }) }, 60000);
   }

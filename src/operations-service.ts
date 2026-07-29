@@ -33,6 +33,7 @@ import {
   type AlipayRevenueWindowInput,
 } from "./alipay-revenue-database";
 import { collectUserBalanceLiability } from "./user-balance-liability";
+import { collectDailyProfitFacts } from "./daily-profit-facts";
 
 const prioritiesByIdSql = `
 SELECT id::text AS id, priority::int AS priority
@@ -94,6 +95,10 @@ export class OperationsService {
 
   async userBalanceLiability() {
     return await collectUserBalanceLiability(this.reads, "manual");
+  }
+
+  async dailyProfitFacts(day: string) {
+    return await collectDailyProfitFacts(this.config, this.reads, day, "manual");
   }
 
   async ledger(period = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 7)) {

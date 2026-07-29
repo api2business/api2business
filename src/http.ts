@@ -9,6 +9,7 @@ import {
   parseAccountEconomicsWindow,
 } from "./account-batch-economics";
 import { parseAlipayRevenueWindow } from "./alipay-revenue-database";
+import { parseCompletedProfitDay } from "./daily-profit-facts";
 import {
   apiKeyAuthorized,
   clearSessionCookie,
@@ -334,6 +335,17 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/admin/users/balance-liability") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
         return json(await operations.userBalanceLiability());
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/profit/daily-facts") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const input = await body(request);
+        if (typeof input.day !== "string") return json({ ok: false, error: "day is required" }, 400);
+        try {
+          parseCompletedProfitDay(input.day, config.monitor.timezone);
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+        return json(await operations.dailyProfitFacts(input.day));
       }
 
       if (!url.pathname.startsWith("/api/admin/")) return json({ ok: false, error: "not found" }, 404);
