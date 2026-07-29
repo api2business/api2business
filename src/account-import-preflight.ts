@@ -108,13 +108,13 @@ export async function accountImportPreflight(
         AND a.platform = 'openai'
         AND a.type = 'oauth'
         AND (
-          COALESCE(a.credentials->>'chatgpt_user_id', '') = ANY($1::text[])
-          OR COALESCE(a.extra->>'access_token_sha256', '') = ANY($2::text[])
+          COALESCE(a.credentials->>'chatgpt_user_id', '') IN (SELECT jsonb_array_elements_text($1::jsonb))
+          OR COALESCE(a.extra->>'access_token_sha256', '') IN (SELECT jsonb_array_elements_text($2::jsonb))
         )
       GROUP BY a.id, p.name
       ORDER BY a.id
     `,
-    parameters: [userIds, accessHashes],
+    parameters: [JSON.stringify(userIds), JSON.stringify(accessHashes)],
   });
   const byUser = new Map<string, AccountRow[]>();
   const byAccess = new Map<string, AccountRow[]>();

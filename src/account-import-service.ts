@@ -46,6 +46,7 @@ function safeMessage(value: string): string {
     .replace(/sk-[A-Za-z0-9_-]+/gu, "[REDACTED]")
     .replace(/rt\.\d\.[A-Za-z0-9_-]+/gu, "[REDACTED]")
     .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gu, "[REDACTED]")
+    .replace(/user-[A-Za-z0-9_-]+/gu, "[REDACTED]")
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/gu, "[REDACTED]")
     .slice(0, 500);
 }

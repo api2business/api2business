@@ -16,3 +16,8 @@ test("projects partial import failures with indexes and redaction", () => {
     { index: 8, reason: "refresh rt.1.secret expired" },
   ] } })).toBe("账号导入失败：#2 request for [REDACTED] failed；#8 refresh [REDACTED] expired");
 });
+
+test("redacts upstream user identifiers from database errors", () => {
+  expect(importFailure({ ok: false, error: "lookup failed for user-sensitive-id" }))
+    .toBe("lookup failed for [REDACTED]");
+});
