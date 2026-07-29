@@ -95,6 +95,8 @@ const automationLoop = (async () => {
           config.operations.automationPollMs,
           config.operations.automationFailureBackoffMaxMs,
           consecutiveAutomationFailures,
+          config.operations.automationFailureRetryLimit,
+          config.operations.automationFailureCooldownMs,
         ),
       }));
     }
@@ -103,6 +105,8 @@ const automationLoop = (async () => {
         config.operations.automationPollMs,
         config.operations.automationFailureBackoffMaxMs,
         consecutiveAutomationFailures,
+        config.operations.automationFailureRetryLimit,
+        config.operations.automationFailureCooldownMs,
       ));
     }
   }

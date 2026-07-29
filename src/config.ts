@@ -125,6 +125,8 @@ export interface AppConfig {
     automationPollMs: number;
     automationRunTimeoutMs: number;
     automationFailureBackoffMaxMs: number;
+    automationFailureRetryLimit: number;
+    automationFailureCooldownMs: number;
     automationJitterPercent: number;
     automationSafety: {
       maximumScoreQueryDurationMs: number;
@@ -622,6 +624,14 @@ export function loadConfig(path: string): AppConfig {
         "operations",
         1000,
         300000,
+      ),
+      automationFailureRetryLimit: integerValue(operations, "automationFailureRetryLimit", "operations", 0, 10),
+      automationFailureCooldownMs: integerValue(
+        operations,
+        "automationFailureCooldownMs",
+        "operations",
+        60000,
+        86400000,
       ),
       automationJitterPercent: numberValue(operations, "automationJitterPercent", "operations", 0, 0.5),
       automationSafety: {

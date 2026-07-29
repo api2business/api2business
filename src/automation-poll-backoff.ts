@@ -2,6 +2,8 @@ export function automationPollDelayMs(
   pollMs: number,
   maximumMs: number,
   consecutiveFailures: number,
+  retryLimit = Number.MAX_SAFE_INTEGER,
+  cooldownMs = maximumMs,
 ): number {
   if (!Number.isInteger(pollMs) || pollMs <= 0) throw new Error("pollMs must be a positive integer");
   if (!Number.isInteger(maximumMs) || maximumMs < pollMs) {
@@ -10,6 +12,13 @@ export function automationPollDelayMs(
   if (!Number.isInteger(consecutiveFailures) || consecutiveFailures < 0) {
     throw new Error("consecutiveFailures must be a non-negative integer");
   }
+  if (!Number.isInteger(retryLimit) || retryLimit < 0) {
+    throw new Error("retryLimit must be a non-negative integer");
+  }
+  if (!Number.isInteger(cooldownMs) || cooldownMs < maximumMs) {
+    throw new Error("cooldownMs must be an integer greater than or equal to maximumMs");
+  }
   if (consecutiveFailures === 0) return pollMs;
+  if (consecutiveFailures > retryLimit) return cooldownMs;
   return Math.min(maximumMs, pollMs * (2 ** Math.min(consecutiveFailures - 1, 30)));
 }
