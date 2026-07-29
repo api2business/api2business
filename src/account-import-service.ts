@@ -40,7 +40,28 @@ function validate(input: AccountImportRequest): void {
 }
 
 function safeMessage(value: string): string {
-  return value.replace(/sk-[A-Za-z0-9_-]+/gu, "[REDACTED]").replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/gu, "[REDACTED]").slice(0, 500);
+  return value
+    .replace(/sk-[A-Za-z0-9_-]+/gu, "[REDACTED]")
+    .replace(/rt\.\d\.[A-Za-z0-9_-]+/gu, "[REDACTED]")
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gu, "[REDACTED]")
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/gu, "[REDACTED]")
+    .slice(0, 500);
+}
+
+export function importFailure(output: Record<string, unknown>): string {
+  const candidates: unknown[] = [output.error];
+  const data = output.data && typeof output.data === "object" && !Array.isArray(output.data) ? output.data as Record<string, unknown> : null;
+  if (data) candidates.push(data.error, data.runtime && typeof data.runtime === "object" ? (data.runtime as Record<string, unknown>).error : null);
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) return safeMessage(candidate);
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      const error = candidate as Record<string, unknown>;
+      const message = typeof error.message === "string" ? error.message.trim() : "";
+      const code = typeof error.code === "string" ? error.code.trim() : "";
+      if (message) return safeMessage(code ? `${code}: ${message}` : message);
+    }
+  }
+  return "runtime 导入失败，但未返回可识别的错误原因";
 }
 
 export class AccountImportService {
@@ -94,7 +115,7 @@ export class AccountImportService {
       const stdout = await new Response(child.stdout).text();
       const exitCode = await child.exited; await stderrTask;
       const output = JSON.parse(stdout) as Record<string, unknown>;
-      if (exitCode !== 0 || output.ok === false) throw new Error(typeof output.error === "string" ? output.error : "runtime 导入失败");
+      if (exitCode !== 0 || output.ok === false) throw new Error(importFailure(output));
       job.result = output; job.state = "succeeded"; this.log(job, "job", "done", "导入作业完成");
     } catch (error) {
       job.state = "failed"; job.error = safeMessage(error instanceof Error ? error.message : String(error));
