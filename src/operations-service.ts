@@ -24,6 +24,10 @@ import type {
   Sub2ApiReadPriority,
 } from "./sub2api-read-executor";
 import { collectUserImpactFromDatabase } from "./user-impact-database";
+import {
+  collectAccountBatchEconomics,
+  type AccountBatchEconomicsInput,
+} from "./account-batch-economics";
 
 const alipayRevenueSql = `
 SELECT count(*)::int AS completed_orders,
@@ -951,6 +955,15 @@ export class OperationsService {
       start,
       end,
       affectedOnly,
+      "manual",
+    );
+  }
+
+  async accountBatchEconomics(input: AccountBatchEconomicsInput) {
+    return await collectAccountBatchEconomics(
+      this.config,
+      this.reads,
+      input,
       "manual",
     );
   }

@@ -5,6 +5,10 @@ import type { OperationsService } from "./operations-service";
 import type { AccountImportService, AccountImportRequest } from "./account-import-service";
 import type { AppCommand, OperationRequest } from "./contracts";
 import {
+  normalizeAccountIds,
+  parseAccountEconomicsWindow,
+} from "./account-batch-economics";
+import {
   apiKeyAuthorized,
   clearSessionCookie,
   createSessionCookie,
@@ -287,6 +291,30 @@ export function createHandler(
           input.end,
           input.affectedOnly,
         ));
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/accounts/economics") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const input = await body(request);
+        const costCny = Number(input.costCny);
+        let accountIds: number[];
+        try {
+          accountIds = normalizeAccountIds(input.accountIds);
+          if (!Number.isFinite(costCny) || costCny <= 0) throw new Error("costCny must be a positive number");
+          parseAccountEconomicsWindow({
+            day: typeof input.day === "string" ? input.day : null,
+            start: typeof input.start === "string" ? input.start : null,
+            end: typeof input.end === "string" ? input.end : null,
+          }, config.monitor.timezone);
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+        return json(await operations.accountBatchEconomics({
+          accountIds,
+          costCny,
+          day: typeof input.day === "string" ? input.day : null,
+          start: typeof input.start === "string" ? input.start : null,
+          end: typeof input.end === "string" ? input.end : null,
+        }));
       }
 
       if (!url.pathname.startsWith("/api/admin/")) return json({ ok: false, error: "not found" }, 404);

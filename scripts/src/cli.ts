@@ -11,6 +11,8 @@ import { TemporalGateway } from "../../src/temporal-client";
 import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
 import { emitPriorityPlan } from "./priority-plan-output";
+import { emitAccountEconomics } from "./account-economics-output";
+import { parseAccountIdSelector } from "../../src/account-batch-economics";
 
 interface Parsed {
   configPath: string;
@@ -41,6 +43,9 @@ interface Parsed {
   groups: string | null;
   proxyId: number | null;
   shadowProxy: boolean | null;
+  accounts: string | null;
+  costCny: number | null;
+  day: string | null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -58,7 +63,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--group", "--start", "--end", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--shadow-proxy"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--shadow-proxy"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -77,6 +82,13 @@ function parseArgs(args: string[]): Parsed {
   };
   const component = value(args, "--component");
   if (component !== null && component !== "all" && component !== "api" && component !== "worker" && component !== "web") throw new Error("--component must be all, api, worker, or web");
+  const decimal = (name: string): number | null => {
+    const raw = value(args, name);
+    if (raw === null) return null;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} must be a positive number`);
+    return parsed;
+  };
   return {
     configPath,
     targetId: value(args, "--target"),
@@ -94,9 +106,12 @@ function parseArgs(args: string[]): Parsed {
     top: integer("--top"),
     calls: integer("--calls"),
     account: value(args, "--account"),
+    accounts: value(args, "--accounts"),
     group: value(args, "--group"),
     start: value(args, "--start"),
     end: value(args, "--end"),
+    day: value(args, "--day"),
+    costCny: decimal("--cost-cny"),
     affectedOnly: args.includes("--affected-only"),
     intervalSeconds: integer("--interval-seconds"),
     enabled: value(args, "--enabled") === null ? null
@@ -133,6 +148,7 @@ function help(): Record<string, unknown> {
       "priority history --over-api",
       "accounts import --file <json> [--priority 1 --capacity 5 --groups 2,3 --proxy-id 3 --shadow-proxy true] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
+      "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
@@ -238,6 +254,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || parsed.command.join(" ") === "scores rank"
     || parsed.command[0] === "errors"
     || parsed.command.join(" ") === "users impact"
+    || parsed.command.join(" ") === "accounts economics"
     || parsed.command.join(" ") === "reads status"
   ) {
     throw new Error("Sub2API production reads require the Native API transport");
@@ -268,6 +285,17 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
 async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: HttpCliTarget): Promise<unknown> {
   const client = new AdminHttpClient(config, target);
   const [group, action] = parsed.command;
+  if (group === "accounts" && action === "economics") {
+    if (!parsed.accounts) throw new Error("accounts economics requires --accounts");
+    if (parsed.costCny === null) throw new Error("accounts economics requires --cost-cny");
+    return await client.accountBatchEconomics({
+      accountIds: parseAccountIdSelector(parsed.accounts),
+      costCny: parsed.costCny,
+      day: parsed.day,
+      start: parsed.start,
+      end: parsed.end,
+    });
+  }
   if (group === "accounts" && action === "import") {
     if (!parsed.file) throw new Error("accounts import requires --file");
     const groupIds = (parsed.groups ?? "2,3").split(",").map(Number);
@@ -428,6 +456,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command.join(" ") === "reads status"
       || parsed.command[0] === "errors"
       || parsed.command.join(" ") === "users impact"
+      || parsed.command.join(" ") === "accounts economics"
     );
     const targetId = parsed.targetId ?? (
       parsed.overApi || nativeReadCommand
@@ -443,6 +472,7 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "scores priority-plan") emitPriorityPlan(output, parsed.json);
     else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
     else if (parsed.command.join(" ") === "users impact") emitUserImpact(output, parsed.json);
+    else if (parsed.command.join(" ") === "accounts economics") emitAccountEconomics(output, parsed.json);
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);
