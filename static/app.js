@@ -67,6 +67,7 @@ function shell() {
     ['ranking', '/ranking', '用户用量'],
     ['lottery', '/lottery', '额度抽奖'],
     ['operations', '/operations', '经营管理'],
+    ['account-import', '/account-import', '账号导入'],
   ]
   mount.innerHTML = `<header class="topbar">
     <a class="brand" href="/scores"><span class="brand-mark">AS</span><span><b>ApiState</b><small>Sub2API Operations</small></span></a>
@@ -600,6 +601,57 @@ async function operationsPage() {
   await loadOperations({ showCached: true })
 }
 
+async function accountImportPage() {
+  const options = await requestJson('/api/account-import/options')
+  const defaults = options.defaults
+  $('#import-priority').value = defaults.priority
+  $('#import-capacity').value = defaults.capacity
+  $('#import-proxy').value = defaults.sourceProxyId
+  $('#import-shadow').checked = defaults.shadowProxy
+  $('#import-groups').innerHTML = options.groups.map((group) => `<label><input type="checkbox" value="${group.id}" ${defaults.groupIds.includes(group.id) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${group.id}</b></span></label>`).join('')
+  const fileInput = $('#import-file')
+  const zone = $('#drop-zone')
+  const loadFile = async (file) => {
+    if (!file) return
+    $('#import-json').value = await file.text()
+    $('#file-state').textContent = `${file.name} · ${number(file.size)} bytes`
+  }
+  zone.addEventListener('click', () => fileInput.click())
+  zone.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') fileInput.click() })
+  fileInput.addEventListener('change', () => loadFile(fileInput.files?.[0]))
+  for (const eventName of ['dragenter', 'dragover']) zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.add('is-dragging') })
+  for (const eventName of ['dragleave', 'drop']) zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.remove('is-dragging') })
+  zone.addEventListener('drop', (event) => loadFile(event.dataTransfer?.files?.[0]))
+  const renderJob = (job) => {
+    $('#import-state').textContent = ({ queued: '排队中', running: '导入中', succeeded: '已完成', failed: '失败' })[job.state]
+    $('#import-state').dataset.state = job.state === 'succeeded' ? 'ready' : job.state === 'failed' ? 'unavailable' : 'refreshing'
+    $('#import-job-id').textContent = `JOB ${job.id}`
+    const labels = options.groups.filter((group) => job.settings.groupIds.includes(group.id)).map((group) => `${group.name} #${group.id}`).join('、')
+    $('#import-summary').textContent = `${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · Proxy #${job.settings.sourceProxyId}`
+    $('#import-logs').innerHTML = job.logs.length ? job.logs.map((log) => `<li data-state="${escapeHtml(log.state)}"><time>${time(log.timestamp)}</time><b>${escapeHtml(log.stage)}</b><span>${escapeHtml(log.message)}</span></li>`).join('') : '<li class="empty">等待作业启动</li>'
+    $('#import-logs').scrollTop = $('#import-logs').scrollHeight
+  }
+  $('#import-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const button = $('#import-submit'); button.disabled = true
+    try {
+      const groupIds = [...document.querySelectorAll('#import-groups input:checked')].map((input) => Number(input.value))
+      const response = await requestJson('/api/account-import/jobs', { method: 'POST', body: JSON.stringify({
+        content: $('#import-json').value, priority: Number($('#import-priority').value), capacity: Number($('#import-capacity').value),
+        groupIds, sourceProxyId: Number($('#import-proxy').value), shadowProxy: $('#import-shadow').checked, confirm: true,
+      }) }, 30000)
+      let job = response.job; renderJob(job)
+      history.replaceState(null, '', `/account-import?job=${encodeURIComponent(job.id)}`)
+      while (job.state === 'queued' || job.state === 'running') {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        job = (await requestJson(`/api/account-import/jobs/${encodeURIComponent(job.id)}`)).job; renderJob(job)
+      }
+    } finally { button.disabled = false }
+  })
+  const existing = new URLSearchParams(location.search).get('job')
+  if (existing) renderJob((await requestJson(`/api/account-import/jobs/${encodeURIComponent(existing)}`)).job)
+}
+
 async function boot() {
   if (page === 'login') return await loginPage()
   shell()
@@ -607,6 +659,7 @@ async function boot() {
   if (page === 'ranking') return await rankingPage()
   if (page === 'lottery') return await lotteryPage()
   if (page === 'operations') return await operationsPage()
+  if (page === 'account-import') return await accountImportPage()
 }
 
 boot().catch((error) => {

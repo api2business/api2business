@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import type { AppConfig } from "./config";
 import type { ApplicationDispatcher } from "./dispatcher";
 import type { OperationsService } from "./operations-service";
+import type { AccountImportService, AccountImportRequest } from "./account-import-service";
 import type { AppCommand, OperationRequest } from "./contracts";
 import {
   apiKeyAuthorized,
@@ -67,6 +68,7 @@ export function createHandler(
   legacyAdminToken: string,
   secureCookies: boolean,
   operations: OperationsService,
+  imports: AccountImportService,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
@@ -94,10 +96,20 @@ export function createHandler(
         return await staticFile("score-display-freshness.js", "text/javascript; charset=utf-8");
       }
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
-      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html" } as Record<string, string>)[url.pathname];
+      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/account-import": "account-import.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+      if (request.method === "GET" && url.pathname === "/api/account-import/options") return json(imports.options());
+      if (request.method === "POST" && url.pathname === "/api/account-import/jobs") {
+        const input = await body(request) as unknown as AccountImportRequest;
+        if (typeof input.content !== "string" || typeof input.shadowProxy !== "boolean" || typeof input.confirm !== "boolean") return json({ ok: false, error: "导入参数不完整" }, 400);
+        return json({ ok: true, job: imports.submit(input) }, 202);
+      }
+      if (request.method === "GET" && url.pathname.startsWith("/api/account-import/jobs/")) {
+        const job = imports.get(decodeURIComponent(url.pathname.slice("/api/account-import/jobs/".length)));
+        return job ? json({ ok: true, job }) : json({ ok: false, error: "导入作业不存在" }, 404);
+      }
       if (request.method === "POST" && url.pathname === "/api/internal/execute-operation") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
         const operation = operationRequest(await body(request));

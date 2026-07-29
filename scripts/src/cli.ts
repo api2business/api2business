@@ -1,4 +1,5 @@
 import { AdminHttpClient } from "../../src/admin-http-client";
+import { readFileSync } from "node:fs";
 import { mergeAccountScores } from "../../src/account-score-aggregation";
 import { createEmbeddedContext } from "../../src/bootstrap";
 import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServiceId } from "../../src/config";
@@ -34,6 +35,12 @@ interface Parsed {
   affectedOnly: boolean;
   intervalSeconds: number | null;
   enabled: boolean | null;
+  file: string | null;
+  priority: number | null;
+  capacity: number | null;
+  groups: string | null;
+  proxyId: number | null;
+  shadowProxy: boolean | null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -51,7 +58,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--group", "--start", "--end", "--interval-seconds", "--enabled"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--group", "--start", "--end", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--shadow-proxy"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -96,6 +103,9 @@ function parseArgs(args: string[]): Parsed {
       : value(args, "--enabled") === "true" ? true
       : value(args, "--enabled") === "false" ? false
       : (() => { throw new Error("--enabled must be true or false"); })(),
+    file: value(args, "--file"), priority: integer("--priority"), capacity: integer("--capacity"),
+    groups: value(args, "--groups"), proxyId: integer("--proxy-id"),
+    shadowProxy: value(args, "--shadow-proxy") === null ? null : value(args, "--shadow-proxy") === "true" ? true : value(args, "--shadow-proxy") === "false" ? false : (() => { throw new Error("--shadow-proxy must be true or false"); })(),
   };
 }
 
@@ -121,6 +131,8 @@ function help(): Record<string, unknown> {
       "priority plan create --over-api [--calls N]",
       "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
+      "accounts import --file <json> [--priority 1 --capacity 5 --groups 2,3 --proxy-id 3 --shadow-proxy true] [--confirm] --over-api",
+      "accounts status --id <job-id> --over-api",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
@@ -256,6 +268,17 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
 async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: HttpCliTarget): Promise<unknown> {
   const client = new AdminHttpClient(config, target);
   const [group, action] = parsed.command;
+  if (group === "accounts" && action === "import") {
+    if (!parsed.file) throw new Error("accounts import requires --file");
+    const groupIds = (parsed.groups ?? "2,3").split(",").map(Number);
+    return await client.accountImport({ content: readFileSync(parsed.file, "utf8"), priority: parsed.priority ?? 1,
+      capacity: parsed.capacity ?? 5, groupIds, sourceProxyId: parsed.proxyId ?? 3,
+      shadowProxy: parsed.shadowProxy ?? true, confirm: parsed.confirm });
+  }
+  if (group === "accounts" && action === "status") {
+    if (!parsed.id) throw new Error("accounts status requires --id");
+    return await client.accountImportStatus(parsed.id);
+  }
   if (group === "priority" && action === "history") return await client.priorityHistory();
   if (group === "priority" && action === "plan") {
     const verb = parsed.command[2];

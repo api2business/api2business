@@ -65,6 +65,12 @@ export class AdminHttpClient {
   }
   priorityAutomation(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-automation"); }
   priorityHistory(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-history"); }
+  accountImport(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/api/account-import/jobs", { method: "POST", body: JSON.stringify(input) }, 30000);
+  }
+  accountImportStatus(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/account-import/jobs/${encodeURIComponent(id)}`);
+  }
   createPriorityPlan(recentCallLimit: number): Promise<Record<string, unknown>> {
     return this.request("/api/operations/priority-plans", { method: "POST", body: JSON.stringify({ recentCallLimit }) }, 60000);
   }

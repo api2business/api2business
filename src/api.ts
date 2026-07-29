@@ -6,6 +6,7 @@ import { requiredOption } from "./runtime-args";
 import { TemporalGateway } from "./temporal-client";
 import { OperationsStore } from "./operations-store";
 import { OperationsService } from "./operations-service";
+import { AccountImportService } from "./account-import-service";
 import { SingleConnectionSub2ApiReadExecutor } from "./sub2api-read-executor";
 
 const config = loadConfig(requiredOption("--config"));
@@ -36,10 +37,11 @@ const operations = new OperationsService(
   reads,
 );
 await operations.initialize();
+const imports = new AccountImportService(config);
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports),
 });
 
 console.log(JSON.stringify({
