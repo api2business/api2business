@@ -83,6 +83,9 @@ export class AdminHttpClient {
       body: JSON.stringify(input),
     }, 60000);
   }
+  userBalanceLiability(): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/users/balance-liability", {}, 60000);
+  }
   createPriorityPlan(recentCallLimit: number): Promise<Record<string, unknown>> {
     return this.request("/api/operations/priority-plans", { method: "POST", body: JSON.stringify({ recentCallLimit }) }, 60000);
   }

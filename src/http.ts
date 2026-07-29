@@ -331,6 +331,10 @@ export function createHandler(
         }
         return json(await operations.alipayRevenue(windowInput));
       }
+      if (request.method === "GET" && url.pathname === "/api/admin/users/balance-liability") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        return json(await operations.userBalanceLiability());
+      }
 
       if (!url.pathname.startsWith("/api/admin/")) return json({ ok: false, error: "not found" }, 404);
       if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);

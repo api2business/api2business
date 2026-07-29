@@ -139,6 +139,7 @@ function help(): Record<string, unknown> {
       "errors list [--limit N]",
       "errors get --request-id <request-id>",
       "users impact --start <ISO> --end <ISO> [--affected-only]",
+      "users balance-liability [--over-api]",
       "lottery status|draw|reset",
       "records list|delete",
       "credit test",
@@ -257,6 +258,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || parsed.command.join(" ") === "scores rank"
     || parsed.command[0] === "errors"
     || parsed.command.join(" ") === "users impact"
+    || parsed.command.join(" ") === "users balance-liability"
     || parsed.command.join(" ") === "accounts economics"
     || parsed.command.join(" ") === "payments alipay-revenue"
     || parsed.command.join(" ") === "reads status"
@@ -291,6 +293,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   const [group, action] = parsed.command;
   if (group === "payments" && action === "alipay-revenue") {
     return await client.alipayRevenue({ day: parsed.day, period: parsed.period });
+  }
+  if (group === "users" && action === "balance-liability") {
+    return await client.userBalanceLiability();
   }
   if (group === "accounts" && action === "economics") {
     if (!parsed.accounts) throw new Error("accounts economics requires --accounts");
@@ -463,6 +468,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command.join(" ") === "reads status"
       || parsed.command[0] === "errors"
       || parsed.command.join(" ") === "users impact"
+      || parsed.command.join(" ") === "users balance-liability"
       || parsed.command.join(" ") === "accounts economics"
       || parsed.command.join(" ") === "payments alipay-revenue"
     );
