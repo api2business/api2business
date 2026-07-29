@@ -12,7 +12,22 @@ JSONB_BUILD_OBJECT(
   'insufficientBalance', LOWER(message_text) LIKE '%insufficient account balance%',
   'modelNotFound', LOWER(message_text) LIKE '%model_not_found%',
   'noAvailableChannel', LOWER(message_text) LIKE '%no available channel for model%',
-  'upstreamRequestFailed', LOWER(message_text) LIKE '%upstream request failed%'
+  'upstreamRequestFailed', LOWER(message_text) LIKE '%upstream request failed%',
+  'upstreamServiceUnavailable', LOWER(message_text) LIKE '%upstream service temporarily unavailable%',
+  'serviceTemporarilyUnavailable', LOWER(message_text) LIKE '%service temporarily unavailable%',
+  'badGateway', LOWER(message_text) LIKE '%bad gateway%',
+  'gatewayTimeout', LOWER(message_text) LIKE '%gateway timeout%',
+  'upstreamTimeout', LOWER(message_text) LIKE '%upstream timeout%',
+  'unexpectedEof', LOWER(message_text) LIKE '%unexpected eof%',
+  'streamInterrupted', LOWER(message_text) LIKE '%upstream response stream was interrupted%',
+  'originIncompleteResponse', LOWER(message_text) LIKE '%origin web server returned an invalid or incomplete response%',
+  'errorCode502', LOWER(message_text) LIKE '%error code: 502%',
+  'errorCode504', LOWER(message_text) LIKE '%error code: 504%',
+  'statusCode502', LOWER(message_text) LIKE '%status code: 502%',
+  'statusCode504', LOWER(message_text) LIKE '%status code: 504%',
+  'contains502', message_text LIKE '%502%',
+  'contains504', message_text LIKE '%504%',
+  'contains524', message_text LIKE '%524%'
 )`;
 
 const baseProjectionSql = `
