@@ -46,6 +46,7 @@ interface Parsed {
   accounts: string | null;
   costCny: number | null;
   day: string | null;
+  period: string | null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -63,7 +64,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--shadow-proxy"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--shadow-proxy"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -111,6 +112,7 @@ function parseArgs(args: string[]): Parsed {
     start: value(args, "--start"),
     end: value(args, "--end"),
     day: value(args, "--day"),
+    period: value(args, "--period"),
     costCny: decimal("--cost-cny"),
     affectedOnly: args.includes("--affected-only"),
     intervalSeconds: integer("--interval-seconds"),
@@ -149,6 +151,7 @@ function help(): Record<string, unknown> {
       "accounts import --file <json> [--priority 1 --capacity 5 --groups 2,3 --proxy-id 3 --shadow-proxy true] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
+      "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
@@ -255,6 +258,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || parsed.command[0] === "errors"
     || parsed.command.join(" ") === "users impact"
     || parsed.command.join(" ") === "accounts economics"
+    || parsed.command.join(" ") === "payments alipay-revenue"
     || parsed.command.join(" ") === "reads status"
   ) {
     throw new Error("Sub2API production reads require the Native API transport");
@@ -285,6 +289,9 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
 async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: HttpCliTarget): Promise<unknown> {
   const client = new AdminHttpClient(config, target);
   const [group, action] = parsed.command;
+  if (group === "payments" && action === "alipay-revenue") {
+    return await client.alipayRevenue({ day: parsed.day, period: parsed.period });
+  }
   if (group === "accounts" && action === "economics") {
     if (!parsed.accounts) throw new Error("accounts economics requires --accounts");
     if (parsed.costCny === null) throw new Error("accounts economics requires --cost-cny");
@@ -457,6 +464,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command[0] === "errors"
       || parsed.command.join(" ") === "users impact"
       || parsed.command.join(" ") === "accounts economics"
+      || parsed.command.join(" ") === "payments alipay-revenue"
     );
     const targetId = parsed.targetId ?? (
       parsed.overApi || nativeReadCommand

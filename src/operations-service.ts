@@ -28,17 +28,10 @@ import {
   collectAccountBatchEconomics,
   type AccountBatchEconomicsInput,
 } from "./account-batch-economics";
-
-const alipayRevenueSql = `
-SELECT count(*)::int AS completed_orders,
-  COALESCE(sum(o.pay_amount), 0)::float8 AS revenue_cny
-FROM payment_orders o JOIN users u ON u.id=o.user_id
-WHERE lower(COALESCE(u.role, '')) <> 'admin'
-  AND o.provider_key='alipay' AND o.payment_type='alipay'
-  AND o.status='COMPLETED'
-  AND to_char(COALESCE(o.paid_at, o.completed_at, o.created_at)
-    AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM')=$1
-`;
+import {
+  collectAlipayRevenue,
+  type AlipayRevenueWindowInput,
+} from "./alipay-revenue-database";
 
 const prioritiesByIdSql = `
 SELECT id::text AS id, priority::int AS priority
@@ -87,19 +80,15 @@ export class OperationsService {
   }
 
   private async alipay(period: string): Promise<{ completedOrders: number; revenueCny: number }> {
-    const query = await this.reads.query<Record<string, unknown>>({
-      key: JSON.stringify(["operations.alipay", period]),
-      kind: "operations.alipay",
-      sql: alipayRevenueSql,
-      parameters: [period],
-      priority: "manual",
-      cacheMode: "prefer-cache",
-    });
-    const row = query.rows[0];
+    const result = await this.alipayRevenue({ period });
     return {
-      completedOrders: Number(row?.completed_orders ?? 0),
-      revenueCny: money(row?.revenue_cny),
+      completedOrders: Number(result.completedOrders ?? 0),
+      revenueCny: money(result.revenueCny),
     };
+  }
+
+  async alipayRevenue(input: AlipayRevenueWindowInput) {
+    return await collectAlipayRevenue(this.config, this.reads, input, "manual");
   }
 
   async ledger(period = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 7)) {

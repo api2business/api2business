@@ -8,6 +8,7 @@ import {
   normalizeAccountIds,
   parseAccountEconomicsWindow,
 } from "./account-batch-economics";
+import { parseAlipayRevenueWindow } from "./alipay-revenue-database";
 import {
   apiKeyAuthorized,
   clearSessionCookie,
@@ -315,6 +316,20 @@ export function createHandler(
           start: typeof input.start === "string" ? input.start : null,
           end: typeof input.end === "string" ? input.end : null,
         }));
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/payments/alipay-revenue") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const input = await body(request);
+        const windowInput = {
+          day: typeof input.day === "string" ? input.day : null,
+          period: typeof input.period === "string" ? input.period : null,
+        };
+        try {
+          parseAlipayRevenueWindow(windowInput, config.monitor.timezone);
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+        return json(await operations.alipayRevenue(windowInput));
       }
 
       if (!url.pathname.startsWith("/api/admin/")) return json({ ok: false, error: "not found" }, 404);
