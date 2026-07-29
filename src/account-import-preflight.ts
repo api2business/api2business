@@ -30,6 +30,7 @@ export interface AccountImportPreflightPlan {
   content: string;
   sourceIndexes: number[];
   skipped: Array<{ index: number; accountId: number }>;
+  isolationOnly: Array<{ index: number; accountId: number }>;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -63,14 +64,20 @@ function groupIds(value: unknown): number[] {
   return value.map(integer).filter((item): item is number => item !== null).sort((a, b) => a - b);
 }
 
-function aligned(row: AccountRow, settings: AccountImportPreflightSettings): boolean {
+function baseAligned(row: AccountRow, settings: AccountImportPreflightSettings): boolean {
   const id = integer(row.id);
-  const proxyId = integer(row.proxy_id);
   const groups = new Set(groupIds(row.group_ids));
   if (id === null || integer(row.priority) !== settings.priority || integer(row.concurrency) !== settings.capacity) return false;
   if (settings.groupIds.some((groupId) => !groups.has(groupId))) return false;
+  return true;
+}
+
+function proxyAligned(row: AccountRow, settings: AccountImportPreflightSettings): boolean {
   if (!settings.shadowProxy) return true;
+  const id = integer(row.id);
+  const proxyId = integer(row.proxy_id);
   return proxyId !== null
+    && id !== null
     && proxyId !== settings.sourceProxyId
     && text(row.proxy_name).endsWith(`-a${id}-p${settings.sourceProxyId}`);
 }
@@ -125,13 +132,21 @@ export async function accountImportPreflight(
     if (accessHash) byAccess.set(accessHash, [...(byAccess.get(accessHash) ?? []), row]);
   }
   const skipped: AccountImportPreflightPlan["skipped"] = [];
+  const isolationOnly: AccountImportPreflightPlan["isolationOnly"] = [];
   const sourceIndexes: number[] = [];
   const remaining: unknown[] = [];
   for (let offset = 0; offset < accounts.length; offset += 1) {
     const item = identities[offset]!;
     const matches = item.userId ? byUser.get(item.userId) ?? [] : byAccess.get(item.accessTokenSha256) ?? [];
-    if (matches.length === 1 && aligned(matches[0]!, settings)) {
-      skipped.push({ index: offset + 1, accountId: integer(matches[0]!.id)! });
+    if (matches.length === 1 && baseAligned(matches[0]!, settings)) {
+      const match = matches[0]!;
+      const existing = { index: offset + 1, accountId: integer(match.id)! };
+      if (proxyAligned(match, settings)) skipped.push(existing);
+      else if (integer(match.proxy_id) === settings.sourceProxyId) isolationOnly.push(existing);
+      else {
+        remaining.push(accounts[offset]);
+        sourceIndexes.push(offset + 1);
+      }
       continue;
     }
     remaining.push(accounts[offset]);
@@ -141,5 +156,6 @@ export async function accountImportPreflight(
     content: JSON.stringify({ ...payload, accounts: remaining }),
     sourceIndexes,
     skipped,
+    isolationOnly,
   };
 }

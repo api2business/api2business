@@ -126,7 +126,10 @@ export class AccountImportService {
       for (const skipped of plan.skipped) {
         this.log(job, "account", "skipped", `stage=account state=skipped index=${skipped.index}/${job.accountCount} account-id=${skipped.accountId}`);
       }
-      if (plan.sourceIndexes.length === 0) {
+      for (const repair of plan.isolationOnly) {
+        this.log(job, "account", "repair", `stage=account state=repair index=${repair.index}/${job.accountCount} account-id=${repair.accountId} action=proxy-isolation`);
+      }
+      if (plan.sourceIndexes.length === 0 && plan.isolationOnly.length === 0) {
         job.result = completedWithoutWrites(job, plan);
         job.state = "succeeded";
         this.log(job, "job", "done", "全部账号已导入并对齐，本轮未写入");
@@ -137,6 +140,7 @@ export class AccountImportService {
         "--file", file, "--target", this.config.monitor.target, "--priority", String(job.settings.priority),
         "--capacity", String(job.settings.capacity), "--groups", job.settings.groupIds.join(","),
         "--source-proxy-id", String(job.settings.sourceProxyId), "--shadow-proxy", String(job.settings.shadowProxy), "--json"];
+      if (plan.isolationOnly.length > 0) args.push("--existing-account-ids", plan.isolationOnly.map((item) => item.accountId).join(","));
       if (job.settings.confirm) args.push("--confirm");
       const child = Bun.spawn([this.config.monitor.cli.executable, ...args], { cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env });
       const stderrTask = this.captureProgress(job, child.stderr, plan);
