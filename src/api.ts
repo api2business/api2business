@@ -37,7 +37,7 @@ const operations = new OperationsService(
   reads,
 );
 await operations.initialize();
-const imports = new AccountImportService(config);
+const imports = new AccountImportService(config, reads);
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,

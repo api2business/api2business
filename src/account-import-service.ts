@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "./config";
+import { accountImportPreflight, type AccountImportPreflightPlan } from "./account-import-preflight";
+import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 export interface AccountImportRequest {
   content: string;
@@ -87,7 +89,7 @@ export function importFailure(output: Record<string, unknown>): string {
 
 export class AccountImportService {
   private jobs = new Map<string, ImportJob>();
-  constructor(private config: AppConfig) {}
+  constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
 
   options() {
     return { ok: true, defaults: { priority: 1, capacity: 5, groupIds: [2, 3], sourceProxyId: 3, shadowProxy: true }, groups: [
@@ -118,18 +120,29 @@ export class AccountImportService {
     const dir = mkdtempSync(join(tmpdir(), "apistate-import-"));
     const file = join(dir, "accounts.json");
     try {
-      writeFileSync(file, content, { encoding: "utf8", mode: 0o600 });
       job.state = "running"; this.log(job, "job", "start", `开始处理 ${job.accountCount} 个账号`);
+      const plan = await accountImportPreflight(content, job.settings, this.reads);
+      for (const skipped of plan.skipped) {
+        this.log(job, "account", "skipped", `stage=account state=skipped index=${skipped.index}/${job.accountCount} account-id=${skipped.accountId}`);
+      }
+      if (plan.sourceIndexes.length === 0) {
+        job.result = completedWithoutWrites(job, plan);
+        job.state = "succeeded";
+        this.log(job, "job", "done", "全部账号已导入并对齐，本轮未写入");
+        return;
+      }
+      writeFileSync(file, plan.content, { encoding: "utf8", mode: 0o600 });
       const args = [this.config.monitor.cli.entrypoint, "platform-infra", "sub2api", "codex-pool", "runtime", "import",
         "--file", file, "--target", this.config.monitor.target, "--priority", String(job.settings.priority),
         "--capacity", String(job.settings.capacity), "--groups", job.settings.groupIds.join(","),
         "--source-proxy-id", String(job.settings.sourceProxyId), "--shadow-proxy", String(job.settings.shadowProxy), "--json"];
       if (job.settings.confirm) args.push("--confirm");
       const child = Bun.spawn([this.config.monitor.cli.executable, ...args], { cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env });
-      const stderrTask = this.captureProgress(job, child.stderr);
+      const stderrTask = this.captureProgress(job, child.stderr, plan);
       const stdout = await new Response(child.stdout).text();
       const exitCode = await child.exited; await stderrTask;
       const output = JSON.parse(stdout) as Record<string, unknown>;
+      mergePreflightResult(output, job, plan);
       if (exitCode !== 0 || output.ok === false) {
         job.result = output;
         job.state = "failed";
@@ -146,12 +159,18 @@ export class AccountImportService {
     }
   }
 
-  private async captureProgress(job: ImportJob, stream: ReadableStream<Uint8Array>): Promise<void> {
+  private async captureProgress(job: ImportJob, stream: ReadableStream<Uint8Array>, plan: AccountImportPreflightPlan): Promise<void> {
     const decoder = new TextDecoder();
     let pending = "";
     const consume = (line: string) => {
-      const text = line.trim();
+      let text = line.trim();
       if (!text) return;
+      const match = /stage=account state=([^ ]+) index=(\d+)\/(\d+)/u.exec(text);
+      if (match) {
+        const filteredIndex = Number(match[2]);
+        const sourceIndex = plan.sourceIndexes[filteredIndex - 1];
+        if (sourceIndex !== undefined) text = text.replace(`index=${match[2]}/${match[3]}`, `index=${sourceIndex}/${job.accountCount}`);
+      }
       const stage = /stage=([^ ]+)/u.exec(text)?.[1] ?? "runtime";
       const state = /state=([^ ]+)/u.exec(text)?.[1] ?? "progress";
       this.log(job, stage, state, text.replace(/^.*?PROGRESS\s+/u, ""));
@@ -165,4 +184,40 @@ export class AccountImportService {
     pending += decoder.decode();
     consume(pending);
   }
+}
+
+function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan): Record<string, unknown> {
+  return {
+    ok: true,
+    action: "platform-infra-sub2api-codex-pool-runtime-import",
+    mode: "confirmed",
+    mutation: false,
+    file: { fingerprint: job.fingerprint, accountCount: job.accountCount, valuesPrinted: false },
+    settings: job.settings,
+    result: { createdIds: [], updatedIds: [], skippedIds: plan.skipped.map((item) => item.accountId), skipped: plan.skipped.length, failed: 0, failures: [], isolated: 0 },
+    valuesPrinted: false,
+  };
+}
+
+function mergePreflightResult(output: Record<string, unknown>, job: ImportJob, plan: AccountImportPreflightPlan): void {
+  const result = output.result && typeof output.result === "object" && !Array.isArray(output.result) ? output.result as Record<string, unknown> : null;
+  if (!result) return;
+  const existingSkipped = Array.isArray(result.skippedIds) ? result.skippedIds.filter((item): item is number => Number.isSafeInteger(item)) : [];
+  result.skippedIds = [...new Set([...existingSkipped, ...plan.skipped.map((item) => item.accountId)])];
+  result.skipped = (result.skippedIds as number[]).length;
+  if (Array.isArray(result.failures)) {
+    result.failures = result.failures.map((failure) => {
+      if (!failure || typeof failure !== "object" || Array.isArray(failure)) return failure;
+      const item = failure as Record<string, unknown>;
+      const index = typeof item.index === "number" ? plan.sourceIndexes[item.index - 1] : undefined;
+      return index === undefined ? item : { ...item, index };
+    });
+  }
+  const file = output.file && typeof output.file === "object" && !Array.isArray(output.file) ? output.file as Record<string, unknown> : null;
+  if (file) accountImportFileProjection(file, job);
+}
+
+function accountImportFileProjection(file: Record<string, unknown>, job: ImportJob): void {
+  file.accountCount = job.accountCount;
+  file.fingerprint = job.fingerprint;
 }
