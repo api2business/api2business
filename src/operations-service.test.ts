@@ -749,3 +749,45 @@ test("a blocked automatic cycle remains inside the full optimization queue throu
     "released",
   ]);
 });
+
+test("an expired automatic cycle is recovered without starting another optimization", async () => {
+  const events: string[] = [];
+  const store = {
+    async claimDueAutomation(runTimeoutMs: number, jitterPercent: number) {
+      events.push(`claim:${runTimeoutMs}:${jitterPercent}`);
+      return {
+        recovered: true,
+        plan_id: "plan-stale",
+        writeMode: "cycle-timeout",
+        reason: "automation-run-timeout",
+        next_run_at: "2026-07-29T12:30:00.000Z",
+        last_completed_at: "2026-07-29T12:00:00.000Z",
+      };
+    },
+    async withPriorityOptimizationQueue() {
+      events.push("unexpected-queue-entry");
+      throw new Error("recovery must not start a new optimization");
+    },
+  } as unknown as OperationsStore;
+  const config = {
+    operations: {
+      automationRunTimeoutMs: 600000,
+      automationJitterPercent: 0.1,
+    },
+  } as AppConfig;
+  const service = new OperationsService(config, store, unusedReads);
+
+  const result = await service.runDueAutomation();
+
+  expect(result).toEqual({
+    ok: true,
+    due: false,
+    recovered: true,
+    planId: "plan-stale",
+    writeMode: "cycle-timeout",
+    reason: "automation-run-timeout",
+    nextRunAt: "2026-07-29T12:30:00.000Z",
+    completedAt: "2026-07-29T12:00:00.000Z",
+  });
+  expect(events).toEqual(["claim:600000:0.1"]);
+});

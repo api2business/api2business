@@ -683,8 +683,23 @@ export class OperationsService {
   }
 
   async runDueAutomation() {
-    const policy = await this.store.claimDueAutomation();
+    const policy = await this.store.claimDueAutomation(
+      this.config.operations.automationRunTimeoutMs,
+      this.config.operations.automationJitterPercent,
+    );
     if (!policy) return { ok: true, due: false };
+    if (policy.recovered) {
+      return {
+        ok: true,
+        due: false,
+        recovered: true,
+        planId: policy.plan_id,
+        writeMode: policy.writeMode,
+        reason: policy.reason,
+        nextRunAt: policy.next_run_at,
+        completedAt: policy.last_completed_at,
+      };
+    }
     const operator = "scheduler";
     const runId = String(policy.run_id);
     let enteredQueue = false;

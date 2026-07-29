@@ -67,6 +67,8 @@ export class OperationsStore {
       ALTER TABLE apistate_priority_automation
         ADD COLUMN IF NOT EXISTS run_started_at timestamptz;
       ALTER TABLE apistate_priority_automation
+        ADD COLUMN IF NOT EXISTS run_claimed_at timestamptz;
+      ALTER TABLE apistate_priority_automation
         ADD COLUMN IF NOT EXISTS last_completed_at timestamptz;
       ALTER TABLE apistate_priority_automation
         ADD COLUMN IF NOT EXISTS last_run_status text;
@@ -280,7 +282,7 @@ export class OperationsStore {
   async getAutomation() {
     const [row] = await this.sql`
       SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at,
-        created_at, updated_at, updated_by, run_id, run_started_at,
+        created_at, updated_at, updated_by, run_id, run_claimed_at, run_started_at,
         last_completed_at, last_run_status
       FROM apistate_priority_automation WHERE id='default'
     `;
@@ -323,24 +325,76 @@ export class OperationsStore {
     return row;
   }
 
-  async claimDueAutomation() {
+  async claimDueAutomation(runTimeoutMs: number, jitterPercent: number) {
     return await this.sql.begin(async (tx) => {
       const [row] = await tx`
-        SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at
+        SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at,
+          run_id, run_claimed_at, run_started_at, updated_at,
+          next_run_at <= now() AS due,
+          COALESCE(run_started_at, run_claimed_at, updated_at)
+            <= now() - (${runTimeoutMs} * interval '1 millisecond') AS run_expired
         FROM apistate_priority_automation
-        WHERE id='default' AND enabled=true AND run_id IS NULL
-          AND next_run_at <= now()
+        WHERE id='default'
         FOR UPDATE SKIP LOCKED
       `;
       if (!row) return null;
+      if (row.run_id) {
+        if (row.run_expired !== true) return null;
+        const runId = String(row.run_id);
+        const [pendingPlan] = await tx`
+          SELECT id FROM apistate_priority_plans
+          WHERE trigger_type='automatic' AND status='pending'
+            AND execution_started_at=${row.run_started_at ?? null}
+          ORDER BY created_at DESC LIMIT 1
+          FOR UPDATE
+        `;
+        const recoveryResult = {
+          changedCount: 0,
+          writeMode: "cycle-timeout",
+          reason: "automation-run-timeout",
+          runTimeoutMs,
+        };
+        if (pendingPlan) {
+          await tx`
+            UPDATE apistate_priority_plans
+            SET status='failed', applied_at=now(), completed_at=now(),
+              apply_result=${recoveryResult}::jsonb
+            WHERE id=${pendingPlan.id}
+          `;
+        }
+        const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
+        const [recovered] = await tx`
+          UPDATE apistate_priority_automation
+          SET run_id=NULL, run_claimed_at=NULL, run_started_at=NULL,
+            last_completed_at=now(), last_run_status='failed',
+            next_run_at=now() + make_interval(secs => ${nextDelay}), updated_at=now()
+          WHERE id='default' AND run_id=${runId}
+          RETURNING next_run_at, last_completed_at
+        `;
+        await tx`
+          INSERT INTO apistate_operation_audit
+            (id, action, status, operator, input_summary, result_summary)
+          VALUES (${crypto.randomUUID()}, 'priority.automation.run', 'failed', 'scheduler',
+            ${{ runTimeoutMs }}::jsonb,
+            ${{ planId: pendingPlan?.id ?? null, ...recoveryResult }}::jsonb)
+        `;
+        return {
+          recovered: true,
+          plan_id: pendingPlan?.id ?? null,
+          next_run_at: recovered?.next_run_at ?? null,
+          last_completed_at: recovered?.last_completed_at ?? null,
+          ...recoveryResult,
+        };
+      }
+      if (row.enabled !== true || row.due !== true) return null;
       const runId = crypto.randomUUID();
       const [claimed] = await tx`
         UPDATE apistate_priority_automation
-        SET run_id=${runId}, run_started_at=NULL,
+        SET run_id=${runId}, run_claimed_at=now(), run_started_at=NULL,
           updated_at=now()
         WHERE id='default'
         RETURNING id, enabled, interval_seconds, recent_call_limit,
-          next_run_at, run_id, run_started_at
+          next_run_at, run_id, run_claimed_at, run_started_at
       `;
       return claimed ?? null;
     });
@@ -369,7 +423,7 @@ export class OperationsStore {
       const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
       const [completed] = await tx`
         UPDATE apistate_priority_automation
-        SET run_id=NULL, run_started_at=NULL, last_completed_at=now(),
+        SET run_id=NULL, run_claimed_at=NULL, run_started_at=NULL, last_completed_at=now(),
           last_run_status=${status},
           next_run_at=now() + make_interval(secs => ${nextDelay}),
           updated_at=now()

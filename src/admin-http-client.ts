@@ -19,13 +19,22 @@ export class AdminHttpClient {
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${this.token}`);
     if (init.body) headers.set("content-type", "application/json");
-    const response = await fetch(`${this.target.baseUrl.replace(/\/$/u, "")}${path}`, {
-      ...init,
-      headers,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.target.baseUrl.replace(/\/$/u, "")}${path}`, {
+        ...init,
+        headers,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`ApiState API transport failed for ${path}: ${message}`, { cause: error });
+    }
     const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
-    if (!response.ok || !payload) throw new Error(payload?.error ?? `ApiState API failed with HTTP ${response.status}`);
+    if (!response.ok || !payload) {
+      const detail = payload?.error ? `: ${payload.error}` : "";
+      throw new Error(`ApiState API ${path} returned HTTP ${response.status}${detail}`);
+    }
     return payload as T;
   }
 
@@ -141,7 +150,7 @@ export class AdminHttpClient {
     return this.request(
       "/api/internal/priority-automation/run-due",
       { method: "POST", body: "{}" },
-      240000,
+      this.config.operations.automationRunTimeoutMs + 30000,
     );
   }
 }

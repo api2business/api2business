@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { loadConfig } from "./config";
 import { AdminHttpClient } from "./admin-http-client";
+import { automationPollDelayMs } from "./automation-poll-backoff";
 import type { OperationRequest } from "./contracts";
 import { requiredOption } from "./runtime-args";
 import { temporalAddress, TemporalGateway } from "./temporal-client";
@@ -75,18 +76,35 @@ console.log(JSON.stringify({
 }));
 
 let stopping = false;
+let consecutiveAutomationFailures = 0;
 const automationLoop = (async () => {
   while (!stopping) {
     try {
       const result = await internal.runDueAutomation();
-      if (result.due) console.log(JSON.stringify({ component: "priority-automation", ...result, valuesPrinted: false }));
+      consecutiveAutomationFailures = 0;
+      if (result.due || result.recovered) {
+        console.log(JSON.stringify({ component: "priority-automation", ...result, valuesPrinted: false }));
+      }
     } catch (error) {
+      consecutiveAutomationFailures += 1;
       console.error(JSON.stringify({
         ok: false, component: "priority-automation",
         error: error instanceof Error ? error.message : String(error), valuesPrinted: false,
+        consecutiveFailures: consecutiveAutomationFailures,
+        nextPollDelayMs: automationPollDelayMs(
+          config.operations.automationPollMs,
+          config.operations.automationFailureBackoffMaxMs,
+          consecutiveAutomationFailures,
+        ),
       }));
     }
-    if (!stopping) await Bun.sleep(config.operations.automationPollMs);
+    if (!stopping) {
+      await Bun.sleep(automationPollDelayMs(
+        config.operations.automationPollMs,
+        config.operations.automationFailureBackoffMaxMs,
+        consecutiveAutomationFailures,
+      ));
+    }
   }
 })();
 let resolveStandaloneStop = () => {};

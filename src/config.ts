@@ -123,6 +123,8 @@ export interface AppConfig {
     priorityVerificationTimeoutMs: number;
     priorityVerificationPollMs: number;
     automationPollMs: number;
+    automationRunTimeoutMs: number;
+    automationFailureBackoffMaxMs: number;
     automationJitterPercent: number;
     automationSafety: {
       maximumScoreQueryDurationMs: number;
@@ -613,6 +615,14 @@ export function loadConfig(path: string): AppConfig {
       priorityVerificationTimeoutMs: integerValue(operations, "priorityVerificationTimeoutMs", "operations", 1000, 120000),
       priorityVerificationPollMs: integerValue(operations, "priorityVerificationPollMs", "operations", 100, 10000),
       automationPollMs: integerValue(operations, "automationPollMs", "operations", 100, 60000),
+      automationRunTimeoutMs: integerValue(operations, "automationRunTimeoutMs", "operations", 60000, 3600000),
+      automationFailureBackoffMaxMs: integerValue(
+        operations,
+        "automationFailureBackoffMaxMs",
+        "operations",
+        1000,
+        300000,
+      ),
       automationJitterPercent: numberValue(operations, "automationJitterPercent", "operations", 0, 0.5),
       automationSafety: {
         maximumScoreQueryDurationMs: integerValue(
