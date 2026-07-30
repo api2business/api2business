@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { AppConfig } from "./config";
 import { accountImportPreflight, type AccountImportPreflightPlan } from "./account-import-preflight";
 import { recordAccountImportCosts } from "./account-import-cost-ledger";
+import { inspectAccounts, verifyImportedAccounts } from "./account-inspection";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 export interface AccountImportRequest {
@@ -13,7 +14,6 @@ export interface AccountImportRequest {
   capacity: number;
   groupIds: number[];
   sourceProxyId: number;
-  shadowProxy: boolean;
   unitCostCny: number;
   confirm: boolean;
 }
@@ -40,7 +40,7 @@ function validate(input: AccountImportRequest): void {
   if (!Number.isInteger(input.priority) || input.priority < 1 || input.priority > 1000) throw new Error("优先级必须为 1 至 1000");
   if (!Number.isInteger(input.capacity) || input.capacity < 1 || input.capacity > 100000) throw new Error("容量必须为正整数");
   if (!Array.isArray(input.groupIds) || input.groupIds.length === 0 || input.groupIds.some((id) => !Number.isInteger(id) || id < 1)) throw new Error("至少选择一个有效分组");
-  if (!Number.isInteger(input.sourceProxyId) || input.sourceProxyId < 1) throw new Error("Proxy ID 必须为正整数");
+  if (!Number.isInteger(input.sourceProxyId) || input.sourceProxyId < 3) throw new Error("代理池基准 ID 必须是不小于 3 的正整数");
   if (!Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0
     || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
     throw new Error("账号单价必须为正数人民币，最多两位小数");
@@ -99,7 +99,7 @@ export class AccountImportService {
   constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
 
   options() {
-    return { ok: true, currency: "CNY", defaults: { priority: 1, capacity: 5, groupIds: [2, 3], sourceProxyId: 3, shadowProxy: true, unitCostCny: null }, groups: [
+    return { ok: true, currency: "CNY", defaults: { priority: 1, capacity: 5, groupIds: [2, 3], sourceProxyId: 3, unitCostCny: null }, groups: [
       { id: 2, name: "混池（unidesk-codex-pool）" }, { id: 3, name: "自用" }, { id: 6, name: "Grok" },
     ] };
   }
@@ -109,7 +109,7 @@ export class AccountImportService {
     const parsed = parsePayload(input.content);
     const id = randomUUID();
     const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null, ...parsed,
-      settings: { priority: input.priority, capacity: input.capacity, groupIds: [...new Set(input.groupIds)], sourceProxyId: input.sourceProxyId, shadowProxy: input.shadowProxy, unitCostCny: input.unitCostCny, confirm: input.confirm },
+      settings: { priority: input.priority, capacity: input.capacity, groupIds: [...new Set(input.groupIds)], sourceProxyId: input.sourceProxyId, unitCostCny: input.unitCostCny, confirm: input.confirm },
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);
     while (this.jobs.size > 20) this.jobs.delete(this.jobs.keys().next().value!);
@@ -118,6 +118,7 @@ export class AccountImportService {
   }
 
   get(id: string): ImportJob | null { const job = this.jobs.get(id); return job ? this.project(job) : null; }
+  inspect(accountIds: number[]): Promise<Record<string, unknown>> { return inspectAccounts(accountIds, this.reads); }
   private project(job: ImportJob): ImportJob { return structuredClone(job); }
   private log(job: ImportJob, stage: string, state: string, message: string) {
     job.logs.push({ timestamp: new Date().toISOString(), stage, state, message: safeMessage(message) });
@@ -132,10 +133,8 @@ export class AccountImportService {
       for (const skipped of plan.skipped) {
         this.log(job, "account", "skipped", `stage=account state=skipped index=${skipped.index}/${job.accountCount} account-id=${skipped.accountId}`);
       }
-      for (const repair of plan.isolationOnly) {
-        this.log(job, "account", "repair", `stage=account state=repair index=${repair.index}/${job.accountCount} account-id=${repair.accountId} action=proxy-isolation`);
-      }
-      if (plan.sourceIndexes.length === 0 && plan.isolationOnly.length === 0) {
+      this.log(job, "proxy", "selected", `代理池候选 ${plan.proxyCandidateIds.length} 个，本批选中 Proxy #${plan.selectedProxyId}`);
+      if (plan.sourceIndexes.length === 0) {
         job.result = completedWithoutWrites(job, plan);
         job.state = "succeeded";
         this.log(job, "job", "done", "全部账号已导入并对齐，本轮未写入");
@@ -145,8 +144,7 @@ export class AccountImportService {
       const args = [this.config.monitor.cli.entrypoint, "platform-infra", "sub2api", "codex-pool", "runtime", "import",
         "--file", file, "--target", this.config.monitor.target, "--priority", String(job.settings.priority),
         "--capacity", String(job.settings.capacity), "--groups", job.settings.groupIds.join(","),
-        "--source-proxy-id", String(job.settings.sourceProxyId), "--shadow-proxy", String(job.settings.shadowProxy), "--json"];
-      if (plan.isolationOnly.length > 0) args.push("--existing-account-ids", plan.isolationOnly.map((item) => item.accountId).join(","));
+        "--source-proxy-id", String(job.settings.sourceProxyId), "--proxy-id", String(plan.selectedProxyId), "--shadow-proxy", "false", "--json"];
       if (job.settings.confirm) args.push("--confirm");
       const child = Bun.spawn([this.config.monitor.cli.executable, ...args], { cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env });
       const stderrTask = this.captureProgress(job, child.stderr, plan);
@@ -159,6 +157,17 @@ export class AccountImportService {
         ? output.result as Record<string, unknown> : null;
       const createdIds = Array.isArray(result?.createdIds)
         ? result.createdIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) > 0) : [];
+      const updatedIds = Array.isArray(result?.updatedIds)
+        ? result.updatedIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) > 0) : [];
+      const skippedIds = Array.isArray(result?.skippedIds)
+        ? result.skippedIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) > 0) : [];
+      const verifiedIds = [...new Set([...createdIds, ...updatedIds, ...skippedIds])];
+      if (job.settings.confirm && verifiedIds.length > 0) {
+        output.verification = await verifyImportedAccounts(verifiedIds, job.settings, plan.proxyCandidateIds, this.reads);
+        const verification = output.verification as Record<string, unknown>;
+        this.log(job, "verification", verification.ok === true ? "done" : "failed",
+          `账号终态校验 ${verification.aligned}/${verification.selected} 对齐`);
+      }
       if (job.settings.confirm && createdIds.length > 0) {
         job.accounting = recordAccountImportCosts({
           path: this.config.operations.accountImportLedgerPath,
@@ -171,9 +180,10 @@ export class AccountImportService {
         this.log(job, "accounting", "recorded", `人民币采购成本已记账 ${accounting.recordedCount} 个账号，共 ¥${Number(accounting.totalCostCny).toFixed(2)}`);
         output.accounting = accounting;
       }
-      if (exitCode !== 0 || output.ok === false) {
+      const verification = output.verification as Record<string, unknown> | undefined;
+      if (exitCode !== 0 || output.ok === false || verification?.ok === false) {
         job.state = "failed";
-        job.error = importFailure(output);
+        job.error = verification?.ok === false ? "导入后的账号配置未全部对齐，请查看 verification.accounts" : importFailure(output);
         this.log(job, "job", "failed", job.error);
         return;
       }
@@ -220,7 +230,7 @@ function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan
     mode: "confirmed",
     mutation: false,
     file: { fingerprint: job.fingerprint, accountCount: job.accountCount, valuesPrinted: false },
-    settings: job.settings,
+    settings: { ...job.settings, selectedProxyId: plan.selectedProxyId },
     result: { createdIds: [], updatedIds: [], skippedIds: plan.skipped.map((item) => item.accountId), skipped: plan.skipped.length, failed: 0, failures: [], isolated: 0 },
     valuesPrinted: false,
   };

@@ -152,8 +152,9 @@ function help(): Record<string, unknown> {
       "priority plan create --over-api [--calls N]",
       "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
-      "accounts import --file <json> --unit-cost-cny <CNY> [--priority 1 --capacity 5 --groups 2,3 --proxy-id 3 --shadow-proxy true] [--confirm] --over-api",
+      "accounts import --file <json> --unit-cost-cny <CNY> [--priority 1 --capacity 5 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
+      "accounts inspect --accounts <id-or-range,...> [--over-api]",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
@@ -264,6 +265,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || parsed.command.join(" ") === "users balance-liability"
     || parsed.command.join(" ") === "profit daily-facts"
     || parsed.command.join(" ") === "accounts economics"
+    || parsed.command.join(" ") === "accounts inspect"
     || parsed.command.join(" ") === "payments alipay-revenue"
     || parsed.command.join(" ") === "reads status"
   ) {
@@ -322,11 +324,15 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const groupIds = (parsed.groups ?? "2,3").split(",").map(Number);
     return await client.accountImport({ content: readFileSync(parsed.file, "utf8"), priority: parsed.priority ?? 1,
       capacity: parsed.capacity ?? 5, groupIds, sourceProxyId: parsed.proxyId ?? 3,
-      shadowProxy: parsed.shadowProxy ?? true, unitCostCny: parsed.unitCostCny, confirm: parsed.confirm });
+      unitCostCny: parsed.unitCostCny, confirm: parsed.confirm });
   }
   if (group === "accounts" && action === "status") {
     if (!parsed.id) throw new Error("accounts status requires --id");
     return await client.accountImportStatus(parsed.id);
+  }
+  if (group === "accounts" && action === "inspect") {
+    if (!parsed.accounts) throw new Error("accounts inspect requires --accounts");
+    return await client.inspectAccounts(parseAccountIdSelector(parsed.accounts));
   }
   if (group === "priority" && action === "history") return await client.priorityHistory();
   if (group === "priority" && action === "plan") {
@@ -480,6 +486,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command.join(" ") === "users balance-liability"
       || parsed.command.join(" ") === "profit daily-facts"
       || parsed.command.join(" ") === "accounts economics"
+      || parsed.command.join(" ") === "accounts inspect"
       || parsed.command.join(" ") === "payments alipay-revenue"
     );
     const targetId = parsed.targetId ?? (

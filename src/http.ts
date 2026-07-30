@@ -109,7 +109,7 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/account-import/options") return json(imports.options());
       if (request.method === "POST" && url.pathname === "/api/account-import/jobs") {
         const input = await body(request) as unknown as AccountImportRequest;
-        if (typeof input.content !== "string" || typeof input.shadowProxy !== "boolean" || typeof input.confirm !== "boolean"
+        if (typeof input.content !== "string" || typeof input.confirm !== "boolean"
           || !Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0
           || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
           return json({ ok: false, error: "账号单价必须为正数人民币，最多两位小数" }, 400);
@@ -119,6 +119,10 @@ export function createHandler(
       if (request.method === "GET" && url.pathname.startsWith("/api/account-import/jobs/")) {
         const job = imports.get(decodeURIComponent(url.pathname.slice("/api/account-import/jobs/".length)));
         return job ? json({ ok: true, job }) : json({ ok: false, error: "导入作业不存在" }, 404);
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/accounts/inspect") {
+        const input = await body(request);
+        return json(await imports.inspect(normalizeAccountIds(input.accountIds)));
       }
       if (request.method === "POST" && url.pathname === "/api/internal/execute-operation") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);

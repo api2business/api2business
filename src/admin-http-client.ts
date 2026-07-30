@@ -71,6 +71,11 @@ export class AdminHttpClient {
   accountImportStatus(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/account-import/jobs/${encodeURIComponent(id)}`);
   }
+  inspectAccounts(accountIds: number[]): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/accounts/inspect", {
+      method: "POST", body: JSON.stringify({ accountIds }),
+    }, 60000);
+  }
   accountBatchEconomics(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request("/api/admin/accounts/economics", {
       method: "POST",

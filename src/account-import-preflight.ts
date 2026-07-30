@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 interface AccountRow extends Record<string, unknown> {
+  row_kind: unknown;
   id: unknown;
   user_id: unknown;
   access_token_sha256: unknown;
@@ -23,14 +24,14 @@ export interface AccountImportPreflightSettings {
   capacity: number;
   groupIds: number[];
   sourceProxyId: number;
-  shadowProxy: boolean;
 }
 
 export interface AccountImportPreflightPlan {
   content: string;
   sourceIndexes: number[];
   skipped: Array<{ index: number; accountId: number }>;
-  isolationOnly: Array<{ index: number; accountId: number }>;
+  selectedProxyId: number;
+  proxyCandidateIds: number[];
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -72,16 +73,6 @@ function baseAligned(row: AccountRow, settings: AccountImportPreflightSettings):
   return true;
 }
 
-function proxyAligned(row: AccountRow, settings: AccountImportPreflightSettings): boolean {
-  if (!settings.shadowProxy) return true;
-  const id = integer(row.id);
-  const proxyId = integer(row.proxy_id);
-  return proxyId !== null
-    && id !== null
-    && proxyId !== settings.sourceProxyId
-    && text(row.proxy_name).endsWith(`-a${id}-p${settings.sourceProxyId}`);
-}
-
 export async function accountImportPreflight(
   content: string,
   settings: AccountImportPreflightSettings,
@@ -99,7 +90,15 @@ export async function accountImportPreflight(
     priority: "manual",
     cacheMode: "bypass-cache",
     sql: `
-      SELECT
+      WITH source_proxy AS (
+        SELECT host, port FROM proxies
+        WHERE id = $3::bigint AND deleted_at IS NULL
+      ), matching_proxies AS (
+        SELECT p.id FROM proxies p
+        JOIN source_proxy source ON source.host = p.host AND source.port = p.port
+        WHERE p.id >= 3 AND p.deleted_at IS NULL AND p.status = 'active'
+      ), matched_accounts AS (
+        SELECT
         a.id,
         COALESCE(a.credentials->>'chatgpt_user_id', '') AS user_id,
         COALESCE(a.extra->>'access_token_sha256', '') AS access_token_sha256,
@@ -118,35 +117,43 @@ export async function accountImportPreflight(
           COALESCE(a.credentials->>'chatgpt_user_id', '') = ANY(string_to_array($1, ','))
           OR COALESCE(a.extra->>'access_token_sha256', '') = ANY(string_to_array($2, ','))
         )
-      GROUP BY a.id, p.name
-      ORDER BY a.id
+        GROUP BY a.id, p.name
+      )
+      SELECT 'account'::text AS row_kind,
+        account.id, account.user_id, account.access_token_sha256,
+        account.priority, account.concurrency, account.proxy_id, account.proxy_name, account.group_ids
+      FROM matched_accounts account
+      UNION ALL
+      SELECT 'proxy'::text AS row_kind,
+        proxy.id, ''::text, ''::text, NULL::int, NULL::int, NULL::bigint, ''::text, '{}'::bigint[]
+      FROM matching_proxies proxy
+      ORDER BY row_kind, id
     `,
-    parameters: [userIds.join(","), accessHashes.join(",")],
+    parameters: [userIds.join(","), accessHashes.join(","), settings.sourceProxyId],
   });
+  const proxyCandidateIds = result.rows.filter((row) => row.row_kind === "proxy")
+    .map((row) => integer(row.id)).filter((id): id is number => id !== null);
+  if (proxyCandidateIds.length === 0) throw new Error("代理池中没有与基准代理相同 host/port 的可用代理");
+  const selectedProxyId = proxyCandidateIds[Math.floor(Math.random() * proxyCandidateIds.length)]!;
   const byUser = new Map<string, AccountRow[]>();
   const byAccess = new Map<string, AccountRow[]>();
-  for (const row of result.rows) {
+  for (const row of result.rows.filter((item) => item.row_kind === "account")) {
     const userId = text(row.user_id);
     const accessHash = text(row.access_token_sha256);
     if (userId) byUser.set(userId, [...(byUser.get(userId) ?? []), row]);
     if (accessHash) byAccess.set(accessHash, [...(byAccess.get(accessHash) ?? []), row]);
   }
   const skipped: AccountImportPreflightPlan["skipped"] = [];
-  const isolationOnly: AccountImportPreflightPlan["isolationOnly"] = [];
   const sourceIndexes: number[] = [];
   const remaining: unknown[] = [];
   for (let offset = 0; offset < accounts.length; offset += 1) {
     const item = identities[offset]!;
     const matches = item.userId ? byUser.get(item.userId) ?? [] : byAccess.get(item.accessTokenSha256) ?? [];
-    if (matches.length === 1 && baseAligned(matches[0]!, settings)) {
+    if (matches.length === 1 && baseAligned(matches[0]!, settings)
+      && proxyCandidateIds.includes(integer(matches[0]!.proxy_id) ?? -1)) {
       const match = matches[0]!;
       const existing = { index: offset + 1, accountId: integer(match.id)! };
-      if (proxyAligned(match, settings)) skipped.push(existing);
-      else if (integer(match.proxy_id) === settings.sourceProxyId) isolationOnly.push(existing);
-      else {
-        remaining.push(accounts[offset]);
-        sourceIndexes.push(offset + 1);
-      }
+      skipped.push(existing);
       continue;
     }
     remaining.push(accounts[offset]);
@@ -156,6 +163,7 @@ export async function accountImportPreflight(
     content: JSON.stringify({ ...payload, accounts: remaining }),
     sourceIndexes,
     skipped,
-    isolationOnly,
+    selectedProxyId,
+    proxyCandidateIds,
   };
 }
