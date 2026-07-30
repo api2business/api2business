@@ -154,7 +154,7 @@ function help(): Record<string, unknown> {
       "priority plan create --over-api [--calls N]",
       "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
-      "accounts import --file <json> --unit-cost-cny <CNY> [--priority 1 --capacity 16 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
+      "accounts import --file <json|zip> --unit-cost-cny <CNY> [--priority 1 --capacity 16 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
@@ -339,7 +339,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const planType = parsed.planType ?? inferredPlanType;
     if (planType !== "k12" && planType !== "plus") throw new Error("--plan-type must be k12 or plus");
     const groupIds = (parsed.groups ?? defaults.groupIds.join(",")).split(",").map(Number);
-    return await client.accountImport({ content: readFileSync(parsed.file, "utf8"), priority: parsed.priority ?? defaults.priority,
+    const zip = parsed.file.toLowerCase().endsWith(".zip");
+    return await client.accountImport({ content: readFileSync(parsed.file, zip ? "base64" : "utf8"), inputFormat: zip ? "zip" : "json",
+      priority: parsed.priority ?? defaults.priority,
       capacity: parsed.capacity ?? defaults.capacity, groupIds, sourceProxyId: parsed.proxyId ?? defaults.sourceProxyId,
       unitCostCny: parsed.unitCostCny, planType, confirm: parsed.confirm });
   }

@@ -620,11 +620,30 @@ async function accountImportPage() {
   $('#import-groups').innerHTML = options.groups.map((group) => `<label><input type="checkbox" value="${group.id}" ${defaults.groupIds.includes(group.id) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${group.id}</b></span></label>`).join('')
   const fileInput = $('#import-file')
   const zone = $('#drop-zone')
+  let importInputFormat = 'json'
+  let importContent = ''
+  const bytesToBase64 = (bytes) => {
+    let binary = ''
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+    }
+    return btoa(binary)
+  }
   const loadFile = async (file) => {
     if (!file) return
-    $('#import-json').value = await file.text()
+    const zip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip'
+    importInputFormat = zip ? 'zip' : 'json'
+    importContent = zip ? bytesToBase64(new Uint8Array(await file.arrayBuffer())) : await file.text()
+    $('#import-json').value = zip ? '' : importContent
+    $('#import-json').disabled = zip
+    $('#import-json').placeholder = zip ? 'ZIP 将在服务端安全合并，二进制内容不会回显' : '粘贴 Sub2API 导出的 JSON'
     $('#file-state').textContent = `${file.name} · ${number(file.size)} bytes`
   }
+  $('#import-json').addEventListener('input', () => {
+    if ($('#import-json').disabled) return
+    importInputFormat = 'json'
+    importContent = $('#import-json').value
+  })
   zone.addEventListener('click', () => fileInput.click())
   zone.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') fileInput.click() })
   fileInput.addEventListener('change', () => loadFile(fileInput.files?.[0]))
@@ -642,7 +661,8 @@ async function accountImportPage() {
     const proxyOutcome = assignments.length ? ` · 已分配 ${assignments.filter((item) => item?.bound).length} 个账号 / 使用 ${usedProxies} 个 Proxy` : ''
     const outcome = result ? ` · 新建 ${result.createdIds?.length ?? 0} · 更新 ${result.updatedIds?.length ?? 0} · 跳过 ${result.skippedIds?.length ?? result.skipped ?? 0} · 失败 ${result.failed ?? 0}${proxyOutcome}` : ''
     const accounting = job.accounting ? ` · 已记账 ${job.accounting.recordedCount} 个 / ${cny(job.accounting.totalCostCny)}` : ''
-    $('#import-summary').textContent = `${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
+    const source = job.source?.format === 'zip' ? `ZIP ${job.source.jsonFileCount} 个 JSON · 包内去重 ${job.source.duplicateAccountCount}` : 'JSON'
+    $('#import-summary').textContent = `${source} · ${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
     $('#import-logs').innerHTML = job.logs.length ? job.logs.map((log) => `<li data-state="${escapeHtml(log.state)}"><time>${time(log.timestamp)}</time><b>${escapeHtml(log.stage)}</b><span>${escapeHtml(log.message)}</span></li>`).join('') : '<li class="empty">等待作业启动</li>'
     $('#import-logs').scrollTop = $('#import-logs').scrollHeight
   }
@@ -652,7 +672,8 @@ async function accountImportPage() {
     try {
       const groupIds = [...document.querySelectorAll('#import-groups input:checked')].map((input) => Number(input.value))
       const response = await requestJson('/api/account-import/jobs', { method: 'POST', body: JSON.stringify({
-        content: $('#import-json').value, priority: Number($('#import-priority').value), capacity: Number($('#import-capacity').value),
+        content: importInputFormat === 'zip' ? importContent : $('#import-json').value, inputFormat: importInputFormat,
+        priority: Number($('#import-priority').value), capacity: Number($('#import-capacity').value),
         groupIds, sourceProxyId: Number($('#import-proxy').value),
         unitCostCny: Number($('#import-unit-cost').value), planType: planType.value, confirm: true,
       }) }, 30000)

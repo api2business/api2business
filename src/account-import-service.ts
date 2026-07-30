@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,9 +7,11 @@ import { accountImportPreflight, type AccountImportPreflightPlan } from "./accou
 import { recordAccountImportCosts } from "./account-import-cost-ledger";
 import { inspectAccounts, verifyImportedAccounts } from "./account-inspection";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import { normalizeAccountImportInput } from "./account-import-input";
 
 export interface AccountImportRequest {
   content: string;
+  inputFormat?: "json" | "zip";
   priority: number;
   capacity: number;
   groupIds: number[];
@@ -24,21 +26,14 @@ interface ImportJob {
   id: string; state: "queued" | "running" | "succeeded" | "failed"; createdAt: string;
   completedAt: string | null; fingerprint: string; accountCount: number; settings: Omit<AccountImportRequest, "content">;
   inputArchive: { stored: true; fileName: string };
+  source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number };
   logs: ImportLog[]; result: Record<string, unknown> | null; accounting: Record<string, unknown> | null; error: string | null;
 }
 
-function parsePayload(content: string): { accountCount: number; fingerprint: string } {
-  if (Buffer.byteLength(content, "utf8") > 10 * 1024 * 1024) throw new Error("JSON 文件不能超过 10 MiB");
-  let value: unknown;
-  try { value = JSON.parse(content); } catch { throw new Error("JSON 内容格式无效"); }
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("JSON 顶层必须是对象");
-  const payload = value as Record<string, unknown>;
-  if (!Array.isArray(payload.accounts) || !Array.isArray(payload.proxies)) throw new Error("JSON 必须包含 accounts 和 proxies 数组");
-  if (payload.accounts.length < 1 || payload.accounts.length > 100) throw new Error("账号数量必须为 1 至 100");
-  return { accountCount: payload.accounts.length, fingerprint: createHash("sha256").update(content).digest("hex").slice(0, 16) };
-}
-
 function validate(input: AccountImportRequest): void {
+  if (input.inputFormat !== undefined && input.inputFormat !== "json" && input.inputFormat !== "zip") {
+    throw new Error("导入格式只允许 json 或 zip");
+  }
   if (!Number.isInteger(input.priority) || input.priority < 1 || input.priority > 1000) throw new Error("优先级必须为 1 至 1000");
   if (!Number.isInteger(input.capacity) || input.capacity < 1 || input.capacity > 100000) throw new Error("容量必须为正整数");
   if (!Array.isArray(input.groupIds) || input.groupIds.length === 0 || input.groupIds.some((id) => !Number.isInteger(id) || id < 1)) throw new Error("至少选择一个有效分组");
@@ -112,23 +107,24 @@ export class AccountImportService {
   constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
 
   options() {
-    return { ok: true, currency: "CNY", planTypes: [{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }], defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null, planType: "k12" }, groups: [
+    return { ok: true, currency: "CNY", inputFormats: ["json", "zip"], planTypes: [{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }], defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null, planType: "k12" }, groups: [
       { id: 2, name: "混池（unidesk-codex-pool）" }, { id: 3, name: "自用" }, { id: 6, name: "Grok" },
     ] };
   }
 
   submit(input: AccountImportRequest): ImportJob {
     validate(input);
-    const parsed = parsePayload(input.content);
+    const parsed = normalizeAccountImportInput(input.content, input.inputFormat);
     const id = randomUUID();
-    const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, input.content);
-    const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null, ...parsed,
+    const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, parsed.content);
+    const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null,
+      accountCount: parsed.accountCount, fingerprint: parsed.fingerprint, source: parsed.source,
       settings: { priority: input.priority, capacity: input.capacity, groupIds: [...new Set(input.groupIds)], sourceProxyId: input.sourceProxyId, unitCostCny: input.unitCostCny, planType: input.planType, confirm: input.confirm },
       inputArchive: { stored: true, fileName: archiveFileName },
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);
     while (this.jobs.size > 20) this.jobs.delete(this.jobs.keys().next().value!);
-    void this.run(job, input.content);
+    void this.run(job, parsed.content);
     return this.project(job);
   }
 
