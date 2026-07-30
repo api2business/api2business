@@ -22,7 +22,9 @@ test("candidate query projects lifecycle facts without OAuth credentials", () =>
 });
 
 test("unwraps the production UniDesk CLI data.runtime envelope", () => {
-  const runtime = { tests: [{ accountId: 99, classification: "dead" }], summary: { alive: 0, dead: 1, unknown: 0 } };
+  const runtime = { operation: "test", tests: [{ accountId: 99, classification: "dead" }], summary: { alive: 0, dead: 1, unknown: 0 } };
   expect(lifecycleRuntimeResult({ ok: true, data: { runtime } })).toEqual(runtime);
   expect(lifecycleRuntimeResult({ ok: true, runtime })).toEqual(runtime);
+  expect(lifecycleRuntimeResult({ ok: true, data: { data: { runtime } } })).toEqual(runtime);
+  expect(() => lifecycleRuntimeResult({ ok: true, data: {} })).toThrow("missing account test results");
 });

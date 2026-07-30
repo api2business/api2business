@@ -71,10 +71,19 @@ function safeMessage(value: string): string {
 }
 
 export function lifecycleRuntimeResult(output: Row): Row {
-  const data = output.data && typeof output.data === "object" ? output.data as Row : null;
-  if (data?.runtime && typeof data.runtime === "object") return data.runtime as Row;
-  if (output.runtime && typeof output.runtime === "object") return output.runtime as Row;
-  return output;
+  const queue: Array<{ value: Row; depth: number }> = [{ value: output, depth: 0 }];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current.value.operation === "test" && Array.isArray(current.value.tests)) return current.value;
+    if (current.depth >= 4) continue;
+    for (const key of ["runtime", "data", "result"]) {
+      const nested = current.value[key];
+      if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+        queue.push({ value: nested as Row, depth: current.depth + 1 });
+      }
+    }
+  }
+  throw new Error("UniDesk runtime CLI response is missing account test results");
 }
 
 export class AccountLifecycleService {
@@ -181,6 +190,10 @@ export class AccountLifecycleService {
       const runtime = lifecycleRuntimeResult(output);
       const tests = Array.isArray(runtime.tests) ? runtime.tests : [];
       const summary = runtime.summary && typeof runtime.summary === "object" ? runtime.summary as Row : { alive: 0, dead: 0, unknown: 0 };
+      const classified = number(summary.alive) + number(summary.dead) + number(summary.unknown);
+      if (tests.length !== accountIds.length || classified !== accountIds.length) {
+        throw new Error(`OAuth 检测结果不完整：候选 ${accountIds.length}，结果 ${tests.length}，分类 ${classified}`);
+      }
       job.result = { tests, summary, model: job.settings.model, mode: runtime.mode, valuesPrinted: false };
       job.state = "succeeded";
       this.log(job, "test", "done", `检测完成：存活 ${number(summary.alive)}，死亡 ${number(summary.dead)}，不确定 ${number(summary.unknown)}`);
