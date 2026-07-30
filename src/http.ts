@@ -176,6 +176,16 @@ export function createHandler(
         if (period !== undefined && !/^\d{4}-\d{2}$/u.test(period)) return json({ ok: false, error: "period must be YYYY-MM" }, 400);
         return json(await operations.ledger(period));
       }
+      if (request.method === "GET" && url.pathname === "/api/operations/oauth-cost") {
+        const day = url.searchParams.get("day");
+        if (day === null) return json({ ok: false, error: "day is required" }, 400);
+        try {
+          parseAccountEconomicsWindow({ day }, config.monitor.timezone);
+          return json(await operations.oauthImportEconomics(day));
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
       if (request.method === "POST" && url.pathname === "/api/operations/cash") {
         const input = await body(request);
         if (!/^\\d{4}-\\d{2}-\\d{2}$/u.test(String(input.occurredOn ?? ""))

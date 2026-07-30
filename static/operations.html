@@ -18,6 +18,22 @@
       <div><span>毛利</span><strong id="ops-profit">—</strong></div>
       <div><span>YAML</span><strong>只读</strong></div>
     </section>
+    <section class="table-section oauth-cost-section">
+      <div class="table-toolbar">
+        <div><h2>OAuth 综合成本</h2><p id="oauth-cost-state" class="section-state">等待查询</p></div>
+        <form id="oauth-cost-form" class="score-query-controls">
+          <label class="filter-field"><span>运营日</span><input id="oauth-cost-day" type="date" required /></label>
+          <button id="oauth-cost-refresh" class="query-command" type="submit">刷新成本</button>
+        </form>
+      </div>
+      <div class="oauth-cost-metrics" aria-live="polite">
+        <div><span>OAuth 账号</span><strong id="oauth-cost-accounts">—</strong><small id="oauth-cost-active">—</small></div>
+        <div><span>净采购成本</span><strong id="oauth-cost-net">—</strong><small id="oauth-cost-gross">—</small></div>
+        <div><span>API 美元产出</span><strong id="oauth-cost-output">—</strong><small id="oauth-cost-requests">—</small></div>
+        <div class="oauth-cost-primary"><span>综合成本</span><strong id="oauth-cost-unit">—</strong><small>人民币 / API 美元</small></div>
+      </div>
+      <div class="table-wrap"><table class="data-table oauth-cost-table"><thead><tr><th>账号类型</th><th>账号数</th><th>有产出</th><th>采购成本</th><th>API 美元产出</th><th>人民币 / 刀</th><th>请求</th><th>Token</th></tr></thead><tbody id="oauth-cost-body"><tr><td colspan="8" class="empty">正在读取 OAuth 成本</td></tr></tbody></table></div>
+    </section>
     <section class="table-section">
       <div class="table-toolbar"><h2>手工收支</h2></div>
       <form id="cash-form" class="score-query-controls">

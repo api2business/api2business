@@ -302,6 +302,10 @@ function cny(value) {
   return `¥${number(value, 2)}`
 }
 
+function operatingDay() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date())
+}
+
 let activePlanId = null
 let priorityAutomationExists = false
 let priorityHistoryRecords = []
@@ -575,8 +579,48 @@ async function loadOperations({ showCached = false } = {}) {
   writeOperationsSnapshot(ledger, audits)
 }
 
+function renderOauthCost(data) {
+  const total = data.total ?? {}
+  $('#oauth-cost-accounts').textContent = number(total.accountCount)
+  $('#oauth-cost-active').textContent = `${number(total.usageAccountCount)} 个已有产出`
+  $('#oauth-cost-net').textContent = cny(total.netAcquisitionCostCny)
+  $('#oauth-cost-gross').textContent = `毛成本 ${cny(total.grossAcquisitionCostCny)} · 退款 ${cny(total.procurementRefundCny)}`
+  $('#oauth-cost-output').innerHTML = usd(total.apiAmountUsd, 2)
+  $('#oauth-cost-requests').textContent = `${number(total.requestCount)} 次请求 · ${compact(total.tokenCount)} Token`
+  $('#oauth-cost-unit').textContent = total.cnyPerApiUsd == null ? '—' : `¥${number(total.cnyPerApiUsd, 5)}`
+  $('#oauth-cost-state').textContent = `${escapeHtml(data.day)} · ${data.complete ? '数据完整' : '数据不完整'} · ${number(data.databaseQueries)} 次数据库查询`
+  const labels = { k12: 'K12', plus: 'Plus', free: 'Free' }
+  $('#oauth-cost-body').innerHTML = data.groups?.length ? data.groups.map((row) => `<tr>
+    <td><b>${escapeHtml(labels[row.planType] ?? row.planType)}</b></td><td>${number(row.accountCount)}</td>
+    <td>${number(row.usageAccountCount)}</td><td>${cny(row.acquisitionCostCny)}</td>
+    <td class="usd-cell">${usd(row.apiAmountUsd, 2)}</td><td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td>
+    <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
+  </tr>`).join('') : '<tr><td colspan="8" class="empty">该运营日没有 OAuth 采购账号</td></tr>'
+}
+
+async function loadOauthCost() {
+  const button = $('#oauth-cost-refresh')
+  button.disabled = true
+  $('#oauth-cost-state').textContent = '正在通过单连接队列核算…'
+  try {
+    const day = $('#oauth-cost-day').value
+    const data = await requestJson(`/api/operations/oauth-cost?day=${encodeURIComponent(day)}`, {}, 60000)
+    renderOauthCost(data)
+  } catch (error) {
+    $('#oauth-cost-state').textContent = `核算失败：${error instanceof Error ? error.message : String(error)}`
+    throw error
+  } finally {
+    button.disabled = false
+  }
+}
+
 async function operationsPage() {
-  $('#cash-date').value = new Date().toISOString().slice(0, 10)
+  $('#cash-date').value = operatingDay()
+  $('#oauth-cost-day').value = operatingDay()
+  $('#oauth-cost-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    await loadOauthCost()
+  })
   $('#cash-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     await requestJson('/api/operations/cash', { method: 'POST', body: JSON.stringify({
@@ -585,7 +629,7 @@ async function operationsPage() {
       description: $('#cash-description').value,
     }) })
     event.currentTarget.reset()
-    $('#cash-date').value = new Date().toISOString().slice(0, 10)
+    $('#cash-date').value = operatingDay()
     await loadOperations()
   })
   $('#procurement-form').addEventListener('submit', async (event) => {
@@ -598,7 +642,7 @@ async function operationsPage() {
     </tr>`).join('') : `<tr><td colspan="3" class="empty">未分配 ${cny(result.unallocatedCny)}</td></tr>`
     await loadOperations()
   })
-  await loadOperations({ showCached: true })
+  await Promise.all([loadOperations({ showCached: true }), loadOauthCost()])
 }
 
 async function accountImportPage() {

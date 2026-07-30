@@ -980,6 +980,38 @@ export class OperationsService {
     return await collectAccountImportEconomics(this.config, this.reads, input, "manual");
   }
 
+  async oauthImportEconomics(day: string) {
+    const yaml = this.yamlLedger();
+    const externalCosts = yaml.costs
+      .filter((entry) => entry.kind === "acquisition" && entry.occurredOn === day)
+      .map((entry) => ({ accountId: Number(entry.accountId), costCny: money(entry.amountCny) }));
+    const facts = await collectAccountImportEconomics(
+      this.config,
+      this.reads,
+      { day, externalCosts },
+      "manual",
+    );
+    const total = facts.total as Record<string, unknown>;
+    const grossAcquisitionCostCny = money(total.acquisitionCostCny);
+    const procurementRefundCny = yaml.revenues
+      .filter((entry) => entry.kind === "procurement-refund" && entry.occurredOn === day)
+      .reduce((sum, entry) => sum + money(entry.amountCny), 0);
+    const netAcquisitionCostCny = Math.max(0, grossAcquisitionCostCny - procurementRefundCny);
+    const apiAmountUsd = Number(total.apiAmountUsd);
+    return {
+      ...facts,
+      total: {
+        ...total,
+        grossAcquisitionCostCny,
+        procurementRefundCny,
+        netAcquisitionCostCny,
+        acquisitionCostCny: netAcquisitionCostCny,
+        cnyPerApiUsd: apiAmountUsd > 0 ? netAcquisitionCostCny / apiAmountUsd : null,
+      },
+      accountingBasis: "openai-oauth-net-acquisition-cost",
+    };
+  }
+
   async audits() {
     return { ok: true, records: await this.store.audits(this.config.operations.auditLimit) };
   }
