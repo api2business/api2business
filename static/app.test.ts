@@ -1,5 +1,15 @@
 import { expect, test } from "bun:test";
 
+test("account import exposes only K12 and Plus with the configured price threshold", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
+  expect(html).toContain('id="import-plan-type"');
+  expect(app).toContain("cost > defaults.plusCostThresholdCny ? 'plus' : 'k12'");
+  expect(app).toContain("planTypeManuallySelected");
+  expect(app).toContain("planType: planType.value");
+  expect(app).not.toContain("value=\"free\"");
+});
+
 test("automation submit preserves the user's current form values", async () => {
   const source = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const start = source.indexOf("$('#automation-form').addEventListener");

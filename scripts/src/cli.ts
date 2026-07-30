@@ -45,6 +45,7 @@ interface Parsed {
   accounts: string | null;
   costCny: number | null;
   unitCostCny: number | null;
+  planType: string | null;
   day: string | null;
   period: string | null;
   externalCostsJson: string | null;
@@ -65,7 +66,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -116,6 +117,7 @@ function parseArgs(args: string[]): Parsed {
     period: value(args, "--period"),
     costCny: decimal("--cost-cny"),
     unitCostCny: decimal("--unit-cost-cny"),
+    planType: value(args, "--plan-type"),
     affectedOnly: args.includes("--affected-only"),
     intervalSeconds: integer("--interval-seconds"),
     enabled: value(args, "--enabled") === null ? null
@@ -333,10 +335,13 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (!parsed.file) throw new Error("accounts import requires --file");
     if (parsed.unitCostCny === null) throw new Error("accounts import requires --unit-cost-cny in CNY");
     const defaults = config.operations.accountImportDefaults;
+    const inferredPlanType = parsed.unitCostCny > defaults.plusCostThresholdCny ? "plus" : "k12";
+    const planType = parsed.planType ?? inferredPlanType;
+    if (planType !== "k12" && planType !== "plus") throw new Error("--plan-type must be k12 or plus");
     const groupIds = (parsed.groups ?? defaults.groupIds.join(",")).split(",").map(Number);
     return await client.accountImport({ content: readFileSync(parsed.file, "utf8"), priority: parsed.priority ?? defaults.priority,
       capacity: parsed.capacity ?? defaults.capacity, groupIds, sourceProxyId: parsed.proxyId ?? defaults.sourceProxyId,
-      unitCostCny: parsed.unitCostCny, confirm: parsed.confirm });
+      unitCostCny: parsed.unitCostCny, planType, confirm: parsed.confirm });
   }
   if (group === "accounts" && action === "status") {
     if (!parsed.id) throw new Error("accounts status requires --id");

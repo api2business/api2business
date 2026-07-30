@@ -15,6 +15,7 @@ export interface AccountImportRequest {
   groupIds: number[];
   sourceProxyId: number;
   unitCostCny: number;
+  planType: "k12" | "plus";
   confirm: boolean;
 }
 
@@ -46,6 +47,7 @@ function validate(input: AccountImportRequest): void {
     || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
     throw new Error("账号单价必须为正数人民币，最多两位小数");
   }
+  if (input.planType !== "k12" && input.planType !== "plus") throw new Error("账号类型只允许 k12 或 plus");
 }
 
 function safeMessage(value: string): string {
@@ -110,7 +112,7 @@ export class AccountImportService {
   constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
 
   options() {
-    return { ok: true, currency: "CNY", defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null }, groups: [
+    return { ok: true, currency: "CNY", planTypes: [{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }], defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null, planType: "k12" }, groups: [
       { id: 2, name: "混池（unidesk-codex-pool）" }, { id: 3, name: "自用" }, { id: 6, name: "Grok" },
     ] };
   }
@@ -121,7 +123,7 @@ export class AccountImportService {
     const id = randomUUID();
     const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, input.content);
     const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null, ...parsed,
-      settings: { priority: input.priority, capacity: input.capacity, groupIds: [...new Set(input.groupIds)], sourceProxyId: input.sourceProxyId, unitCostCny: input.unitCostCny, confirm: input.confirm },
+      settings: { priority: input.priority, capacity: input.capacity, groupIds: [...new Set(input.groupIds)], sourceProxyId: input.sourceProxyId, unitCostCny: input.unitCostCny, planType: input.planType, confirm: input.confirm },
       inputArchive: { stored: true, fileName: archiveFileName },
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);

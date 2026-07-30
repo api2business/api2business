@@ -11,6 +11,7 @@ interface AccountRow extends Record<string, unknown> {
   proxy_id: unknown;
   proxy_name: unknown;
   group_ids: unknown;
+  plan_type: unknown;
 }
 
 interface ImportIdentity {
@@ -24,6 +25,7 @@ export interface AccountImportPreflightSettings {
   capacity: number;
   groupIds: number[];
   sourceProxyId: number;
+  planType: "k12" | "plus";
 }
 
 export interface AccountImportPreflightPlan {
@@ -75,6 +77,7 @@ function baseAligned(row: AccountRow, settings: AccountImportPreflightSettings):
   const groups = new Set(groupIds(row.group_ids));
   if (id === null || integer(row.priority) !== settings.priority || integer(row.concurrency) !== settings.capacity) return false;
   if (settings.groupIds.some((groupId) => !groups.has(groupId))) return false;
+  if (text(row.plan_type).toLowerCase() !== settings.planType) return false;
   return true;
 }
 
@@ -93,6 +96,7 @@ export async function accountImportPreflight(
     capacity: settings.capacity,
     groupIds: [...new Set(settings.groupIds)].sort((a, b) => a - b),
     sourceProxyId: settings.sourceProxyId,
+    planType: settings.planType,
   };
   const key = createHash("sha256").update(JSON.stringify({ userIds, accessHashes, settings: normalizedSettings })).digest("hex");
   const result = await reads.query<AccountRow>({
@@ -117,6 +121,7 @@ export async function accountImportPreflight(
         a.concurrency,
         a.proxy_id,
         COALESCE(p.name, '') AS proxy_name,
+        COALESCE(LOWER(a.credentials->>'plan_type'), '') AS plan_type,
         COALESCE(array_agg(DISTINCT ag.group_id) FILTER (WHERE ag.group_id IS NOT NULL), '{}') AS group_ids
       FROM accounts a
       LEFT JOIN account_groups ag ON ag.account_id = a.id
@@ -132,11 +137,11 @@ export async function accountImportPreflight(
       )
       SELECT 'account'::text AS row_kind,
         account.id, account.user_id, account.access_token_sha256,
-        account.priority, account.concurrency, account.proxy_id, account.proxy_name, account.group_ids
+        account.priority, account.concurrency, account.proxy_id, account.proxy_name, account.plan_type, account.group_ids
       FROM matched_accounts account
       UNION ALL
       SELECT 'proxy'::text AS row_kind,
-        proxy.id, ''::text, ''::text, NULL::int, NULL::int, NULL::bigint, ''::text, '{}'::bigint[]
+        proxy.id, ''::text, ''::text, NULL::int, NULL::int, NULL::bigint, ''::text, ''::text, '{}'::bigint[]
       FROM matching_proxies proxy
       ORDER BY row_kind, id
     `,
@@ -167,7 +172,9 @@ export async function accountImportPreflight(
       skipped.push(existing);
       continue;
     }
-    remaining.push(accounts[offset]);
+    const account = record(accounts[offset]);
+    const credentials = record(account?.credentials);
+    remaining.push({ ...account, credentials: { ...credentials, plan_type: settings.planType } });
     sourceIndexes.push(offset + 1);
   }
   const filteredContent = JSON.stringify({ ...payload, accounts: remaining });

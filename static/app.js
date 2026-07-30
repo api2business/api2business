@@ -607,6 +607,16 @@ async function accountImportPage() {
   $('#import-priority').value = defaults.priority
   $('#import-capacity').value = defaults.capacity
   $('#import-proxy').value = defaults.sourceProxyId
+  const planType = $('#import-plan-type')
+  planType.innerHTML = options.planTypes.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('')
+  planType.value = defaults.planType
+  let planTypeManuallySelected = false
+  planType.addEventListener('change', () => { planTypeManuallySelected = true })
+  $('#import-unit-cost').addEventListener('input', () => {
+    if (planTypeManuallySelected) return
+    const cost = Number($('#import-unit-cost').value)
+    planType.value = Number.isFinite(cost) && cost > defaults.plusCostThresholdCny ? 'plus' : 'k12'
+  })
   $('#import-groups').innerHTML = options.groups.map((group) => `<label><input type="checkbox" value="${group.id}" ${defaults.groupIds.includes(group.id) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${group.id}</b></span></label>`).join('')
   const fileInput = $('#import-file')
   const zone = $('#drop-zone')
@@ -632,7 +642,7 @@ async function accountImportPage() {
     const proxyOutcome = assignments.length ? ` · 已分配 ${assignments.filter((item) => item?.bound).length} 个账号 / 使用 ${usedProxies} 个 Proxy` : ''
     const outcome = result ? ` · 新建 ${result.createdIds?.length ?? 0} · 更新 ${result.updatedIds?.length ?? 0} · 跳过 ${result.skippedIds?.length ?? result.skipped ?? 0} · 失败 ${result.failed ?? 0}${proxyOutcome}` : ''
     const accounting = job.accounting ? ` · 已记账 ${job.accounting.recordedCount} 个 / ${cny(job.accounting.totalCostCny)}` : ''
-    $('#import-summary').textContent = `${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
+    $('#import-summary').textContent = `${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
     $('#import-logs').innerHTML = job.logs.length ? job.logs.map((log) => `<li data-state="${escapeHtml(log.state)}"><time>${time(log.timestamp)}</time><b>${escapeHtml(log.stage)}</b><span>${escapeHtml(log.message)}</span></li>`).join('') : '<li class="empty">等待作业启动</li>'
     $('#import-logs').scrollTop = $('#import-logs').scrollHeight
   }
@@ -644,7 +654,7 @@ async function accountImportPage() {
       const response = await requestJson('/api/account-import/jobs', { method: 'POST', body: JSON.stringify({
         content: $('#import-json').value, priority: Number($('#import-priority').value), capacity: Number($('#import-capacity').value),
         groupIds, sourceProxyId: Number($('#import-proxy').value),
-        unitCostCny: Number($('#import-unit-cost').value), confirm: true,
+        unitCostCny: Number($('#import-unit-cost').value), planType: planType.value, confirm: true,
       }) }, 30000)
       let job = response.job; renderJob(job)
       history.replaceState(null, '', `/account-import?job=${encodeURIComponent(job.id)}`)
