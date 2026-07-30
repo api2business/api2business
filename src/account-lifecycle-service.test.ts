@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { AccountLifecycleService, accountLifecycleCandidateQuery, lifecycleRuntimeResult } from "./account-lifecycle-service";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AccountLifecycleService, accountLifecycleCandidateQuery, lifecycleRuntimeResult, readLifecycleAcquisitionCosts } from "./account-lifecycle-service";
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -19,6 +22,25 @@ test("candidate query projects lifecycle facts without OAuth credentials", () =>
   expect(accountLifecycleCandidateQuery).toContain("account.deleted_at IS NULL");
   expect(accountLifecycleCandidateQuery).not.toContain("access_token");
   expect(accountLifecycleCandidateQuery).not.toContain("refresh_token");
+});
+
+test("includes YAML acquisition entries so manually recorded OAuth accounts enter lifecycle detection", () => {
+  const root = mkdtempSync(join(tmpdir(), "apistate-lifecycle-yaml-"));
+  const ledger = join(root, "pool.yaml");
+  writeFileSync(ledger, [
+    "profit:",
+    "  periodCosts:",
+    "    - kind: acquisition",
+    "      occurredOn: 2026-07-30",
+    "      accountId: 104",
+    "      amountCny: 3.3",
+    "    - kind: recharge",
+    "      occurredOn: 2026-07-30",
+    "      accountId: 29",
+    "      amountCny: 50",
+  ].join("\n"));
+  const config = { operations: { ledgerYamlPath: ledger } } as AppConfig;
+  expect(readLifecycleAcquisitionCosts(config, "2026-07-30")).toEqual([{ accountId: 104, costCny: 3.3 }]);
 });
 
 test("unwraps the production UniDesk CLI data.runtime envelope", () => {

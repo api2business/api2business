@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import type { AppConfig } from "./config";
 import { readAccountImportCosts } from "./account-import-cost-ledger";
 import { parseAccountEconomicsWindow } from "./account-batch-economics";
 import { recordLifecycleSettlement } from "./account-lifecycle-ledger";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import { parse } from "yaml";
 
 type PlanType = "k12" | "plus";
 type JobState = "queued" | "running" | "succeeded" | "settling" | "settled" | "failed";
@@ -61,6 +63,43 @@ ORDER BY cost.account_id`;
 function number(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function positiveInteger(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function records(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item))
+    : [];
+}
+
+export function readLifecycleAcquisitionCosts(config: AppConfig, day: string): Array<{ accountId: number; costCny: number }> {
+  const root = parse(readFileSync(config.operations.ledgerYamlPath, "utf8")) as Record<string, unknown>;
+  const profit = root.profit && typeof root.profit === "object" && !Array.isArray(root.profit)
+    ? root.profit as Record<string, unknown>
+    : {};
+  return records(profit.periodCosts)
+    .filter((entry) => entry.kind === "acquisition" && entry.occurredOn === day)
+    .map((entry) => ({ accountId: positiveInteger(entry.accountId), costCny: number(entry.amountCny) }))
+    .filter((entry): entry is { accountId: number; costCny: number } => entry.accountId !== null && entry.costCny > 0);
+}
+
+function mergeLifecycleCosts(
+  automatic: Array<{ accountId: number; costCny: number }>,
+  declared: Array<{ accountId: number; costCny: number }>,
+): Array<{ accountId: number; costCny: number }> {
+  const merged = new Map<number, number>();
+  for (const entry of [...automatic, ...declared]) {
+    const previous = merged.get(entry.accountId);
+    if (previous !== undefined && Math.abs(previous - entry.costCny) > 1e-8) {
+      throw new Error(`账号 ${entry.accountId} 的生命周期采购成本在 JSONL 与 owning YAML 中冲突`);
+    }
+    merged.set(entry.accountId, entry.costCny);
+  }
+  return [...merged.entries()].sort(([left], [right]) => left - right).map(([accountId, costCny]) => ({ accountId, costCny }));
 }
 
 function safeMessage(value: string): string {
@@ -139,9 +178,10 @@ export class AccountLifecycleService {
   }
 
   private async facts(day: string): Promise<Row[]> {
-    const costs = readAccountImportCosts(this.config.operations.accountImportLedgerPath)
+    const automaticCosts = readAccountImportCosts(this.config.operations.accountImportLedgerPath)
       .filter((entry) => entry.occurredOn === day)
       .map((entry) => ({ accountId: entry.accountId, costCny: entry.amountCny }));
+    const costs = mergeLifecycleCosts(automaticCosts, readLifecycleAcquisitionCosts(this.config, day));
     if (costs.length === 0) return [];
     const window = parseAccountEconomicsWindow({ day }, this.config.monitor.timezone);
     const end = new Date().toISOString();
