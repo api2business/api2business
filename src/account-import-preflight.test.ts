@@ -1,13 +1,16 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { accountImportPreflight } from "./account-import-preflight";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+
+const tokenHash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 test("skips only uniquely matched accounts whose runtime settings are aligned", async () => {
   const reads = {
     query: async () => ({
       rows: [
-        { row_kind: "account", id: 41, user_id: "user-aligned", access_token_sha256: "", priority: 1, concurrency: 5, proxy_id: 141, proxy_name: "proxy-141", plan_type: "k12", group_ids: [2, 3] },
-        { row_kind: "account", id: 42, user_id: "user-stale", access_token_sha256: "", priority: 1, concurrency: 10, proxy_id: 142, proxy_name: "proxy-142", plan_type: "free", group_ids: [2, 3] },
+        { row_kind: "account", id: 41, user_id: "user-aligned", access_token_sha256: tokenHash("token-a"), priority: 1, concurrency: 5, proxy_id: 141, proxy_name: "proxy-141", plan_type: "k12", group_ids: [2, 3] },
+        { row_kind: "account", id: 42, user_id: "user-stale", access_token_sha256: tokenHash("token-b"), priority: 1, concurrency: 10, proxy_id: 142, proxy_name: "proxy-142", plan_type: "free", group_ids: [2, 3] },
         { row_kind: "proxy", id: 141 },
         { row_kind: "proxy", id: 142 },
       ],
@@ -35,7 +38,7 @@ test("skips an aligned account bound to any existing proxy in the matching pool"
   const reads = {
     query: async () => ({
       rows: [
-        { row_kind: "account", id: 79, user_id: "user-repair", access_token_sha256: "", priority: 1, concurrency: 5, proxy_id: 3, proxy_name: "source", plan_type: "plus", group_ids: [2, 3] },
+        { row_kind: "account", id: 79, user_id: "user-repair", access_token_sha256: tokenHash("token"), priority: 1, concurrency: 5, proxy_id: 3, proxy_name: "source", plan_type: "plus", group_ids: [2, 3] },
         { row_kind: "proxy", id: 3 },
       ],
       queueDurationMs: 0, queryDurationMs: 0, totalDurationMs: 0,
@@ -52,6 +55,29 @@ test("skips an aligned account bound to any existing proxy in the matching pool"
   expect(plan.skipped).toEqual([{ index: 1, accountId: 79 }]);
   expect(plan.sourceIndexes).toEqual([]);
   expect((JSON.parse(plan.content) as { accounts: unknown[] }).accounts).toHaveLength(0);
+});
+
+test("reimports the same OAuth user when the access token fingerprint changed", async () => {
+  const reads = {
+    query: async () => ({
+      rows: [
+        { row_kind: "account", id: 127, user_id: "user-recycled", access_token_sha256: tokenHash("old-token"), priority: 1, concurrency: 16, proxy_id: 3, proxy_name: "source", plan_type: "k12", group_ids: [2, 3] },
+        { row_kind: "proxy", id: 3 },
+      ],
+      queueDurationMs: 0, queryDurationMs: 0, totalDurationMs: 0,
+      queryStartedAt: "2026-01-01T00:00:00.000Z", queryCompletedAt: "2026-01-01T00:00:00.000Z",
+      deduplicated: false, cached: false,
+    }),
+  } as unknown as Sub2ApiReadClient;
+  const content = JSON.stringify({ accounts: [
+    { credentials: { chatgpt_user_id: "user-recycled", access_token: "new-token" } },
+  ], proxies: [] });
+  const plan = await accountImportPreflight(content, {
+    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, planType: "k12",
+  }, reads);
+  expect(plan.skipped).toEqual([]);
+  expect(plan.sourceIndexes).toEqual([1]);
+  expect((JSON.parse(plan.content) as { accounts: unknown[] }).accounts).toHaveLength(1);
 });
 
 test("selects the same initial proxy for the same import identity regardless of candidate order", async () => {

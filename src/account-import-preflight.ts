@@ -81,6 +81,11 @@ function baseAligned(row: AccountRow, settings: AccountImportPreflightSettings):
   return true;
 }
 
+function credentialsAligned(row: AccountRow, item: ImportIdentity): boolean {
+  const persistedHash = text(row.access_token_sha256);
+  return !item.accessTokenSha256 || persistedHash === item.accessTokenSha256;
+}
+
 export async function accountImportPreflight(
   content: string,
   settings: AccountImportPreflightSettings,
@@ -165,7 +170,7 @@ export async function accountImportPreflight(
   for (let offset = 0; offset < accounts.length; offset += 1) {
     const item = identities[offset]!;
     const matches = item.userId ? byUser.get(item.userId) ?? [] : byAccess.get(item.accessTokenSha256) ?? [];
-    if (matches.length === 1 && baseAligned(matches[0]!, settings)
+    if (matches.length === 1 && credentialsAligned(matches[0]!, item) && baseAligned(matches[0]!, settings)
       && proxyCandidateIds.includes(integer(matches[0]!.proxy_id) ?? -1)) {
       const match = matches[0]!;
       const existing = { index: offset + 1, accountId: integer(match.id)! };
