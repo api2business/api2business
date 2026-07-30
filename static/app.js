@@ -312,6 +312,19 @@ let priorityHistoryRecords = []
 let priorityHistoryPage = 1
 const priorityHistoryPageSize = 10
 const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
+let cashPage = 1
+let auditPage = 1
+let oauthPage = 1
+let procurementPage = 1
+let procurementBudget = null
+
+function renderPager(prefix, pagination) {
+  const page = Number(pagination?.page ?? 1)
+  const totalPages = Number(pagination?.totalPages ?? 1)
+  $(`#${prefix}-page`).textContent = `${page} / ${totalPages} · ${number(pagination?.total ?? 0)} 条`
+  $(`#${prefix}-prev`).disabled = page <= 1
+  $(`#${prefix}-next`).disabled = page >= totalPages
+}
 
 function signed(value) {
   const numeric = Number(value)
@@ -516,14 +529,7 @@ function renderOperations(ledger, audits) {
   $('#ops-income').textContent = cny(ledger.summary.incomeCny)
   $('#ops-expense').textContent = cny(ledger.summary.expenseCny)
   $('#ops-profit').textContent = cny(ledger.summary.grossProfitCny)
-  const yamlRows = [
-    ...(ledger.yaml.revenues ?? []).map((row) => ({ ...row, direction: 'income' })),
-    ...(ledger.yaml.costs ?? []).map((row) => ({ ...row, direction: 'expense' })),
-  ]
-  const rows = [
-    { source: 'alipay', period: ledger.period, direction: 'income', kind: 'alipay-completed', amountCny: ledger.alipay.revenueCny, description: `${ledger.alipay.completedOrders} 笔已完成订单（已排除管理员测试）`, readOnly: true },
-    ...(ledger.manual ?? []), ...yamlRows,
-  ]
+  const rows = ledger.records ?? []
   $('#cash-body').innerHTML = rows.length ? rows.map((row) => `<tr>
     <td>${row.source === 'yaml' ? 'YAML（只读）' : row.source === 'alipay' ? '支付宝（只读）' : '手工数据库'}</td>
     <td>${escapeHtml(row.occurred_on ?? row.period ?? '—')}</td>
@@ -534,6 +540,7 @@ function renderOperations(ledger, audits) {
     <td>${row.voided_at ? '已作废' : '有效'}</td>
     <td>${row.readOnly || row.voided_at ? '—' : `<button class="text-command cash-void" data-id="${escapeHtml(row.id)}" type="button">作废</button>`}</td>
   </tr>`).join('') : '<tr><td colspan="8" class="empty">暂无经营记录</td></tr>'
+  renderPager('cash', ledger.pagination)
   document.querySelectorAll('.cash-void').forEach((button) => button.addEventListener('click', async () => {
     const reason = window.prompt('请输入作废原因')
     if (!reason?.trim()) return
@@ -547,6 +554,7 @@ function renderOperations(ledger, audits) {
     <td>${escapeHtml(row.operator)}</td><td><code>${escapeHtml(JSON.stringify(row.input_summary))}</code></td>
     <td><code>${escapeHtml(JSON.stringify(row.result_summary))}</code></td>
   </tr>`).join('') : '<tr><td colspan="6" class="empty">暂无操作记录</td></tr>'
+  renderPager('audit', audits.pagination)
 }
 
 function readOperationsSnapshot() {
@@ -559,6 +567,7 @@ function readOperationsSnapshot() {
 }
 
 function writeOperationsSnapshot(ledger, audits) {
+  if (cashPage !== 1 || auditPage !== 1) return
   try {
     localStorage.setItem(operationsSnapshotKey, JSON.stringify({ ledger, audits, refreshedAt: new Date().toISOString() }))
   } catch {
@@ -567,13 +576,13 @@ function writeOperationsSnapshot(ledger, audits) {
 }
 
 async function loadOperations({ showCached = false } = {}) {
-  if (showCached) {
+  if (showCached && cashPage === 1 && auditPage === 1) {
     const cached = readOperationsSnapshot()
     if (cached) renderOperations(cached.ledger, cached.audits)
   }
   const [ledger, audits] = await Promise.all([
-    requestJson('/api/operations/ledger'),
-    requestJson('/api/operations/audits'),
+    requestJson(`/api/operations/ledger?page=${cashPage}`),
+    requestJson(`/api/operations/audits?page=${auditPage}`),
   ])
   renderOperations(ledger, audits)
   writeOperationsSnapshot(ledger, audits)
@@ -596,6 +605,7 @@ function renderOauthCost(data) {
     <td class="usd-cell">${usd(row.apiAmountUsd, 2)}</td><td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td>
     <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
   </tr>`).join('') : '<tr><td colspan="8" class="empty">该运营日没有 OAuth 采购账号</td></tr>'
+  renderPager('oauth', data.pagination)
 }
 
 async function loadOauthCost() {
@@ -604,7 +614,7 @@ async function loadOauthCost() {
   $('#oauth-cost-state').textContent = '正在通过单连接队列核算…'
   try {
     const day = $('#oauth-cost-day').value
-    const data = await requestJson(`/api/operations/oauth-cost?day=${encodeURIComponent(day)}`, {}, 60000)
+    const data = await requestJson(`/api/operations/oauth-cost?day=${encodeURIComponent(day)}&page=${oauthPage}`, {}, 60000)
     renderOauthCost(data)
   } catch (error) {
     $('#oauth-cost-state').textContent = `核算失败：${error instanceof Error ? error.message : String(error)}`
@@ -619,8 +629,15 @@ async function operationsPage() {
   $('#oauth-cost-day').value = operatingDay()
   $('#oauth-cost-form').addEventListener('submit', async (event) => {
     event.preventDefault()
+    oauthPage = 1
     await loadOauthCost()
   })
+  $('#oauth-prev').addEventListener('click', async () => { oauthPage -= 1; await loadOauthCost() })
+  $('#oauth-next').addEventListener('click', async () => { oauthPage += 1; await loadOauthCost() })
+  $('#cash-prev').addEventListener('click', async () => { cashPage -= 1; await loadOperations() })
+  $('#cash-next').addEventListener('click', async () => { cashPage += 1; await loadOperations() })
+  $('#audit-prev').addEventListener('click', async () => { auditPage -= 1; await loadOperations() })
+  $('#audit-next').addEventListener('click', async () => { auditPage += 1; await loadOperations() })
   $('#cash-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     await requestJson('/api/operations/cash', { method: 'POST', body: JSON.stringify({
@@ -634,15 +651,30 @@ async function operationsPage() {
   })
   $('#procurement-form').addEventListener('submit', async (event) => {
     event.preventDefault()
-    const result = await requestJson('/api/operations/procurement', {
-      method: 'POST', body: JSON.stringify({ budgetCny: Number($('#procurement-budget').value) }),
-    }, 90000)
-    $('#procurement-body').innerHTML = result.allocations?.length ? result.allocations.map((row) => `<tr>
-      <td>${escapeHtml(row.billingSite)}</td><td>${cny(row.amountCny)}</td><td>${cny(row.denominationCny)}</td>
-    </tr>`).join('') : `<tr><td colspan="3" class="empty">未分配 ${cny(result.unallocatedCny)}</td></tr>`
+    procurementBudget = Number($('#procurement-budget').value)
+    procurementPage = 1
+    await loadProcurement()
     await loadOperations()
   })
+  $('#procurement-prev').addEventListener('click', async () => { procurementPage -= 1; await loadProcurement() })
+  $('#procurement-next').addEventListener('click', async () => { procurementPage += 1; await loadProcurement() })
   await Promise.all([loadOperations({ showCached: true }), loadOauthCost()])
+}
+
+function renderProcurement(result) {
+  const rows = result.allocations ?? []
+  $('#procurement-body').innerHTML = rows.length ? rows.map((row) => `<tr>
+    <td>${escapeHtml(row.billingSite)}</td><td>${cny(row.amountCny)}</td><td>${cny(row.denominationCny)}</td>
+  </tr>`).join('') : `<tr><td colspan="3" class="empty">未分配 ${cny(result.unallocatedCny)}</td></tr>`
+  renderPager('procurement', result.pagination)
+}
+
+async function loadProcurement() {
+  if (procurementBudget == null) return
+  const result = await requestJson('/api/operations/procurement', {
+    method: 'POST', body: JSON.stringify({ budgetCny: procurementBudget, page: procurementPage }),
+  }, 90000)
+  renderProcurement(result)
 }
 
 async function accountImportPage() {

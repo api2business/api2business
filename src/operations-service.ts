@@ -106,22 +106,34 @@ export class OperationsService {
     return await collectDailyProfitFacts(this.config, this.reads, day, "manual");
   }
 
-  async ledger(period = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 7)) {
+  async ledger(period = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 7), page = 1, pageSize = 10) {
     const yaml = this.yamlLedger();
     const accountImports = readAccountImportCosts(this.config.operations.accountImportLedgerPath)
       .filter((entry) => entry.period === period)
       .map((entry) => ({ ...entry, readOnly: true }));
-    const manual = await this.store.listCash();
-    const active = records(manual).filter((row) => !row.voided_at && String(row.occurred_on).slice(0, 7) === period);
     const alipay = await this.alipay(period);
+    const staticRows = [
+      { source: "alipay", period, direction: "income", kind: "alipay-completed", amountCny: alipay.revenueCny, description: `${alipay.completedOrders} 笔已完成订单（已排除管理员测试）`, readOnly: true },
+      ...yaml.revenues.map((row) => ({ ...row, direction: "income" })),
+      ...yaml.costs.map((row) => ({ ...row, direction: "expense" })),
+    ];
+    const offset = (page - 1) * pageSize;
+    const staticPage = staticRows.slice(offset, offset + pageSize);
+    const manualLimit = pageSize - staticPage.length;
+    const manualOffset = Math.max(0, offset - staticRows.length);
+    const manualPage = manualLimit > 0 ? records(await this.store.listCashPage(manualLimit, manualOffset)) : [];
+    const manualSummary = await this.store.cashSummary(period) as Record<string, unknown>;
+    const manualTotal = Number(manualSummary.total_count ?? 0);
     const incomeCny = yaml.revenues.filter((row) => row.period === period).reduce((sum, row) => sum + money(row.amountCny), 0)
-      + active.filter((row) => row.direction === "income").reduce((sum, row) => sum + money(row.amount_cny), 0);
+      + money(manualSummary.income_cny);
     const expenseCny = yaml.costs.filter((row) => row.period === period).reduce((sum, row) => sum + money(row.amountCny), 0)
-      + active.filter((row) => row.direction === "expense").reduce((sum, row) => sum + money(row.amount_cny), 0)
+      + money(manualSummary.expense_cny)
       + accountImports.reduce((sum, row) => sum + money(row.amountCny), 0);
     const totalIncomeCny = incomeCny + alipay.revenueCny;
     return {
-      ok: true, period, yaml, manual, accountImports, alipay,
+      ok: true, period, accountImports: { count: accountImports.length }, alipay,
+      records: [...staticPage, ...manualPage],
+      pagination: { page, pageSize, total: staticRows.length + manualTotal, totalPages: Math.max(1, Math.ceil((staticRows.length + manualTotal) / pageSize)) },
       exclusions: ["管理员支付宝测试订单", "未完成支付宝订单", "API 流量估值"],
       summary: { incomeCny: totalIncomeCny, expenseCny, grossProfitCny: totalIncomeCny - expenseCny },
     };
@@ -881,7 +893,7 @@ export class OperationsService {
     }
   }
 
-  async procurement(budgetCny: number, operator: string) {
+  async procurement(budgetCny: number, operator: string, page = 1, pageSize = 10) {
     const ranking = await collectRecentCallScoresFromDatabase(
       this.config,
       this.config.monitor.recentCallLimit,
@@ -904,9 +916,17 @@ export class OperationsService {
       remaining -= denomination;
       cursor += 1;
     }
-    const result = { ok: true, budgetCny, allocatedCny: budgetCny - remaining, unallocatedCny: remaining, allocations, deterministic: true, llmCalls: 0 };
-    await this.store.audit("procurement.calculate", "succeeded", operator,
-      { budgetCny }, { allocatedCny: result.allocatedCny, unallocatedCny: remaining, siteCount: new Set(allocations.map((row) => row.billingSite)).size });
+    const total = allocations.length;
+    const result = {
+      ok: true, budgetCny, allocatedCny: budgetCny - remaining, unallocatedCny: remaining,
+      allocations: allocations.slice((page - 1) * pageSize, page * pageSize),
+      pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+      deterministic: true, llmCalls: 0,
+    };
+    if (page === 1) {
+      await this.store.audit("procurement.calculate", "succeeded", operator,
+        { budgetCny }, { allocatedCny: result.allocatedCny, unallocatedCny: remaining, siteCount: new Set(allocations.map((row) => row.billingSite)).size });
+    }
     return result;
   }
 
@@ -980,7 +1000,7 @@ export class OperationsService {
     return await collectAccountImportEconomics(this.config, this.reads, input, "manual");
   }
 
-  async oauthImportEconomics(day: string) {
+  async oauthImportEconomics(day: string, page = 1, pageSize = 10) {
     const yaml = this.yamlLedger();
     const externalCosts = yaml.costs
       .filter((entry) => entry.kind === "acquisition" && entry.occurredOn === day)
@@ -998,8 +1018,11 @@ export class OperationsService {
       .reduce((sum, entry) => sum + money(entry.amountCny), 0);
     const netAcquisitionCostCny = Math.max(0, grossAcquisitionCostCny - procurementRefundCny);
     const apiAmountUsd = Number(total.apiAmountUsd);
+    const groups = Array.isArray(facts.groups) ? facts.groups : [];
     return {
       ...facts,
+      groups: groups.slice((page - 1) * pageSize, page * pageSize),
+      pagination: { page, pageSize, total: groups.length, totalPages: Math.max(1, Math.ceil(groups.length / pageSize)) },
       total: {
         ...total,
         grossAcquisitionCostCny,
@@ -1012,7 +1035,9 @@ export class OperationsService {
     };
   }
 
-  async audits() {
-    return { ok: true, records: await this.store.audits(this.config.operations.auditLimit) };
+  async audits(page = 1, pageSize = 10) {
+    const rows = await this.store.audits(pageSize, (page - 1) * pageSize) as Array<Record<string, unknown>>;
+    const total = rows.length > 0 ? Number(rows[0]?.total_count ?? 0) : await this.store.auditCount();
+    return { ok: true, records: rows, pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } };
   }
 }

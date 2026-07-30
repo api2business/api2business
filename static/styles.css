@@ -194,6 +194,9 @@ button:disabled { cursor: wait; opacity: .48; }
 .oauth-cost-metrics #oauth-cost-output .usd-value { justify-content: flex-start; font-size: 24px; }
 .oauth-cost-table { min-width: 900px; }
 .operations-summary { margin-top: 28px; border-top: 1px solid var(--line); }
+.table-pager { min-height: 40px; display: flex; justify-content: flex-end; align-items: center; gap: 12px; border: 1px solid var(--line); border-top: 0; color: var(--muted); font: 11px/1 var(--mono); }
+.table-pager .text-command { min-width: 68px; color: var(--signal); }
+.table-pager .text-command:disabled { color: var(--muted); }
 
 @media (max-width: 900px) {
   .oauth-cost-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }

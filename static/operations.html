@@ -27,6 +27,7 @@
         <div class="oauth-cost-primary"><span>综合成本</span><strong id="oauth-cost-unit">—</strong><small>人民币 / API 美元</small></div>
       </div>
       <div class="table-wrap"><table class="data-table oauth-cost-table"><thead><tr><th>账号类型</th><th>账号数</th><th>有产出</th><th>采购成本</th><th>API 美元产出</th><th>人民币 / 刀</th><th>请求</th><th>Token</th></tr></thead><tbody id="oauth-cost-body"><tr><td colspan="8" class="empty">正在读取 OAuth 成本</td></tr></tbody></table></div>
+      <div class="table-pager"><button id="oauth-prev" class="text-command" type="button">上一页</button><span id="oauth-page">1 / 1</span><button id="oauth-next" class="text-command" type="button">下一页</button></div>
     </section>
     <section class="metric-strip operations-summary" aria-label="经营总览">
       <div><span>收入</span><strong id="ops-income">—</strong></div>
@@ -45,14 +46,17 @@
         <button class="query-command" type="submit">新增记录</button>
       </form>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>来源</th><th>日期/月</th><th>方向</th><th>类别</th><th>金额</th><th>说明</th><th>状态</th><th>操作</th></tr></thead><tbody id="cash-body"></tbody></table></div>
+      <div class="table-pager"><button id="cash-prev" class="text-command" type="button">上一页</button><span id="cash-page">1 / 1</span><button id="cash-next" class="text-command" type="button">下一页</button></div>
     </section>
     <section class="table-section">
       <div class="table-toolbar"><h2>预算采购建议</h2><form id="procurement-form" class="score-query-controls"><label class="filter-field"><span>预算 CNY</span><input id="procurement-budget" type="number" min="1" step="1" required /></label><button class="query-command" type="submit">计算建议</button></form></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>网站</th><th>金额</th><th>档位</th></tr></thead><tbody id="procurement-body"><tr><td colspan="3" class="empty">输入预算后计算；不调用 LLM</td></tr></tbody></table></div>
+      <div class="table-pager"><button id="procurement-prev" class="text-command" type="button">上一页</button><span id="procurement-page">1 / 1</span><button id="procurement-next" class="text-command" type="button">下一页</button></div>
     </section>
     <section class="table-section">
       <div class="table-toolbar"><h2>操作记录</h2></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>时间</th><th>动作</th><th>状态</th><th>操作人</th><th>输入摘要</th><th>结果摘要</th></tr></thead><tbody id="audit-body"></tbody></table></div>
+      <div class="table-pager"><button id="audit-prev" class="text-command" type="button">上一页</button><span id="audit-page">1 / 1</span><button id="audit-next" class="text-command" type="button">下一页</button></div>
     </section>
   </main>
 </body>

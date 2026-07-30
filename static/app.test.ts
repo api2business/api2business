@@ -75,6 +75,27 @@ test("priority adjustment history is paginated instead of growing without bound"
   expect(html).toContain('id="history-next"');
 });
 
+test("operations tables request fixed server-side pages of ten records", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./operations.html", import.meta.url)).text();
+  const http = await Bun.file(new URL("../src/http.ts", import.meta.url)).text();
+
+  expect(http).toContain("operations.ledger(period, pageNumber(url), 10)");
+  expect(http).toContain("operations.oauthImportEconomics(day, pageNumber(url), 10)");
+  expect(http).toContain("operations.audits(pageNumber(url), 10)");
+  expect(http).toContain("operations.procurement(budget, config.webAuth.username, page, 10)");
+  expect(app).toContain("/api/operations/ledger?page=${cashPage}");
+  expect(app).toContain("/api/operations/audits?page=${auditPage}");
+  expect(app).toContain("&page=${oauthPage}");
+  expect(app).toContain("JSON.stringify({ budgetCny: procurementBudget, page: procurementPage })");
+  expect(app).not.toContain("procurementAllocations");
+  for (const prefix of ["oauth", "cash", "procurement", "audit"]) {
+    expect(html).toContain(`id="${prefix}-prev"`);
+    expect(html).toContain(`id="${prefix}-page"`);
+    expect(html).toContain(`id="${prefix}-next"`);
+  }
+});
+
 test("score table separates Codex and Grok accounts with profile tabs", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();

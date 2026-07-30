@@ -47,6 +47,12 @@ function positiveInteger(value: string | null, fallback: number): number | null 
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function pageNumber(url: URL): number {
+  const page = positiveInteger(url.searchParams.get("page"), 1);
+  if (page === null) throw new Error("page must be a positive integer");
+  return page;
+}
+
 function operationRequest(value: Record<string, unknown>): OperationRequest | null {
   const command = value.command as Record<string, unknown> | undefined;
   if (typeof value.operationId !== "string" || !value.operationId.trim()) return null;
@@ -174,14 +180,15 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/operations/ledger") {
         const period = url.searchParams.get("period") ?? undefined;
         if (period !== undefined && !/^\d{4}-\d{2}$/u.test(period)) return json({ ok: false, error: "period must be YYYY-MM" }, 400);
-        return json(await operations.ledger(period));
+        try { return json(await operations.ledger(period, pageNumber(url), 10)); }
+        catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
       }
       if (request.method === "GET" && url.pathname === "/api/operations/oauth-cost") {
         const day = url.searchParams.get("day");
         if (day === null) return json({ ok: false, error: "day is required" }, 400);
         try {
           parseAccountEconomicsWindow({ day }, config.monitor.timezone);
-          return json(await operations.oauthImportEconomics(day));
+          return json(await operations.oauthImportEconomics(day, pageNumber(url), 10));
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }
@@ -254,9 +261,14 @@ export function createHandler(
         const input = await body(request);
         const budget = Number(input.budgetCny);
         if (!Number.isInteger(budget) || budget <= 0) return json({ ok: false, error: "预算必须为正整数" }, 400);
-        return json(await operations.procurement(budget, config.webAuth.username));
+        const page = positiveInteger(String(input.page ?? "1"), 1);
+        if (page === null) return json({ ok: false, error: "page must be a positive integer" }, 400);
+        return json(await operations.procurement(budget, config.webAuth.username, page, 10));
       }
-      if (request.method === "GET" && url.pathname === "/api/operations/audits") return json(await operations.audits());
+      if (request.method === "GET" && url.pathname === "/api/operations/audits") {
+        try { return json(await operations.audits(pageNumber(url), 10)); }
+        catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
+      }
       if (request.method === "GET" && url.pathname === "/api/admin/read-status") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
         return json(operations.readStatus());

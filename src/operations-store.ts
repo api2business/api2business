@@ -158,11 +158,24 @@ export class OperationsStore {
     return row;
   }
 
-  async listCash() {
+  async cashSummary(period: string) {
+    const [row] = await this.sql`
+      SELECT
+        COUNT(*)::int AS total_count,
+        COALESCE(SUM(amount_cny) FILTER (WHERE direction='income' AND voided_at IS NULL AND to_char(occurred_on, 'YYYY-MM')=${period}), 0) AS income_cny,
+        COALESCE(SUM(amount_cny) FILTER (WHERE direction='expense' AND voided_at IS NULL AND to_char(occurred_on, 'YYYY-MM')=${period}), 0) AS expense_cny
+      FROM apistate_cash_entries
+    `;
+    return row ?? { income_cny: 0, expense_cny: 0 };
+  }
+
+  async listCashPage(limit: number, offset: number) {
     return await this.sql`
       SELECT id, occurred_on, direction, category, amount_cny, description,
-        operator, created_at, voided_at, voided_by, void_reason
-      FROM apistate_cash_entries ORDER BY occurred_on DESC, created_at DESC LIMIT 500
+        operator, created_at, voided_at, voided_by, void_reason,
+        COUNT(*) OVER()::int AS total_count
+      FROM apistate_cash_entries ORDER BY occurred_on DESC, created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
     `;
   }
 
@@ -444,10 +457,16 @@ export class OperationsStore {
     `;
   }
 
-  async audits(limit: number) {
+  async audits(limit: number, offset: number) {
     return await this.sql`
-      SELECT id, action, status, operator, input_summary, result_summary, created_at
-      FROM apistate_operation_audit ORDER BY created_at DESC LIMIT ${limit}
+      SELECT id, action, status, operator, input_summary, result_summary, created_at,
+        COUNT(*) OVER()::int AS total_count
+      FROM apistate_operation_audit ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
     `;
+  }
+
+  async auditCount() {
+    const [row] = await this.sql`SELECT COUNT(*)::int AS total_count FROM apistate_operation_audit`;
+    return Number(row?.total_count ?? 0);
   }
 }
