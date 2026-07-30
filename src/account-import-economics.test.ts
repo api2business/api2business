@@ -6,6 +6,10 @@ import {
 } from "./account-import-economics";
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient, Sub2ApiReadRequest } from "./sub2api-read-executor";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { recordAccountImportCosts } from "./account-import-cost-ledger";
 
 test("validates external acquisition costs", () => {
   expect(normalizeExternalAccountCosts([{ accountId: 98, costCny: 18.8 }]))
@@ -58,4 +62,17 @@ test("reads only plan type from account credentials and never projects secret fi
   expect(accountImportEconomicsQuery).not.toContain("access_token");
   expect(accountImportEconomicsQuery).not.toContain("refresh_token");
   expect(accountImportEconomicsQuery).not.toContain("account.name");
+});
+
+test("projects stable import batches independently of deleted account matches", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "apistate-batch-economics-"));
+  const path = join(directory, "costs.jsonl");
+  try {
+    recordAccountImportCosts({ path, fingerprint: "batch-abc12345", accountIds: [108, 109], unitCostCny: 3.3, planType: "k12", occurredOn: "2026-07-30" });
+    const reads = { query: async () => ({ rows: [], queueDurationMs: 0, queryDurationMs: 0, totalDurationMs: 0, queryStartedAt: "", queryCompletedAt: "", deduplicated: false, cached: false }) } as unknown as Sub2ApiReadClient;
+    const result = await collectAccountImportEconomics({ monitor: { timezone: "Asia/Shanghai" }, operations: { accountImportLedgerPath: path } } as AppConfig, reads, { day: "2026-07-30" });
+    expect(result.batches).toEqual([expect.objectContaining({ batchId: "account-import-batch-batch-abc12345", planType: "k12", accountIds: [108, 109], grossAcquisitionCostCny: 6.6 })]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

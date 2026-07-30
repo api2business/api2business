@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readAccountImportCosts, recordAccountImportCosts } from "./account-import-cost-ledger";
+import { accountImportBatchId, readAccountImportCosts, recordAccountImportCosts } from "./account-import-cost-ledger";
 
 test("records CNY account costs once per stable account id", () => {
   const directory = mkdtempSync(join(tmpdir(), "apistate-cost-ledger-"));
@@ -13,6 +13,7 @@ test("records CNY account costs once per stable account id", () => {
       fingerprint: "abc123",
       accountIds: [102, 101],
       unitCostCny: 18.8,
+      planType: "plus",
       occurredAt: "2026-07-30T16:30:00.000Z",
       occurredOn: "2026-07-31",
     });
@@ -27,8 +28,8 @@ test("records CNY account costs once per stable account id", () => {
     expect(first).toMatchObject({ currency: "CNY", recordedAccountIds: [101, 102], recordedCount: 2, totalCostCny: 37.6 });
     expect(repeated).toMatchObject({ recordedCount: 0, skippedAccountIds: [101, 102], totalCostCny: 0 });
     expect(readAccountImportCosts(path)).toEqual([
-      expect.objectContaining({ accountId: 101, amountCny: 18.8, currency: "CNY", occurredOn: "2026-07-31", period: "2026-07" }),
-      expect.objectContaining({ accountId: 102, amountCny: 18.8, currency: "CNY", occurredOn: "2026-07-31", period: "2026-07" }),
+      expect.objectContaining({ accountId: 101, amountCny: 18.8, currency: "CNY", occurredOn: "2026-07-31", period: "2026-07", batchId: accountImportBatchId("abc123"), planType: "plus" }),
+      expect.objectContaining({ accountId: 102, amountCny: 18.8, currency: "CNY", occurredOn: "2026-07-31", period: "2026-07", batchId: accountImportBatchId("abc123"), planType: "plus" }),
     ]);
   } finally {
     rmSync(directory, { recursive: true, force: true });

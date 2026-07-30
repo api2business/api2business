@@ -1,5 +1,5 @@
 import type { AppConfig } from "./config";
-import { readAccountImportCosts } from "./account-import-cost-ledger";
+import { readAccountImportCosts, type AccountImportCostEntry } from "./account-import-cost-ledger";
 import { parseAccountEconomicsWindow } from "./account-batch-economics";
 import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
 
@@ -83,6 +83,39 @@ function positiveInteger(value: unknown): number | null {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function importBatches(entries: AccountImportCostEntry[]): Row[] {
+  const batches = new Map<string, { batchId: string; fingerprint: string; planType: "k12" | "plus" | null; accountIds: number[]; grossAcquisitionCostCny: number }>();
+  for (const entry of entries) {
+    const existing = batches.get(entry.batchId);
+    if (!existing) {
+      batches.set(entry.batchId, {
+        batchId: entry.batchId,
+        fingerprint: entry.fingerprint,
+        planType: entry.planType,
+        accountIds: [entry.accountId],
+        grossAcquisitionCostCny: entry.amountCny,
+      });
+      continue;
+    }
+    if (existing.fingerprint !== entry.fingerprint) throw new Error(`采购批次 ${entry.batchId} 的 fingerprint 冲突`);
+    if (existing.planType !== null && entry.planType !== null && existing.planType !== entry.planType) {
+      throw new Error(`采购批次 ${entry.batchId} 的账号类型冲突`);
+    }
+    existing.planType ??= entry.planType;
+    existing.accountIds.push(entry.accountId);
+    existing.grossAcquisitionCostCny = rounded(existing.grossAcquisitionCostCny + entry.amountCny, 2);
+  }
+  return [...batches.values()].map((batch) => ({
+    ...batch,
+    accountIds: [...new Set(batch.accountIds)].sort((a, b) => a - b),
+    accountCosts: [...new Set(batch.accountIds)].sort((a, b) => a - b).map((accountId) => {
+      const entry = entries.find((item) => item.batchId === batch.batchId && item.accountId === accountId)!;
+      return { accountId, costCny: entry.amountCny };
+    }),
+    accountCount: new Set(batch.accountIds).size,
+  })).sort((left, right) => left.batchId.localeCompare(right.batchId));
+}
+
 function integerArray(value: unknown): number[] {
   const values = Array.isArray(value)
     ? value
@@ -161,15 +194,15 @@ export async function collectAccountImportEconomics(
 ): Promise<Row> {
   const window = parseAccountEconomicsWindow({ day: input.day }, config.monitor.timezone);
   const externalCosts = normalizeExternalAccountCosts(input.externalCosts);
-  const autoCosts = readAccountImportCosts(config.operations.accountImportLedgerPath)
-    .filter((entry) => entry.occurredOn === input.day)
-    .map((entry) => ({ accountId: entry.accountId, costCny: entry.amountCny }));
+  const autoEntries = readAccountImportCosts(config.operations.accountImportLedgerPath)
+    .filter((entry) => entry.occurredOn === input.day);
+  const autoCosts = autoEntries.map((entry) => ({ accountId: entry.accountId, costCny: entry.amountCny }));
   const merged = mergeCosts(autoCosts, externalCosts);
   if (merged.costs.length === 0) {
     return {
       ok: true, complete: true, mode: "account-import-economics-postgresql", day: input.day, window,
       groups: [], total: { accountCount: 0, matchedAccountCount: 0, usageAccountCount: 0, missingAccountIds: [], requestCount: 0, tokenCount: 0, apiAmountUsd: 0, acquisitionCostCny: 0, cnyPerApiUsd: null, complete: true },
-      ledger: { automaticEntries: 0, externalEntries: 0, duplicateAccountIds: [] }, databaseQueries: 0, valuesPrinted: false,
+      ledger: { automaticEntries: 0, externalEntries: 0, duplicateAccountIds: [], batches: [] }, batches: [], databaseQueries: 0, valuesPrinted: false,
     };
   }
   const startedAt = performance.now();
@@ -204,7 +237,8 @@ export async function collectAccountImportEconomics(
   };
   return {
     ok: true, complete: total.complete, mode: "account-import-economics-postgresql", day: input.day, window, groups, total,
-    ledger: { automaticEntries: autoCosts.length, externalEntries: externalCosts.length, duplicateAccountIds: merged.duplicateAccountIds },
+    ledger: { automaticEntries: autoCosts.length, externalEntries: externalCosts.length, duplicateAccountIds: merged.duplicateAccountIds, batches: importBatches(autoEntries) },
+    batches: importBatches(autoEntries),
     databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs,
     totalDurationMs: rounded(performance.now() - startedAt, 1), cached: query.cached, deduplicated: query.deduplicated, valuesPrinted: false,
   };

@@ -11,6 +11,8 @@ export interface AccountImportCostEntry {
   occurredOn: string;
   period: string;
   fingerprint: string;
+  batchId: string;
+  planType: "k12" | "plus" | null;
   accountId: number;
   unitCostCny: number;
   amountCny: number;
@@ -22,6 +24,10 @@ function money(value: number): number {
 
 function entryId(accountId: number): string {
   return `account-import-${createHash("sha256").update(String(accountId)).digest("hex").slice(0, 16)}`;
+}
+
+export function accountImportBatchId(fingerprint: string): string {
+  return `account-import-batch-${fingerprint.slice(0, 24)}`;
 }
 
 function parseEntry(value: unknown, line: number): AccountImportCostEntry {
@@ -38,7 +44,13 @@ function parseEntry(value: unknown, line: number): AccountImportCostEntry {
     || !Number.isFinite(row.amountCny) || Number(row.amountCny) <= 0) {
     throw new Error(`账号导入成本账本第 ${line} 行字段无效`);
   }
-  return row as unknown as AccountImportCostEntry;
+  const fingerprint = row.fingerprint as string;
+  const planType = row.planType === "k12" || row.planType === "plus" ? row.planType : null;
+  return {
+    ...row,
+    batchId: typeof row.batchId === "string" && row.batchId ? row.batchId : accountImportBatchId(fingerprint),
+    planType,
+  } as unknown as AccountImportCostEntry;
 }
 
 export function readAccountImportCosts(path: string): AccountImportCostEntry[] {
@@ -69,6 +81,7 @@ export function recordAccountImportCosts(input: {
   fingerprint: string;
   accountIds: number[];
   unitCostCny: number;
+  planType?: "k12" | "plus";
   occurredAt?: string;
   occurredOn: string;
 }) {
@@ -90,6 +103,8 @@ export function recordAccountImportCosts(input: {
     occurredOn,
     period: occurredOn.slice(0, 7),
     fingerprint: input.fingerprint,
+    batchId: accountImportBatchId(input.fingerprint),
+    planType: input.planType ?? null,
     accountId,
     unitCostCny,
     amountCny: unitCostCny,

@@ -186,6 +186,7 @@ export class AccountImportService {
           fingerprint: job.fingerprint,
           accountIds: createdIds,
           unitCostCny: job.settings.unitCostCny,
+          planType: job.settings.planType,
           occurredOn: new Date().toLocaleDateString("sv-SE", { timeZone: this.config.monitor.timezone }),
         });
         const accounting = job.accounting;
