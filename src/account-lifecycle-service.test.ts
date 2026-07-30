@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { AccountLifecycleService, accountLifecycleCandidateQuery } from "./account-lifecycle-service";
+import { AccountLifecycleService, accountLifecycleCandidateQuery, lifecycleRuntimeResult } from "./account-lifecycle-service";
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -19,4 +19,10 @@ test("candidate query projects lifecycle facts without OAuth credentials", () =>
   expect(accountLifecycleCandidateQuery).toContain("account.deleted_at IS NULL");
   expect(accountLifecycleCandidateQuery).not.toContain("access_token");
   expect(accountLifecycleCandidateQuery).not.toContain("refresh_token");
+});
+
+test("unwraps the production UniDesk CLI data.runtime envelope", () => {
+  const runtime = { tests: [{ accountId: 99, classification: "dead" }], summary: { alive: 0, dead: 1, unknown: 0 } };
+  expect(lifecycleRuntimeResult({ ok: true, data: { runtime } })).toEqual(runtime);
+  expect(lifecycleRuntimeResult({ ok: true, runtime })).toEqual(runtime);
 });

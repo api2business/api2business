@@ -70,6 +70,13 @@ function safeMessage(value: string): string {
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/gu, "[REDACTED]").slice(0, 500);
 }
 
+export function lifecycleRuntimeResult(output: Row): Row {
+  const data = output.data && typeof output.data === "object" ? output.data as Row : null;
+  if (data?.runtime && typeof data.runtime === "object") return data.runtime as Row;
+  if (output.runtime && typeof output.runtime === "object") return output.runtime as Row;
+  return output;
+}
+
 export class AccountLifecycleService {
   private jobs = new Map<string, LifecycleJob>();
 
@@ -167,7 +174,7 @@ export class AccountLifecycleService {
         "platform-infra", "sub2api", "codex-pool", "runtime", "test", "--target", this.config.monitor.target,
         "--accounts", accountIds.join(","), "--model", job.settings.model, "--json", ...(job.settings.confirm ? ["--confirm"] : []),
       ], this.config.operations.accountLifecycle.testTimeoutMs);
-      const runtime = (output.runtime && typeof output.runtime === "object" ? output.runtime : output) as Row;
+      const runtime = lifecycleRuntimeResult(output);
       const tests = Array.isArray(runtime.tests) ? runtime.tests : [];
       const summary = runtime.summary && typeof runtime.summary === "object" ? runtime.summary as Row : { alive: 0, dead: 0, unknown: 0 };
       job.result = { tests, summary, model: job.settings.model, mode: runtime.mode, valuesPrinted: false };
