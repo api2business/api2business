@@ -201,6 +201,7 @@ export async function collectAccountImportEconomics(
   if (merged.costs.length === 0) {
     return {
       ok: true, complete: true, mode: "account-import-economics-postgresql", day: input.day, window,
+      usageScope: "selected-account-ids-including-deleted",
       groups: [], total: { accountCount: 0, matchedAccountCount: 0, usageAccountCount: 0, missingAccountIds: [], requestCount: 0, tokenCount: 0, apiAmountUsd: 0, acquisitionCostCny: 0, cnyPerApiUsd: null, complete: true },
       ledger: { automaticEntries: 0, externalEntries: 0, duplicateAccountIds: [], batches: [] }, batches: [], databaseQueries: 0, valuesPrinted: false,
     };
@@ -236,7 +237,8 @@ export async function collectAccountImportEconomics(
     complete: groups.every((group) => group.complete),
   };
   return {
-    ok: true, complete: total.complete, mode: "account-import-economics-postgresql", day: input.day, window, groups, total,
+    ok: true, complete: total.complete, mode: "account-import-economics-postgresql", day: input.day, window,
+    usageScope: "selected-account-ids-including-deleted", groups, total,
     ledger: { automaticEntries: autoCosts.length, externalEntries: externalCosts.length, duplicateAccountIds: merged.duplicateAccountIds, batches: importBatches(autoEntries) },
     batches: importBatches(autoEntries),
     databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs,
