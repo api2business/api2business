@@ -18,7 +18,10 @@ export interface AccountImportEconomicsInput {
 const importEconomicsSql = `
 WITH cost_input AS (
   SELECT account_id, cost_cny
-  FROM jsonb_to_recordset($1::jsonb) AS item(account_id bigint, cost_cny numeric)
+  FROM unnest(
+    string_to_array($1::text, ',')::bigint[],
+    string_to_array($2::text, ',')::numeric[]
+  ) AS item(account_id, cost_cny)
 ), account_scope AS (
   SELECT
     cost.account_id,
@@ -42,8 +45,8 @@ WITH cost_input AS (
     MAX(usage.created_at) AS last_used_at
   FROM usage_logs usage
   JOIN account_scope scope ON scope.account_id = usage.account_id AND scope.matched
-  WHERE usage.created_at >= $2::timestamptz
-    AND usage.created_at < $3::timestamptz
+  WHERE usage.created_at >= $3::timestamptz
+    AND usage.created_at < $4::timestamptz
   GROUP BY usage.account_id
 )
 SELECT
@@ -174,7 +177,12 @@ export async function collectAccountImportEconomics(
     key: JSON.stringify(["accounts.import-economics", input.day, merged.costs]),
     kind: "accounts.import-economics",
     sql: importEconomicsSql,
-    parameters: [JSON.stringify(merged.costs.map((item) => ({ account_id: item.accountId, cost_cny: item.costCny }))), window.startUtc, window.endUtc],
+    parameters: [
+      merged.costs.map((item) => item.accountId).join(","),
+      merged.costs.map((item) => item.costCny).join(","),
+      window.startUtc,
+      window.endUtc,
+    ],
     priority,
     cacheMode: "bypass-cache",
   });

@@ -49,11 +49,12 @@ test("aggregates plan types and total economics in one queued query", async () =
     cnyPerApiUsd: 0.276228, requestCount: 1322, tokenCount: 9348121,
   }));
   expect(request?.kind).toBe("accounts.import-economics");
-  expect(request?.parameters).toHaveLength(3);
+  expect(request?.parameters).toHaveLength(4);
 });
 
 test("reads only plan type from account credentials and never projects secret fields", () => {
   expect(accountImportEconomicsQuery).toContain("credentials->>'plan_type'");
+  expect(accountImportEconomicsQuery).toContain("string_to_array($1::text, ',')::bigint[]");
   expect(accountImportEconomicsQuery).not.toContain("access_token");
   expect(accountImportEconomicsQuery).not.toContain("refresh_token");
   expect(accountImportEconomicsQuery).not.toContain("account.name");
