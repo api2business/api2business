@@ -212,7 +212,7 @@ export class AccountLifecycleService {
       if (tests.length !== accountIds.length || classified !== accountIds.length) {
         throw new Error(`OAuth 检测结果不完整：候选 ${accountIds.length}，结果 ${tests.length}，分类 ${classified}`);
       }
-      job.result = { tests, summary, model: job.settings.model, mode: runtime.mode, valuesPrinted: false };
+      job.result = { tests, summary, model: job.settings.model, mode: job.settings.confirm ? "confirmed" : "dry-run", valuesPrinted: false };
       job.state = "succeeded";
       this.log(job, "test", "done", `检测完成：存活 ${number(summary.alive)}，死亡 ${number(summary.dead)}，不确定 ${number(summary.unknown)}`);
     } catch (error) {
