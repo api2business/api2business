@@ -206,7 +206,8 @@ button:disabled { cursor: wait; opacity: .48; }
 .json-field textarea:focus { border-color: var(--signal); }
 .import-settings { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 18px; }
 .import-settings label { color: var(--muted); font-size: 11px; }
-.import-settings input[type="number"] { width: 100%; height: 38px; margin-top: 7px; border: 1px solid var(--line); border-radius: 3px; padding: 0 10px; background: var(--surface); color: var(--paper); }
+.import-settings input[type="number"], .import-settings select { width: 100%; height: 38px; margin-top: 7px; border: 1px solid var(--line); border-radius: 3px; padding: 0 10px; background: var(--surface); color: var(--paper); }
+.import-settings input[type="number"]:focus, .import-settings select:focus { border-color: var(--signal); outline: 0; }
 .import-settings .toggle-field { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; color: var(--paper); }
 .group-picker { margin: 18px 0; border: 1px solid var(--line); padding: 12px; }
 .group-picker legend { color: var(--muted); font-size: 11px; }
