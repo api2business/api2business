@@ -1,6 +1,6 @@
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import type { AppConfig, NativeServiceId } from "./config";
 import { readSecret } from "./secrets";
 
@@ -16,6 +16,9 @@ function composeArgs(config: AppConfig, action: string, component?: NativeServic
 
 function composeRun(config: AppConfig, action: string, component?: NativeServiceId, tail = 40): Record<string, unknown> {
   if (action === "up") {
+    const ledgerDirectory = dirname(config.operations.accountImportLedgerPath);
+    mkdirSync(ledgerDirectory, { recursive: true, mode: 0o700 });
+    chmodSync(ledgerDirectory, 0o700);
     const envPath = resolve(config.rootDirectory, config.runtime.native.composeEnvFile);
     mkdirSync(resolve(envPath, ".."), { recursive: true, mode: 0o700 });
     const lines = Object.entries(config.runtime.native.env).map(([key, ref]) => `${key}=${readSecret(config, ref).replace(/\\/gu, "\\\\").replace(/\n/gu, "\\n")}`);

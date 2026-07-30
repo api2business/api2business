@@ -110,7 +110,10 @@ export function createHandler(
       if (request.method === "POST" && url.pathname === "/api/account-import/jobs") {
         const input = await body(request) as unknown as AccountImportRequest;
         if (typeof input.content !== "string" || typeof input.shadowProxy !== "boolean" || typeof input.confirm !== "boolean"
-          || !Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0) return json({ ok: false, error: "导入参数不完整" }, 400);
+          || !Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0
+          || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
+          return json({ ok: false, error: "账号单价必须为正数人民币，最多两位小数" }, 400);
+        }
         return json({ ok: true, job: imports.submit(input) }, 202);
       }
       if (request.method === "GET" && url.pathname.startsWith("/api/account-import/jobs/")) {
