@@ -57,6 +57,31 @@ function money(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+export function applyPlanTypeRefunds(
+  groups: Array<Record<string, unknown>>,
+  refunds: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const refundsByPlanType = new Map<string, number>();
+  for (const refund of refunds) {
+    const planType = String(refund.planType ?? "").toLowerCase();
+    refundsByPlanType.set(planType, (refundsByPlanType.get(planType) ?? 0) + money(refund.amountCny));
+  }
+  return groups.map((group) => {
+    const grossCost = money(group.acquisitionCostCny);
+    const refund = refundsByPlanType.get(String(group.planType ?? "").toLowerCase()) ?? 0;
+    const netCost = Math.max(0, grossCost - refund);
+    const apiAmountUsd = Number(group.apiAmountUsd);
+    return {
+      ...group,
+      grossAcquisitionCostCny: grossCost,
+      procurementRefundCny: refund,
+      netAcquisitionCostCny: netCost,
+      acquisitionCostCny: netCost,
+      cnyPerApiUsd: apiAmountUsd > 0 ? netCost / apiAmountUsd : null,
+    };
+  });
+}
+
 function object(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -1013,12 +1038,13 @@ export class OperationsService {
     );
     const total = facts.total as Record<string, unknown>;
     const grossAcquisitionCostCny = money(total.acquisitionCostCny);
-    const procurementRefundCny = yaml.revenues
-      .filter((entry) => entry.kind === "procurement-refund" && entry.occurredOn === day)
+    const refunds = yaml.revenues
+      .filter((entry) => entry.kind === "procurement-refund" && entry.occurredOn === day);
+    const procurementRefundCny = refunds
       .reduce((sum, entry) => sum + money(entry.amountCny), 0);
     const netAcquisitionCostCny = Math.max(0, grossAcquisitionCostCny - procurementRefundCny);
     const apiAmountUsd = Number(total.apiAmountUsd);
-    const groups = Array.isArray(facts.groups) ? facts.groups : [];
+    const groups = applyPlanTypeRefunds(Array.isArray(facts.groups) ? facts.groups : [], refunds);
     return {
       ...facts,
       groups: groups.slice((page - 1) * pageSize, page * pageSize),

@@ -90,6 +90,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .usd-point, .usd-fraction { color: var(--muted); }
 .usd-fraction { font-weight: 550; }
 .usd-value.is-empty { display: inline-block; color: var(--muted); text-align: right; }
+.cost-breakdown { display: block; margin-top: .25rem; color: var(--muted); white-space: nowrap; }
 .account-cell { min-width: 230px; }
 .account-cell b { display: block; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
 .account-cell small { display: block; color: var(--muted); margin-top: 4px; font: 10px/1 var(--mono); }

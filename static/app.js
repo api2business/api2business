@@ -601,7 +601,7 @@ function renderOauthCost(data) {
   const labels = { k12: 'K12', plus: 'Plus', free: 'Free' }
   $('#oauth-cost-body').innerHTML = data.groups?.length ? data.groups.map((row) => `<tr>
     <td><b>${escapeHtml(labels[row.planType] ?? row.planType)}</b></td><td>${number(row.accountCount)}</td>
-    <td>${number(row.usageAccountCount)}</td><td>${cny(row.acquisitionCostCny)}</td>
+    <td>${number(row.usageAccountCount)}</td><td>${cny(row.netAcquisitionCostCny)}<small class="cost-breakdown">毛 ${cny(row.grossAcquisitionCostCny)} · 退款 ${cny(row.procurementRefundCny)}</small></td>
     <td class="usd-cell">${usd(row.apiAmountUsd, 2)}</td><td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td>
     <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
   </tr>`).join('') : '<tr><td colspan="8" class="empty">该运营日没有 OAuth 采购账号</td></tr>'

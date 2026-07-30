@@ -1,10 +1,33 @@
 import { expect, test } from "bun:test";
 import type { AppConfig } from "./config";
-import { OperationsService } from "./operations-service";
+import { applyPlanTypeRefunds, OperationsService } from "./operations-service";
 import type { OperationsStore } from "./operations-store";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 const unusedReads = {} as Sub2ApiReadClient;
+
+test("plan type refunds make group weighted cost equal the net total", () => {
+  const groups = applyPlanTypeRefunds([
+    { planType: "k12", acquisitionCostCny: 148.6, apiAmountUsd: 520.6944195 },
+    { planType: "plus", acquisitionCostCny: 102.8, apiAmountUsd: 601.3187743 },
+  ], [
+    { planType: "k12", amountCny: 33 },
+    { planType: "k12", amountCny: 27 },
+  ]);
+  expect(groups[0]).toMatchObject({
+    grossAcquisitionCostCny: 148.6,
+    procurementRefundCny: 60,
+    netAcquisitionCostCny: 88.6,
+  });
+  expect(groups[1]).toMatchObject({
+    grossAcquisitionCostCny: 102.8,
+    procurementRefundCny: 0,
+    netAcquisitionCostCny: 102.8,
+  });
+  const output = groups.reduce((sum, group) => sum + Number(group.apiAmountUsd), 0);
+  const weighted = groups.reduce((sum, group) => sum + Number(group.apiAmountUsd) * Number(group.cnyPerApiUsd), 0) / output;
+  expect(weighted).toBeCloseTo(191.4 / output, 12);
+});
 
 const automationSafety = {
   maximumScoreQueryDurationMs: 3000,
