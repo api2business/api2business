@@ -70,6 +70,13 @@ function safeMessage(value: string): string {
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/gu, "[REDACTED]").slice(0, 500);
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try { return JSON.stringify(error); }
+  catch { return String(error); }
+}
+
 export function lifecycleRuntimeResult(output: Row): Row {
   const queue: Array<{ value: Row; depth: number }> = [{ value: output, depth: 0 }];
   while (queue.length > 0) {
@@ -242,18 +249,25 @@ export class AccountLifecycleService {
         detectionJobId: job.id, detectionFingerprint: job.fingerprint!,
       });
       this.log(job, "accounting", accounting.mutation ? "recorded" : "skipped", `批次结算已记账 ${expectedIds.length} 个账号`);
-      const deletion = await this.runCli([
-        "platform-infra", "sub2api", "codex-pool", "runtime", "delete", "--target", this.config.monitor.target,
-        "--kind", "account-delete", "--accounts", expectedIds.join(","), "--confirm", "--json",
-      ], this.config.operations.accountLifecycle.deleteTimeoutMs);
+      let deletion: Row | null = null;
+      let deletionError: string | null = null;
+      try {
+        deletion = await this.runCli([
+          "platform-infra", "sub2api", "codex-pool", "runtime", "delete", "--target", this.config.monitor.target,
+          "--kind", "account-delete", "--accounts", expectedIds.join(","), "--confirm", "--json",
+        ], this.config.operations.accountLifecycle.deleteTimeoutMs);
+      } catch (error) {
+        deletionError = safeMessage(errorMessage(error));
+        this.log(job, "deletion", "verify", `删除命令结果回收失败，转入终态回读：${deletionError}`);
+      }
       const verified = await this.facts(job.settings.day);
       const remaining = verified.filter((row) => expectedIds.includes(number(row.accountId)) && row.exists === true).map((row) => row.accountId);
-      job.settlement = { accounting, deletion, remainingAccountIds: remaining, valuesPrinted: false };
-      if (remaining.length > 0) throw new Error(`删除回读仍有 ${remaining.length} 个账号存在`);
+      job.settlement = { accounting, deletion, deletionError, remainingAccountIds: remaining, valuesPrinted: false };
+      if (remaining.length > 0) throw new Error(`删除回读仍有 ${remaining.length} 个账号存在${deletionError ? `；命令错误：${deletionError}` : ""}`);
       job.state = "settled"; job.error = null; job.completedAt = new Date().toISOString();
       this.log(job, "verification", "done", `结算与删除完成，回读 ${expectedIds.length}/${expectedIds.length} 已删除`);
     } catch (error) {
-      job.state = "failed"; job.error = safeMessage(error instanceof Error ? error.message : String(error));
+      job.state = "failed"; job.error = safeMessage(errorMessage(error));
       job.completedAt = new Date().toISOString(); this.log(job, "settlement", "failed", job.error);
     }
   }
