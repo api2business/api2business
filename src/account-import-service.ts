@@ -144,7 +144,7 @@ export class AccountImportService {
       for (const skipped of plan.skipped) {
         this.log(job, "account", "skipped", `stage=account state=skipped index=${skipped.index}/${job.accountCount} account-id=${skipped.accountId}`);
       }
-      this.log(job, "proxy", "planned", `代理池候选 ${plan.proxyCandidateIds.length} 个，将为每个新建或更新账号独立随机分配`);
+      this.log(job, "proxy", "planned", `代理池候选 ${plan.proxyCandidateIds.length} 个，将为每个新建账号独立随机分配`);
       if (plan.sourceIndexes.length === 0) {
         job.result = completedWithoutWrites(job, plan);
         job.state = "succeeded";
@@ -156,7 +156,7 @@ export class AccountImportService {
         "--file", file, "--target", this.config.monitor.target, "--priority", String(job.settings.priority),
         "--capacity", String(job.settings.capacity), "--groups", job.settings.groupIds.join(","),
         "--source-proxy-id", String(job.settings.sourceProxyId), "--proxy-id", String(plan.initialProxyId),
-        "--proxy-pool-ids", plan.proxyCandidateIds.join(","), "--json"];
+        "--proxy-pool-ids", plan.proxyCandidateIds.join(","), "--existing-account-policy", "create", "--json"];
       if (job.settings.confirm) args.push("--confirm");
       const child = Bun.spawn([this.config.monitor.cli.executable, ...args], { cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env });
       const stderrTask = this.captureProgress(job, child.stderr, plan);
