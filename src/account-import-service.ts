@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "./config";
@@ -22,6 +22,7 @@ interface ImportLog { timestamp: string; stage: string; state: string; message: 
 interface ImportJob {
   id: string; state: "queued" | "running" | "succeeded" | "failed"; createdAt: string;
   completedAt: string | null; fingerprint: string; accountCount: number; settings: Omit<AccountImportRequest, "content">;
+  inputArchive: { stored: true; fileName: string };
   logs: ImportLog[]; result: Record<string, unknown> | null; accounting: Record<string, unknown> | null; error: string | null;
 }
 
@@ -94,6 +95,16 @@ export function importFailure(output: Record<string, unknown>): string {
   return "runtime 导入失败，但未返回可识别的错误原因";
 }
 
+export function archiveAccountImportContent(directory: string, jobId: string, content: string): string {
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  chmodSync(directory, 0o700);
+  const fileName = `${jobId}.json`;
+  const path = join(directory, fileName);
+  writeFileSync(path, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  chmodSync(path, 0o600);
+  return fileName;
+}
+
 export class AccountImportService {
   private jobs = new Map<string, ImportJob>();
   constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
@@ -108,8 +119,10 @@ export class AccountImportService {
     validate(input);
     const parsed = parsePayload(input.content);
     const id = randomUUID();
+    const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, input.content);
     const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null, ...parsed,
       settings: { priority: input.priority, capacity: input.capacity, groupIds: [...new Set(input.groupIds)], sourceProxyId: input.sourceProxyId, unitCostCny: input.unitCostCny, confirm: input.confirm },
+      inputArchive: { stored: true, fileName: archiveFileName },
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);
     while (this.jobs.size > 20) this.jobs.delete(this.jobs.keys().next().value!);

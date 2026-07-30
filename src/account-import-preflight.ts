@@ -34,6 +34,11 @@ export interface AccountImportPreflightPlan {
   proxyCandidateIds: number[];
 }
 
+function deterministicProxyId(identity: string, candidateIds: number[]): number {
+  const offset = Number(BigInt(`0x${identity.slice(0, 16)}`) % BigInt(candidateIds.length));
+  return candidateIds[offset]!;
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
@@ -83,7 +88,13 @@ export async function accountImportPreflight(
   const identities = accounts.map(identity);
   const userIds = [...new Set(identities.map((item) => item.userId).filter(Boolean))].sort();
   const accessHashes = [...new Set(identities.map((item) => item.accessTokenSha256).filter(Boolean))].sort();
-  const key = createHash("sha256").update(JSON.stringify({ userIds, accessHashes, settings })).digest("hex");
+  const normalizedSettings = {
+    priority: settings.priority,
+    capacity: settings.capacity,
+    groupIds: [...new Set(settings.groupIds)].sort((a, b) => a - b),
+    sourceProxyId: settings.sourceProxyId,
+  };
+  const key = createHash("sha256").update(JSON.stringify({ userIds, accessHashes, settings: normalizedSettings })).digest("hex");
   const result = await reads.query<AccountRow>({
     key: `account-import-preflight:${key}`,
     kind: "account-import-preflight",
@@ -132,9 +143,9 @@ export async function accountImportPreflight(
     parameters: [userIds.join(","), accessHashes.join(","), settings.sourceProxyId],
   });
   const proxyCandidateIds = result.rows.filter((row) => row.row_kind === "proxy")
-    .map((row) => integer(row.id)).filter((id): id is number => id !== null);
+    .map((row) => integer(row.id)).filter((id): id is number => id !== null)
+    .sort((a, b) => a - b);
   if (proxyCandidateIds.length === 0) throw new Error("代理池中没有与基准代理相同 host/port 的可用代理");
-  const initialProxyId = proxyCandidateIds[Math.floor(Math.random() * proxyCandidateIds.length)]!;
   const byUser = new Map<string, AccountRow[]>();
   const byAccess = new Map<string, AccountRow[]>();
   for (const row of result.rows.filter((item) => item.row_kind === "account")) {
@@ -159,11 +170,19 @@ export async function accountImportPreflight(
     remaining.push(accounts[offset]);
     sourceIndexes.push(offset + 1);
   }
+  const filteredContent = JSON.stringify({ ...payload, accounts: remaining });
+  const fingerprint = createHash("sha256").update(filteredContent).digest("hex").slice(0, 16);
+  const requestIdentity = createHash("sha256").update(JSON.stringify({
+    fingerprint,
+    groupIds: normalizedSettings.groupIds,
+    priority: settings.priority,
+    capacity: settings.capacity,
+  })).digest("hex").slice(0, 24);
   return {
-    content: JSON.stringify({ ...payload, accounts: remaining }),
+    content: filteredContent,
     sourceIndexes,
     skipped,
-    initialProxyId,
+    initialProxyId: deterministicProxyId(requestIdentity, proxyCandidateIds),
     proxyCandidateIds,
   };
 }

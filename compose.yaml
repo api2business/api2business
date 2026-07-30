@@ -7,6 +7,7 @@ services:
     volumes:
       - /workspace/unidesk:/workspace/unidesk:ro
       - /root/apistate/.state/ledger:/root/apistate/.state/ledger
+      - /root/apistate/.state/account-imports:/root/apistate/.state/account-imports
       - /opt/unidesk/platform-infra/sub2api-nc01:/opt/unidesk/platform-infra/sub2api-nc01:ro
       - /root/.unidesk/.state/secrets/platform-infra/sub2api.env:/root/.unidesk/.state/secrets/platform-infra/sub2api.env:ro
     command: ["bun", "src/api.ts", "--config", "config/sub2rank.yaml", "--runtime", "compose"]

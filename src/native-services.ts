@@ -19,6 +19,8 @@ function composeRun(config: AppConfig, action: string, component?: NativeService
     const ledgerDirectory = dirname(config.operations.accountImportLedgerPath);
     mkdirSync(ledgerDirectory, { recursive: true, mode: 0o700 });
     chmodSync(ledgerDirectory, 0o700);
+    mkdirSync(config.operations.accountImportArchiveDirectory, { recursive: true, mode: 0o700 });
+    chmodSync(config.operations.accountImportArchiveDirectory, 0o700);
     const envPath = resolve(config.rootDirectory, config.runtime.native.composeEnvFile);
     mkdirSync(resolve(envPath, ".."), { recursive: true, mode: 0o700 });
     const lines = Object.entries(config.runtime.native.env).map(([key, ref]) => `${key}=${readSecret(config, ref).replace(/\\/gu, "\\\\").replace(/\n/gu, "\\n")}`);

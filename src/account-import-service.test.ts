@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { AccountImportService, importFailure } from "./account-import-service";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AccountImportService, archiveAccountImportContent, importFailure } from "./account-import-service";
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -31,4 +34,15 @@ test("projects partial import failures with indexes and redaction", () => {
 test("redacts upstream user identifiers from database errors", () => {
   expect(importFailure({ ok: false, error: "lookup failed for user-sensitive-id" }))
     .toBe("lookup failed for [REDACTED]");
+});
+
+test("archives submitted JSON in the local state directory with owner-only permissions", () => {
+  const directory = join(mkdtempSync(join(tmpdir(), "apistate-import-archive-")), "account-imports");
+  const content = JSON.stringify({ accounts: [], proxies: [] });
+  const fileName = archiveAccountImportContent(directory, "job-fixture", content);
+  const path = join(directory, fileName);
+  expect(fileName).toBe("job-fixture.json");
+  expect(readFileSync(path, "utf8")).toBe(content);
+  expect(statSync(directory).mode & 0o777).toBe(0o700);
+  expect(statSync(path).mode & 0o777).toBe(0o600);
 });

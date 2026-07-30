@@ -52,3 +52,24 @@ test("skips an aligned account bound to any existing proxy in the matching pool"
   expect(plan.sourceIndexes).toEqual([]);
   expect((JSON.parse(plan.content) as { accounts: unknown[] }).accounts).toHaveLength(0);
 });
+
+test("selects the same initial proxy for the same import identity regardless of candidate order", async () => {
+  const reads = (proxyIds: number[]) => ({
+    query: async () => ({
+      rows: proxyIds.map((id) => ({ row_kind: "proxy", id })),
+      queueDurationMs: 0, queryDurationMs: 0, totalDurationMs: 0,
+      queryStartedAt: "2026-01-01T00:00:00.000Z", queryCompletedAt: "2026-01-01T00:00:00.000Z",
+      deduplicated: false, cached: false,
+    }),
+  }) as unknown as Sub2ApiReadClient;
+  const content = JSON.stringify({ accounts: [
+    { credentials: { chatgpt_user_id: "user-new", access_token: "token" } },
+  ], proxies: [] });
+  const settings = { priority: 1, capacity: 16, groupIds: [3, 2], sourceProxyId: 3 };
+  const first = await accountImportPreflight(content, settings, reads([31, 3, 19]));
+  const repeated = await accountImportPreflight(content, { ...settings, groupIds: [2, 3] }, reads([19, 31, 3]));
+  expect(first.proxyCandidateIds).toEqual([3, 19, 31]);
+  expect(repeated.proxyCandidateIds).toEqual(first.proxyCandidateIds);
+  expect(repeated.initialProxyId).toBe(first.initialProxyId);
+  expect(first.proxyCandidateIds).toContain(first.initialProxyId);
+});
