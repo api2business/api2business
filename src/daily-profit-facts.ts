@@ -132,10 +132,18 @@ function decimal(value: unknown): number {
 
 export function parseCompletedProfitDay(day: string, timezone: string, nowMillis = Date.now()) {
   const window = parseAlipayRevenueWindow({ day, period: null }, timezone);
-  if (DateTime.fromISO(window.endUtc).toMillis() > nowMillis) {
-    throw new Error("--day must be a completed natural day");
-  }
-  return window;
+  const startMillis = DateTime.fromISO(window.startUtc).toMillis();
+  const endMillis = DateTime.fromISO(window.endUtc).toMillis();
+  if (startMillis > nowMillis) throw new Error("--day cannot be in the future");
+  if (endMillis <= nowMillis) return { ...window, complete: true, asOf: window.endUtc };
+  const asOf = DateTime.fromMillis(nowMillis, { zone: "utc" });
+  return {
+    ...window,
+    endUtc: asOf.toISO()!,
+    endLocal: asOf.setZone(timezone).toISO()!,
+    complete: false,
+    asOf: asOf.toISO()!,
+  };
 }
 
 export async function collectDailyProfitFacts(
@@ -164,6 +172,8 @@ export async function collectDailyProfitFacts(
     mode: "daily-profit-facts-postgresql",
     selector: day,
     window,
+    dayComplete: window.complete,
+    asOf: window.asOf,
     alipay: {
       completedOrders: integer(row.completed_orders),
       revenueCny: Math.round(number(row.revenue_cny) * 100) / 100,

@@ -34,9 +34,17 @@ test("reconstructs opening and closing positive balances in one uncached query",
   });
 });
 
-test("rejects a natural day that has not ended", () => {
-  expect(() => parseCompletedProfitDay("2026-07-29", "Asia/Shanghai", DateTime.fromISO("2026-07-29T12:00:00+08:00").toMillis()))
-    .toThrow("--day must be a completed natural day");
+test("clamps the current natural day to an intraday as-of window", () => {
+  const now = DateTime.fromISO("2026-07-29T12:00:00+08:00");
+  const window = parseCompletedProfitDay("2026-07-29", "Asia/Shanghai", now.toMillis());
+  expect(window.complete).toBe(false);
+  expect(window.endUtc).toBe(now.toUTC().toISO()!);
+  expect(window.endLocal).toBe("2026-07-29T12:00:00.000+08:00");
+});
+
+test("rejects a future natural day", () => {
+  expect(() => parseCompletedProfitDay("2026-07-30", "Asia/Shanghai", DateTime.fromISO("2026-07-29T12:00:00+08:00").toMillis()))
+    .toThrow("--day cannot be in the future");
 });
 
 test("query replays persisted balance mutations per user before positive aggregation", () => {
