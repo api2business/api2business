@@ -183,13 +183,31 @@ export class AccountLifecycleService {
       const accountIds = job.candidates.map((row) => number(row.accountId));
       job.fingerprint = createHash("sha256").update(JSON.stringify({ day: job.settings.day, planType: job.settings.planType, accountIds })).digest("hex");
       this.log(job, "candidates", "done", `候选 ${accountIds.length} 个，开始原生连接检测`);
-      const output = await this.runCli([
-        "platform-infra", "sub2api", "codex-pool", "runtime", "test", "--target", this.config.monitor.target,
-        "--accounts", accountIds.join(","), "--model", job.settings.model, "--json", ...(job.settings.confirm ? ["--confirm"] : []),
-      ], this.config.operations.accountLifecycle.testTimeoutMs);
-      const runtime = lifecycleRuntimeResult(output);
-      const tests = Array.isArray(runtime.tests) ? runtime.tests : [];
-      const summary = runtime.summary && typeof runtime.summary === "object" ? runtime.summary as Row : { alive: 0, dead: 0, unknown: 0 };
+      const tests: unknown[] = [];
+      const batchSize = this.config.operations.accountLifecycle.testBatchSize;
+      for (let offset = 0; offset < accountIds.length; offset += batchSize) {
+        const batch = accountIds.slice(offset, offset + batchSize);
+        const batchIndex = Math.floor(offset / batchSize) + 1;
+        const batchCount = Math.ceil(accountIds.length / batchSize);
+        this.log(job, "test", "start", `检测批次 ${batchIndex}/${batchCount}，账号 ${batch.length} 个`);
+        const output = await this.runCli([
+          "platform-infra", "sub2api", "codex-pool", "runtime", "test", "--target", this.config.monitor.target,
+          "--accounts", batch.join(","), "--model", job.settings.model, "--json", ...(job.settings.confirm ? ["--confirm"] : []),
+        ], this.config.operations.accountLifecycle.testTimeoutMs);
+        const runtime = lifecycleRuntimeResult(output);
+        const batchTests = Array.isArray(runtime.tests) ? runtime.tests : [];
+        if (batchTests.length !== batch.length) {
+          throw new Error(`OAuth 检测批次 ${batchIndex}/${batchCount} 结果不完整：候选 ${batch.length}，结果 ${batchTests.length}`);
+        }
+        tests.push(...batchTests);
+        this.log(job, "test", "done", `检测批次 ${batchIndex}/${batchCount} 完成`);
+      }
+      const summary = { alive: 0, dead: 0, unknown: 0 };
+      for (const item of tests) {
+        const classification = item && typeof item === "object" ? String((item as Row).classification ?? "unknown") : "unknown";
+        if (classification === "alive" || classification === "dead") summary[classification] += 1;
+        else summary.unknown += 1;
+      }
       const classified = number(summary.alive) + number(summary.dead) + number(summary.unknown);
       if (tests.length !== accountIds.length || classified !== accountIds.length) {
         throw new Error(`OAuth 检测结果不完整：候选 ${accountIds.length}，结果 ${tests.length}，分类 ${classified}`);

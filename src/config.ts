@@ -122,6 +122,7 @@ export interface AppConfig {
     accountImportArchiveDirectory: string;
     accountLifecycle: {
       defaultModel: string;
+      testBatchSize: number;
       testTimeoutMs: number;
       deleteTimeoutMs: number;
     };
@@ -633,6 +634,7 @@ export function loadConfig(path: string): AppConfig {
       accountImportArchiveDirectory: stringValue(operations, "accountImportArchiveDirectory", "operations"),
       accountLifecycle: {
         defaultModel: stringValue(accountLifecycle, "defaultModel", "operations.accountLifecycle"),
+        testBatchSize: integerValue(accountLifecycle, "testBatchSize", "operations.accountLifecycle", 1, 20),
         testTimeoutMs: integerValue(accountLifecycle, "testTimeoutMs", "operations.accountLifecycle", 1000, 3600000),
         deleteTimeoutMs: integerValue(accountLifecycle, "deleteTimeoutMs", "operations.accountLifecycle", 1000, 3600000),
       },
