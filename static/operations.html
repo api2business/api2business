@@ -12,12 +12,6 @@
   <div data-shell></div>
   <main class="workspace">
     <header class="page-head"><div><p class="eyebrow">OPERATIONS / DETERMINISTIC</p><h1>经营管理</h1></div></header>
-    <section class="metric-strip">
-      <div><span>收入</span><strong id="ops-income">—</strong></div>
-      <div><span>支出</span><strong id="ops-expense">—</strong></div>
-      <div><span>毛利</span><strong id="ops-profit">—</strong></div>
-      <div><span>YAML</span><strong>只读</strong></div>
-    </section>
     <section class="table-section oauth-cost-section">
       <div class="table-toolbar">
         <div><h2>OAuth 综合成本</h2><p id="oauth-cost-state" class="section-state">等待查询</p></div>
@@ -33,6 +27,12 @@
         <div class="oauth-cost-primary"><span>综合成本</span><strong id="oauth-cost-unit">—</strong><small>人民币 / API 美元</small></div>
       </div>
       <div class="table-wrap"><table class="data-table oauth-cost-table"><thead><tr><th>账号类型</th><th>账号数</th><th>有产出</th><th>采购成本</th><th>API 美元产出</th><th>人民币 / 刀</th><th>请求</th><th>Token</th></tr></thead><tbody id="oauth-cost-body"><tr><td colspan="8" class="empty">正在读取 OAuth 成本</td></tr></tbody></table></div>
+    </section>
+    <section class="metric-strip operations-summary" aria-label="经营总览">
+      <div><span>收入</span><strong id="ops-income">—</strong></div>
+      <div><span>支出</span><strong id="ops-expense">—</strong></div>
+      <div><span>毛利</span><strong id="ops-profit">—</strong></div>
+      <div><span>账本配置</span><strong>只读</strong></div>
     </section>
     <section class="table-section">
       <div class="table-toolbar"><h2>手工收支</h2></div>
