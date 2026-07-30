@@ -1,0 +1,220 @@
+import { createHash, randomUUID } from "node:crypto";
+import type { AppConfig } from "./config";
+import { readAccountImportCosts } from "./account-import-cost-ledger";
+import { parseAccountEconomicsWindow } from "./account-batch-economics";
+import { recordLifecycleSettlement } from "./account-lifecycle-ledger";
+import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+
+type PlanType = "k12" | "plus";
+type JobState = "queued" | "running" | "succeeded" | "settling" | "settled" | "failed";
+type Row = Record<string, unknown>;
+
+export interface LifecycleRequest {
+  day: string;
+  planType: PlanType;
+  model?: string;
+  confirm: boolean;
+}
+
+interface LifecycleJob {
+  id: string;
+  state: JobState;
+  createdAt: string;
+  completedAt: string | null;
+  settings: { day: string; planType: PlanType; model: string; confirm: boolean };
+  fingerprint: string | null;
+  logs: Array<{ timestamp: string; stage: string; state: string; message: string }>;
+  candidates: Row[];
+  result: Row | null;
+  settlement: Row | null;
+  error: string | null;
+}
+
+const candidateSql = `
+WITH cost_input AS (
+  SELECT account_id, cost_cny
+  FROM unnest(
+    string_to_array($1::text, ',')::bigint[],
+    string_to_array($2::text, ',')::numeric[]
+  ) AS item(account_id, cost_cny)
+), usage_totals AS (
+  SELECT usage.account_id, COUNT(*)::bigint AS request_count,
+    COALESCE(SUM(usage.input_tokens + usage.output_tokens), 0)::bigint AS token_count,
+    COALESCE(SUM(usage.actual_cost), 0)::numeric AS api_amount_usd
+  FROM usage_logs usage
+  JOIN cost_input cost ON cost.account_id = usage.account_id
+  WHERE usage.created_at >= $3::timestamptz AND usage.created_at < $4::timestamptz
+  GROUP BY usage.account_id
+)
+SELECT cost.account_id, cost.cost_cny,
+  (account.id IS NOT NULL) AS exists,
+  account.platform, account.type,
+  COALESCE(NULLIF(LOWER(account.credentials->>'plan_type'), ''), 'unknown') AS plan_type,
+  COALESCE(usage.request_count, 0)::bigint AS request_count,
+  COALESCE(usage.token_count, 0)::bigint AS token_count,
+  COALESCE(usage.api_amount_usd, 0)::numeric AS api_amount_usd
+FROM cost_input cost
+LEFT JOIN accounts account ON account.id = cost.account_id AND account.deleted_at IS NULL
+LEFT JOIN usage_totals usage ON usage.account_id = cost.account_id
+ORDER BY cost.account_id`;
+
+function number(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function safeMessage(value: string): string {
+  return value.replace(/sk-[A-Za-z0-9_-]+/gu, "[REDACTED]")
+    .replace(/rt\.\d\.[A-Za-z0-9_-]+/gu, "[REDACTED]")
+    .replace(/eyJ[A-Za-z0-9_.-]+/gu, "[REDACTED]")
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/gu, "[REDACTED]").slice(0, 500);
+}
+
+export class AccountLifecycleService {
+  private jobs = new Map<string, LifecycleJob>();
+
+  constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
+
+  submit(input: LifecycleRequest): LifecycleJob {
+    parseAccountEconomicsWindow({ day: input.day }, this.config.monitor.timezone);
+    if (input.planType !== "k12" && input.planType !== "plus") throw new Error("planType must be k12 or plus");
+    const model = input.model?.trim() || this.config.operations.accountLifecycle.defaultModel;
+    if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(model)) throw new Error("model is invalid");
+    const job: LifecycleJob = {
+      id: randomUUID(), state: "queued", createdAt: new Date().toISOString(), completedAt: null,
+      settings: { day: input.day, planType: input.planType, model, confirm: input.confirm },
+      fingerprint: null, logs: [], candidates: [], result: null, settlement: null, error: null,
+    };
+    this.jobs.set(job.id, job);
+    while (this.jobs.size > 20) this.jobs.delete(this.jobs.keys().next().value!);
+    void this.detect(job);
+    return this.project(job);
+  }
+
+  get(id: string): LifecycleJob | null {
+    const job = this.jobs.get(id);
+    return job ? this.project(job) : null;
+  }
+
+  settle(id: string): LifecycleJob {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error("OAuth 生命周期作业不存在");
+    if (job.state !== "succeeded") throw new Error("只有检测成功的作业可以结算");
+    const summary = job.result?.summary as Row | undefined;
+    if (number(summary?.alive) !== 0 || number(summary?.unknown) !== 0 || number(summary?.dead) !== job.candidates.length) {
+      throw new Error("批次并非全部确定死亡，拒绝结算和删除");
+    }
+    job.state = "settling";
+    this.log(job, "settlement", "queued", `开始结算 ${job.candidates.length} 个确定死亡账号`);
+    void this.finishSettlement(job);
+    return this.project(job);
+  }
+
+  private project(job: LifecycleJob): LifecycleJob { return structuredClone(job); }
+  private log(job: LifecycleJob, stage: string, state: string, message: string) {
+    job.logs.push({ timestamp: new Date().toISOString(), stage, state, message: safeMessage(message) });
+  }
+
+  private async facts(day: string): Promise<Row[]> {
+    const costs = readAccountImportCosts(this.config.operations.accountImportLedgerPath)
+      .filter((entry) => entry.occurredOn === day)
+      .map((entry) => ({ accountId: entry.accountId, costCny: entry.amountCny }));
+    if (costs.length === 0) return [];
+    const window = parseAccountEconomicsWindow({ day }, this.config.monitor.timezone);
+    const end = new Date().toISOString();
+    const query = await this.reads.query<Row>({
+      key: JSON.stringify(["accounts.lifecycle", day, costs, end]), kind: "accounts.lifecycle",
+      sql: candidateSql,
+      parameters: [costs.map((item) => item.accountId).join(","), costs.map((item) => item.costCny).join(","), window.startUtc, end],
+      priority: "manual", cacheMode: "bypass-cache",
+    });
+    return query.rows.map((row) => ({
+      accountId: number(row.account_id), costCny: number(row.cost_cny), exists: row.exists === true,
+      platform: row.platform ?? null, type: row.type ?? null, planType: row.plan_type ?? "unknown",
+      requestCount: number(row.request_count), tokenCount: number(row.token_count), apiAmountUsd: number(row.api_amount_usd),
+    }));
+  }
+
+  private async runCli(args: string[], timeoutMs: number): Promise<Row> {
+    const proc = Bun.spawn([this.config.monitor.cli.executable, this.config.monitor.cli.entrypoint, ...args], {
+      cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env,
+    });
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; proc.kill(); }, timeoutMs);
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+    ]);
+    clearTimeout(timer);
+    if (timedOut) throw new Error("UniDesk runtime CLI timed out");
+    let output: Row;
+    try { output = JSON.parse(stdout) as Row; }
+    catch { throw new Error(`UniDesk runtime CLI returned invalid JSON: ${safeMessage(stderr || stdout)}`); }
+    if (exitCode !== 0 || output.ok === false) throw new Error(safeMessage(String(output.error ?? stderr ?? "runtime CLI failed")));
+    return output;
+  }
+
+  private async detect(job: LifecycleJob): Promise<void> {
+    try {
+      job.state = "running";
+      this.log(job, "candidates", "start", `读取 ${job.settings.day} 的 ${job.settings.planType.toUpperCase()} OAuth 候选`);
+      const rows = await this.facts(job.settings.day);
+      job.candidates = rows.filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth" && row.planType === job.settings.planType);
+      if (job.candidates.length === 0) throw new Error("没有匹配的 OpenAI OAuth 候选账号");
+      const accountIds = job.candidates.map((row) => number(row.accountId));
+      job.fingerprint = createHash("sha256").update(JSON.stringify({ day: job.settings.day, planType: job.settings.planType, accountIds })).digest("hex");
+      this.log(job, "candidates", "done", `候选 ${accountIds.length} 个，开始原生连接检测`);
+      const output = await this.runCli([
+        "platform-infra", "sub2api", "codex-pool", "runtime", "test", "--target", this.config.monitor.target,
+        "--accounts", accountIds.join(","), "--model", job.settings.model, "--json", ...(job.settings.confirm ? ["--confirm"] : []),
+      ], this.config.operations.accountLifecycle.testTimeoutMs);
+      const runtime = (output.runtime && typeof output.runtime === "object" ? output.runtime : output) as Row;
+      const tests = Array.isArray(runtime.tests) ? runtime.tests : [];
+      const summary = runtime.summary && typeof runtime.summary === "object" ? runtime.summary as Row : { alive: 0, dead: 0, unknown: 0 };
+      job.result = { tests, summary, model: job.settings.model, mode: runtime.mode, valuesPrinted: false };
+      job.state = "succeeded";
+      this.log(job, "test", "done", `检测完成：存活 ${number(summary.alive)}，死亡 ${number(summary.dead)}，不确定 ${number(summary.unknown)}`);
+    } catch (error) {
+      job.state = "failed"; job.error = safeMessage(error instanceof Error ? error.message : String(error));
+      this.log(job, "job", "failed", job.error);
+    } finally {
+      job.completedAt = new Date().toISOString();
+    }
+  }
+
+  private async finishSettlement(job: LifecycleJob): Promise<void> {
+    try {
+      const current = (await this.facts(job.settings.day))
+        .filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth" && row.planType === job.settings.planType);
+      const currentIds = current.map((row) => number(row.accountId));
+      const expectedIds = job.candidates.map((row) => number(row.accountId));
+      if (JSON.stringify(currentIds) !== JSON.stringify(expectedIds)) throw new Error("候选账号范围已变化，请重新检测");
+      const gross = current.reduce((sum, row) => sum + number(row.costCny), 0);
+      const apiAmountUsd = current.reduce((sum, row) => sum + number(row.apiAmountUsd), 0);
+      const accounting = recordLifecycleSettlement(this.config.operations.accountLifecycleLedgerPath, {
+        acquisitionDay: job.settings.day, planType: job.settings.planType, accountIds: expectedIds,
+        accountCount: expectedIds.length, grossAcquisitionCostCny: Math.round(gross * 100) / 100,
+        requestCount: current.reduce((sum, row) => sum + number(row.requestCount), 0),
+        tokenCount: current.reduce((sum, row) => sum + number(row.tokenCount), 0),
+        apiAmountUsd: Math.round(apiAmountUsd * 1e8) / 1e8,
+        grossCnyPerApiUsd: apiAmountUsd > 0 ? Math.round((gross / apiAmountUsd) * 1e6) / 1e6 : null,
+        detectionJobId: job.id, detectionFingerprint: job.fingerprint!,
+      });
+      this.log(job, "accounting", accounting.mutation ? "recorded" : "skipped", `批次结算已记账 ${expectedIds.length} 个账号`);
+      const deletion = await this.runCli([
+        "platform-infra", "sub2api", "codex-pool", "runtime", "delete", "--target", this.config.monitor.target,
+        "--kind", "account-delete", "--accounts", expectedIds.join(","), "--confirm", "--json",
+      ], this.config.operations.accountLifecycle.deleteTimeoutMs);
+      const verified = await this.facts(job.settings.day);
+      const remaining = verified.filter((row) => expectedIds.includes(number(row.accountId)) && row.exists === true).map((row) => row.accountId);
+      job.settlement = { accounting, deletion, remainingAccountIds: remaining, valuesPrinted: false };
+      if (remaining.length > 0) throw new Error(`删除回读仍有 ${remaining.length} 个账号存在`);
+      job.state = "settled"; job.error = null; job.completedAt = new Date().toISOString();
+      this.log(job, "verification", "done", `结算与删除完成，回读 ${expectedIds.length}/${expectedIds.length} 已删除`);
+    } catch (error) {
+      job.state = "failed"; job.error = safeMessage(error instanceof Error ? error.message : String(error));
+      job.completedAt = new Date().toISOString(); this.log(job, "settlement", "failed", job.error);
+    }
+  }
+}
+
+export const accountLifecycleCandidateQuery = candidateSql;

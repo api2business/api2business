@@ -7,6 +7,7 @@ import { TemporalGateway } from "./temporal-client";
 import { OperationsStore } from "./operations-store";
 import { OperationsService } from "./operations-service";
 import { AccountImportService } from "./account-import-service";
+import { AccountLifecycleService } from "./account-lifecycle-service";
 import { SingleConnectionSub2ApiReadExecutor } from "./sub2api-read-executor";
 
 const config = loadConfig(requiredOption("--config"));
@@ -38,10 +39,11 @@ const operations = new OperationsService(
 );
 await operations.initialize();
 const imports = new AccountImportService(config, reads);
+const lifecycle = new AccountLifecycleService(config, reads);
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle),
 });
 
 console.log(JSON.stringify({

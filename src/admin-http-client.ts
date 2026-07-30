@@ -71,6 +71,15 @@ export class AdminHttpClient {
   accountImportStatus(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/account-import/jobs/${encodeURIComponent(id)}`);
   }
+  accountLifecycleDetect(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/api/account-lifecycle/jobs", { method: "POST", body: JSON.stringify(input) }, 30000);
+  }
+  accountLifecycleStatus(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/account-lifecycle/jobs/${encodeURIComponent(id)}`);
+  }
+  accountLifecycleSettle(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/account-lifecycle/jobs/${encodeURIComponent(id)}/settle`, { method: "POST", body: "{}" }, 30000);
+  }
   inspectAccounts(accountIds: number[]): Promise<Record<string, unknown>> {
     return this.request("/api/admin/accounts/inspect", {
       method: "POST", body: JSON.stringify({ accountIds }),

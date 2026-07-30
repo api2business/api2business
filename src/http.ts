@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import type { AppConfig } from "./config";
 import type { ApplicationDispatcher } from "./dispatcher";
 import type { OperationsService } from "./operations-service";
+import type { AccountLifecycleService, LifecycleRequest } from "./account-lifecycle-service";
 import type { AccountImportService, AccountImportRequest } from "./account-import-service";
 import type { AppCommand, OperationRequest } from "./contracts";
 import {
@@ -82,6 +83,7 @@ export function createHandler(
   secureCookies: boolean,
   operations: OperationsService,
   imports: AccountImportService,
+  lifecycle: AccountLifecycleService,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
@@ -128,6 +130,21 @@ export function createHandler(
       if (request.method === "GET" && url.pathname.startsWith("/api/account-import/jobs/")) {
         const job = imports.get(decodeURIComponent(url.pathname.slice("/api/account-import/jobs/".length)));
         return job ? json({ ok: true, job }) : json({ ok: false, error: "导入作业不存在" }, 404);
+      }
+      if (request.method === "POST" && url.pathname === "/api/account-lifecycle/jobs") {
+        const input = await body(request) as unknown as LifecycleRequest;
+        try { return json({ ok: true, job: lifecycle.submit(input) }, 202); }
+        catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
+      }
+      if (request.method === "GET" && /^\/api\/account-lifecycle\/jobs\/[^/]+$/u.test(url.pathname)) {
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        const job = lifecycle.get(id);
+        return job ? json({ ok: true, job }) : json({ ok: false, error: "OAuth 生命周期作业不存在" }, 404);
+      }
+      if (request.method === "POST" && /^\/api\/account-lifecycle\/jobs\/[^/]+\/settle$/u.test(url.pathname)) {
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        try { return json({ ok: true, job: lifecycle.settle(id) }, 202); }
+        catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 409); }
       }
       if (request.method === "POST" && url.pathname === "/api/admin/accounts/inspect") {
         const input = await body(request);

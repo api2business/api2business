@@ -118,7 +118,13 @@ export interface AppConfig {
     databaseUrlEnv: string;
     ledgerYamlPath: string;
     accountImportLedgerPath: string;
+    accountLifecycleLedgerPath: string;
     accountImportArchiveDirectory: string;
+    accountLifecycle: {
+      defaultModel: string;
+      testTimeoutMs: number;
+      deleteTimeoutMs: number;
+    };
     accountImportDefaults: {
       priority: number;
       capacity: number;
@@ -419,6 +425,7 @@ export function loadConfig(path: string): AppConfig {
   const ranking = object(raw.ranking, "ranking");
   const records = object(raw.records, "records");
   const operations = object(raw.operations, "operations");
+  const accountLifecycle = object(operations.accountLifecycle, "operations.accountLifecycle");
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
   const automationSafety = object(operations.automationSafety, "operations.automationSafety");
   const priorityWrite = object(operations.priorityWrite, "operations.priorityWrite");
@@ -622,7 +629,13 @@ export function loadConfig(path: string): AppConfig {
       databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
       ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),
       accountImportLedgerPath: stringValue(operations, "accountImportLedgerPath", "operations"),
+      accountLifecycleLedgerPath: stringValue(operations, "accountLifecycleLedgerPath", "operations"),
       accountImportArchiveDirectory: stringValue(operations, "accountImportArchiveDirectory", "operations"),
+      accountLifecycle: {
+        defaultModel: stringValue(accountLifecycle, "defaultModel", "operations.accountLifecycle"),
+        testTimeoutMs: integerValue(accountLifecycle, "testTimeoutMs", "operations.accountLifecycle", 1000, 3600000),
+        deleteTimeoutMs: integerValue(accountLifecycle, "deleteTimeoutMs", "operations.accountLifecycle", 1000, 3600000),
+      },
       accountImportDefaults: {
         priority: integerValue(accountImportDefaults, "priority", "operations.accountImportDefaults", 1, 1000),
         capacity: integerValue(accountImportDefaults, "capacity", "operations.accountImportDefaults", 1, 100000),

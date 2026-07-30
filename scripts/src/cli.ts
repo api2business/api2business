@@ -46,6 +46,7 @@ interface Parsed {
   costCny: number | null;
   unitCostCny: number | null;
   planType: string | null;
+  model: string | null;
   day: string | null;
   period: string | null;
   externalCostsJson: string | null;
@@ -66,7 +67,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -118,6 +119,7 @@ function parseArgs(args: string[]): Parsed {
     costCny: decimal("--cost-cny"),
     unitCostCny: decimal("--unit-cost-cny"),
     planType: value(args, "--plan-type"),
+    model: value(args, "--model"),
     affectedOnly: args.includes("--affected-only"),
     intervalSeconds: integer("--interval-seconds"),
     enabled: value(args, "--enabled") === null ? null
@@ -159,6 +161,9 @@ function help(): Record<string, unknown> {
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
       "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
+      "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
+      "accounts lifecycle status --id <job-id> --over-api",
+      "accounts lifecycle settle --id <job-id> --confirm --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
@@ -270,6 +275,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || parsed.command.join(" ") === "accounts economics"
     || parsed.command.join(" ") === "accounts import-economics"
     || parsed.command.join(" ") === "accounts inspect"
+    || (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle")
     || parsed.command.join(" ") === "payments alipay-revenue"
     || parsed.command.join(" ") === "reads status"
   ) {
@@ -344,6 +350,19 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       priority: parsed.priority ?? defaults.priority,
       capacity: parsed.capacity ?? defaults.capacity, groupIds, sourceProxyId: parsed.proxyId ?? defaults.sourceProxyId,
       unitCostCny: parsed.unitCostCny, planType, confirm: parsed.confirm });
+  }
+  if (group === "accounts" && action === "lifecycle") {
+    const verb = parsed.command[2];
+    if (verb === "detect") {
+      if (!parsed.day) throw new Error("accounts lifecycle detect requires --day");
+      if (parsed.planType !== "k12" && parsed.planType !== "plus") throw new Error("--plan-type must be k12 or plus");
+      return await client.accountLifecycleDetect({ day: parsed.day, planType: parsed.planType, model: parsed.model, confirm: parsed.confirm });
+    }
+    if (!parsed.id) throw new Error(`accounts lifecycle ${verb ?? ""} requires --id`);
+    if (verb === "status") return await client.accountLifecycleStatus(parsed.id);
+    if (verb === "settle") return parsed.confirm ? await client.accountLifecycleSettle(parsed.id)
+      : { ok: true, mutation: false, id: parsed.id, hint: "add --confirm to settle and delete the confirmed-dead batch" };
+    throw new Error("accounts lifecycle requires detect, status, or settle");
   }
   if (group === "accounts" && action === "status") {
     if (!parsed.id) throw new Error("accounts status requires --id");
@@ -507,6 +526,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command.join(" ") === "accounts economics"
       || parsed.command.join(" ") === "accounts import-economics"
       || parsed.command.join(" ") === "accounts inspect"
+      || (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle")
       || parsed.command.join(" ") === "payments alipay-revenue"
     );
     const targetId = parsed.targetId ?? (
