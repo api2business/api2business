@@ -30,7 +30,7 @@ export interface AccountImportPreflightPlan {
   content: string;
   sourceIndexes: number[];
   skipped: Array<{ index: number; accountId: number }>;
-  selectedProxyId: number;
+  initialProxyId: number;
   proxyCandidateIds: number[];
 }
 
@@ -134,7 +134,7 @@ export async function accountImportPreflight(
   const proxyCandidateIds = result.rows.filter((row) => row.row_kind === "proxy")
     .map((row) => integer(row.id)).filter((id): id is number => id !== null);
   if (proxyCandidateIds.length === 0) throw new Error("代理池中没有与基准代理相同 host/port 的可用代理");
-  const selectedProxyId = proxyCandidateIds[Math.floor(Math.random() * proxyCandidateIds.length)]!;
+  const initialProxyId = proxyCandidateIds[Math.floor(Math.random() * proxyCandidateIds.length)]!;
   const byUser = new Map<string, AccountRow[]>();
   const byAccess = new Map<string, AccountRow[]>();
   for (const row of result.rows.filter((item) => item.row_kind === "account")) {
@@ -163,7 +163,7 @@ export async function accountImportPreflight(
     content: JSON.stringify({ ...payload, accounts: remaining }),
     sourceIndexes,
     skipped,
-    selectedProxyId,
+    initialProxyId,
     proxyCandidateIds,
   };
 }

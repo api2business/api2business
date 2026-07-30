@@ -42,7 +42,6 @@ interface Parsed {
   capacity: number | null;
   groups: string | null;
   proxyId: number | null;
-  shadowProxy: boolean | null;
   accounts: string | null;
   costCny: number | null;
   unitCostCny: number | null;
@@ -65,7 +64,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--shadow-proxy"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -124,7 +123,6 @@ function parseArgs(args: string[]): Parsed {
       : (() => { throw new Error("--enabled must be true or false"); })(),
     file: value(args, "--file"), priority: integer("--priority"), capacity: integer("--capacity"),
     groups: value(args, "--groups"), proxyId: integer("--proxy-id"),
-    shadowProxy: value(args, "--shadow-proxy") === null ? null : value(args, "--shadow-proxy") === "true" ? true : value(args, "--shadow-proxy") === "false" ? false : (() => { throw new Error("--shadow-proxy must be true or false"); })(),
   };
 }
 

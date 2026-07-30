@@ -627,8 +627,10 @@ async function accountImportPage() {
     $('#import-job-id').textContent = `JOB ${job.id}`
     const labels = options.groups.filter((group) => job.settings.groupIds.includes(group.id)).map((group) => `${group.name} #${group.id}`).join('、')
     const result = job.result?.result
-    const selectedProxy = job.result?.settings?.selectedProxyId
-    const outcome = result ? ` · 新建 ${result.createdIds?.length ?? 0} · 更新 ${result.updatedIds?.length ?? 0} · 跳过 ${result.skippedIds?.length ?? result.skipped ?? 0} · 失败 ${result.failed ?? 0}${selectedProxy ? ` · 选中 Proxy #${selectedProxy}` : ''}` : ''
+    const assignments = result?.proxyAssignments ?? []
+    const usedProxies = new Set(assignments.filter((item) => item?.bound).map((item) => item.proxyId)).size
+    const proxyOutcome = assignments.length ? ` · 已分配 ${assignments.filter((item) => item?.bound).length} 个账号 / 使用 ${usedProxies} 个 Proxy` : ''
+    const outcome = result ? ` · 新建 ${result.createdIds?.length ?? 0} · 更新 ${result.updatedIds?.length ?? 0} · 跳过 ${result.skippedIds?.length ?? result.skipped ?? 0} · 失败 ${result.failed ?? 0}${proxyOutcome}` : ''
     const accounting = job.accounting ? ` · 已记账 ${job.accounting.recordedCount} 个 / ${cny(job.accounting.totalCostCny)}` : ''
     $('#import-summary').textContent = `${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
     $('#import-logs').innerHTML = job.logs.length ? job.logs.map((log) => `<li data-state="${escapeHtml(log.state)}"><time>${time(log.timestamp)}</time><b>${escapeHtml(log.stage)}</b><span>${escapeHtml(log.message)}</span></li>`).join('') : '<li class="empty">等待作业启动</li>'

@@ -133,7 +133,7 @@ export class AccountImportService {
       for (const skipped of plan.skipped) {
         this.log(job, "account", "skipped", `stage=account state=skipped index=${skipped.index}/${job.accountCount} account-id=${skipped.accountId}`);
       }
-      this.log(job, "proxy", "selected", `代理池候选 ${plan.proxyCandidateIds.length} 个，本批选中 Proxy #${plan.selectedProxyId}`);
+      this.log(job, "proxy", "planned", `代理池候选 ${plan.proxyCandidateIds.length} 个，将为每个新建或更新账号独立随机分配`);
       if (plan.sourceIndexes.length === 0) {
         job.result = completedWithoutWrites(job, plan);
         job.state = "succeeded";
@@ -144,7 +144,8 @@ export class AccountImportService {
       const args = [this.config.monitor.cli.entrypoint, "platform-infra", "sub2api", "codex-pool", "runtime", "import",
         "--file", file, "--target", this.config.monitor.target, "--priority", String(job.settings.priority),
         "--capacity", String(job.settings.capacity), "--groups", job.settings.groupIds.join(","),
-        "--source-proxy-id", String(job.settings.sourceProxyId), "--proxy-id", String(plan.selectedProxyId), "--shadow-proxy", "false", "--json"];
+        "--source-proxy-id", String(job.settings.sourceProxyId), "--proxy-id", String(plan.initialProxyId),
+        "--proxy-pool-ids", plan.proxyCandidateIds.join(","), "--json"];
       if (job.settings.confirm) args.push("--confirm");
       const child = Bun.spawn([this.config.monitor.cli.executable, ...args], { cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env });
       const stderrTask = this.captureProgress(job, child.stderr, plan);
@@ -230,7 +231,7 @@ function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan
     mode: "confirmed",
     mutation: false,
     file: { fingerprint: job.fingerprint, accountCount: job.accountCount, valuesPrinted: false },
-    settings: { ...job.settings, selectedProxyId: plan.selectedProxyId },
+    settings: { ...job.settings, assignmentMode: "per-account-random", proxyCandidateCount: plan.proxyCandidateIds.length },
     result: { createdIds: [], updatedIds: [], skippedIds: plan.skipped.map((item) => item.accountId), skipped: plan.skipped.length, failed: 0, failures: [], isolated: 0 },
     valuesPrinted: false,
   };

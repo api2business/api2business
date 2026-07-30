@@ -26,6 +26,7 @@ test("skips only uniquely matched accounts whose runtime settings are aligned", 
   expect(plan.skipped).toEqual([{ index: 1, accountId: 41 }]);
   expect(plan.sourceIndexes).toEqual([2]);
   expect(plan.proxyCandidateIds).toEqual([141, 142]);
+  expect(plan.proxyCandidateIds).toContain(plan.initialProxyId);
   expect((JSON.parse(plan.content) as { accounts: unknown[] }).accounts).toHaveLength(1);
 });
 
