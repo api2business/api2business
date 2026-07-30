@@ -59,9 +59,31 @@ test("aggregates plan types and total economics in one queued query", async () =
 test("reads only plan type from account credentials and never projects secret fields", () => {
   expect(accountImportEconomicsQuery).toContain("credentials->>'plan_type'");
   expect(accountImportEconomicsQuery).toContain("string_to_array($1::text, ',')::bigint[]");
+  expect(accountImportEconomicsQuery).toContain("JOIN account_scope scope ON scope.account_id = usage.account_id");
   expect(accountImportEconomicsQuery).not.toContain("access_token");
   expect(accountImportEconomicsQuery).not.toContain("refresh_token");
   expect(accountImportEconomicsQuery).not.toContain("account.name");
+});
+
+test("keeps historical usage for accounts that were deleted after import", async () => {
+  const reads = {
+    query: async () => ({
+      rows: [{
+        plan_type: "missing", account_count: 2, matched_account_count: 0, usage_account_count: 2,
+        missing_account_ids: [104, 105], request_count: 378, token_count: 1970000,
+        acquisition_cost_cny: 6.6, api_amount_usd: 39.8498441,
+      }],
+      queueDurationMs: 0, queryDurationMs: 1, totalDurationMs: 1,
+      queryStartedAt: "", queryCompletedAt: "", deduplicated: false, cached: false,
+    }),
+  } as unknown as Sub2ApiReadClient;
+  const result = await collectAccountImportEconomics(
+    { monitor: { timezone: "Asia/Shanghai" }, operations: { accountImportLedgerPath: "/tmp/missing-history.jsonl" } } as AppConfig,
+    reads,
+    { day: "2026-07-30", externalCosts: [{ accountId: 104, costCny: 3.3 }, { accountId: 105, costCny: 3.3 }] },
+  );
+  expect(result.total).toEqual(expect.objectContaining({ apiAmountUsd: 39.8498441, cnyPerApiUsd: 0.165622 }));
+  expect(result.groups).toEqual([expect.objectContaining({ planType: "missing", apiAmountUsd: 39.8498441, missingAccountIds: [104, 105] })]);
 });
 
 test("projects stable import batches independently of deleted account matches", async () => {

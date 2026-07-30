@@ -44,7 +44,7 @@ WITH cost_input AS (
     MIN(usage.created_at) AS first_used_at,
     MAX(usage.created_at) AS last_used_at
   FROM usage_logs usage
-  JOIN account_scope scope ON scope.account_id = usage.account_id AND scope.matched
+  JOIN account_scope scope ON scope.account_id = usage.account_id
   WHERE usage.created_at >= $3::timestamptz
     AND usage.created_at < $4::timestamptz
   GROUP BY usage.account_id
