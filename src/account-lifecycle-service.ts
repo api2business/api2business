@@ -156,7 +156,11 @@ export class AccountLifecycleService {
     let output: Row;
     try { output = JSON.parse(stdout) as Row; }
     catch { throw new Error(`UniDesk runtime CLI returned invalid JSON: ${safeMessage(stderr || stdout)}`); }
-    if (exitCode !== 0 || output.ok === false) throw new Error(safeMessage(String(output.error ?? stderr ?? "runtime CLI failed")));
+    if (exitCode !== 0 || output.ok === false) {
+      const data = output.data && typeof output.data === "object" ? output.data as Row : null;
+      const detail = output.error || data?.error || stderr.trim() || "runtime CLI failed";
+      throw new Error(safeMessage(String(detail)));
+    }
     return output;
   }
 
