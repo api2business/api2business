@@ -82,6 +82,12 @@ export class AdminHttpClient {
       body: JSON.stringify(input),
     }, 60000);
   }
+  accountImportEconomics(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/accounts/import-economics", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }, 60000);
+  }
   alipayRevenue(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request("/api/admin/payments/alipay-revenue", {
       method: "POST",

@@ -11,7 +11,7 @@ import { TemporalGateway } from "../../src/temporal-client";
 import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
 import { emitPriorityPlan } from "./priority-plan-output";
-import { emitAccountEconomics } from "./account-economics-output";
+import { emitAccountEconomics, emitAccountImportEconomics } from "./account-economics-output";
 import { parseAccountIdSelector } from "../../src/account-batch-economics";
 
 interface Parsed {
@@ -47,6 +47,7 @@ interface Parsed {
   unitCostCny: number | null;
   day: string | null;
   period: string | null;
+  externalCostsJson: string | null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -64,7 +65,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -123,6 +124,7 @@ function parseArgs(args: string[]): Parsed {
       : (() => { throw new Error("--enabled must be true or false"); })(),
     file: value(args, "--file"), priority: integer("--priority"), capacity: integer("--capacity"),
     groups: value(args, "--groups"), proxyId: integer("--proxy-id"),
+    externalCostsJson: value(args, "--external-costs-json"),
   };
 }
 
@@ -154,6 +156,7 @@ function help(): Record<string, unknown> {
       "accounts status --id <job-id> --over-api",
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
+      "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
@@ -263,6 +266,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || parsed.command.join(" ") === "users balance-liability"
     || parsed.command.join(" ") === "profit daily-facts"
     || parsed.command.join(" ") === "accounts economics"
+    || parsed.command.join(" ") === "accounts import-economics"
     || parsed.command.join(" ") === "accounts inspect"
     || parsed.command.join(" ") === "payments alipay-revenue"
     || parsed.command.join(" ") === "reads status"
@@ -315,6 +319,15 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       start: parsed.start,
       end: parsed.end,
     });
+  }
+  if (group === "accounts" && action === "import-economics") {
+    if (!parsed.day) throw new Error("accounts import-economics requires --day");
+    let externalCosts: unknown = [];
+    if (parsed.externalCostsJson !== null) {
+      try { externalCosts = JSON.parse(parsed.externalCostsJson); }
+      catch { throw new Error("--external-costs-json must be valid JSON"); }
+    }
+    return await client.accountImportEconomics({ day: parsed.day, externalCosts });
   }
   if (group === "accounts" && action === "import") {
     if (!parsed.file) throw new Error("accounts import requires --file");
@@ -484,6 +497,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command.join(" ") === "users balance-liability"
       || parsed.command.join(" ") === "profit daily-facts"
       || parsed.command.join(" ") === "accounts economics"
+      || parsed.command.join(" ") === "accounts import-economics"
       || parsed.command.join(" ") === "accounts inspect"
       || parsed.command.join(" ") === "payments alipay-revenue"
     );
@@ -502,6 +516,7 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
     else if (parsed.command.join(" ") === "users impact") emitUserImpact(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts economics") emitAccountEconomics(output, parsed.json);
+    else if (parsed.command.join(" ") === "accounts import-economics") emitAccountImportEconomics(output, parsed.json);
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);

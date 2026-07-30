@@ -29,3 +29,18 @@ export function emitAccountEconomics(value: Record<string, unknown>, json: boole
   console.log(`COST acquisitionCny=${decimal(value.acquisitionCostCny, 2)} cnyPerApiUsd=${decimal(value.cnyPerApiUsd, 6)}`);
   if (Number(value.missingAccountCount) > 0) console.log(`MISSING accountIds=${Array.isArray(value.missingAccountIds) ? value.missingAccountIds.join(",") : "-"}`);
 }
+
+export function emitAccountImportEconomics(value: Record<string, unknown>, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value, null, 2));
+    return;
+  }
+  console.log(`APISTATE IMPORT ECONOMICS complete=${String(value.complete)} day=${String(value.day)} databaseQueries=${String(value.databaseQueries)}`);
+  const groups = Array.isArray(value.groups) ? value.groups : [];
+  for (const item of groups) {
+    const group = record(item) ?? {};
+    console.log(`PLAN type=${String(group.planType)} accounts=${String(group.accountCount)} costCny=${decimal(group.acquisitionCostCny, 2)} apiUsd=${decimal(group.apiAmountUsd, 6)} cnyPerApiUsd=${decimal(group.cnyPerApiUsd, 6)} requests=${String(group.requestCount)} tokens=${String(group.tokenCount)}`);
+  }
+  const total = record(value.total) ?? {};
+  console.log(`TOTAL accounts=${String(total.accountCount)} costCny=${decimal(total.acquisitionCostCny, 2)} apiUsd=${decimal(total.apiAmountUsd, 6)} cnyPerApiUsd=${decimal(total.cnyPerApiUsd, 6)} requests=${String(total.requestCount)} tokens=${String(total.tokenCount)}`);
+}

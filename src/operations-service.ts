@@ -35,6 +35,10 @@ import {
 import { collectUserBalanceLiability } from "./user-balance-liability";
 import { collectDailyProfitFacts } from "./daily-profit-facts";
 import { readAccountImportCosts } from "./account-import-cost-ledger";
+import {
+  collectAccountImportEconomics,
+  type AccountImportEconomicsInput,
+} from "./account-import-economics";
 
 const prioritiesByIdSql = `
 SELECT id::text AS id, priority::int AS priority
@@ -970,6 +974,10 @@ export class OperationsService {
       input,
       "manual",
     );
+  }
+
+  async accountImportEconomics(input: AccountImportEconomicsInput) {
+    return await collectAccountImportEconomics(this.config, this.reads, input, "manual");
   }
 
   async audits() {

@@ -10,6 +10,7 @@ import {
 } from "./account-batch-economics";
 import { parseAlipayRevenueWindow } from "./alipay-revenue-database";
 import { parseCompletedProfitDay } from "./daily-profit-facts";
+import { normalizeExternalAccountCosts } from "./account-import-economics";
 import {
   apiKeyAuthorized,
   clearSessionCookie,
@@ -325,6 +326,18 @@ export function createHandler(
           start: typeof input.start === "string" ? input.start : null,
           end: typeof input.end === "string" ? input.end : null,
         }));
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/accounts/import-economics") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const input = await body(request);
+        try {
+          if (typeof input.day !== "string") throw new Error("day is required");
+          parseAccountEconomicsWindow({ day: input.day }, config.monitor.timezone);
+          const externalCosts = normalizeExternalAccountCosts(input.externalCosts);
+          return json(await operations.accountImportEconomics({ day: input.day, externalCosts }));
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
       }
       if (request.method === "POST" && url.pathname === "/api/admin/payments/alipay-revenue") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
