@@ -99,7 +99,7 @@ export class AccountImportService {
   constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
 
   options() {
-    return { ok: true, currency: "CNY", defaults: { priority: 1, capacity: 5, groupIds: [2, 3], sourceProxyId: 3, unitCostCny: null }, groups: [
+    return { ok: true, currency: "CNY", defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null }, groups: [
       { id: 2, name: "混池（unidesk-codex-pool）" }, { id: 3, name: "自用" }, { id: 6, name: "Grok" },
     ] };
   }

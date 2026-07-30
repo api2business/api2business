@@ -1,5 +1,16 @@
 import { expect, test } from "bun:test";
-import { importFailure } from "./account-import-service";
+import { AccountImportService, importFailure } from "./account-import-service";
+import type { AppConfig } from "./config";
+import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+
+test("projects YAML-owned account import defaults", () => {
+  const service = new AccountImportService({ operations: { accountImportDefaults: {
+    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3,
+  } } } as AppConfig, {} as Sub2ApiReadClient);
+  expect(service.options().defaults).toEqual({
+    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, unitCostCny: null,
+  });
+});
 
 test("projects nested CLI errors without exposing credentials", () => {
   const message = importFailure({ ok: false, error: { code: "runtime_failed", message: "login failed for user@example.com with sk-secret" } });

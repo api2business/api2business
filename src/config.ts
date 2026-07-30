@@ -118,6 +118,12 @@ export interface AppConfig {
     databaseUrlEnv: string;
     ledgerYamlPath: string;
     accountImportLedgerPath: string;
+    accountImportDefaults: {
+      priority: number;
+      capacity: number;
+      groupIds: number[];
+      sourceProxyId: number;
+    };
     rechargeDenominationsCny: number[];
     planTtlMinutes: number;
     auditLimit: number;
@@ -411,6 +417,7 @@ export function loadConfig(path: string): AppConfig {
   const ranking = object(raw.ranking, "ranking");
   const records = object(raw.records, "records");
   const operations = object(raw.operations, "operations");
+  const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
   const automationSafety = object(operations.automationSafety, "operations.automationSafety");
   const priorityWrite = object(operations.priorityWrite, "operations.priorityWrite");
   const interBatchMinimumDelayMs = integerValue(
@@ -613,6 +620,12 @@ export function loadConfig(path: string): AppConfig {
       databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
       ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),
       accountImportLedgerPath: stringValue(operations, "accountImportLedgerPath", "operations"),
+      accountImportDefaults: {
+        priority: integerValue(accountImportDefaults, "priority", "operations.accountImportDefaults", 1, 1000),
+        capacity: integerValue(accountImportDefaults, "capacity", "operations.accountImportDefaults", 1, 100000),
+        groupIds: integers(accountImportDefaults, "groupIds", "operations.accountImportDefaults", 1),
+        sourceProxyId: integerValue(accountImportDefaults, "sourceProxyId", "operations.accountImportDefaults", 3),
+      },
       rechargeDenominationsCny: integers(operations, "rechargeDenominationsCny", "operations", 1, 100000),
       planTtlMinutes: integerValue(operations, "planTtlMinutes", "operations", 1, 1440),
       auditLimit: integerValue(operations, "auditLimit", "operations", 1, 1000),
