@@ -8,6 +8,8 @@ test("account import exposes only K12 and Plus with the configured price thresho
   expect(app).toContain("planTypeManuallySelected");
   expect(app).toContain("planType: planType.value");
   expect(app).not.toContain("value=\"free\"");
+  expect(app).not.toContain("history.replaceState(null, '', `/account-import?job=");
+  expect(app).not.toContain("new URLSearchParams(location.search).get('job')");
 });
 
 test("automation submit preserves the user's current form values", async () => {

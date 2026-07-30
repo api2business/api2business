@@ -657,15 +657,12 @@ async function accountImportPage() {
         unitCostCny: Number($('#import-unit-cost').value), planType: planType.value, confirm: true,
       }) }, 30000)
       let job = response.job; renderJob(job)
-      history.replaceState(null, '', `/account-import?job=${encodeURIComponent(job.id)}`)
       while (job.state === 'queued' || job.state === 'running') {
         await new Promise((resolve) => setTimeout(resolve, 1000))
         job = (await requestJson(`/api/account-import/jobs/${encodeURIComponent(job.id)}`)).job; renderJob(job)
       }
     } finally { button.disabled = false }
   })
-  const existing = new URLSearchParams(location.search).get('job')
-  if (existing) renderJob((await requestJson(`/api/account-import/jobs/${encodeURIComponent(existing)}`)).job)
 }
 
 async function boot() {
