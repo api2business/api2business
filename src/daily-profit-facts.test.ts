@@ -4,7 +4,10 @@ import { collectDailyProfitFacts, dailyProfitFactsQuery, parseCompletedProfitDay
 
 test("reconstructs opening and closing positive balances in one uncached query", async () => {
   let captured: Record<string, unknown> | null = null;
-  const result = await collectDailyProfitFacts({ monitor: { timezone: "Asia/Shanghai" } } as never, {
+  const result = await collectDailyProfitFacts({
+    monitor: { timezone: "Asia/Shanghai" },
+    operations: { accountImportLedgerPath: "/tmp/apistate-test-missing-import-costs.jsonl" },
+  } as never, {
     query: async (input: Record<string, unknown>) => {
       captured = input;
       return {
@@ -24,6 +27,7 @@ test("reconstructs opening and closing positive balances in one uncached query",
   expect(result).toMatchObject({
     mode: "daily-profit-facts-postgresql",
     alipay: { completedOrders: 3, revenueCny: 60 },
+    accountImportCosts: { currency: "CNY", entryCount: 0, totalCostCny: 0 },
     liability: { opening: { redeemableBalanceUsd: 100 }, closing: { redeemableBalanceUsd: 145 }, redeemableChangeUsd: 45 },
     replay: { complete: true, rollbackFailedEvents: 0 },
     databaseQueries: 1,

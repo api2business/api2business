@@ -34,6 +34,7 @@ import {
 } from "./alipay-revenue-database";
 import { collectUserBalanceLiability } from "./user-balance-liability";
 import { collectDailyProfitFacts } from "./daily-profit-facts";
+import { readAccountImportCosts } from "./account-import-cost-ledger";
 
 const prioritiesByIdSql = `
 SELECT id::text AS id, priority::int AS priority
@@ -103,16 +104,20 @@ export class OperationsService {
 
   async ledger(period = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 7)) {
     const yaml = this.yamlLedger();
+    const accountImports = readAccountImportCosts(this.config.operations.accountImportLedgerPath)
+      .filter((entry) => entry.period === period)
+      .map((entry) => ({ ...entry, readOnly: true }));
     const manual = await this.store.listCash();
     const active = records(manual).filter((row) => !row.voided_at && String(row.occurred_on).slice(0, 7) === period);
     const alipay = await this.alipay(period);
     const incomeCny = yaml.revenues.filter((row) => row.period === period).reduce((sum, row) => sum + money(row.amountCny), 0)
       + active.filter((row) => row.direction === "income").reduce((sum, row) => sum + money(row.amount_cny), 0);
     const expenseCny = yaml.costs.filter((row) => row.period === period).reduce((sum, row) => sum + money(row.amountCny), 0)
-      + active.filter((row) => row.direction === "expense").reduce((sum, row) => sum + money(row.amount_cny), 0);
+      + active.filter((row) => row.direction === "expense").reduce((sum, row) => sum + money(row.amount_cny), 0)
+      + accountImports.reduce((sum, row) => sum + money(row.amountCny), 0);
     const totalIncomeCny = incomeCny + alipay.revenueCny;
     return {
-      ok: true, period, yaml, manual, alipay,
+      ok: true, period, yaml, manual, accountImports, alipay,
       exclusions: ["管理员支付宝测试订单", "未完成支付宝订单", "API 流量估值"],
       summary: { incomeCny: totalIncomeCny, expenseCny, grossProfitCny: totalIncomeCny - expenseCny },
     };

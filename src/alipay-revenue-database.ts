@@ -2,6 +2,7 @@ import { DateTime } from "luxon";
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
 import type { ImpactWindow } from "./user-impact-database";
+import { summarizeAccountImportCosts } from "./account-import-cost-ledger";
 
 type Row = Record<string, unknown>;
 
@@ -93,6 +94,8 @@ export async function collectAlipayRevenue(
     cacheMode: "prefer-cache",
   });
   const row = query.rows[0] ?? {};
+  const accountImportCosts = summarizeAccountImportCosts(config.operations.accountImportLedgerPath,
+    selectedWindow.kind === "day" ? { day: selectedWindow.selector } : { period: selectedWindow.selector });
   return {
     ok: true,
     mode: "alipay-revenue-postgresql",
@@ -107,6 +110,7 @@ export async function collectAlipayRevenue(
     },
     completedOrders: number(row.completed_orders),
     revenueCny: Math.round(number(row.revenue_cny) * 100) / 100,
+    accountImportCosts,
     firstPaidAt: localTime(row.first_paid_at, selectedWindow.timezone),
     lastPaidAt: localTime(row.last_paid_at, selectedWindow.timezone),
     databaseQueries: query.cached ? 0 : 1,

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "./config";
 import { accountImportPreflight, type AccountImportPreflightPlan } from "./account-import-preflight";
+import { recordAccountImportCosts } from "./account-import-cost-ledger";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 export interface AccountImportRequest {
@@ -13,6 +14,7 @@ export interface AccountImportRequest {
   groupIds: number[];
   sourceProxyId: number;
   shadowProxy: boolean;
+  unitCostCny: number;
   confirm: boolean;
 }
 
@@ -20,7 +22,7 @@ interface ImportLog { timestamp: string; stage: string; state: string; message: 
 interface ImportJob {
   id: string; state: "queued" | "running" | "succeeded" | "failed"; createdAt: string;
   completedAt: string | null; fingerprint: string; accountCount: number; settings: Omit<AccountImportRequest, "content">;
-  logs: ImportLog[]; result: Record<string, unknown> | null; error: string | null;
+  logs: ImportLog[]; result: Record<string, unknown> | null; accounting: Record<string, unknown> | null; error: string | null;
 }
 
 function parsePayload(content: string): { accountCount: number; fingerprint: string } {
@@ -39,6 +41,10 @@ function validate(input: AccountImportRequest): void {
   if (!Number.isInteger(input.capacity) || input.capacity < 1 || input.capacity > 100000) throw new Error("容量必须为正整数");
   if (!Array.isArray(input.groupIds) || input.groupIds.length === 0 || input.groupIds.some((id) => !Number.isInteger(id) || id < 1)) throw new Error("至少选择一个有效分组");
   if (!Number.isInteger(input.sourceProxyId) || input.sourceProxyId < 1) throw new Error("Proxy ID 必须为正整数");
+  if (!Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0
+    || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
+    throw new Error("账号单价必须为正数人民币，最多两位小数");
+  }
 }
 
 function safeMessage(value: string): string {
@@ -93,7 +99,7 @@ export class AccountImportService {
   constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
 
   options() {
-    return { ok: true, defaults: { priority: 1, capacity: 5, groupIds: [2, 3], sourceProxyId: 3, shadowProxy: true }, groups: [
+    return { ok: true, currency: "CNY", defaults: { priority: 1, capacity: 5, groupIds: [2, 3], sourceProxyId: 3, shadowProxy: true, unitCostCny: null }, groups: [
       { id: 2, name: "混池（unidesk-codex-pool）" }, { id: 3, name: "自用" }, { id: 6, name: "Grok" },
     ] };
   }
@@ -103,8 +109,8 @@ export class AccountImportService {
     const parsed = parsePayload(input.content);
     const id = randomUUID();
     const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null, ...parsed,
-      settings: { priority: input.priority, capacity: input.capacity, groupIds: [...new Set(input.groupIds)], sourceProxyId: input.sourceProxyId, shadowProxy: input.shadowProxy, confirm: input.confirm },
-      logs: [], result: null, error: null };
+      settings: { priority: input.priority, capacity: input.capacity, groupIds: [...new Set(input.groupIds)], sourceProxyId: input.sourceProxyId, shadowProxy: input.shadowProxy, unitCostCny: input.unitCostCny, confirm: input.confirm },
+      logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);
     while (this.jobs.size > 20) this.jobs.delete(this.jobs.keys().next().value!);
     void this.run(job, input.content);
@@ -148,14 +154,30 @@ export class AccountImportService {
       const exitCode = await child.exited; await stderrTask;
       const output = JSON.parse(stdout) as Record<string, unknown>;
       mergePreflightResult(output, job, plan);
+      job.result = output;
+      const result = output.result && typeof output.result === "object" && !Array.isArray(output.result)
+        ? output.result as Record<string, unknown> : null;
+      const createdIds = Array.isArray(result?.createdIds)
+        ? result.createdIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) > 0) : [];
+      if (job.settings.confirm && createdIds.length > 0) {
+        job.accounting = recordAccountImportCosts({
+          path: this.config.operations.accountImportLedgerPath,
+          fingerprint: job.fingerprint,
+          accountIds: createdIds,
+          unitCostCny: job.settings.unitCostCny,
+          occurredOn: new Date().toLocaleDateString("sv-SE", { timeZone: this.config.monitor.timezone }),
+        });
+        const accounting = job.accounting;
+        this.log(job, "accounting", "recorded", `人民币采购成本已记账 ${accounting.recordedCount} 个账号，共 ¥${Number(accounting.totalCostCny).toFixed(2)}`);
+        output.accounting = accounting;
+      }
       if (exitCode !== 0 || output.ok === false) {
-        job.result = output;
         job.state = "failed";
         job.error = importFailure(output);
         this.log(job, "job", "failed", job.error);
         return;
       }
-      job.result = output; job.state = "succeeded"; this.log(job, "job", "done", "导入作业完成");
+      job.state = "succeeded"; this.log(job, "job", "done", "导入作业完成");
     } catch (error) {
       job.state = "failed"; job.error = safeMessage(error instanceof Error ? error.message : String(error));
       this.log(job, "job", "failed", job.error);

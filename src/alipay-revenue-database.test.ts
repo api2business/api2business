@@ -32,13 +32,14 @@ test("aggregates completed Alipay revenue through one queued query", async () =>
     },
   } as unknown as Sub2ApiReadClient;
   const result = await collectAlipayRevenue(
-    { monitor: { timezone: "Asia/Shanghai" } } as AppConfig,
+    { monitor: { timezone: "Asia/Shanghai" }, operations: { accountImportLedgerPath: "/tmp/apistate-test-missing-import-costs.jsonl" } } as AppConfig,
     reads,
     { day: "2026-07-29" },
   );
   expect(result.completedOrders).toBe(3);
   expect(result.revenueCny).toBe(240.5);
   expect(result.databaseQueries).toBe(1);
+  expect(result.accountImportCosts).toEqual({ currency: "CNY", entryCount: 0, totalCostCny: 0 });
   expect(parameters).toEqual(["2026-07-28T16:00:00.000Z", "2026-07-29T16:00:00.000Z"]);
 });
 

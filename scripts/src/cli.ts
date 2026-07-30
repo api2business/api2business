@@ -45,6 +45,7 @@ interface Parsed {
   shadowProxy: boolean | null;
   accounts: string | null;
   costCny: number | null;
+  unitCostCny: number | null;
   day: string | null;
   period: string | null;
 }
@@ -64,7 +65,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--shadow-proxy"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--shadow-proxy"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -114,6 +115,7 @@ function parseArgs(args: string[]): Parsed {
     day: value(args, "--day"),
     period: value(args, "--period"),
     costCny: decimal("--cost-cny"),
+    unitCostCny: decimal("--unit-cost-cny"),
     affectedOnly: args.includes("--affected-only"),
     intervalSeconds: integer("--interval-seconds"),
     enabled: value(args, "--enabled") === null ? null
@@ -150,7 +152,7 @@ function help(): Record<string, unknown> {
       "priority plan create --over-api [--calls N]",
       "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
-      "accounts import --file <json> [--priority 1 --capacity 5 --groups 2,3 --proxy-id 3 --shadow-proxy true] [--confirm] --over-api",
+      "accounts import --file <json> --unit-cost-cny <CNY> [--priority 1 --capacity 5 --groups 2,3 --proxy-id 3 --shadow-proxy true] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
@@ -316,10 +318,11 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   }
   if (group === "accounts" && action === "import") {
     if (!parsed.file) throw new Error("accounts import requires --file");
+    if (parsed.unitCostCny === null) throw new Error("accounts import requires --unit-cost-cny in CNY");
     const groupIds = (parsed.groups ?? "2,3").split(",").map(Number);
     return await client.accountImport({ content: readFileSync(parsed.file, "utf8"), priority: parsed.priority ?? 1,
       capacity: parsed.capacity ?? 5, groupIds, sourceProxyId: parsed.proxyId ?? 3,
-      shadowProxy: parsed.shadowProxy ?? true, confirm: parsed.confirm });
+      shadowProxy: parsed.shadowProxy ?? true, unitCostCny: parsed.unitCostCny, confirm: parsed.confirm });
   }
   if (group === "accounts" && action === "status") {
     if (!parsed.id) throw new Error("accounts status requires --id");

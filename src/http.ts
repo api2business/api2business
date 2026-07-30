@@ -109,7 +109,8 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/account-import/options") return json(imports.options());
       if (request.method === "POST" && url.pathname === "/api/account-import/jobs") {
         const input = await body(request) as unknown as AccountImportRequest;
-        if (typeof input.content !== "string" || typeof input.shadowProxy !== "boolean" || typeof input.confirm !== "boolean") return json({ ok: false, error: "导入参数不完整" }, 400);
+        if (typeof input.content !== "string" || typeof input.shadowProxy !== "boolean" || typeof input.confirm !== "boolean"
+          || !Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0) return json({ ok: false, error: "导入参数不完整" }, 400);
         return json({ ok: true, job: imports.submit(input) }, 202);
       }
       if (request.method === "GET" && url.pathname.startsWith("/api/account-import/jobs/")) {

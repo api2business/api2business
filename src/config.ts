@@ -117,6 +117,7 @@ export interface AppConfig {
   operations: {
     databaseUrlEnv: string;
     ledgerYamlPath: string;
+    accountImportLedgerPath: string;
     rechargeDenominationsCny: number[];
     planTtlMinutes: number;
     auditLimit: number;
@@ -611,6 +612,7 @@ export function loadConfig(path: string): AppConfig {
     operations: {
       databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
       ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),
+      accountImportLedgerPath: stringValue(operations, "accountImportLedgerPath", "operations"),
       rechargeDenominationsCny: integers(operations, "rechargeDenominationsCny", "operations", 1, 100000),
       planTtlMinutes: integerValue(operations, "planTtlMinutes", "operations", 1, 1440),
       auditLimit: integerValue(operations, "auditLimit", "operations", 1, 1000),

@@ -2,6 +2,7 @@ import { DateTime } from "luxon";
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
 import { parseAlipayRevenueWindow } from "./alipay-revenue-database";
+import { summarizeAccountImportCosts } from "./account-import-cost-ledger";
 
 type Row = Record<string, unknown>;
 
@@ -157,6 +158,7 @@ export async function collectDailyProfitFacts(
   const openingRedeemable = decimal(row.opening_redeemable_balance);
   const closingRedeemable = decimal(row.closing_redeemable_balance);
   const rollbackFailedEvents = integer(row.rollback_failed_events);
+  const accountImportCosts = summarizeAccountImportCosts(config.operations.accountImportLedgerPath, { day });
   return {
     ok: true,
     mode: "daily-profit-facts-postgresql",
@@ -166,6 +168,7 @@ export async function collectDailyProfitFacts(
       completedOrders: integer(row.completed_orders),
       revenueCny: Math.round(number(row.revenue_cny) * 100) / 100,
     },
+    accountImportCosts,
     liability: {
       opening: {
         users: integer(row.opening_users),
