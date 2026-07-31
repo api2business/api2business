@@ -916,11 +916,36 @@ async function accountImportPage() {
   const planType = $('#import-plan-type')
   planType.innerHTML = options.planTypes.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('')
   planType.value = defaults.planType
+  let planTypeManuallySelected = false
+  const inferPlanType = () => {
+    if (planTypeManuallySelected) return
+    const cost = Number($('#import-unit-cost').value)
+    planType.value = Number.isFinite(cost) && cost > 0
+      ? (cost < defaults.freeCostThresholdCny ? 'free' : cost > defaults.plusCostThresholdCny ? 'plus' : 'k12')
+      : defaults.planType
+  }
+  planType.addEventListener('change', () => { planTypeManuallySelected = true })
+  $('#import-unit-cost').addEventListener('input', inferPlanType)
   $('#import-groups').innerHTML = options.groups.map((group) => `<label><input type="checkbox" value="${group.id}" ${defaults.groupIds.includes(group.id) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${group.id}</b></span></label>`).join('')
   const fileInput = $('#import-file')
   const zone = $('#drop-zone')
   let importInputFormat = 'json'
   let importContent = ''
+  const importedAccountCount = () => {
+    if (importInputFormat !== 'json') return 0
+    try {
+      const payload = JSON.parse(importContent)
+      return Array.isArray(payload?.accounts) ? payload.accounts.length : 0
+    } catch { return 0 }
+  }
+  const updateUnitCostFromTotal = () => {
+    const total = Number($('#import-total-cost').value)
+    const count = importedAccountCount()
+    if (!Number.isFinite(total) || total <= 0 || count < 1) return
+    $('#import-unit-cost').value = (Math.round((total / count) * 100) / 100).toFixed(2)
+    inferPlanType()
+  }
+  $('#import-total-cost').addEventListener('input', updateUnitCostFromTotal)
   const bytesToBase64 = (bytes) => {
     let binary = ''
     for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -937,11 +962,13 @@ async function accountImportPage() {
     $('#import-json').disabled = zip
     $('#import-json').placeholder = zip ? 'ZIP 将在服务端安全合并，二进制内容不会回显' : '粘贴 Sub2API 导出的 JSON'
     $('#file-state').textContent = `${file.name} · ${number(file.size)} bytes`
+    updateUnitCostFromTotal()
   }
   $('#import-json').addEventListener('input', () => {
     if ($('#import-json').disabled) return
     importInputFormat = 'json'
     importContent = $('#import-json').value
+    updateUnitCostFromTotal()
   })
   zone.addEventListener('click', () => fileInput.click())
   zone.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') fileInput.click() })

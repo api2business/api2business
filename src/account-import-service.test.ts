@@ -8,10 +8,12 @@ import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 test("projects YAML-owned account import defaults", () => {
   const service = new AccountImportService({ operations: { accountImportDefaults: {
-    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, perAccountProxy: false, planType: "k12",
+    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, perAccountProxy: false,
+    planType: "k12", freeCostThresholdCny: 1, plusCostThresholdCny: 7,
   } } } as AppConfig, {} as Sub2ApiReadClient);
   expect(service.options().defaults).toEqual({
-    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, perAccountProxy: false, unitCostCny: null, planType: "k12",
+    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, perAccountProxy: false,
+    unitCostCny: null, planType: "k12", freeCostThresholdCny: 1, plusCostThresholdCny: 7,
   });
   expect(service.options().planTypes).toEqual([{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }, { id: "team", name: "Team" }, { id: "free", name: "Free" }]);
 });

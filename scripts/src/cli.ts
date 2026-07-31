@@ -345,7 +345,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (!parsed.file) throw new Error("accounts import requires --file");
     if (parsed.unitCostCny === null) throw new Error("accounts import requires --unit-cost-cny in CNY");
     const defaults = config.operations.accountImportDefaults;
-    const planType = parsed.planType ?? defaults.planType;
+    const inferredPlanType = parsed.unitCostCny < defaults.freeCostThresholdCny ? "free"
+      : parsed.unitCostCny > defaults.plusCostThresholdCny ? "plus" : "k12";
+    const planType = parsed.planType ?? inferredPlanType;
     if (planType !== "k12" && planType !== "plus" && planType !== "team" && planType !== "free") {
       throw new Error("--plan-type must be k12, plus, team, or free");
     }

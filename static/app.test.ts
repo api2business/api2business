@@ -1,20 +1,25 @@
 import { expect, test } from "bun:test";
 
-test("account import exposes explicit plan types without price inference", async () => {
+test("account import supports Team manual selection and three price-inferred types", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
   const cli = await Bun.file(new URL("../scripts/src/cli.ts", import.meta.url)).text();
   expect(html).toContain('id="import-plan-type"');
+  expect(html).toContain('id="import-total-cost"');
   expect(html).toContain('id="import-per-account-proxy"');
   expect(app).toContain("planType: planType.value");
   expect(app).toContain("perAccountProxy: $('#import-per-account-proxy').checked");
   expect(app).toContain("defaults.perAccountProxy === true");
   expect(app).toContain("planType.value = defaults.planType");
-  expect(app).not.toContain("freeCostThresholdCny");
-  expect(app).not.toContain("plusCostThresholdCny");
-  expect(cli).toContain("parsed.planType ?? defaults.planType");
+  expect(app).toContain("cost < defaults.freeCostThresholdCny ? 'free'");
+  expect(app).toContain("cost > defaults.plusCostThresholdCny ? 'plus' : 'k12'");
+  expect(app).toContain("planTypeManuallySelected");
+  expect(app).not.toContain("? 'team'");
+  expect(app).toContain("Math.round((total / count) * 100) / 100");
+  expect(app).toContain("Array.isArray(payload?.accounts) ? payload.accounts.length : 0");
+  expect(cli).toContain("parsed.planType ?? inferredPlanType");
   expect(cli).toContain("k12|plus|team|free");
-  expect(cli).not.toContain("inferredPlanType");
+  expect(cli).not.toContain('inferredPlanType = "team"');
   expect(app).not.toContain("history.replaceState(null, '', `/account-import?job=");
   expect(app).not.toContain("new URLSearchParams(location.search).get('job')");
 });

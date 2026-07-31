@@ -148,6 +148,8 @@ export interface AppConfig {
       sourceProxyId: number;
       perAccountProxy: boolean;
       planType: OAuthPlanType;
+      freeCostThresholdCny: number;
+      plusCostThresholdCny: number;
     };
     upstreamManagement: UpstreamManagementConfig;
     oauthEconomics: {
@@ -686,6 +688,8 @@ export function loadConfig(path: string): AppConfig {
           }
           return value;
         })(),
+        freeCostThresholdCny: numberValue(accountImportDefaults, "freeCostThresholdCny", "operations.accountImportDefaults", 0),
+        plusCostThresholdCny: numberValue(accountImportDefaults, "plusCostThresholdCny", "operations.accountImportDefaults", 0),
       },
       upstreamManagement: {
         pageSize: integerValue(upstreamManagement, "pageSize", "operations.upstreamManagement", 1, 100),
