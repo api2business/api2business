@@ -39,6 +39,11 @@ import {
   collectAccountImportEconomics,
   type AccountImportEconomicsInput,
 } from "./account-import-economics";
+import {
+  collectOAuthPoolEconomics,
+  mergeOAuthAcquisitionCosts,
+  normalizeOAuthRefunds,
+} from "./oauth-economics";
 
 const prioritiesByIdSql = `
 SELECT id::text AS id, priority::int AS priority
@@ -1023,6 +1028,29 @@ export class OperationsService {
 
   async accountImportEconomics(input: AccountImportEconomicsInput) {
     return await collectAccountImportEconomics(this.config, this.reads, input, "manual");
+  }
+
+  async oauthPoolEconomics() {
+    const yaml = this.yamlLedger();
+    const importEntries = readAccountImportCosts(this.config.operations.accountImportLedgerPath);
+    const merged = mergeOAuthAcquisitionCosts(importEntries, yaml.costs);
+    const refunds = normalizeOAuthRefunds(yaml.revenues);
+    const jsonlCostCny = importEntries.reduce((sum, entry) => sum + money(entry.amountCny), 0);
+    const yamlAcquisitionCostCny = yaml.costs
+      .filter((entry) => entry.kind === "acquisition")
+      .reduce((sum, entry) => sum + money(entry.amountCny), 0);
+    return await collectOAuthPoolEconomics(this.config, this.reads, {
+      costs: merged.costs,
+      refunds,
+      ledger: {
+        jsonlEntryCount: merged.jsonlEntryCount,
+        jsonlCostCny: money(jsonlCostCny),
+        yamlAcquisitionEntryCount: merged.yamlEntryCount,
+        yamlAcquisitionCostCny: money(yamlAcquisitionCostCny),
+        yamlSuppressedDuplicateCount: merged.yamlSuppressedCount,
+        mergedCostAccountCount: merged.costs.length,
+      },
+    }, "manual");
   }
 
   async oauthImportEconomics(day: string, page = 1, pageSize = 10) {

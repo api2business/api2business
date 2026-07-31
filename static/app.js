@@ -589,7 +589,9 @@ async function loadOperations({ showCached = false } = {}) {
 }
 
 function renderOauthCost(data) {
-  const total = data.total ?? {}
+  const pool = data.pool ?? { total: data.total ?? {}, groups: data.groups ?? [] }
+  const total = pool.total ?? {}
+  const health = data.health ?? {}
   $('#oauth-cost-accounts').textContent = number(total.accountCount)
   $('#oauth-cost-active').textContent = `${number(total.usageAccountCount)} 个已有产出`
   $('#oauth-cost-net').textContent = cny(total.netAcquisitionCostCny)
@@ -597,14 +599,18 @@ function renderOauthCost(data) {
   $('#oauth-cost-output').innerHTML = usd(total.apiAmountUsd, 2)
   $('#oauth-cost-requests').textContent = `${number(total.requestCount)} 次请求 · ${compact(total.tokenCount)} Token`
   $('#oauth-cost-unit').textContent = total.cnyPerApiUsd == null ? '—' : `¥${number(total.cnyPerApiUsd, 5)}`
-  $('#oauth-cost-state').textContent = `${escapeHtml(data.day)} · ${data.complete ? '数据完整' : '数据不完整'} · ${number(data.databaseQueries)} 次数据库查询`
+  $('#oauth-cost-health').textContent = `${number(health.normalCount)} 正常`
+  $('#oauth-cost-health-detail').textContent = `限流 ${number(health.rateLimitedCount)} · 错误 ${number(health.errorCount)} · 未探测`
+  $('#oauth-cost-state').textContent = `当前号池全历史 · ${data.complete ? '数据完整' : '数据不完整'} · ${number(data.databaseQueries)} 次数据库查询`
   const labels = { k12: 'K12', plus: 'Plus', free: 'Free' }
-  $('#oauth-cost-body').innerHTML = data.groups?.length ? data.groups.map((row) => `<tr>
-    <td><b>${escapeHtml(labels[row.planType] ?? row.planType)}</b></td><td>${number(row.accountCount)}</td>
+  const archived = data.archived ?? { groups: [] }
+  const groups = [...(pool.groups ?? []), ...(archived.groups ?? [])]
+  $('#oauth-cost-body').innerHTML = groups.length ? groups.map((row) => `<tr>
+    <td><b>${row.scope === 'archived' ? '已归档' : '当前号池'}</b></td><td><b>${escapeHtml(labels[row.planType] ?? row.planType)}</b></td><td>${number(row.accountCount)}</td>
     <td>${number(row.usageAccountCount)}</td><td>${cny(row.netAcquisitionCostCny)}<small class="cost-breakdown">毛 ${cny(row.grossAcquisitionCostCny)} · 退款 ${cny(row.procurementRefundCny)}</small></td>
     <td class="usd-cell">${usd(row.apiAmountUsd, 2)}</td><td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td>
     <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
-  </tr>`).join('') : '<tr><td colspan="8" class="empty">该运营日没有 OAuth 采购账号</td></tr>'
+  </tr>`).join('') : '<tr><td colspan="9" class="empty">当前没有 OAuth 账号或历史采购记录</td></tr>'
   renderPager('oauth', data.pagination)
 }
 
@@ -613,8 +619,7 @@ async function loadOauthCost() {
   button.disabled = true
   $('#oauth-cost-state').textContent = '正在通过单连接队列核算…'
   try {
-    const day = $('#oauth-cost-day').value
-    const data = await requestJson(`/api/operations/oauth-cost?day=${encodeURIComponent(day)}&page=${oauthPage}`, {}, 60000)
+    const data = await requestJson(`/api/operations/oauth-cost?page=${oauthPage}`, {}, 60000)
     renderOauthCost(data)
   } catch (error) {
     $('#oauth-cost-state').textContent = `核算失败：${error instanceof Error ? error.message : String(error)}`
@@ -626,7 +631,6 @@ async function loadOauthCost() {
 
 async function operationsPage() {
   $('#cash-date').value = operatingDay()
-  $('#oauth-cost-day').value = operatingDay()
   $('#oauth-cost-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     oauthPage = 1

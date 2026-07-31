@@ -183,7 +183,7 @@ button:disabled { cursor: wait; opacity: .48; }
 
 .oauth-cost-section { padding-top: 20px; }
 .oauth-cost-section .table-toolbar h2 { margin: 0 0 7px; }
-.oauth-cost-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-bottom: 0; }
+.oauth-cost-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-bottom: 0; }
 .oauth-cost-metrics > div { min-height: 104px; padding: 20px; border-right: 1px solid var(--line); background: rgba(25,29,26,.62); }
 .oauth-cost-metrics > div:last-child { border-right: 0; }
 .oauth-cost-metrics span, .oauth-cost-metrics small { display: block; color: var(--muted); }

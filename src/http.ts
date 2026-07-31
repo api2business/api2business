@@ -201,11 +201,8 @@ export function createHandler(
         catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
       }
       if (request.method === "GET" && url.pathname === "/api/operations/oauth-cost") {
-        const day = url.searchParams.get("day");
-        if (day === null) return json({ ok: false, error: "day is required" }, 400);
         try {
-          parseAccountEconomicsWindow({ day }, config.monitor.timezone);
-          return json(await operations.oauthImportEconomics(day, pageNumber(url), 10));
+          return json(await operations.oauthPoolEconomics());
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }
@@ -376,6 +373,14 @@ export function createHandler(
           parseAccountEconomicsWindow({ day: input.day }, config.monitor.timezone);
           const externalCosts = normalizeExternalAccountCosts(input.externalCosts);
           return json(await operations.accountImportEconomics({ day: input.day, externalCosts }));
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/accounts/oauth-economics") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        try {
+          return json(await operations.oauthPoolEconomics());
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }

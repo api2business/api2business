@@ -12,6 +12,7 @@ import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
 import { emitPriorityPlan } from "./priority-plan-output";
 import { emitAccountEconomics, emitAccountImportEconomics } from "./account-economics-output";
+import { emitOAuthEconomics } from "./oauth-economics-output";
 import { parseAccountIdSelector } from "../../src/account-batch-economics";
 
 interface Parsed {
@@ -161,6 +162,7 @@ function help(): Record<string, unknown> {
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
       "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
+      "accounts oauth-economics [--over-api]",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
       "accounts lifecycle status --id <job-id> --over-api",
       "accounts lifecycle settle --id <job-id> --confirm --over-api",
@@ -274,6 +276,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || parsed.command.join(" ") === "profit daily-facts"
     || parsed.command.join(" ") === "accounts economics"
     || parsed.command.join(" ") === "accounts import-economics"
+    || parsed.command.join(" ") === "accounts oauth-economics"
     || parsed.command.join(" ") === "accounts inspect"
     || (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle")
     || parsed.command.join(" ") === "payments alipay-revenue"
@@ -337,6 +340,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     }
     return await client.accountImportEconomics({ day: parsed.day, externalCosts });
   }
+  if (group === "accounts" && action === "oauth-economics") return await client.oauthPoolEconomics();
   if (group === "accounts" && action === "import") {
     if (!parsed.file) throw new Error("accounts import requires --file");
     if (parsed.unitCostCny === null) throw new Error("accounts import requires --unit-cost-cny in CNY");
@@ -525,6 +529,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command.join(" ") === "profit daily-facts"
       || parsed.command.join(" ") === "accounts economics"
       || parsed.command.join(" ") === "accounts import-economics"
+      || parsed.command.join(" ") === "accounts oauth-economics"
       || parsed.command.join(" ") === "accounts inspect"
       || (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle")
       || parsed.command.join(" ") === "payments alipay-revenue"
@@ -545,6 +550,7 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "users impact") emitUserImpact(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts economics") emitAccountEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts import-economics") emitAccountImportEconomics(output, parsed.json);
+    else if (parsed.command.join(" ") === "accounts oauth-economics") emitOAuthEconomics(output, parsed.json);
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);
