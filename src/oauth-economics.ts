@@ -372,7 +372,9 @@ function projectGroup(row: Row, timezone: string, refunds: Map<number, number>) 
     procurementRefundCny,
     netAcquisitionCostCny,
     acquisitionCostCny: netAcquisitionCostCny,
-    cnyPerApiUsd: apiAmountUsd > 0 ? rounded(netAcquisitionCostCny / apiAmountUsd, 6) : null,
+    cnyPerApiUsd: missingCostAccountCount === 0 && apiAmountUsd > 0
+      ? rounded(netAcquisitionCostCny / apiAmountUsd, 6)
+      : null,
     firstUsedAt: localTime(row.first_used_at, timezone),
     lastUsedAt: localTime(row.last_used_at, timezone),
   };
@@ -384,10 +386,11 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
   const gross = scoped.reduce((sum, group) => sum + number(group.grossAcquisitionCostCny), 0);
   const refund = scoped.reduce((sum, group) => sum + number(group.procurementRefundCny), 0);
   const net = scoped.reduce((sum, group) => sum + number(group.netAcquisitionCostCny), 0);
+  const missingCostAccountCount = scoped.reduce((sum, group) => sum + number(group.missingCostAccountCount), 0);
   const total = {
     accountCount: scoped.reduce((sum, group) => sum + number(group.accountCount), 0),
     matchedCostAccountCount: scoped.reduce((sum, group) => sum + number(group.matchedCostAccountCount), 0),
-    missingCostAccountCount: scoped.reduce((sum, group) => sum + number(group.missingCostAccountCount), 0),
+    missingCostAccountCount,
     presentAccountCount: scoped.reduce((sum, group) => sum + number(group.presentAccountCount), 0),
     orphanedAccountCount: scoped.reduce((sum, group) => sum + number(group.orphanedAccountCount), 0),
     usageAccountCount: scoped.reduce((sum, group) => sum + number(group.usageAccountCount), 0),
@@ -398,8 +401,8 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
     procurementRefundCny: money(refund),
     netAcquisitionCostCny: money(net),
     acquisitionCostCny: money(net),
-    cnyPerApiUsd: apiAmountUsd > 0 ? rounded(net / apiAmountUsd, 6) : null,
-    complete: scoped.length > 0 && scoped.every((group) => number(group.missingCostAccountCount) === 0)
+    cnyPerApiUsd: missingCostAccountCount === 0 && apiAmountUsd > 0 ? rounded(net / apiAmountUsd, 6) : null,
+    complete: scoped.length > 0 && missingCostAccountCount === 0
       && apiAmountUsd > 0,
   };
   return total;
@@ -467,7 +470,8 @@ export async function collectOAuthPoolEconomics(
     procurementRefundCny: money(pool.procurementRefundCny + archived.procurementRefundCny),
     netAcquisitionCostCny: money(pool.netAcquisitionCostCny + archived.netAcquisitionCostCny),
     acquisitionCostCny: money(pool.netAcquisitionCostCny + archived.netAcquisitionCostCny),
-    cnyPerApiUsd: pool.apiAmountUsd + archived.apiAmountUsd > 0
+    cnyPerApiUsd: pool.missingCostAccountCount + archived.missingCostAccountCount === 0
+      && pool.apiAmountUsd + archived.apiAmountUsd > 0
       ? rounded((pool.netAcquisitionCostCny + archived.netAcquisitionCostCny) / (pool.apiAmountUsd + archived.apiAmountUsd), 6)
       : null,
     complete: pool.complete && (archivedGroups.length === 0 || archived.complete),
