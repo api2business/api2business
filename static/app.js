@@ -317,6 +317,8 @@ let auditPage = 1
 let oauthPage = 1
 let oauthArchivedPage = 1
 let oauthRefreshTimer = null
+let oauthRefreshCountdownTimer = null
+let oauthRefreshDueAt = null
 let oauthCostLoading = false
 let procurementPage = 1
 let procurementBudget = null
@@ -597,6 +599,23 @@ function renderOauthCost(data) {
   const pool = data.pool ?? { total: data.total ?? {}, groups: data.groups ?? [] }
   const total = pool.total ?? {}
   const health = data.health ?? {}
+  const statusCount = (value) => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+  }
+  const statusCounts = (source) => ({
+    normal: statusCount(source.normalCount),
+    rateLimited: statusCount(source.rateLimitedCount),
+    error: statusCount(source.errorCount),
+  })
+  const statusDonutMarkup = (source, extraClass = '') => {
+    const counts = statusCounts(source)
+    const statusTotal = counts.normal + counts.rateLimited + counts.error
+    if (statusTotal === 0) return `<div class="oauth-status-donut ${extraClass} is-empty" role="img" aria-label="状态未探测"></div>`
+    const normalEnd = (counts.normal / statusTotal * 100).toFixed(2)
+    const rateEnd = ((counts.normal + counts.rateLimited) / statusTotal * 100).toFixed(2)
+    return `<div class="oauth-status-donut ${extraClass}" style="--oauth-normal-end:${normalEnd}%;--oauth-rate-end:${rateEnd}%" role="img" aria-label="正常 ${counts.normal}，限流 ${counts.rateLimited}，错误 ${counts.error}"></div>`
+  }
   const outputProgress = (row) => {
     const actual = Number(row.apiAmountUsd)
     const ideal = Number(row.idealApiAmountUsd)
@@ -635,6 +654,7 @@ function renderOauthCost(data) {
     : `预计还能产出 ${usdText(total.remainingIdealApiAmountUsd, 2)}`
   $('#oauth-cost-health').textContent = `${number(health.normalCount)} 正常`
   $('#oauth-cost-health-detail').textContent = `限流 ${number(health.rateLimitedCount)} · 错误 ${number(health.errorCount)} · 未探测`
+  $('#oauth-cost-health-chart').innerHTML = statusDonutMarkup(health, 'oauth-status-donut-large')
   const exclusions = data.exclusions ?? {}
   const excludedIds = Array.isArray(exclusions.accountIds) ? exclusions.accountIds : []
   const exclusionLabel = excludedIds.length ? ` · 已排除账号 #${excludedIds.join(', #')}` : ''
@@ -647,28 +667,13 @@ function renderOauthCost(data) {
   $('#oauth-cost-state').textContent = `当前号池核算 · 全历史用量${exclusionLabel}${warningLabel} · ${data.complete ? '数据完整' : '有数据缺口'} · ${number(data.databaseQueries)} 次数据库查询`
   const labels = { k12: 'K12', plus: 'Plus', free: 'Free', team: 'Team' }
   const archived = data.archived ?? { groups: [] }
-  const statusCount = (value) => {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
-  }
   const statusDistributionCell = (row, statusSource = row) => {
     if (row.scope === 'archived') return '<td class="oauth-status-distribution"><span class="oauth-status-unavailable">—</span></td>'
-    const counts = {
-      normal: statusCount(statusSource.normalCount),
-      rateLimited: statusCount(statusSource.rateLimitedCount),
-      error: statusCount(statusSource.errorCount),
-    }
+    const counts = statusCounts(statusSource)
     const total = counts.normal + counts.rateLimited + counts.error
     if (total === 0) return '<td class="oauth-status-distribution"><span class="oauth-status-unavailable">—</span></td>'
-    const width = (value) => `${(value / total * 100).toFixed(2)}%`
-    const segments = [
-      ['normal', counts.normal, 'oauth-status-segment-normal'],
-      ['rateLimited', counts.rateLimited, 'oauth-status-segment-rate-limited'],
-      ['error', counts.error, 'oauth-status-segment-error'],
-    ].filter(([, count]) => count > 0)
     return `<td class="oauth-status-distribution">
-      <div class="oauth-status-progress" role="progressbar" aria-label="账号状态分布" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${total}" aria-valuetext="正常 ${counts.normal}，限流 ${counts.rateLimited}，错误 ${counts.error}">${segments.map(([, count, className], index) => `<span class="oauth-status-segment ${className}${index > 0 ? ' oauth-status-segment-divider' : ''}" style="width:${width(count)}"></span>`).join('')}</div>
-      <div class="oauth-status-legend"><span class="oauth-status-normal">正常 ${counts.normal}</span><span class="oauth-status-rate-limited">限流 ${counts.rateLimited}</span><span class="oauth-status-error">错误 ${counts.error}</span></div>
+      <div class="oauth-status-visual" role="group" aria-label="账号状态分布">${statusDonutMarkup(statusSource)}<div class="oauth-status-legend"><span class="oauth-status-normal">正常 ${counts.normal}</span><span class="oauth-status-rate-limited">限流 ${counts.rateLimited}</span><span class="oauth-status-error">错误 ${counts.error}</span></div></div>
     </td>`
   }
   const outputCell = (row) => {
@@ -725,7 +730,31 @@ function usdText(value, digits = 2) {
 
 function clearOauthRefreshTimer() {
   if (oauthRefreshTimer !== null) clearTimeout(oauthRefreshTimer)
+  if (oauthRefreshCountdownTimer !== null) clearInterval(oauthRefreshCountdownTimer)
   oauthRefreshTimer = null
+  oauthRefreshCountdownTimer = null
+  oauthRefreshDueAt = null
+  renderOauthRefreshCountdown()
+}
+
+function renderOauthRefreshCountdown() {
+  const target = $('#oauth-cost-refresh-countdown')
+  if (!target) return
+  const interval = Number($('#oauth-cost-refresh-interval')?.value)
+  if (!oauthRefreshIntervals.has(interval) || interval <= 0) {
+    target.textContent = '自动刷新已关闭'
+    return
+  }
+  if (oauthRefreshDueAt === null) {
+    target.textContent = '下次刷新 --:--'
+    return
+  }
+  const remainingSeconds = Math.max(0, Math.ceil((oauthRefreshDueAt - Date.now()) / 1000))
+  const minutes = Math.floor(remainingSeconds / 60)
+  const seconds = remainingSeconds % 60
+  target.textContent = remainingSeconds > 0
+    ? `下次刷新 ${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : '自动刷新中…'
 }
 
 function readOauthRefreshInterval() {
@@ -749,7 +778,12 @@ function scheduleOauthCostRefresh() {
   clearOauthRefreshTimer()
   const interval = Number($('#oauth-cost-refresh-interval')?.value)
   if (!oauthRefreshIntervals.has(interval) || interval <= 0) return
+  oauthRefreshDueAt = Date.now() + interval * 1000
+  renderOauthRefreshCountdown()
+  oauthRefreshCountdownTimer = setInterval(renderOauthRefreshCountdown, 1000)
   oauthRefreshTimer = setTimeout(async () => {
+    oauthRefreshDueAt = null
+    renderOauthRefreshCountdown()
     await loadOauthCost({ automatic: true }).catch(() => null)
     scheduleOauthCostRefresh()
   }, interval * 1000)
