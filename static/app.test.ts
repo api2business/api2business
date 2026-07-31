@@ -90,6 +90,7 @@ test("priority adjustment history is paginated instead of growing without bound"
 test("shared navigation remains stable and horizontally scrollable", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
+  const http = await Bun.file(new URL("../src/http.ts", import.meta.url)).text();
 
   expect(app).toContain('class="primary-nav" aria-label="主导航"');
   expect(app).toContain("primaryNav.scrollWidth > primaryNav.clientWidth");
@@ -98,6 +99,8 @@ test("shared navigation remains stable and horizontally scrollable", async () =>
   expect(css).toContain("flex-wrap: nowrap");
   expect(css).toContain("overflow-x: auto");
   expect(css).toContain("-webkit-overflow-scrolling: touch");
+  expect(http).toContain('\"cache-control\": \"no-cache\"');
+  expect(http).not.toContain('public, max-age=300');
 });
 
 test("operations tables request fixed server-side pages of ten records", async () => {
@@ -223,6 +226,6 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
-  expect(html).toContain("/app.js?v=availability-reasons-v1");
-  expect(html).toContain("/styles.css?v=availability-reasons-v1");
+  expect(html).toContain('/app.js?v=nav-shell-v2');
+  expect(html).toContain('/styles.css?v=nav-shell-v2');
 });

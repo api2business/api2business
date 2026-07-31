@@ -79,7 +79,7 @@ async function staticFile(name: string, contentType: string): Promise<Response> 
   return new Response(file, {
     headers: {
       "content-type": contentType,
-      "cache-control": name.endsWith(".html") ? "no-cache" : "public, max-age=300",
+      "cache-control": "no-cache",
     },
   });
 }
