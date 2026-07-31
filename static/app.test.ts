@@ -104,6 +104,7 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(html).toContain("<th>平均单价</th>");
   expect(html).toContain("<th>API 产出 / 预期产出</th>");
   expect(html).toContain("<small>预期成本</small>");
+  expect(html).toContain("<span>已消耗的实时成本</span>");
   expect(html).toContain("<th>预期人民币 / 刀</th>");
   expect(html).not.toContain("<th>API 美元产出</th>");
   expect(html).not.toContain("<th>理想 API 产出</th>");
