@@ -320,7 +320,7 @@ export function createHandler(
       }
       if (request.method === "POST" && url.pathname === "/api/operations/cash") {
         const input = await body(request);
-        if (!/^\\d{4}-\\d{2}-\\d{2}$/u.test(String(input.occurredOn ?? ""))
+        if (!/^\d{4}-\d{2}-\d{2}$/u.test(String(input.occurredOn ?? ""))
           || (input.direction !== "income" && input.direction !== "expense")
           || typeof input.category !== "string" || !input.category.trim()
           || !Number.isFinite(Number(input.amountCny)) || Number(input.amountCny) <= 0
