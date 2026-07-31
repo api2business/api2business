@@ -103,6 +103,8 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(html).toContain("已归档 OAuth 成本");
   expect(html).toContain("<th>平均单价</th>");
   expect(html).toContain("<th>API 产出 / 理想产出</th>");
+  expect(html).toContain("<span>预期成本</span>");
+  expect(html).toContain("<th>预期人民币 / 刀</th>");
   expect(html).not.toContain("<th>API 美元产出</th>");
   expect(html).not.toContain("<th>理想 API 产出</th>");
   expect(app).toContain("oauthArchivedPage");

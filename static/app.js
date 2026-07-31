@@ -688,7 +688,7 @@ function renderOauthCost(data) {
     archivedWarningLabels.push(`缺少理想产出配置：${archivedTotal.missingIdealPlanTypes.join(', ')}`)
   }
   const archivedWarningLabel = archivedWarningLabels.length ? ` · ${archivedWarningLabels.join('；')}` : ''
-  $('#oauth-archived-state').textContent = `已归档账号全历史用量 · ${number(archivedTotal.accountCount)} 个账号 · 净成本 ${cny(archivedTotal.netAcquisitionCostCny)} · 理想成本 ${archivedTotal.idealCnyPerApiUsd == null ? '—' : `¥${number(archivedTotal.idealCnyPerApiUsd, 5)}`}${archivedWarningLabel}`
+  $('#oauth-archived-state').textContent = `已归档账号全历史用量 · ${number(archivedTotal.accountCount)} 个账号 · 净成本 ${cny(archivedTotal.netAcquisitionCostCny)} · 预期成本 ${archivedTotal.idealCnyPerApiUsd == null ? '—' : `¥${number(archivedTotal.idealCnyPerApiUsd, 5)}`}${archivedWarningLabel}`
   renderRows(archived.groups ?? [], '#oauth-archived-body', '当前没有已归档 OAuth 采购记录', '已归档', archivedTotal)
   renderPager('oauth', data.pagination)
   renderPager('oauth-archived', archived.pagination)
