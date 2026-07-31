@@ -637,13 +637,16 @@ function renderOauthCost(data) {
     const rateEnd = ((counts.normal + counts.rateLimited) / statusTotal * 100).toFixed(2)
     return `<div class="oauth-status-donut ${extraClass}" style="--oauth-normal-end:${normalEnd}%;--oauth-rate-end:${rateEnd}%" role="img" aria-label="正常 ${counts.normal}，限流 ${counts.rateLimited}，错误 ${counts.error}"></div>`
   }
+  const expectedAmount = (row) => row.expectedApiAmountUsd ?? row.idealApiAmountUsd
+  const expectedRemaining = (row) => row.remainingExpectedApiAmountUsd ?? row.remainingIdealApiAmountUsd
+  const expectedUnitCost = (row) => row.expectedCnyPerApiUsd ?? row.idealCnyPerApiUsd
   const outputProgress = (row) => {
     const actual = Number(row.apiAmountUsd)
-    const ideal = Number(row.idealApiAmountUsd)
-    if (!Number.isFinite(actual) || !Number.isFinite(ideal) || ideal <= 0) {
+    const expected = Number(expectedAmount(row))
+    if (!Number.isFinite(actual) || !Number.isFinite(expected) || expected <= 0) {
       return { percent: '—', width: '0', className: 'is-empty', value: null }
     }
-    const ratio = actual / ideal
+    const ratio = actual / expected
     return {
       percent: `${number(ratio * 100, 1)}%`,
       width: Math.min(100, Math.max(0, ratio * 100)).toFixed(2),
@@ -663,16 +666,19 @@ function renderOauthCost(data) {
   outputProgressBar.setAttribute('aria-valuetext', totalOutputProgress.value === null ? '缺少预期产出配置' : `已产出占预期产出 ${totalOutputProgress.percent}`)
   if (totalOutputProgress.value === null) outputProgressBar.removeAttribute('aria-valuenow')
   else outputProgressBar.setAttribute('aria-valuenow', totalOutputProgress.value.toFixed(1))
-  $('#oauth-cost-output-progress-label').textContent = total.idealApiAmountUsd == null
+  const totalExpectedAmount = expectedAmount(total)
+  const totalExpectedRemaining = expectedRemaining(total)
+  $('#oauth-cost-output-progress-label').textContent = totalExpectedAmount == null
     ? '已产出 / 预期 —'
-    : `已产出 / 预期 ${usdText(total.apiAmountUsd, 2)} / ${usdText(total.idealApiAmountUsd, 2)} · ${totalOutputProgress.percent}`
+    : `已产出 / 预期 ${usdText(total.apiAmountUsd, 2)} / ${usdText(totalExpectedAmount, 2)} · ${totalOutputProgress.percent}`
   $('#oauth-cost-requests').textContent = `${number(total.requestCount)} 次请求 · ${compact(total.tokenCount)} Token`
   $('#oauth-cost-unit').textContent = total.cnyPerApiUsd == null ? '—' : `¥${number(total.cnyPerApiUsd, 5)}`
-  $('#oauth-cost-ideal-unit').textContent = total.idealCnyPerApiUsd == null ? '—' : `¥${number(total.idealCnyPerApiUsd, 5)}`
+  const totalExpectedUnitCost = expectedUnitCost(total)
+  $('#oauth-cost-ideal-unit').textContent = totalExpectedUnitCost == null ? '—' : `¥${number(totalExpectedUnitCost, 5)}`
   $('#oauth-cost-ideal-output').textContent = `已产出 API 额度 ${usdText(total.apiAmountUsd, 2)}`
-  $('#oauth-cost-ideal-remaining').textContent = total.remainingIdealApiAmountUsd == null
-    ? '预计还能产出 —（缺少理想配置）'
-    : `预计还能产出 ${usdText(total.remainingIdealApiAmountUsd, 2)}`
+  $('#oauth-cost-ideal-remaining').textContent = totalExpectedRemaining == null
+    ? '预计还能产出 —（缺少预期配置）'
+    : `预计还能产出 ${usdText(totalExpectedRemaining, 2)}`
   $('#oauth-cost-health').textContent = `${number(health.normalCount)} 正常`
   $('#oauth-cost-health-detail').textContent = `限流 ${number(health.rateLimitedCount)} · 错误 ${number(health.errorCount)} · 未探测`
   $('#oauth-cost-health-chart').innerHTML = statusDonutMarkup(health, 'oauth-status-donut-large')
@@ -681,8 +687,9 @@ function renderOauthCost(data) {
   const exclusionLabel = excludedIds.length ? ` · 已排除账号 #${excludedIds.join(', #')}` : ''
   const currentWarningLabels = []
   if (number(total.missingCostAccountCount) > 0) currentWarningLabels.push(`缺少采购成本 ${number(total.missingCostAccountCount)} 个`)
-  if (Array.isArray(total.missingIdealPlanTypes) && total.missingIdealPlanTypes.length > 0) {
-    currentWarningLabels.push(`缺少理想产出配置：${total.missingIdealPlanTypes.join(', ')}`)
+  const missingExpectedPlanTypes = total.missingExpectedPlanTypes ?? total.missingIdealPlanTypes
+  if (Array.isArray(missingExpectedPlanTypes) && missingExpectedPlanTypes.length > 0) {
+    currentWarningLabels.push(`缺少预期产出配置：${missingExpectedPlanTypes.join(', ')}`)
   }
   const warningLabel = currentWarningLabels.length ? ` · ${currentWarningLabels.join('；')}` : ''
   $('#oauth-cost-state').textContent = `当前号池核算 · 全历史用量${exclusionLabel}${warningLabel} · ${data.complete ? '数据完整' : '有数据缺口'} · ${number(data.databaseQueries)} 次数据库查询`
@@ -699,16 +706,22 @@ function renderOauthCost(data) {
   }
   const outputCell = (row) => {
     const progress = outputProgress(row)
-    const idealLabel = row.idealApiAmountUsd == null
-      ? '理想产出缺少类型配置'
-      : row.planType === 'total' ? '理想总产出' : `理想 ${usd(row.idealApiUsdPerAccount, 2)} / 号`
+    const rowExpectedAmount = expectedAmount(row)
+    const configuredExpectedLabel = row.planType === 'total'
+      ? '正常账号按各类型预期'
+      : `正常号按 ${usd(row.expectedApiUsdPerAccount ?? row.idealApiUsdPerAccount, 2)} / 号`
+    const expectedLabel = rowExpectedAmount == null
+      ? '预期产出缺少类型配置'
+      : row.expectedOutputBasis === 'status-adjusted'
+        ? `${configuredExpectedLabel}，限流/错误按当前产出`
+        : row.planType === 'total' ? '预期总产出' : `预期 ${usd(row.expectedApiUsdPerAccount ?? row.idealApiUsdPerAccount, 2)} / 号`
     const progressAttributes = progress.value === null
-      ? 'aria-valuetext="缺少理想产出配置"'
+      ? 'aria-valuetext="缺少预期产出配置"'
       : `aria-valuenow="${progress.value.toFixed(1)}"`
     return `<td class="oauth-output-cell">
-      <div class="oauth-output-values"><span class="oauth-output-actual">${usd(row.apiAmountUsd, 2)}</span><span class="oauth-output-separator">/</span><span class="oauth-output-ideal">${usd(row.idealApiAmountUsd, 2)}</span><b class="oauth-output-percent ${progress.className}">(${progress.percent})</b></div>
-      <div class="oauth-output-progress ${progress.className}" role="progressbar" aria-label="已产出占理想产出" aria-valuemin="0" aria-valuemax="100" ${progressAttributes}><span style="width:${progress.width}%"></span></div>
-      <small class="cost-breakdown">${idealLabel}</small>
+      <div class="oauth-output-values"><span class="oauth-output-actual">${usd(row.apiAmountUsd, 2)}</span><span class="oauth-output-separator">/</span><span class="oauth-output-ideal">${usd(rowExpectedAmount, 2)}</span><b class="oauth-output-percent ${progress.className}">(${progress.percent})</b></div>
+      <div class="oauth-output-progress ${progress.className}" role="progressbar" aria-label="已产出占预期产出" aria-valuemin="0" aria-valuemax="100" ${progressAttributes}><span style="width:${progress.width}%"></span></div>
+      <small class="cost-breakdown">${expectedLabel}</small>
     </td>`
   }
   const renderRow = (row, scopeLabel, isTotal = false) => {
@@ -721,7 +734,7 @@ function renderOauthCost(data) {
       <td>${cny(row.netAcquisitionCostCny)}<small class="cost-breakdown">毛 ${cny(row.grossAcquisitionCostCny)} · 退款 ${cny(row.procurementRefundCny)}</small></td>
       <td>${averageUnitCostCny == null ? '—' : cny(averageUnitCostCny)}${isTotal ? '' : '<small class="cost-breakdown">净采购成本 / 号</small>'}</td>
       ${outputCell({ ...row, planType: isTotal ? 'total' : row.planType })}
-      <td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td><td>${row.idealCnyPerApiUsd == null ? '—' : `¥${number(row.idealCnyPerApiUsd, 5)}`}</td>
+      <td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td><td>${expectedUnitCost(row) == null ? '—' : `¥${number(expectedUnitCost(row), 5)}`}</td>
       <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
     </tr>`
   }
@@ -734,11 +747,13 @@ function renderOauthCost(data) {
   const archivedTotal = archived.total ?? {}
   const archivedWarningLabels = []
   if (number(archivedTotal.missingCostAccountCount) > 0) archivedWarningLabels.push(`缺少采购成本 ${number(archivedTotal.missingCostAccountCount)} 个`)
-  if (Array.isArray(archivedTotal.missingIdealPlanTypes) && archivedTotal.missingIdealPlanTypes.length > 0) {
-    archivedWarningLabels.push(`缺少理想产出配置：${archivedTotal.missingIdealPlanTypes.join(', ')}`)
+  const archivedMissingExpectedPlanTypes = archivedTotal.missingExpectedPlanTypes ?? archivedTotal.missingIdealPlanTypes
+  if (Array.isArray(archivedMissingExpectedPlanTypes) && archivedMissingExpectedPlanTypes.length > 0) {
+    archivedWarningLabels.push(`缺少预期产出配置：${archivedMissingExpectedPlanTypes.join(', ')}`)
   }
   const archivedWarningLabel = archivedWarningLabels.length ? ` · ${archivedWarningLabels.join('；')}` : ''
-  $('#oauth-archived-state').textContent = `已归档账号全历史用量 · ${number(archivedTotal.accountCount)} 个账号 · 净成本 ${cny(archivedTotal.netAcquisitionCostCny)} · 预期成本 ${archivedTotal.idealCnyPerApiUsd == null ? '—' : `¥${number(archivedTotal.idealCnyPerApiUsd, 5)}`}${archivedWarningLabel}`
+  const archivedExpectedUnitCost = expectedUnitCost(archivedTotal)
+  $('#oauth-archived-state').textContent = `已归档账号全历史用量 · ${number(archivedTotal.accountCount)} 个账号 · 净成本 ${cny(archivedTotal.netAcquisitionCostCny)} · 预期成本 ${archivedExpectedUnitCost == null ? '—' : `¥${number(archivedExpectedUnitCost, 5)}`}${archivedWarningLabel}`
   renderRows(archived.groups ?? [], '#oauth-archived-body', '当前没有已归档 OAuth 采购记录', '已归档', archivedTotal)
   renderPager('oauth', data.pagination)
   renderPager('oauth-archived', archived.pagination)

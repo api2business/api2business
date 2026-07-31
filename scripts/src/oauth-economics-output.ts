@@ -9,14 +9,26 @@ function decimal(value: unknown, places: number): string {
   return Number.isFinite(parsed) ? parsed.toFixed(places) : "-";
 }
 
+function expectedAmount(value: Record<string, unknown>): unknown {
+  return value.expectedApiAmountUsd ?? value.idealApiAmountUsd;
+}
+
+function expectedRemaining(value: Record<string, unknown>): unknown {
+  return value.remainingExpectedApiAmountUsd ?? value.remainingIdealApiAmountUsd;
+}
+
+function expectedUnitCost(value: Record<string, unknown>): unknown {
+  return value.expectedCnyPerApiUsd ?? value.idealCnyPerApiUsd;
+}
+
 function printPart(name: string, value: unknown): void {
   const part = record(value) ?? {};
   const total = record(part.total) ?? {};
-  console.log(`${name} accounts=${String(total.accountCount)} netCny=${decimal(total.netAcquisitionCostCny, 2)} apiUsd=${decimal(total.apiAmountUsd, 6)} remainingIdealApiUsd=${decimal(total.remainingIdealApiAmountUsd, 6)} cnyPerApiUsd=${decimal(total.cnyPerApiUsd, 6)} idealApiUsd=${decimal(total.idealApiAmountUsd, 6)} idealCnyPerApiUsd=${decimal(total.idealCnyPerApiUsd, 6)} requests=${String(total.requestCount)} tokens=${String(total.tokenCount)} complete=${String(total.complete)}`);
+  console.log(`${name} accounts=${String(total.accountCount)} netCny=${decimal(total.netAcquisitionCostCny, 2)} apiUsd=${decimal(total.apiAmountUsd, 6)} unavailableApiUsd=${decimal(total.unavailableApiAmountUsd, 6)} remainingExpectedApiUsd=${decimal(expectedRemaining(total), 6)} cnyPerApiUsd=${decimal(total.cnyPerApiUsd, 6)} expectedApiUsd=${decimal(expectedAmount(total), 6)} expectedCnyPerApiUsd=${decimal(expectedUnitCost(total), 6)} expectedOutputBasis=${String(total.expectedOutputBasis ?? "configured")} complete=${String(total.complete)}`);
   const groups = Array.isArray(part.groups) ? part.groups : [];
   for (const item of groups) {
     const group = record(item) ?? {};
-    console.log(`  PLAN type=${String(group.planType)} accounts=${String(group.accountCount)} normal=${String(group.normalCount ?? "-")} rateLimited=${String(group.rateLimitedCount ?? "-")} error=${String(group.errorCount ?? "-")} netCny=${decimal(group.netAcquisitionCostCny, 2)} avgUnitCny=${decimal(group.averageUnitCostCny, 6)} refundCny=${decimal(group.procurementRefundCny, 2)} apiUsd=${decimal(group.apiAmountUsd, 6)} remainingIdealApiUsd=${decimal(group.remainingIdealApiAmountUsd, 6)} cnyPerApiUsd=${decimal(group.cnyPerApiUsd, 6)} idealApiUsd=${decimal(group.idealApiAmountUsd, 6)} idealCnyPerApiUsd=${decimal(group.idealCnyPerApiUsd, 6)}`);
+    console.log(`  PLAN type=${String(group.planType)} accounts=${String(group.accountCount)} normal=${String(group.normalCount ?? "-")} rateLimited=${String(group.rateLimitedCount ?? "-")} error=${String(group.errorCount ?? "-")} netCny=${decimal(group.netAcquisitionCostCny, 2)} avgUnitCny=${decimal(group.averageUnitCostCny, 6)} refundCny=${decimal(group.procurementRefundCny, 2)} apiUsd=${decimal(group.apiAmountUsd, 6)} unavailableApiUsd=${decimal(group.unavailableApiAmountUsd, 6)} remainingExpectedApiUsd=${decimal(expectedRemaining(group), 6)} cnyPerApiUsd=${decimal(group.cnyPerApiUsd, 6)} expectedApiUsd=${decimal(expectedAmount(group), 6)} expectedCnyPerApiUsd=${decimal(expectedUnitCost(group), 6)} expectedOutputBasis=${String(group.expectedOutputBasis ?? "configured")}`);
   }
 }
 
@@ -38,5 +50,5 @@ export function emitOAuthEconomics(value: Record<string, unknown>, json: boolean
   printPart("ARCHIVED", value.archived);
   console.log(`HEALTH accounts=${String(health.accountCount)} normal=${String(health.normalCount)} rateLimited=${String(health.rateLimitedCount)} error=${String(health.errorCount)} active=${String(health.activeCount)} schedulable=${String(health.schedulableCount)} probeStarted=${String(health.probeStarted)}`);
   const all = record(record(value.all)?.total);
-  if (all) console.log(`ALL netCny=${decimal(all.netAcquisitionCostCny, 2)} apiUsd=${decimal(all.apiAmountUsd, 6)} remainingIdealApiUsd=${decimal(all.remainingIdealApiAmountUsd, 6)} cnyPerApiUsd=${decimal(all.cnyPerApiUsd, 6)} idealApiUsd=${decimal(all.idealApiAmountUsd, 6)} idealCnyPerApiUsd=${decimal(all.idealCnyPerApiUsd, 6)}`);
+  if (all) console.log(`ALL netCny=${decimal(all.netAcquisitionCostCny, 2)} apiUsd=${decimal(all.apiAmountUsd, 6)} unavailableApiUsd=${decimal(all.unavailableApiAmountUsd, 6)} remainingExpectedApiUsd=${decimal(expectedRemaining(all), 6)} cnyPerApiUsd=${decimal(all.cnyPerApiUsd, 6)} expectedApiUsd=${decimal(expectedAmount(all), 6)} expectedCnyPerApiUsd=${decimal(expectedUnitCost(all), 6)} expectedOutputBasis=${String(all.expectedOutputBasis ?? "configured")}`);
 }

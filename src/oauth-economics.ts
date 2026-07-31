@@ -108,6 +108,12 @@ WITH cost_input AS (
     COALESCE(SUM(usage.request_count), 0)::bigint AS request_count,
     COALESCE(SUM(usage.token_count), 0)::bigint AS token_count,
     COALESCE(SUM(usage.api_amount_usd), 0)::numeric AS api_amount_usd,
+    COALESCE(
+      SUM(usage.api_amount_usd) FILTER (
+        WHERE current_account.state_bucket IN ('rate_limited', 'error')
+      ),
+      0
+    )::numeric AS unavailable_api_amount_usd,
     MIN(usage.first_used_at) AS first_used_at,
     MAX(usage.last_used_at) AS last_used_at,
     COUNT(*) FILTER (WHERE current_account.state_bucket = 'normal')::int AS normal_count,
@@ -133,6 +139,7 @@ WITH cost_input AS (
     COALESCE(SUM(usage.request_count), 0)::bigint AS request_count,
     COALESCE(SUM(usage.token_count), 0)::bigint AS token_count,
     COALESCE(SUM(usage.api_amount_usd), 0)::numeric AS api_amount_usd,
+    0::numeric AS unavailable_api_amount_usd,
     MIN(usage.first_used_at) AS first_used_at,
     MAX(usage.last_used_at) AS last_used_at,
     0::int AS normal_count,
@@ -175,6 +182,7 @@ SELECT
   rows.request_count,
   rows.token_count,
   rows.api_amount_usd,
+  rows.unavailable_api_amount_usd,
   rows.first_used_at,
   rows.last_used_at,
   rows.normal_count,
@@ -202,6 +210,7 @@ SELECT
   NULL::numeric,
   NULL::bigint,
   NULL::bigint,
+  NULL::numeric,
   NULL::numeric,
   NULL::timestamptz,
   NULL::timestamptz,
@@ -383,11 +392,21 @@ function projectGroup(
   const procurementRefundCny = money(accountIds.reduce((sum, id) => sum + (refunds.get(id) ?? 0), 0));
   const netAcquisitionCostCny = money(Math.max(0, grossAcquisitionCostCny - procurementRefundCny));
   const apiAmountUsd = rounded(number(row.api_amount_usd), 8);
+  const unavailableApiAmountUsd = rounded(number(row.unavailable_api_amount_usd), 8);
   const missingCostAccountCount = number(row.missing_cost_account_count);
   const missingCostAccountIds = arrayNumbers(row.missing_cost_account_ids);
-  const idealApiAmountUsd = idealApiUsdPerAccountValue === null
-    ? null
-    : rounded(accountCount * idealApiUsdPerAccountValue, 8);
+  const normalCount = number(row.normal_count);
+  const rateLimitedCount = number(row.rate_limited_count);
+  const errorCount = number(row.error_count);
+  const statusCount = normalCount + rateLimitedCount + errorCount;
+  const statusCoverageComplete = row.scope === "pool" && statusCount === accountCount;
+  const statusAdjusted = statusCoverageComplete && rateLimitedCount + errorCount > 0;
+  const expectedApiAmountUsd = idealApiUsdPerAccountValue === null
+    ? statusCoverageComplete && normalCount === 0 ? unavailableApiAmountUsd : null
+    : statusCoverageComplete
+      ? rounded(normalCount * idealApiUsdPerAccountValue + unavailableApiAmountUsd, 8)
+      : rounded(accountCount * idealApiUsdPerAccountValue, 8);
+  const expectedOutputBasis = statusAdjusted ? "status-adjusted" : "configured";
   return {
     scope: String(row.scope ?? ""),
     planType: rowPlanType,
@@ -401,6 +420,7 @@ function projectGroup(
     requestCount: number(row.request_count),
     tokenCount: number(row.token_count),
     apiAmountUsd,
+    unavailableApiAmountUsd,
     grossAcquisitionCostCny,
     procurementRefundCny,
     netAcquisitionCostCny,
@@ -411,18 +431,29 @@ function projectGroup(
     cnyPerApiUsd: apiAmountUsd > 0
       ? rounded(netAcquisitionCostCny / apiAmountUsd, 6)
       : null,
-    idealApiUsdPerAccount: idealApiUsdPerAccountValue,
-    idealApiAmountUsd,
-    remainingIdealApiAmountUsd: idealApiAmountUsd === null
+    expectedApiUsdPerAccount: idealApiUsdPerAccountValue,
+    expectedApiAmountUsd,
+    remainingExpectedApiAmountUsd: expectedApiAmountUsd === null
       ? null
-      : rounded(Math.max(0, idealApiAmountUsd - apiAmountUsd), 8),
-    idealCnyPerApiUsd: idealApiAmountUsd !== null && idealApiAmountUsd > 0
-      ? rounded(netAcquisitionCostCny / idealApiAmountUsd, 6)
+      : rounded(Math.max(0, expectedApiAmountUsd - apiAmountUsd), 8),
+    expectedCnyPerApiUsd: expectedApiAmountUsd !== null && expectedApiAmountUsd > 0
+      ? rounded(netAcquisitionCostCny / expectedApiAmountUsd, 6)
       : null,
-    idealCostComplete: idealApiAmountUsd !== null,
-    normalCount: number(row.normal_count),
-    rateLimitedCount: number(row.rate_limited_count),
-    errorCount: number(row.error_count),
+    expectedCostComplete: expectedApiAmountUsd !== null,
+    expectedOutputBasis,
+    // Keep the old names for existing CLI/API consumers during the field migration.
+    idealApiUsdPerAccount: idealApiUsdPerAccountValue,
+    idealApiAmountUsd: expectedApiAmountUsd,
+    remainingIdealApiAmountUsd: expectedApiAmountUsd === null
+      ? null
+      : rounded(Math.max(0, expectedApiAmountUsd - apiAmountUsd), 8),
+    idealCnyPerApiUsd: expectedApiAmountUsd !== null && expectedApiAmountUsd > 0
+      ? rounded(netAcquisitionCostCny / expectedApiAmountUsd, 6)
+      : null,
+    idealCostComplete: expectedApiAmountUsd !== null,
+    normalCount,
+    rateLimitedCount,
+    errorCount,
     firstUsedAt: localTime(row.first_used_at, timezone),
     lastUsedAt: localTime(row.last_used_at, timezone),
   };
@@ -436,15 +467,22 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
   const net = scoped.reduce((sum, group) => sum + number(group.netAcquisitionCostCny), 0);
   const missingCostAccountCount = scoped.reduce((sum, group) => sum + number(group.missingCostAccountCount), 0);
   const missingCostAccountIds = [...new Set(scoped.flatMap((group) => arrayNumbers(group.missingCostAccountIds)))].sort((left, right) => left - right);
-  const missingIdealPlanTypes = [...new Set(
+  const missingExpectedPlanTypes = [...new Set(
     scoped
-      .filter((group) => group.idealApiAmountUsd === null)
+      .filter((group) => group.expectedApiAmountUsd === null)
       .map((group) => String(group.planType ?? "unknown")),
   )].sort();
-  const idealCostComplete = scoped.length > 0 && missingIdealPlanTypes.length === 0;
-  const idealApiAmountUsd = idealCostComplete
-    ? rounded(scoped.reduce((sum, group) => sum + number(group.idealApiAmountUsd), 0), 8)
+  const expectedCostComplete = scoped.length > 0 && missingExpectedPlanTypes.length === 0;
+  const expectedApiAmountUsd = expectedCostComplete
+    ? rounded(scoped.reduce((sum, group) => sum + number(group.expectedApiAmountUsd), 0), 8)
     : null;
+  const unavailableApiAmountUsd = rounded(
+    scoped.reduce((sum, group) => sum + number(group.unavailableApiAmountUsd), 0),
+    8,
+  );
+  const expectedOutputBasis = scoped.some((group) => group.expectedOutputBasis === "status-adjusted")
+    ? "status-adjusted"
+    : "configured";
   const total = {
     scope,
     accountCount: scoped.reduce((sum, group) => sum + number(group.accountCount), 0),
@@ -457,23 +495,35 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
     requestCount: scoped.reduce((sum, group) => sum + number(group.requestCount), 0),
     tokenCount: scoped.reduce((sum, group) => sum + number(group.tokenCount), 0),
     apiAmountUsd: rounded(apiAmountUsd, 8),
+    unavailableApiAmountUsd,
     grossAcquisitionCostCny: money(gross),
     procurementRefundCny: money(refund),
     netAcquisitionCostCny: money(net),
     acquisitionCostCny: money(net),
     cnyPerApiUsd: apiAmountUsd > 0 ? rounded(net / apiAmountUsd, 6) : null,
-    idealApiAmountUsd,
-    remainingIdealApiAmountUsd: idealApiAmountUsd === null
+    expectedApiAmountUsd,
+    remainingExpectedApiAmountUsd: expectedApiAmountUsd === null
       ? null
-      : rounded(Math.max(0, idealApiAmountUsd - apiAmountUsd), 8),
-    idealCnyPerApiUsd: idealApiAmountUsd !== null && idealApiAmountUsd > 0
-      ? rounded(net / idealApiAmountUsd, 6)
+      : rounded(Math.max(0, expectedApiAmountUsd - apiAmountUsd), 8),
+    expectedCnyPerApiUsd: expectedApiAmountUsd !== null && expectedApiAmountUsd > 0
+      ? rounded(net / expectedApiAmountUsd, 6)
       : null,
-    idealCostComplete,
-    missingIdealPlanTypes,
+    expectedCostComplete,
+    missingExpectedPlanTypes,
+    expectedOutputBasis,
+    // Keep the old names for existing CLI/API consumers during the field migration.
+    idealApiAmountUsd: expectedApiAmountUsd,
+    remainingIdealApiAmountUsd: expectedApiAmountUsd === null
+      ? null
+      : rounded(Math.max(0, expectedApiAmountUsd - apiAmountUsd), 8),
+    idealCnyPerApiUsd: expectedApiAmountUsd !== null && expectedApiAmountUsd > 0
+      ? rounded(net / expectedApiAmountUsd, 6)
+      : null,
+    idealCostComplete: expectedCostComplete,
+    missingIdealPlanTypes: missingExpectedPlanTypes,
     complete: scoped.length > 0 && missingCostAccountCount === 0
       && apiAmountUsd > 0
-      && idealCostComplete,
+      && expectedCostComplete,
   };
   return total;
 }
@@ -539,6 +589,11 @@ export async function collectOAuthPoolEconomics(
   const archivedGroups = groups.filter((group) => group.scope === "archived");
   const pool = totalProjection(poolGroups, "pool");
   const archived = totalProjection(archivedGroups, "archived");
+  const expectedAllComplete = pool.expectedApiAmountUsd !== null
+    && (archivedGroups.length === 0 || archived.expectedApiAmountUsd !== null);
+  const expectedAllApiAmountUsd = expectedAllComplete
+    ? rounded(pool.expectedApiAmountUsd + (archived.expectedApiAmountUsd ?? 0), 8)
+    : null;
   const all = {
     accountCount: pool.accountCount + archived.accountCount,
     matchedCostAccountCount: pool.matchedCostAccountCount + archived.matchedCostAccountCount,
@@ -553,6 +608,7 @@ export async function collectOAuthPoolEconomics(
     requestCount: pool.requestCount + archived.requestCount,
     tokenCount: pool.tokenCount + archived.tokenCount,
     apiAmountUsd: rounded(pool.apiAmountUsd + archived.apiAmountUsd, 8),
+    unavailableApiAmountUsd: rounded(pool.unavailableApiAmountUsd + archived.unavailableApiAmountUsd, 8),
     grossAcquisitionCostCny: money(pool.grossAcquisitionCostCny + archived.grossAcquisitionCostCny),
     procurementRefundCny: money(pool.procurementRefundCny + archived.procurementRefundCny),
     netAcquisitionCostCny: money(pool.netAcquisitionCostCny + archived.netAcquisitionCostCny),
@@ -560,36 +616,48 @@ export async function collectOAuthPoolEconomics(
     cnyPerApiUsd: pool.apiAmountUsd + archived.apiAmountUsd > 0
       ? rounded((pool.netAcquisitionCostCny + archived.netAcquisitionCostCny) / (pool.apiAmountUsd + archived.apiAmountUsd), 6)
       : null,
-    idealApiAmountUsd: pool.idealApiAmountUsd !== null
-      && (archivedGroups.length === 0 || archived.idealApiAmountUsd !== null)
-      ? rounded(pool.idealApiAmountUsd + (archived.idealApiAmountUsd ?? 0), 8)
-      : null,
-    remainingIdealApiAmountUsd: pool.idealApiAmountUsd !== null
-      && (archivedGroups.length === 0 || archived.idealApiAmountUsd !== null)
-      ? rounded(
-        Math.max(0, (pool.idealApiAmountUsd + (archived.idealApiAmountUsd ?? 0))
-          - (pool.apiAmountUsd + archived.apiAmountUsd)),
+    expectedApiAmountUsd: expectedAllApiAmountUsd,
+    remainingExpectedApiAmountUsd: expectedAllApiAmountUsd === null
+      ? null
+      : rounded(
+        Math.max(0, expectedAllApiAmountUsd - (pool.apiAmountUsd + archived.apiAmountUsd)),
         8,
-      )
-      : null,
-    idealCnyPerApiUsd: pool.idealApiAmountUsd !== null
-      && (archivedGroups.length === 0 || archived.idealApiAmountUsd !== null)
-      && (pool.idealApiAmountUsd + (archived.idealApiAmountUsd ?? 0)) > 0
+      ),
+    expectedCnyPerApiUsd: expectedAllApiAmountUsd !== null && expectedAllApiAmountUsd > 0
       ? rounded(
-        (pool.netAcquisitionCostCny + archived.netAcquisitionCostCny)
-          / (pool.idealApiAmountUsd + (archived.idealApiAmountUsd ?? 0)),
+        (pool.netAcquisitionCostCny + archived.netAcquisitionCostCny) / expectedAllApiAmountUsd,
         6,
       )
       : null,
-    idealCostComplete: pool.idealCostComplete && (archivedGroups.length === 0 || archived.idealCostComplete),
+    expectedCostComplete: pool.expectedCostComplete
+      && (archivedGroups.length === 0 || archived.expectedCostComplete),
+    expectedOutputBasis: archivedGroups.length > 0 && pool.expectedOutputBasis === "status-adjusted"
+      ? "mixed"
+      : pool.expectedOutputBasis,
+    // Keep the old names for existing CLI/API consumers during the field migration.
+    idealApiAmountUsd: expectedAllApiAmountUsd,
+    remainingIdealApiAmountUsd: expectedAllApiAmountUsd === null
+      ? null
+      : rounded(
+        Math.max(0, expectedAllApiAmountUsd - (pool.apiAmountUsd + archived.apiAmountUsd)),
+        8,
+      ),
+    idealCnyPerApiUsd: expectedAllApiAmountUsd !== null && expectedAllApiAmountUsd > 0
+      ? rounded((pool.netAcquisitionCostCny + archived.netAcquisitionCostCny) / expectedAllApiAmountUsd, 6)
+      : null,
+    idealCostComplete: pool.expectedCostComplete && (archivedGroups.length === 0 || archived.expectedCostComplete),
+    missingExpectedPlanTypes: [...new Set([
+      ...pool.missingExpectedPlanTypes,
+      ...archived.missingExpectedPlanTypes,
+    ])].sort(),
     missingIdealPlanTypes: [...new Set([
-      ...pool.missingIdealPlanTypes,
-      ...archived.missingIdealPlanTypes,
+      ...pool.missingExpectedPlanTypes,
+      ...archived.missingExpectedPlanTypes,
     ])].sort(),
     complete: pool.complete && (archivedGroups.length === 0 || archived.complete),
   };
   const missingCostAccountIds = arrayNumbers(all.missingCostAccountIds);
-  const missingIdealPlanTypes = Array.isArray(all.missingIdealPlanTypes) ? all.missingIdealPlanTypes : [];
+  const missingExpectedPlanTypes = Array.isArray(all.missingExpectedPlanTypes) ? all.missingExpectedPlanTypes : [];
   const warnings: Array<Record<string, unknown>> = [];
   if (missingCostAccountIds.length > 0) {
     warnings.push({
@@ -599,11 +667,11 @@ export async function collectOAuthPoolEconomics(
       missingData: "acquisition_cost_cny",
     });
   }
-  if (missingIdealPlanTypes.length > 0) {
+  if (missingExpectedPlanTypes.length > 0) {
     warnings.push({
       code: "missing_ideal_api_output",
-      message: `账号类型 ${missingIdealPlanTypes.join(", ")} 缺少理想 API 美元产出配置，理想成本暂不计算`,
-      planTypes: missingIdealPlanTypes,
+      message: `账号类型 ${missingExpectedPlanTypes.join(", ")} 缺少预期 API 美元产出配置，预期成本暂不计算`,
+      planTypes: missingExpectedPlanTypes,
       missingData: "ideal_api_usd_per_account",
     });
   }

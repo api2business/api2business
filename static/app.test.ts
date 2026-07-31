@@ -102,7 +102,7 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(html).toContain("OAuth 当前池实时成本");
   expect(html).toContain("已归档 OAuth 成本");
   expect(html).toContain("<th>平均单价</th>");
-  expect(html).toContain("<th>API 产出 / 理想产出</th>");
+  expect(html).toContain("<th>API 产出 / 预期产出</th>");
   expect(html).toContain("<small>预期成本</small>");
   expect(html).toContain("<th>预期人民币 / 刀</th>");
   expect(html).not.toContain("<th>API 美元产出</th>");
@@ -111,6 +111,9 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(app).toContain("row.averageUnitCostCny");
   expect(app).toContain("idealCnyPerApiUsd");
   expect(app).toContain("remainingIdealApiAmountUsd");
+  expect(app).toContain("expectedApiAmountUsd");
+  expect(app).toContain("expectedCnyPerApiUsd");
+  expect(app).toContain("限流/错误按当前产出");
   expect(html).toContain("oauth-cost-ideal-remaining");
   expect(html).toContain('id="oauth-cost-refresh-interval"');
   expect(html).toContain('<option value="30" selected>30 秒</option>');
