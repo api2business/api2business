@@ -249,10 +249,8 @@ async function scoresPage() {
   $('#refresh-scores').addEventListener('click', async () => {
     const button = $('#refresh-scores')
     button.disabled = true
-    $('#score-state').textContent = '刷新中'
     try {
-      renderScores(await requestJson('/api/scores/refresh', { method: 'POST', body: '{}' }, 200000))
-      clearPriorityPlan('评分已刷新，请重新生成调整计划')
+      await refreshPriorityState()
     }
     catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }

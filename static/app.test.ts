@@ -171,6 +171,16 @@ test("score table renders a bounded ten-row page with local navigation", async (
   expect(html).toContain('id="score-next"');
 });
 
+test("score toolbar refresh uses the queue-backed manual ranking path", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const start = app.indexOf("$('#refresh-scores').addEventListener");
+  const end = app.indexOf("const initial = await requestJson('/api/scores')", start);
+  const handler = app.slice(start, end);
+
+  expect(handler).toContain("await refreshPriorityState()");
+  expect(handler).not.toContain("/api/scores/refresh");
+});
+
 test("zero-change priority history is labelled as converged", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
 
