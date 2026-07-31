@@ -22,8 +22,9 @@ const config = {
       referenceScore: 92,
       pointsPerScore: 10,
       minimumChange: 5,
-      minimumPriority: 1,
-      maximumPriority: 1000,
+      normalizationTopK: 20,
+      minimumPriority: 100,
+      maximumPriority: 300,
       fixedPriorities: {},
       reservePolicies: {},
       procurementAdvice: {
@@ -49,8 +50,9 @@ const config = {
       referenceScore: 80,
       pointsPerScore: 8,
       minimumChange: 5,
-      minimumPriority: 1,
-      maximumPriority: 1000,
+      normalizationTopK: 20,
+      minimumPriority: 100,
+      maximumPriority: 300,
       fixedPriorities: {},
       reservePolicies: {},
       procurementAdvice: {
@@ -132,9 +134,9 @@ test("reserve policy dynamically lowers priority as weekly quota is depleted", (
   ] }, reserveConfig);
   const reserve = (plan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2);
   expect(reserve).toMatchObject({
-    configuredPriorityFloor: 600,
+    configuredPriorityFloor: 300,
     priorityFloorApplied: true,
-    desiredPriority: 600,
+    desiredPriority: 300,
     reservePolicy: {
       weeklyRemainingPercent: 19,
       lowRemainingThresholdPercent: 20,
@@ -143,7 +145,7 @@ test("reserve policy dynamically lowers priority as weekly quota is depleted", (
       mode: "low-remaining-reserve",
     },
   });
-  expect(plan.priorities).toMatchObject({ "2": 600 });
+  expect(plan.priorities).toMatchObject({ "2": 300 });
 });
 
 test("fixed priority account is excluded from dynamic optimization and only corrected to its declared value", () => {
@@ -212,7 +214,7 @@ test("reserve policy is unrestricted above half quota and weighted below it", ()
   const weighted = (weightedPlan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2)!;
   const calculated = weighted.calculatedPriority as number;
   expect(weighted).toMatchObject({
-    configuredPriorityFloor: Math.round(calculated + 0.5 * (600 - calculated)),
+    configuredPriorityFloor: 300,
     priorityFloorApplied: true,
     reservePolicy: {
       weeklyRemainingPercent: 35,
@@ -222,31 +224,94 @@ test("reserve policy is unrestricted above half quota and weighted below it", ()
   });
 });
 
-test("fixed reference prevents one leader fluctuation from shifting unchanged peers", () => {
+test("stable ranking keeps a local score swap local", () => {
+  const localConfig = structuredClone(config);
+  localConfig.sub2api.priorityPlan.normalizationTopK = 3;
   const leader = account(1, "https://leader.example plus 0.1", 95);
-  leader.priority = 1;
+  leader.priority = 100;
   const peer = account(2, "https://peer.example plus 0.1", 85);
-  peer.priority = 41;
+  peer.priority = 200;
+  const tail = account(3, "https://tail.example plus 0.1", 75);
+  tail.priority = 300;
   const healthyPlan = buildAccountPriorityPlan({
     recentCallLimit: 1000,
     queryDurationMs: 800,
-    accounts: [leader, peer],
-  }, config);
+    accounts: [leader, peer, tail],
+  }, localConfig);
 
-  const degradedLeader = { ...leader, score: 75 };
+  const degradedLeader = { ...leader, score: 80 };
   const degradedPlan = buildAccountPriorityPlan({
     recentCallLimit: 1000,
     queryDurationMs: 900,
-    accounts: [degradedLeader, peer],
-  }, config);
-  const healthyPeer = (healthyPlan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2);
-  const degradedPeer = (degradedPlan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 2);
+    accounts: [degradedLeader, peer, tail],
+  }, localConfig);
+  const changedIds = (degradedPlan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.change === "update")
+    .map((row) => row.accountId);
 
   expect(healthyPlan.anchorScore).toBe(92);
   expect(degradedPlan.anchorScore).toBe(92);
   expect(healthyPlan.observedAnchorScore).not.toBe(degradedPlan.observedAnchorScore);
-  expect(healthyPeer).toMatchObject({ desiredPriority: 41, change: "noop" });
-  expect(degradedPeer).toMatchObject({ desiredPriority: 41, change: "noop" });
+  expect(healthyPlan.priorities).toEqual({});
+  expect(changedIds).toEqual([2, 1]);
+  expect(degradedPlan.priorities).toMatchObject({ "1": 200, "2": 100 });
+  expect(degradedPlan.priorities).not.toHaveProperty("3");
+});
+
+test("rank normalization uses the full band and keeps OAuth outside it untouched", () => {
+  const fullBandConfig = structuredClone(config);
+  fullBandConfig.sub2api.priorityPlan.normalizationTopK = 3;
+  const oauth = account(9, "oauth fallback", 100);
+  (oauth as Record<string, unknown>).accountType = "oauth";
+  oauth.priority = 350;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    account(1, "best", 99),
+    account(2, "middle", 80),
+    account(3, "worst", 60),
+    oauth,
+  ] }, fullBandConfig);
+  const dynamic = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.priorityMode === "normalized-rank");
+
+  expect(dynamic.map((row) => [row.accountId, row.rank, row.calculatedPriority])).toEqual([
+    [1, 1, 100],
+    [2, 2, 200],
+    [3, 3, 300],
+  ]);
+  expect(plan.priorities).not.toHaveProperty("9");
+});
+
+test("minimum change suppresses small pool-wide drift after an account is added", () => {
+  const stableConfig = structuredClone(config);
+  stableConfig.sub2api.priorityPlan.normalizationTopK = 21;
+  const existing = Array.from({ length: 21 }, (_, index) => {
+    const row = account(index + 1, `account-${index + 1}`, 100 - index);
+    row.priority = 100 + index * 10;
+    return row;
+  });
+  const added = account(22, "new-tail", 0);
+  added.priority = 1;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [...existing, added] }, stableConfig);
+  const changedIds = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.change === "update")
+    .map((row) => row.accountId);
+
+  expect(changedIds).toEqual([22]);
+  expect(plan.priorities).toMatchObject({ "22": 300 });
+});
+
+test("accounts beyond top-k converge to the lower scheduling boundary", () => {
+  const rows = Array.from({ length: 22 }, (_, index) => {
+    const row = account(index + 1, `account-${index + 1}`, 100 - index);
+    row.priority = index < 20 ? 100 + Math.round(index * 200 / 19) : 150;
+    return row;
+  });
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, config);
+  const changes = plan.changes as Array<Record<string, unknown>>;
+
+  expect(changes.find((row) => row.accountId === 20)).toMatchObject({ rank: 20, calculatedPriority: 300 });
+  expect(changes.find((row) => row.accountId === 21)).toMatchObject({ rank: 21, calculatedPriority: 300, desiredPriority: 300 });
+  expect(changes.find((row) => row.accountId === 22)).toMatchObject({ rank: 22, calculatedPriority: 300, desiredPriority: 300 });
 });
 
 test("procurement recommendations remain supplier-diverse and do not treat limits as billing", () => {
@@ -318,5 +383,5 @@ test("codex and grok use independent anchors and merge into one adjustment plan"
   });
   expect((plan.changes as Array<Record<string, unknown>>).filter((row) => row.profile === "grok")).toHaveLength(2);
   expect(plan.priorities).toHaveProperty("10");
-  expect(plan.priorities).toHaveProperty("11");
+  expect(plan.priorities).toMatchObject({ "10": 100, "11": 111 });
 });

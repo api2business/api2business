@@ -137,21 +137,29 @@ function buildPriorityProfile(
     ? null
     : eligible.reduce((best, row) => Math.max(best, economicScore(row)), -Infinity);
   const priorityReferenceScore = policy.referenceScore;
-  const dynamicChanges = eligible.map((row) => {
+  const ranked = eligible
+    .map((row) => ({ row, combinedScore: economicScore(row) }))
+    .sort((left, right) => {
+      const scoreDifference = right.combinedScore - left.combinedScore;
+      if (scoreDifference !== 0) return scoreDifference;
+      return number(left.row.accountId)! - number(right.row.accountId)!;
+    });
+  let previousScore: number | null = null;
+  let previousRank = 0;
+  const dynamicChanges = ranked.map(({ row, combinedScore }, index) => {
     const accountId = number(row.accountId);
     const score = number(row.score)!;
     const cost = costRate(row)!;
     const costScore = maximumCost === minimumCost ? 100 : 100 * (maximumCost - cost) / (maximumCost - minimumCost);
-    const combinedScore = economicScore(row);
     const before = number(row.priority);
     if (accountId === null || before === null) throw new Error("eligible score row is missing accountId or priority");
-    const calculated = Math.min(
-      policy.maximumPriority,
-      Math.max(
-        policy.minimumPriority,
-        policy.minimumPriority + Math.round((priorityReferenceScore - combinedScore) * policy.pointsPerScore),
-      ),
-    );
+    const rank = previousScore === combinedScore ? previousRank : index + 1;
+    previousScore = combinedScore;
+    previousRank = rank;
+    const prioritySpan = policy.maximumPriority - policy.minimumPriority;
+    const normalizedRank = Math.min(rank, policy.normalizationTopK);
+    const calculated = policy.minimumPriority
+      + Math.round((normalizedRank - 1) * prioritySpan / (policy.normalizationTopK - 1));
     const reservePolicy = policy.reservePolicies[String(accountId)] ?? null;
     const remainingPercent = number(row.weeklyRemainingPercent);
     const lowRemaining = reservePolicy !== null
@@ -168,9 +176,12 @@ function buildPriorityProfile(
     const weightedFloor = reservePolicy === null || unrestricted
       ? null
       : Math.round(calculated + reserveWeight * (reservePolicy.lowRemainingPriority - calculated));
-    const configuredFloor = weightedFloor === null ? null : Math.max(calculated, weightedFloor);
-    const floored = configuredFloor === null ? calculated : Math.max(calculated, configuredFloor);
-    const desired = Math.abs(before - floored) < policy.minimumChange ? before : floored;
+    const configuredFloor = weightedFloor === null
+      ? null
+      : Math.min(policy.maximumPriority, Math.max(calculated, weightedFloor));
+    const bounded = configuredFloor === null ? calculated : configuredFloor;
+    const beforeInBand = before >= policy.minimumPriority && before <= policy.maximumPriority;
+    const desired = beforeInBand && Math.abs(before - bounded) < policy.minimumChange ? before : bounded;
     if (before !== desired) priorities[String(accountId)] = desired;
     return {
       profile,
@@ -180,6 +191,9 @@ function buildPriorityProfile(
       costRateCnyPerApiUsd: cost,
       costScore,
       combinedScore,
+      rank,
+      rankCount: ranked.length,
+      normalizationTopK: policy.normalizationTopK,
       confidence: row.confidence,
       observedAttempts: row.observedAttempts,
       failureRate: row.failureRate,
@@ -188,7 +202,7 @@ function buildPriorityProfile(
       beforePriority: before,
       calculatedPriority: calculated,
       configuredPriorityFloor: configuredFloor,
-      priorityFloorApplied: configuredFloor !== null && floored !== calculated,
+      priorityFloorApplied: configuredFloor !== null && bounded !== calculated,
       reservePolicy: reservePolicy === null ? null : {
         weeklyRemainingPercent: remainingPercent,
         lowRemainingThresholdPercent: reservePolicy.lowRemainingThresholdPercent,
@@ -197,6 +211,7 @@ function buildPriorityProfile(
         mode: unrestricted ? "unrestricted-cost-aware" : lowRemaining ? "low-remaining-reserve" : "weighted-reserve",
       },
       desiredPriority: desired,
+      priorityMode: "normalized-rank",
       change: before === desired ? "noop" : "update",
     };
   });
