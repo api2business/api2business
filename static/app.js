@@ -916,15 +916,6 @@ async function accountImportPage() {
   const planType = $('#import-plan-type')
   planType.innerHTML = options.planTypes.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('')
   planType.value = defaults.planType
-  let planTypeManuallySelected = false
-  planType.addEventListener('change', () => { planTypeManuallySelected = true })
-  $('#import-unit-cost').addEventListener('input', () => {
-    if (planTypeManuallySelected) return
-    const cost = Number($('#import-unit-cost').value)
-    planType.value = Number.isFinite(cost) && cost > 0
-      ? (cost < defaults.freeCostThresholdCny ? 'free' : cost > defaults.plusCostThresholdCny ? 'plus' : 'k12')
-      : defaults.planType
-  })
   $('#import-groups').innerHTML = options.groups.map((group) => `<label><input type="checkbox" value="${group.id}" ${defaults.groupIds.includes(group.id) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${group.id}</b></span></label>`).join('')
   const fileInput = $('#import-file')
   const zone = $('#drop-zone')

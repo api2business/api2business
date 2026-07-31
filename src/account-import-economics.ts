@@ -84,7 +84,7 @@ function positiveInteger(value: unknown): number | null {
 }
 
 function importBatches(entries: AccountImportCostEntry[]): Row[] {
-  const batches = new Map<string, { batchId: string; fingerprint: string; planType: "k12" | "plus" | "free" | null; accountIds: number[]; grossAcquisitionCostCny: number }>();
+  const batches = new Map<string, { batchId: string; fingerprint: string; planType: "k12" | "plus" | "team" | "free" | null; accountIds: number[]; grossAcquisitionCostCny: number }>();
   for (const entry of entries) {
     const existing = batches.get(entry.batchId);
     if (!existing) {

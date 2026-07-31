@@ -55,3 +55,23 @@ test("preserves Free as an import label in the CNY ledger", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("preserves Team as an import label in the CNY ledger", () => {
+  const directory = mkdtempSync(join(tmpdir(), "apistate-cost-ledger-team-"));
+  const path = join(directory, "costs.jsonl");
+  try {
+    recordAccountImportCosts({
+      path,
+      fingerprint: "team-batch",
+      accountIds: [104],
+      unitCostCny: 20,
+      planType: "team",
+      occurredOn: "2026-07-31",
+    });
+    expect(readAccountImportCosts(path)).toEqual([
+      expect.objectContaining({ accountId: 104, planType: "team", unitCostCny: 20, amountCny: 20 }),
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

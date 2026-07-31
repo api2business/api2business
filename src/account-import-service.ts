@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AppConfig } from "./config";
+import type { AppConfig, OAuthPlanType } from "./config";
 import { accountImportPreflight, type AccountImportPreflightPlan } from "./account-import-preflight";
 import { recordAccountImportCosts } from "./account-import-cost-ledger";
 import { inspectAccounts, verifyImportedAccounts } from "./account-inspection";
@@ -19,7 +19,7 @@ export interface AccountImportRequest {
   sourceProxyId: number;
   perAccountProxy?: boolean;
   unitCostCny: number;
-  planType: "k12" | "plus" | "free";
+  planType: OAuthPlanType;
   confirm: boolean;
 }
 
@@ -60,7 +60,9 @@ function validate(input: AccountImportRequest): void {
     || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
     throw new Error("账号单价必须为正数人民币，最多两位小数");
   }
-  if (input.planType !== "k12" && input.planType !== "plus" && input.planType !== "free") throw new Error("账号类型只允许 k12、plus 或 free");
+  if (input.planType !== "k12" && input.planType !== "plus" && input.planType !== "team" && input.planType !== "free") {
+    throw new Error("账号类型只允许 k12、plus、team 或 free");
+  }
 }
 
 function safeMessage(value: string): string {
@@ -130,7 +132,7 @@ export class AccountImportService {
   ) {}
 
   options() {
-    return { ok: true, currency: "CNY", inputFormats: ["json", "zip"], planTypes: [{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }, { id: "free", name: "Free" }], defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null, planType: "k12" }, groups: [
+    return { ok: true, currency: "CNY", inputFormats: ["json", "zip"], planTypes: [{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }, { id: "team", name: "Team" }, { id: "free", name: "Free" }], defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null }, groups: [
       { id: 2, name: "混池（unidesk-codex-pool）" }, { id: 3, name: "自用" }, { id: 6, name: "Grok" },
     ] };
   }

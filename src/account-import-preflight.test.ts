@@ -118,3 +118,21 @@ test("accepts Free as the selected import plan type and overlays credentials", a
   }, reads);
   expect((JSON.parse(plan.content) as { accounts: Array<{ credentials: { plan_type: string } }> }).accounts[0]?.credentials.plan_type).toBe("free");
 });
+
+test("accepts Team as the selected import plan type and overlays credentials", async () => {
+  const reads = {
+    query: async () => ({
+      rows: [{ row_kind: "proxy", id: 3 }],
+      queueDurationMs: 0, queryDurationMs: 0, totalDurationMs: 0,
+      queryStartedAt: "2026-01-01T00:00:00.000Z", queryCompletedAt: "2026-01-01T00:00:00.000Z",
+      deduplicated: false, cached: false,
+    }),
+  } as unknown as Sub2ApiReadClient;
+  const content = JSON.stringify({ accounts: [
+    { credentials: { chatgpt_user_id: "user-team", access_token: "token-team", plan_type: "plus" } },
+  ], proxies: [] });
+  const plan = await accountImportPreflight(content, {
+    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, planType: "team",
+  }, reads);
+  expect((JSON.parse(plan.content) as { accounts: Array<{ credentials: { plan_type: string } }> }).accounts[0]?.credentials.plan_type).toBe("team");
+});

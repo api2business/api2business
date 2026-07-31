@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { OAuthPlanType } from "./config";
 
 export interface AccountImportCostEntry {
   version: 1;
@@ -12,7 +13,7 @@ export interface AccountImportCostEntry {
   period: string;
   fingerprint: string;
   batchId: string;
-  planType: "k12" | "plus" | "free" | null;
+  planType: OAuthPlanType | null;
   accountId: number;
   unitCostCny: number;
   amountCny: number;
@@ -45,7 +46,7 @@ function parseEntry(value: unknown, line: number): AccountImportCostEntry {
     throw new Error(`账号导入成本账本第 ${line} 行字段无效`);
   }
   const fingerprint = row.fingerprint as string;
-  const planType = row.planType === "k12" || row.planType === "plus" || row.planType === "free" ? row.planType : null;
+  const planType = row.planType === "k12" || row.planType === "plus" || row.planType === "team" || row.planType === "free" ? row.planType : null;
   return {
     ...row,
     batchId: typeof row.batchId === "string" && row.batchId ? row.batchId : accountImportBatchId(fingerprint),
@@ -81,7 +82,7 @@ export function recordAccountImportCosts(input: {
   fingerprint: string;
   accountIds: number[];
   unitCostCny: number;
-  planType?: "k12" | "plus" | "free";
+  planType?: OAuthPlanType;
   occurredAt?: string;
   occurredOn: string;
 }) {

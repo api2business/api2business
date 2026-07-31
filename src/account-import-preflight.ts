@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { OAuthPlanType } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 interface AccountRow extends Record<string, unknown> {
@@ -26,7 +27,7 @@ export interface AccountImportPreflightSettings {
   groupIds: number[];
   sourceProxyId: number;
   perAccountProxy?: boolean;
-  planType: "k12" | "plus" | "free";
+  planType: OAuthPlanType;
 }
 
 export interface AccountImportPreflightPlan {

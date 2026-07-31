@@ -1,18 +1,20 @@
 import { expect, test } from "bun:test";
 
-test("account import exposes K12, Plus, and Free with configured price thresholds", async () => {
+test("account import exposes explicit plan types without price inference", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
+  const cli = await Bun.file(new URL("../scripts/src/cli.ts", import.meta.url)).text();
   expect(html).toContain('id="import-plan-type"');
   expect(html).toContain('id="import-per-account-proxy"');
-  expect(app).toContain("cost < defaults.freeCostThresholdCny ? 'free'");
-  expect(app).toContain("cost > defaults.plusCostThresholdCny ? 'plus' : 'k12'");
-  expect(app).toContain("Number.isFinite(cost) && cost > 0");
-  expect(app).toContain("planTypeManuallySelected");
   expect(app).toContain("planType: planType.value");
   expect(app).toContain("perAccountProxy: $('#import-per-account-proxy').checked");
   expect(app).toContain("defaults.perAccountProxy === true");
   expect(app).toContain("planType.value = defaults.planType");
+  expect(app).not.toContain("freeCostThresholdCny");
+  expect(app).not.toContain("plusCostThresholdCny");
+  expect(cli).toContain("parsed.planType ?? defaults.planType");
+  expect(cli).toContain("k12|plus|team|free");
+  expect(cli).not.toContain("inferredPlanType");
   expect(app).not.toContain("history.replaceState(null, '', `/account-import?job=");
   expect(app).not.toContain("new URLSearchParams(location.search).get('job')");
 });
