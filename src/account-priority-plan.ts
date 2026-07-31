@@ -26,6 +26,96 @@ function costRate(row: ScoreRow): number | null {
   return number((row.usage as ScoreRow).costRateCnyPerApiUsd);
 }
 
+function buildStableRankPriorities(
+  ranked: Array<{ row: ScoreRow; combinedScore: number }>,
+  policy: PriorityPlanPolicy,
+): { priorities: number[]; rebalanced: boolean; uniformity: number } {
+  const topCount = Math.min(ranked.length, policy.normalizationTopK);
+  const prioritySpan = policy.maximumPriority - policy.minimumPriority;
+  const normalized = ranked.map((_, index) => {
+    const normalizedRank = Math.min(index + 1, policy.normalizationTopK);
+    return policy.minimumPriority
+      + Math.round((normalizedRank - 1) * prioritySpan / (policy.normalizationTopK - 1));
+  });
+  if (topCount === 0) return { priorities: normalized, rebalanced: false, uniformity: 1 };
+
+  const candidates = ranked.slice(0, topCount).map(({ row }, index) => {
+    const priority = number(row.priority);
+    const minimumAtIndex = policy.minimumPriority + index;
+    const maximumAtIndex = policy.maximumPriority - (topCount - index - 1);
+    return priority !== null && priority >= minimumAtIndex && priority <= maximumAtIndex
+      ? priority
+      : null;
+  });
+  const lengths: number[] = candidates.map((priority) => priority === null ? 0 : 1);
+  const sums: number[] = candidates.map((priority) => priority ?? 0);
+  const previous = candidates.map(() => -1);
+  for (let index = 0; index < candidates.length; index += 1) {
+    if (candidates[index] === null) continue;
+    for (let prior = 0; prior < index; prior += 1) {
+      if (candidates[prior] === null
+        || candidates[index]! - candidates[prior]! < index - prior) continue;
+      const candidateLength = lengths[prior] + 1;
+      const candidateSum = sums[prior] + candidates[index]!;
+      if (candidateLength > lengths[index]
+        || (candidateLength === lengths[index] && candidateSum > sums[index])) {
+        lengths[index] = candidateLength;
+        sums[index] = candidateSum;
+        previous[index] = prior;
+      }
+    }
+  }
+  let anchorEnd = -1;
+  for (let index = 0; index < candidates.length; index += 1) {
+    if (anchorEnd === -1 || lengths[index] > lengths[anchorEnd]
+      || (lengths[index] === lengths[anchorEnd] && sums[index] > sums[anchorEnd])) {
+      anchorEnd = index;
+    }
+  }
+  if (anchorEnd === -1 || lengths[anchorEnd] === 0) {
+    return { priorities: normalized, rebalanced: false, uniformity: 1 };
+  }
+
+  const anchors: number[] = [];
+  for (let index = anchorEnd; index >= 0; index = previous[index]) {
+    anchors.push(index);
+    if (previous[index] === -1) break;
+  }
+  anchors.reverse();
+  const stable = [...normalized];
+  const boundaries = [-1, ...anchors, topCount];
+  for (const anchor of anchors) stable[anchor] = candidates[anchor]!;
+  for (let boundary = 0; boundary < boundaries.length - 1; boundary += 1) {
+    const leftIndex = boundaries[boundary];
+    const rightIndex = boundaries[boundary + 1];
+    const leftPriority = leftIndex === -1 ? policy.minimumPriority - 1 : stable[leftIndex];
+    const rightPriority = rightIndex === topCount ? policy.maximumPriority + 1 : stable[rightIndex];
+    const gap = rightIndex - leftIndex - 1;
+    for (let offset = 1; offset <= gap; offset += 1) {
+      stable[leftIndex + offset] = leftPriority
+        + Math.round(offset * (rightPriority - leftPriority) / (gap + 1));
+    }
+  }
+  const top = stable.slice(0, topCount);
+  const strictlyOrdered = top.every((priority, index) => index === 0 || priority > top[index - 1]);
+  const expectedSpan = normalized[topCount - 1] - normalized[0];
+  const stableSpan = top[topCount - 1] - top[0];
+  const gaps = top.slice(1).map((priority, index) => priority - top[index]);
+  const uniformity = gaps.length === 0 ? 1 : Math.min(...gaps) / Math.max(...gaps);
+  const normalizedStep = Math.ceil(prioritySpan / (policy.normalizationTopK - 1));
+  const distributionGuardEnabled = topCount >= Math.ceil(policy.normalizationTopK / 2);
+  const distributionDrifted = distributionGuardEnabled && (
+    top[0] > policy.minimumPriority + 2 * normalizedStep
+      || top[topCount - 1] < normalized[topCount - 1] - 2 * normalizedStep
+      || stableSpan < Math.max(topCount - 1, Math.round(expectedSpan * 0.6))
+      || uniformity < policy.minimumPriorityUniformity
+  );
+  if (!strictlyOrdered || distributionDrifted) {
+    return { priorities: normalized, rebalanced: true, uniformity };
+  }
+  return { priorities: stable, rebalanced: false, uniformity };
+}
+
 function buildPriorityProfile(
   ranking: Record<string, unknown>,
   config: AppConfig,
@@ -144,6 +234,7 @@ function buildPriorityProfile(
       if (scoreDifference !== 0) return scoreDifference;
       return number(left.row.accountId)! - number(right.row.accountId)!;
     });
+  const stablePriorityPlan = buildStableRankPriorities(ranked, policy);
   let previousScore: number | null = null;
   let previousRank = 0;
   const dynamicChanges = ranked.map(({ row, combinedScore }, index) => {
@@ -156,10 +247,11 @@ function buildPriorityProfile(
     const rank = previousScore === combinedScore ? previousRank : index + 1;
     previousScore = combinedScore;
     previousRank = rank;
-    const prioritySpan = policy.maximumPriority - policy.minimumPriority;
     const normalizedRank = Math.min(rank, policy.normalizationTopK);
-    const calculated = policy.minimumPriority
-      + Math.round((normalizedRank - 1) * prioritySpan / (policy.normalizationTopK - 1));
+    const normalizedPriority = policy.minimumPriority
+      + Math.round((normalizedRank - 1) * (policy.maximumPriority - policy.minimumPriority)
+        / (policy.normalizationTopK - 1));
+    const calculated = stablePriorityPlan.priorities[index];
     const reservePolicy = policy.reservePolicies[String(accountId)] ?? null;
     const remainingPercent = number(row.weeklyRemainingPercent);
     const lowRemaining = reservePolicy !== null
@@ -180,8 +272,7 @@ function buildPriorityProfile(
       ? null
       : Math.min(policy.maximumPriority, Math.max(calculated, weightedFloor));
     const bounded = configuredFloor === null ? calculated : configuredFloor;
-    const beforeInBand = before >= policy.minimumPriority && before <= policy.maximumPriority;
-    const desired = beforeInBand && Math.abs(before - bounded) < policy.minimumChange ? before : bounded;
+    const desired = bounded;
     if (before !== desired) priorities[String(accountId)] = desired;
     return {
       profile,
@@ -194,6 +285,8 @@ function buildPriorityProfile(
       rank,
       rankCount: ranked.length,
       normalizationTopK: policy.normalizationTopK,
+      priorityUniformity: stablePriorityPlan.uniformity,
+      priorityRebalanced: stablePriorityPlan.rebalanced,
       confidence: row.confidence,
       observedAttempts: row.observedAttempts,
       failureRate: row.failureRate,
@@ -201,6 +294,7 @@ function buildPriorityProfile(
       ttftP95Ms: row.ttftP95Ms,
       beforePriority: before,
       calculatedPriority: calculated,
+      normalizedPriority,
       configuredPriorityFloor: configuredFloor,
       priorityFloorApplied: configuredFloor !== null && bounded !== calculated,
       reservePolicy: reservePolicy === null ? null : {
@@ -211,7 +305,7 @@ function buildPriorityProfile(
         mode: unrestricted ? "unrestricted-cost-aware" : lowRemaining ? "low-remaining-reserve" : "weighted-reserve",
       },
       desiredPriority: desired,
-      priorityMode: "normalized-rank",
+      priorityMode: stablePriorityPlan.rebalanced ? "normalized-rebalance" : "stable-rank",
       change: before === desired ? "noop" : "update",
     };
   });

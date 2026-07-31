@@ -23,6 +23,7 @@ const config = {
       pointsPerScore: 10,
       minimumChange: 5,
       normalizationTopK: 20,
+      minimumPriorityUniformity: 0.25,
       minimumPriority: 100,
       maximumPriority: 300,
       fixedPriorities: {},
@@ -51,6 +52,7 @@ const config = {
       pointsPerScore: 8,
       minimumChange: 5,
       normalizationTopK: 20,
+      minimumPriorityUniformity: 0.25,
       minimumPriority: 100,
       maximumPriority: 300,
       fixedPriorities: {},
@@ -224,27 +226,25 @@ test("reserve policy is unrestricted above half quota and weighted below it", ()
   });
 });
 
-test("stable ranking keeps a local score swap local", () => {
-  const localConfig = structuredClone(config);
-  localConfig.sub2api.priorityPlan.normalizationTopK = 3;
+test("stable ranking inserts a moved leader between unchanged local anchors", () => {
   const leader = account(1, "https://leader.example plus 0.1", 95);
-  leader.priority = 100;
+  leader.priority = 110;
   const peer = account(2, "https://peer.example plus 0.1", 85);
-  peer.priority = 200;
+  peer.priority = 120;
   const tail = account(3, "https://tail.example plus 0.1", 75);
-  tail.priority = 300;
+  tail.priority = 130;
   const healthyPlan = buildAccountPriorityPlan({
     recentCallLimit: 1000,
     queryDurationMs: 800,
     accounts: [leader, peer, tail],
-  }, localConfig);
+  }, config);
 
   const degradedLeader = { ...leader, score: 80 };
   const degradedPlan = buildAccountPriorityPlan({
     recentCallLimit: 1000,
     queryDurationMs: 900,
     accounts: [degradedLeader, peer, tail],
-  }, localConfig);
+  }, config);
   const changedIds = (degradedPlan.changes as Array<Record<string, unknown>>)
     .filter((row) => row.change === "update")
     .map((row) => row.accountId);
@@ -253,9 +253,13 @@ test("stable ranking keeps a local score swap local", () => {
   expect(degradedPlan.anchorScore).toBe(92);
   expect(healthyPlan.observedAnchorScore).not.toBe(degradedPlan.observedAnchorScore);
   expect(healthyPlan.priorities).toEqual({});
-  expect(changedIds).toEqual([2, 1]);
-  expect(degradedPlan.priorities).toMatchObject({ "1": 200, "2": 100 });
-  expect(degradedPlan.priorities).not.toHaveProperty("3");
+  expect(changedIds).toEqual([1]);
+  expect(degradedPlan.priorities).toEqual({ "1": 125 });
+  expect((degradedPlan.changes as Array<Record<string, unknown>>).map((row) => [row.accountId, row.desiredPriority])).toEqual([
+    [2, 120],
+    [1, 125],
+    [3, 130],
+  ]);
 });
 
 test("rank normalization uses the full band and keeps OAuth outside it untouched", () => {
@@ -271,9 +275,9 @@ test("rank normalization uses the full band and keeps OAuth outside it untouched
     oauth,
   ] }, fullBandConfig);
   const dynamic = (plan.changes as Array<Record<string, unknown>>)
-    .filter((row) => row.priorityMode === "normalized-rank");
+    .filter((row) => row.priorityMode === "stable-rank" || row.priorityMode === "normalized-rebalance");
 
-  expect(dynamic.map((row) => [row.accountId, row.rank, row.calculatedPriority])).toEqual([
+  expect(dynamic.map((row) => [row.accountId, row.rank, row.normalizedPriority])).toEqual([
     [1, 1, 100],
     [2, 2, 200],
     [3, 3, 300],
@@ -312,6 +316,59 @@ test("accounts beyond top-k converge to the lower scheduling boundary", () => {
   expect(changes.find((row) => row.accountId === 20)).toMatchObject({ rank: 20, calculatedPriority: 300 });
   expect(changes.find((row) => row.accountId === 21)).toMatchObject({ rank: 21, calculatedPriority: 300, desiredPriority: 300 });
   expect(changes.find((row) => row.accountId === 22)).toMatchObject({ rank: 22, calculatedPriority: 300, desiredPriority: 300 });
+});
+
+test("stable ranking remains distributed and ordered through repeated local moves", () => {
+  const rows = Array.from({ length: 24 }, (_, index) => {
+    const row = account(index + 1, `account-${index + 1}`, 100 - index);
+    row.priority = index < 20 ? 100 + Math.round(index * 200 / 19) : 300;
+    return row;
+  });
+  let maximumChangedCount = 0;
+  let fullRebalanceCount = 0;
+  for (let iteration = 0; iteration < 400; iteration += 1) {
+    const rankedRows = [...rows].sort((left, right) => right.score - left.score);
+    const position = iteration % 19;
+    const firstScore = rankedRows[position].score;
+    rankedRows[position].score = rankedRows[position + 1].score;
+    rankedRows[position + 1].score = firstScore;
+    const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, config);
+    const dynamic = (plan.changes as Array<Record<string, unknown>>)
+      .filter((row) => row.priorityMode === "stable-rank" || row.priorityMode === "normalized-rebalance");
+    const top = dynamic.slice(0, 20);
+    const priorities = top.map((row) => row.desiredPriority as number);
+    const changed = dynamic.filter((row) => row.change === "update");
+    maximumChangedCount = Math.max(maximumChangedCount, changed.length);
+    if (dynamic.some((row) => row.priorityMode === "normalized-rebalance")) fullRebalanceCount += 1;
+
+    expect(priorities.every((priority, index) => index === 0 || priority > priorities[index - 1])).toBeTrue();
+    expect(priorities[0]).toBeGreaterThanOrEqual(100);
+    expect(priorities[19]).toBeLessThanOrEqual(300);
+    expect(priorities[19] - priorities[0]).toBeGreaterThanOrEqual(120);
+    expect(dynamic.slice(20).every((row) => row.desiredPriority === 300)).toBeTrue();
+    for (const change of changed) {
+      rows.find((row) => row.accountId === change.accountId)!.priority = change.desiredPriority as number;
+    }
+  }
+
+  expect(maximumChangedCount).toBeLessThanOrEqual(20);
+  expect(fullRebalanceCount).toBeGreaterThan(0);
+  expect(fullRebalanceCount).toBeLessThan(80);
+});
+
+test("a uniformly clustered top-k is globally rebalanced across the configured band", () => {
+  const rows = Array.from({ length: 20 }, (_, index) => {
+    const row = account(index + 1, `clustered-${index + 1}`, 100 - index);
+    row.priority = 180 + index;
+    return row;
+  });
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, config);
+  const dynamic = plan.changes as Array<Record<string, unknown>>;
+
+  expect(dynamic.every((row) => row.priorityMode === "normalized-rebalance")).toBeTrue();
+  expect(dynamic[0]).toMatchObject({ desiredPriority: 100, priorityRebalanced: true });
+  expect(dynamic[19]).toMatchObject({ desiredPriority: 300, priorityRebalanced: true });
+  expect(dynamic[0].priorityUniformity).toBe(1);
 });
 
 test("procurement recommendations remain supplier-diverse and do not treat limits as billing", () => {
@@ -382,6 +439,6 @@ test("codex and grok use independent anchors and merge into one adjustment plan"
     grok: { eligibleCount: 2 },
   });
   expect((plan.changes as Array<Record<string, unknown>>).filter((row) => row.profile === "grok")).toHaveLength(2);
-  expect(plan.priorities).toHaveProperty("10");
-  expect(plan.priorities).toMatchObject({ "10": 100, "11": 111 });
+  expect(plan.priorities).not.toHaveProperty("10");
+  expect(plan.priorities).not.toHaveProperty("11");
 });

@@ -49,6 +49,7 @@ export interface PriorityPlanPolicy {
   pointsPerScore: number;
   minimumChange: number;
   normalizationTopK: number;
+  minimumPriorityUniformity: number;
   minimumPriority: number;
   maximumPriority: number;
   fixedPriorities: Record<string, number>;
@@ -408,6 +409,7 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
     pointsPerScore: numberValue(policy, "pointsPerScore", path, 0.01, 1000),
     minimumChange: integerValue(policy, "minimumChange", path, 1, 1000),
     normalizationTopK: integerValue(policy, "normalizationTopK", path, 2, 10000),
+    minimumPriorityUniformity: numberValue(policy, "minimumPriorityUniformity", path, 0, 1),
     minimumPriority: integerValue(policy, "minimumPriority", path, 1, 1000),
     maximumPriority: integerValue(policy, "maximumPriority", path, 1, 1000),
     fixedPriorities,
