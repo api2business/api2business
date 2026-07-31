@@ -325,7 +325,7 @@ export class AccountLifecycleService {
     if (exitCode !== 0 || output.ok === false) {
       const data = output.data && typeof output.data === "object" ? output.data as Row : null;
       const detail = output.error || data?.error || stderr.trim() || "runtime CLI failed";
-      throw new Error(safeMessage(String(detail)));
+      throw new Error(safeMessage(typeof detail === "string" ? detail : errorMessage(detail)));
     }
     return output;
   }
