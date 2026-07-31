@@ -205,7 +205,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .oauth-cost-metrics .oauth-cost-ideal .oauth-cost-remaining { margin-top: 12px; color: var(--signal); font-size: 17px; line-height: 1.15; white-space: nowrap; }
 .oauth-cost-combined { grid-column: span 2; min-width: 0; }
 .oauth-cost-combined-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; min-width: 0; }
-.oauth-cost-combined-grid > div { min-width: 0; }
+.oauth-cost-combined-grid > div { min-width: 0; padding-left: 14px; }
 .oauth-cost-combined-grid .oauth-cost-ideal { padding-left: 18px; }
 .oauth-cost-combined-grid > div > small:first-child { margin-top: 0; margin-bottom: 10px; }
 .oauth-cost-output-metric { min-width: 0; }
