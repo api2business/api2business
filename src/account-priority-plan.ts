@@ -309,6 +309,39 @@ function buildPriorityProfile(
       change: before === desired ? "noop" : "update",
     };
   });
+  const rankedAccountIds = new Set(ranked.map(({ row }) => number(row.accountId)));
+  const tailChanges = rows.flatMap((row) => {
+    const accountId = number(row.accountId);
+    if (accountId === null
+      || !profileRow(row)
+      || fixedAccountIds.has(String(accountId))
+      || rankedAccountIds.has(accountId)) return [];
+    const before = number(row.priority);
+    if (before === null) return [];
+    const desired = policy.maximumPriority;
+    if (before !== desired) priorities[String(accountId)] = desired;
+    return [{
+      profile,
+      accountId,
+      accountName: row.accountName,
+      score: number(row.score),
+      costRateCnyPerApiUsd: costRate(row),
+      confidence: row.confidence,
+      observedAttempts: row.observedAttempts,
+      failureRate: row.failureRate,
+      failoverRate: row.failoverRate,
+      ttftP95Ms: row.ttftP95Ms,
+      beforePriority: before,
+      calculatedPriority: desired,
+      normalizedPriority: desired,
+      configuredPriorityFloor: null,
+      priorityFloorApplied: false,
+      reservePolicy: null,
+      desiredPriority: desired,
+      priorityMode: "topk-tail",
+      change: before === desired ? "noop" : "update",
+    }];
+  });
   const procurementAdvice = profile === "codex"
     ? buildProcurementAdvice(rows.filter((row) => !isOAuthAccount(row)), config, { minimum: minimumCost, maximum: maximumCost })
     : { enabled: false, statusAlerts: [], recommendations: [] };
@@ -328,7 +361,7 @@ function buildPriorityProfile(
     fixedCount: fixedChanges.length,
     changedCount: Object.keys(priorities).length,
     priorities,
-    changes: [...fixedChanges, ...dynamicChanges],
+    changes: [...fixedChanges, ...dynamicChanges, ...tailChanges],
     procurementAdvice,
     apply: {
       through: "apistate-priority-plan-confirm",

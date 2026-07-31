@@ -94,7 +94,7 @@ function account(id: number, name: string, score: number, available = true, erro
   };
 }
 
-test("priority plan reports billing depletion without scheduling unavailable accounts", () => {
+test("priority plan reports billing depletion and moves unavailable accounts to the top-k tail", () => {
   const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
     account(1, "https://alpha.example pro 0.1", 95, false, "403 Insufficient account balance"),
     account(2, "https://beta.example pro 0.1", 90),
@@ -104,7 +104,7 @@ test("priority plan reports billing depletion without scheduling unavailable acc
   expect(advice.statusAlerts[0]).not.toHaveProperty("accountId");
   expect(advice.recommendations[0]).toMatchObject({ billingSite: "alpha.example", action: "renew-balance" });
   expect(advice.recommendations[0].availableChannelCount).toBe(0);
-  expect(plan.priorities).not.toHaveProperty("1");
+  expect(plan.priorities).toMatchObject({ "1": 300 });
 });
 
 test("OAuth accounts are excluded from scoring-derived priority changes", () => {
@@ -318,6 +318,26 @@ test("accounts beyond top-k converge to the lower scheduling boundary", () => {
   expect(changes.find((row) => row.accountId === 22)).toMatchObject({ rank: 22, calculatedPriority: 300, desiredPriority: 300 });
 });
 
+test("non-OAuth accounts excluded from ranking converge to the top-k tail", () => {
+  const lowConfidence = account(31, "low-confidence", 80);
+  lowConfidence.priority = 800;
+  lowConfidence.confidence = "low";
+  const unavailable = account(32, "unavailable", 70);
+  unavailable.priority = 80;
+  unavailable.currentAvailable = false;
+  const oauth = account(33, "oauth-fallback", 60);
+  oauth.priority = 900;
+  (oauth as Record<string, unknown>).accountType = "oauth";
+
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [lowConfidence, unavailable, oauth] }, config);
+  const changes = plan.changes as Array<Record<string, unknown>>;
+
+  expect(plan.priorities).toMatchObject({ "31": 300, "32": 300 });
+  expect(plan.priorities).not.toHaveProperty("33");
+  expect(changes.find((row) => row.accountId === 31)).toMatchObject({ priorityMode: "topk-tail", desiredPriority: 300 });
+  expect(changes.find((row) => row.accountId === 32)).toMatchObject({ priorityMode: "topk-tail", desiredPriority: 300 });
+});
+
 test("stable ranking remains distributed and ordered through repeated local moves", () => {
   const rows = Array.from({ length: 24 }, (_, index) => {
     const row = account(index + 1, `account-${index + 1}`, 100 - index);
@@ -399,7 +419,7 @@ test("procurement advice remains available when every account is unavailable", (
   const advice = plan.procurementAdvice as Record<string, any>;
   expect(plan.eligibleCount).toBe(0);
   expect(plan.anchorScore).toBeNull();
-  expect(plan.priorities).toEqual({});
+  expect(plan.priorities).toEqual({ "1": 300 });
   expect(advice.recommendations[0]).toMatchObject({ billingSite: "alpha.example", action: "renew-balance" });
 });
 
@@ -414,7 +434,7 @@ test("shared-balance channels produce one website-level alert and recommendation
   expect(advice.recommendations).toHaveLength(1);
   expect(advice.recommendations[0]).toMatchObject({ billingSite: "shared.example", channelCount: 2, action: "renew-balance" });
   expect(advice.recommendations[0]).not.toHaveProperty("accountIds");
-  expect(Object.keys(plan.priorities as Record<string, number>)).toHaveLength(0);
+  expect(plan.priorities).toEqual({ "1": 300, "2": 300 });
 });
 
 test("codex and grok use independent anchors and merge into one adjustment plan", () => {
