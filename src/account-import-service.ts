@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "./config";
@@ -8,6 +8,7 @@ import { recordAccountImportCosts } from "./account-import-cost-ledger";
 import { inspectAccounts, verifyImportedAccounts } from "./account-inspection";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { normalizeAccountImportInput } from "./account-import-input";
+import type { TemporalGateway } from "./temporal-client";
 
 export interface AccountImportRequest {
   content: string;
@@ -22,13 +23,28 @@ export interface AccountImportRequest {
   confirm: boolean;
 }
 
-interface ImportLog { timestamp: string; stage: string; state: string; message: string }
-interface ImportJob {
+export interface ImportLog { timestamp: string; stage: string; state: string; message: string }
+export interface ImportJob {
   id: string; state: "queued" | "running" | "succeeded" | "failed"; createdAt: string;
   completedAt: string | null; fingerprint: string; accountCount: number; settings: Omit<AccountImportRequest, "content">;
   inputArchive: { stored: true; fileName: string };
   source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number };
   logs: ImportLog[]; result: Record<string, unknown> | null; accounting: Record<string, unknown> | null; error: string | null;
+  workflow?: { workflowId: string; runId: string; state: "submitted" };
+}
+
+export interface ImportJobPatch {
+  state?: ImportJob["state"];
+  completedAt?: string | null;
+  logs?: ImportLog[];
+  result?: Record<string, unknown> | null;
+  accounting?: Record<string, unknown> | null;
+  error?: string | null;
+}
+
+export interface ImportJobControl {
+  get(id: string): Promise<ImportJob | null>;
+  patch(id: string, patch: ImportJobPatch): Promise<void>;
 }
 
 function validate(input: AccountImportRequest): void {
@@ -106,7 +122,12 @@ export function archiveAccountImportContent(directory: string, jobId: string, co
 
 export class AccountImportService {
   private jobs = new Map<string, ImportJob>();
-  constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
+  constructor(
+    private config: AppConfig,
+    private reads: Sub2ApiReadClient,
+    private temporal: TemporalGateway | null = null,
+    private workerJobs: ImportJobControl | null = null,
+  ) {}
 
   options() {
     return { ok: true, currency: "CNY", inputFormats: ["json", "zip"], planTypes: [{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }, { id: "free", name: "Free" }], defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null, planType: "k12" }, groups: [
@@ -114,7 +135,7 @@ export class AccountImportService {
     ] };
   }
 
-  submit(input: AccountImportRequest): ImportJob {
+  async submit(input: AccountImportRequest): Promise<ImportJob> {
     const normalizedInput: AccountImportRequest = {
       ...input,
       perAccountProxy: input.perAccountProxy ?? this.config.operations.accountImportDefaults.perAccountProxy,
@@ -130,22 +151,73 @@ export class AccountImportService {
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);
     while (this.jobs.size > 20) this.jobs.delete(this.jobs.keys().next().value!);
-    void this.run(job, parsed.content);
+    if (!this.temporal) {
+      job.state = "failed";
+      job.error = "Temporal worker 当前不可用";
+      this.log(job, "job", "failed", job.error);
+      job.completedAt = new Date().toISOString();
+      throw new Error(job.error);
+    }
+    try {
+      job.workflow = await this.temporal.submit({ kind: "account.import", jobId: id });
+    } catch (error) {
+      job.state = "failed";
+      job.error = safeMessage(error instanceof Error ? error.message : String(error));
+      this.log(job, "job", "failed", job.error);
+      job.completedAt = new Date().toISOString();
+      throw error;
+    }
     return this.project(job);
   }
 
   get(id: string): ImportJob | null { const job = this.jobs.get(id); return job ? this.project(job) : null; }
+  workerGet(id: string): ImportJob | null { return this.get(id); }
+  applyWorkerPatch(id: string, patch: ImportJobPatch): Record<string, unknown> {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error("导入作业不存在");
+    if (patch.state !== undefined) job.state = patch.state;
+    if (patch.completedAt !== undefined) job.completedAt = patch.completedAt;
+    if (patch.logs !== undefined) job.logs = structuredClone(patch.logs);
+    if (patch.result !== undefined) job.result = patch.result ? structuredClone(patch.result) : null;
+    if (patch.accounting !== undefined) job.accounting = patch.accounting ? structuredClone(patch.accounting) : null;
+    if (patch.error !== undefined) job.error = patch.error;
+    return { ok: true, job: this.project(job), valuesPrinted: false };
+  }
+
+  async runWorker(id: string): Promise<ImportJob> {
+    if (!this.workerJobs) throw new Error("账号导入 worker job 控制面不可用");
+    const job = await this.workerJobs.get(id);
+    if (!job) throw new Error("导入作业不存在");
+    if (job.state === "succeeded" || job.state === "failed") return job;
+    const path = join(this.config.operations.accountImportArchiveDirectory, job.inputArchive.fileName);
+    const content = readFileSync(path, "utf8");
+    await this.run(job, content);
+    return job;
+  }
+
   inspect(accountIds: number[]): Promise<Record<string, unknown>> { return inspectAccounts(accountIds, this.reads); }
   private project(job: ImportJob): ImportJob { return structuredClone(job); }
   private log(job: ImportJob, stage: string, state: string, message: string) {
     job.logs.push({ timestamp: new Date().toISOString(), stage, state, message: safeMessage(message) });
   }
 
+  private async persistWorkerJob(job: ImportJob): Promise<void> {
+    if (!this.workerJobs) return;
+    await this.workerJobs.patch(job.id, {
+      state: job.state,
+      completedAt: job.completedAt,
+      logs: job.logs,
+      result: job.result,
+      accounting: job.accounting,
+      error: job.error,
+    });
+  }
+
   private async run(job: ImportJob, content: string): Promise<void> {
     const dir = mkdtempSync(join(tmpdir(), "apistate-import-"));
     const file = join(dir, "accounts.json");
     try {
-      job.state = "running"; this.log(job, "job", "start", `开始处理 ${job.accountCount} 个账号`);
+      job.state = "running"; this.log(job, "job", "start", `开始处理 ${job.accountCount} 个账号`); await this.persistWorkerJob(job);
       const plan = await accountImportPreflight(content, job.settings, this.reads);
       for (const skipped of plan.skipped) {
         this.log(job, "account", "skipped", `stage=account state=skipped index=${skipped.index}/${job.accountCount} account-id=${skipped.accountId}`);
@@ -153,10 +225,12 @@ export class AccountImportService {
       this.log(job, "proxy", "planned", job.settings.perAccountProxy === true
         ? `代理池候选 ${plan.proxyCandidateIds.length} 个，将为每个新建账号独立随机分配`
         : `代理池候选 ${plan.proxyCandidateIds.length} 个，整批共用 Proxy #${plan.initialProxyId}（原生批量导入）`);
+      await this.persistWorkerJob(job);
       if (plan.sourceIndexes.length === 0) {
         job.result = completedWithoutWrites(job, plan);
         job.state = "succeeded";
         this.log(job, "job", "done", "全部账号已导入并对齐，本轮未写入");
+        await this.persistWorkerJob(job);
         return;
       }
       writeFileSync(file, plan.content, { encoding: "utf8", mode: 0o600 });
@@ -191,6 +265,7 @@ export class AccountImportService {
         const verification = output.verification as Record<string, unknown>;
         this.log(job, "verification", verification.ok === true ? "done" : "failed",
           `账号终态校验 ${verification.aligned}/${verification.selected} 对齐`);
+        await this.persistWorkerJob(job);
       }
       if (job.settings.confirm && createdIds.length > 0) {
         job.accounting = recordAccountImportCosts({
@@ -204,27 +279,31 @@ export class AccountImportService {
         const accounting = job.accounting;
         this.log(job, "accounting", "recorded", `人民币采购成本已记账 ${accounting.recordedCount} 个账号，共 ¥${Number(accounting.totalCostCny).toFixed(2)}`);
         output.accounting = accounting;
+        await this.persistWorkerJob(job);
       }
       const verification = output.verification as Record<string, unknown> | undefined;
       if (exitCode !== 0 || output.ok === false || verification?.ok === false) {
         job.state = "failed";
         job.error = verification?.ok === false ? "导入后的账号配置未全部对齐，请查看 verification.accounts" : importFailure(output);
         this.log(job, "job", "failed", job.error);
+        await this.persistWorkerJob(job);
         return;
       }
-      job.state = "succeeded"; this.log(job, "job", "done", "导入作业完成");
+      job.state = "succeeded"; this.log(job, "job", "done", "导入作业完成"); await this.persistWorkerJob(job);
     } catch (error) {
       job.state = "failed"; job.error = safeMessage(error instanceof Error ? error.message : String(error));
       this.log(job, "job", "failed", job.error);
+      try { await this.persistWorkerJob(job); } catch { /* preserve the original worker failure */ }
     } finally {
       rmSync(dir, { recursive: true, force: true }); job.completedAt = new Date().toISOString();
+      try { await this.persistWorkerJob(job); } catch { /* API may be restarting; Temporal retains the bounded result */ }
     }
   }
 
   private async captureProgress(job: ImportJob, stream: ReadableStream<Uint8Array>, plan: AccountImportPreflightPlan): Promise<void> {
     const decoder = new TextDecoder();
     let pending = "";
-    const consume = (line: string) => {
+    const consume = async (line: string): Promise<void> => {
       let text = line.trim();
       if (!text) return;
       const match = /stage=account state=([^ ]+) index=(\d+)\/(\d+)/u.exec(text);
@@ -236,15 +315,16 @@ export class AccountImportService {
       const stage = /stage=([^ ]+)/u.exec(text)?.[1] ?? "runtime";
       const state = /state=([^ ]+)/u.exec(text)?.[1] ?? "progress";
       this.log(job, stage, state, text.replace(/^.*?PROGRESS\s+/u, ""));
+      await this.persistWorkerJob(job);
     };
     for await (const chunk of stream) {
       pending += decoder.decode(chunk, { stream: true });
       const lines = pending.split(/\r?\n/u);
       pending = lines.pop() ?? "";
-      for (const line of lines) consume(line);
+      for (const line of lines) await consume(line);
     }
     pending += decoder.decode();
-    consume(pending);
+    await consume(pending);
   }
 }
 

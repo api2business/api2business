@@ -19,6 +19,7 @@ services:
     volumes:
       - /workspace/unidesk:/workspace/unidesk:ro
       - /root/apistate/.state/ledger:/root/apistate/.state/ledger
+      - /root/apistate/.state/account-imports:/root/apistate/.state/account-imports
     command: ["bun", "src/worker.ts", "--config", "config/sub2rank.yaml", "--runtime", "compose"]
     depends_on: [api]
   web:

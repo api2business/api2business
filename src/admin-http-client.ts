@@ -75,11 +75,27 @@ export class AdminHttpClient {
   accountImportStatus(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/account-import/jobs/${encodeURIComponent(id)}`);
   }
+  accountImportWorkerJob(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/internal/account-import-jobs/${encodeURIComponent(id)}`);
+  }
+  updateAccountImportWorkerJob(id: string, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request(`/api/internal/account-import-jobs/${encodeURIComponent(id)}`, {
+      method: "POST", body: JSON.stringify(patch),
+    });
+  }
   accountLifecycleDetect(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request("/api/account-lifecycle/jobs", { method: "POST", body: JSON.stringify(input) }, 30000);
   }
   accountLifecycleStatus(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/account-lifecycle/jobs/${encodeURIComponent(id)}`);
+  }
+  accountLifecycleWorkerJob(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/internal/account-lifecycle-jobs/${encodeURIComponent(id)}`);
+  }
+  updateAccountLifecycleWorkerJob(id: string, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request(`/api/internal/account-lifecycle-jobs/${encodeURIComponent(id)}`, {
+      method: "POST", body: JSON.stringify(patch),
+    });
   }
   accountLifecycleSettle(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/account-lifecycle/jobs/${encodeURIComponent(id)}/settle`, { method: "POST", body: "{}" }, 30000);

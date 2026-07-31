@@ -24,6 +24,9 @@ export async function dispatchDirect(services: DispatcherServices, command: AppC
   if (command.kind === "records.delete") return services.lottery.deleteRecord(command.id);
   if (command.kind === "credit.test") return await services.lottery.creditTest(command.execute);
   if (command.kind === "upstream.operation"
+    || command.kind === "account.import"
+    || command.kind === "account.lifecycle.detect"
+    || command.kind === "account.lifecycle.settle"
     || command.kind === "priority.plan.create"
     || command.kind === "priority.plan.confirm"
     || command.kind === "priority.automation.run") {

@@ -6,6 +6,7 @@ import { parseAccountEconomicsWindow } from "./account-batch-economics";
 import { recordLifecycleSettlement } from "./account-lifecycle-ledger";
 import { runBoundedProcess } from "./bounded-process";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import type { TemporalGateway } from "./temporal-client";
 import { parse } from "yaml";
 
 type PlanType = "k12" | "plus";
@@ -19,7 +20,7 @@ export interface LifecycleRequest {
   confirm: boolean;
 }
 
-interface LifecycleJob {
+export interface LifecycleJob {
   id: string;
   state: JobState;
   createdAt: string;
@@ -31,6 +32,23 @@ interface LifecycleJob {
   result: Row | null;
   settlement: Row | null;
   error: string | null;
+  workflow?: { workflowId: string; runId: string; state: "submitted" };
+}
+
+export interface LifecycleJobPatch {
+  state?: JobState;
+  completedAt?: string | null;
+  fingerprint?: string | null;
+  logs?: Array<{ timestamp: string; stage: string; state: string; message: string }>;
+  candidates?: Row[];
+  result?: Row | null;
+  settlement?: Row | null;
+  error?: string | null;
+}
+
+export interface LifecycleJobControl {
+  get(id: string): Promise<LifecycleJob | null>;
+  patch(id: string, patch: LifecycleJobPatch): Promise<void>;
 }
 
 const candidateSql = `
@@ -136,9 +154,14 @@ export function lifecycleRuntimeResult(output: Row): Row {
 export class AccountLifecycleService {
   private jobs = new Map<string, LifecycleJob>();
 
-  constructor(private config: AppConfig, private reads: Sub2ApiReadClient) {}
+  constructor(
+    private config: AppConfig,
+    private reads: Sub2ApiReadClient,
+    private temporal: TemporalGateway | null = null,
+    private workerJobs: LifecycleJobControl | null = null,
+  ) {}
 
-  submit(input: LifecycleRequest): LifecycleJob {
+  async submit(input: LifecycleRequest): Promise<LifecycleJob> {
     parseAccountEconomicsWindow({ day: input.day }, this.config.monitor.timezone);
     if (input.planType !== "k12" && input.planType !== "plus") throw new Error("planType must be k12 or plus");
     const model = input.model?.trim() || this.config.operations.accountLifecycle.defaultModel;
@@ -150,7 +173,22 @@ export class AccountLifecycleService {
     };
     this.jobs.set(job.id, job);
     while (this.jobs.size > 20) this.jobs.delete(this.jobs.keys().next().value!);
-    void this.detect(job);
+    if (!this.temporal) {
+      job.state = "failed";
+      job.error = "Temporal worker 当前不可用";
+      this.log(job, "job", "failed", job.error);
+      job.completedAt = new Date().toISOString();
+      throw new Error(job.error);
+    }
+    try {
+      job.workflow = await this.temporal.submit({ kind: "account.lifecycle.detect", jobId: job.id });
+    } catch (error) {
+      job.state = "failed";
+      job.error = safeMessage(error instanceof Error ? error.message : String(error));
+      this.log(job, "job", "failed", job.error);
+      job.completedAt = new Date().toISOString();
+      throw error;
+    }
     return this.project(job);
   }
 
@@ -159,7 +197,23 @@ export class AccountLifecycleService {
     return job ? this.project(job) : null;
   }
 
-  settle(id: string): LifecycleJob {
+  workerGet(id: string): LifecycleJob | null { return this.get(id); }
+
+  applyWorkerPatch(id: string, patch: LifecycleJobPatch): Record<string, unknown> {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error("OAuth 生命周期作业不存在");
+    if (patch.state !== undefined) job.state = patch.state;
+    if (patch.completedAt !== undefined) job.completedAt = patch.completedAt;
+    if (patch.fingerprint !== undefined) job.fingerprint = patch.fingerprint;
+    if (patch.logs !== undefined) job.logs = structuredClone(patch.logs);
+    if (patch.candidates !== undefined) job.candidates = structuredClone(patch.candidates);
+    if (patch.result !== undefined) job.result = patch.result ? structuredClone(patch.result) : null;
+    if (patch.settlement !== undefined) job.settlement = patch.settlement ? structuredClone(patch.settlement) : null;
+    if (patch.error !== undefined) job.error = patch.error;
+    return { ok: true, job: this.project(job), valuesPrinted: false };
+  }
+
+  async settle(id: string): Promise<LifecycleJob> {
     const job = this.jobs.get(id);
     if (!job) throw new Error("OAuth 生命周期作业不存在");
     if (job.state !== "succeeded") throw new Error("只有检测成功的作业可以结算");
@@ -167,15 +221,56 @@ export class AccountLifecycleService {
     if (number(summary?.alive) !== 0 || number(summary?.unknown) !== 0 || number(summary?.dead) !== job.candidates.length) {
       throw new Error("批次并非全部确定死亡，拒绝结算和删除");
     }
+    if (!this.temporal) throw new Error("Temporal worker 当前不可用");
     job.state = "settling";
     this.log(job, "settlement", "queued", `开始结算 ${job.candidates.length} 个确定死亡账号`);
-    void this.finishSettlement(job);
+    try {
+      job.workflow = await this.temporal.submit({ kind: "account.lifecycle.settle", jobId: job.id });
+    } catch (error) {
+      job.state = "failed";
+      job.error = safeMessage(error instanceof Error ? error.message : String(error));
+      this.log(job, "settlement", "failed", job.error);
+      job.completedAt = new Date().toISOString();
+      throw error;
+    }
     return this.project(job);
+  }
+
+  async runDetectWorker(id: string): Promise<LifecycleJob> {
+    if (!this.workerJobs) throw new Error("OAuth 生命周期 worker job 控制面不可用");
+    const job = await this.workerJobs.get(id);
+    if (!job) throw new Error("OAuth 生命周期作业不存在");
+    if (job.state === "succeeded" || job.state === "settling" || job.state === "settled" || job.state === "failed") return job;
+    await this.detect(job);
+    return job;
+  }
+
+  async runSettlementWorker(id: string): Promise<LifecycleJob> {
+    if (!this.workerJobs) throw new Error("OAuth 生命周期 worker job 控制面不可用");
+    const job = await this.workerJobs.get(id);
+    if (!job) throw new Error("OAuth 生命周期作业不存在");
+    if (job.state === "settled" || job.state === "failed") return job;
+    await this.finishSettlement(job);
+    return job;
   }
 
   private project(job: LifecycleJob): LifecycleJob { return structuredClone(job); }
   private log(job: LifecycleJob, stage: string, state: string, message: string) {
     job.logs.push({ timestamp: new Date().toISOString(), stage, state, message: safeMessage(message) });
+  }
+
+  private async persistWorkerJob(job: LifecycleJob): Promise<void> {
+    if (!this.workerJobs) return;
+    await this.workerJobs.patch(job.id, {
+      state: job.state,
+      completedAt: job.completedAt,
+      fingerprint: job.fingerprint,
+      logs: job.logs,
+      candidates: job.candidates,
+      result: job.result,
+      settlement: job.settlement,
+      error: job.error,
+    });
   }
 
   private async facts(day: string): Promise<Row[]> {
@@ -223,12 +318,14 @@ export class AccountLifecycleService {
     try {
       job.state = "running";
       this.log(job, "candidates", "start", `读取 ${job.settings.day} 的 ${job.settings.planType.toUpperCase()} OAuth 候选`);
+      await this.persistWorkerJob(job);
       const rows = await this.facts(job.settings.day);
       job.candidates = rows.filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth" && row.planType === job.settings.planType);
       if (job.candidates.length === 0) throw new Error("没有匹配的 OpenAI OAuth 候选账号");
       const accountIds = job.candidates.map((row) => number(row.accountId));
       job.fingerprint = createHash("sha256").update(JSON.stringify({ day: job.settings.day, planType: job.settings.planType, accountIds })).digest("hex");
       this.log(job, "candidates", "done", `候选 ${accountIds.length} 个，开始原生连接检测`);
+      await this.persistWorkerJob(job);
       const tests: unknown[] = [];
       const batchSize = this.config.operations.accountLifecycle.testBatchSize;
       for (let offset = 0; offset < accountIds.length; offset += batchSize) {
@@ -236,6 +333,7 @@ export class AccountLifecycleService {
         const batchIndex = Math.floor(offset / batchSize) + 1;
         const batchCount = Math.ceil(accountIds.length / batchSize);
         this.log(job, "test", "start", `检测批次 ${batchIndex}/${batchCount}，账号 ${batch.length} 个`);
+        await this.persistWorkerJob(job);
         const output = await this.runCli([
           "platform-infra", "sub2api", "codex-pool", "runtime", "test", "--target", this.config.monitor.target,
           "--accounts", batch.join(","), "--model", job.settings.model, "--json", ...(job.settings.confirm ? ["--confirm"] : []),
@@ -247,6 +345,7 @@ export class AccountLifecycleService {
         }
         tests.push(...batchTests);
         this.log(job, "test", "done", `检测批次 ${batchIndex}/${batchCount} 完成`);
+        await this.persistWorkerJob(job);
       }
       const summary = { alive: 0, dead: 0, unknown: 0 };
       for (const item of tests) {
@@ -261,11 +360,14 @@ export class AccountLifecycleService {
       job.result = { tests, summary, model: job.settings.model, mode: job.settings.confirm ? "confirmed" : "dry-run", valuesPrinted: false };
       job.state = "succeeded";
       this.log(job, "test", "done", `检测完成：存活 ${number(summary.alive)}，死亡 ${number(summary.dead)}，不确定 ${number(summary.unknown)}`);
+      await this.persistWorkerJob(job);
     } catch (error) {
       job.state = "failed"; job.error = safeMessage(error instanceof Error ? error.message : String(error));
       this.log(job, "job", "failed", job.error);
+      try { await this.persistWorkerJob(job); } catch { /* preserve the original worker failure */ }
     } finally {
       job.completedAt = new Date().toISOString();
+      try { await this.persistWorkerJob(job); } catch { /* API may be restarting */ }
     }
   }
 
@@ -288,6 +390,7 @@ export class AccountLifecycleService {
         detectionJobId: job.id, detectionFingerprint: job.fingerprint!,
       });
       this.log(job, "accounting", accounting.mutation ? "recorded" : "skipped", `批次结算已记账 ${expectedIds.length} 个账号`);
+      await this.persistWorkerJob(job);
       let deletion: Row | null = null;
       let deletionError: string | null = null;
       try {
@@ -298,16 +401,20 @@ export class AccountLifecycleService {
       } catch (error) {
         deletionError = safeMessage(errorMessage(error));
         this.log(job, "deletion", "verify", `删除命令结果回收失败，转入终态回读：${deletionError}`);
+        await this.persistWorkerJob(job);
       }
       const verified = await this.facts(job.settings.day);
       const remaining = verified.filter((row) => expectedIds.includes(number(row.accountId)) && row.exists === true).map((row) => row.accountId);
       job.settlement = { accounting, deletion, deletionError, remainingAccountIds: remaining, valuesPrinted: false };
+      await this.persistWorkerJob(job);
       if (remaining.length > 0) throw new Error(`删除回读仍有 ${remaining.length} 个账号存在${deletionError ? `；命令错误：${deletionError}` : ""}`);
       job.state = "settled"; job.error = null; job.completedAt = new Date().toISOString();
       this.log(job, "verification", "done", `结算与删除完成，回读 ${expectedIds.length}/${expectedIds.length} 已删除`);
+      await this.persistWorkerJob(job);
     } catch (error) {
       job.state = "failed"; job.error = safeMessage(errorMessage(error));
       job.completedAt = new Date().toISOString(); this.log(job, "settlement", "failed", job.error);
+      try { await this.persistWorkerJob(job); } catch { /* preserve the original worker failure */ }
     }
   }
 }

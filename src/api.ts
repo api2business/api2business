@@ -38,8 +38,8 @@ const operations = new OperationsService(
   reads,
 );
 await operations.initialize();
-const imports = new AccountImportService(config, reads);
-const lifecycle = new AccountLifecycleService(config, reads);
+const imports = new AccountImportService(config, reads, temporal);
+const lifecycle = new AccountLifecycleService(config, reads, temporal);
 const upstreams = new UpstreamManagementService(config, reads, temporal);
 const server = Bun.serve({
   hostname: target.listenHost,

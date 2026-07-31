@@ -14,6 +14,8 @@ import { AccountScoreService } from "./account-score-service";
 import { Sub2ApiClient } from "./sub2api-client";
 import { UniDeskRuntimePolicyEventSource } from "./runtime-policy-events";
 import { resolveDataPath } from "./config";
+import { AccountImportService, type ImportJob } from "./account-import-service";
+import { AccountLifecycleService, type LifecycleJob } from "./account-lifecycle-service";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -33,6 +35,24 @@ const connection = workflowEnabled
   ? await NativeConnection.connect({ address: temporalAddress(config) })
   : null;
 const remoteReads = new RemoteSub2ApiReadClient(internal);
+const accountImports = new AccountImportService(config, remoteReads, null, {
+  get: async (id): Promise<ImportJob | null> => {
+    const response = await internal.accountImportWorkerJob(id);
+    return response.job && typeof response.job === "object" ? response.job as ImportJob : null;
+  },
+  patch: async (id, patch): Promise<void> => {
+    await internal.updateAccountImportWorkerJob(id, patch as Record<string, unknown>);
+  },
+});
+const accountLifecycle = new AccountLifecycleService(config, remoteReads, null, {
+  get: async (id): Promise<LifecycleJob | null> => {
+    const response = await internal.accountLifecycleWorkerJob(id);
+    return response.job && typeof response.job === "object" ? response.job as LifecycleJob : null;
+  },
+  patch: async (id, patch): Promise<void> => {
+    await internal.updateAccountLifecycleWorkerJob(id, patch as Record<string, unknown>);
+  },
+});
 const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
 if (!operationsDatabaseUrl) throw new Error(`worker requires env ${config.operations.databaseUrlEnv}`);
 const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), remoteReads);
@@ -59,6 +79,18 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     return await operations.confirmPriorityPlan(command.planId, command.operator);
   }
   if (command.kind === "priority.automation.run") return await operations.runDueAutomation();
+  if (command.kind === "account.import") {
+    const job = await accountImports.runWorker(command.jobId);
+    return { ok: true, jobId: job.id, state: job.state, valuesPrinted: false };
+  }
+  if (command.kind === "account.lifecycle.detect") {
+    const job = await accountLifecycle.runDetectWorker(command.jobId);
+    return { ok: true, jobId: job.id, state: job.state, valuesPrinted: false };
+  }
+  if (command.kind === "account.lifecycle.settle") {
+    const job = await accountLifecycle.runSettlementWorker(command.jobId);
+    return { ok: true, jobId: job.id, state: job.state, valuesPrinted: false };
+  }
   if (command.kind === "upstream.operation") {
     const response = await internal.upstreamOperation(command.operationId);
     const pending = response.operation as UpstreamWorkerOperation | undefined;

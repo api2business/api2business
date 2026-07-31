@@ -2,8 +2,8 @@ import { resolve } from "node:path";
 import type { AppConfig } from "./config";
 import type { ApplicationDispatcher } from "./dispatcher";
 import type { OperationsService } from "./operations-service";
-import type { AccountLifecycleService, LifecycleRequest } from "./account-lifecycle-service";
-import type { AccountImportService, AccountImportRequest } from "./account-import-service";
+import type { AccountLifecycleService, LifecycleJobPatch, LifecycleRequest } from "./account-lifecycle-service";
+import type { AccountImportService, ImportJobPatch, AccountImportRequest } from "./account-import-service";
 import { UpstreamManagementError, type UpstreamManagementService } from "./upstream-management";
 import type { AppCommand, OperationRequest } from "./contracts";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
@@ -184,7 +184,7 @@ export function createHandler(
           || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
           return json({ ok: false, error: "导入参数无效：账号类型只允许 k12、plus 或 free，账号单价须为正数人民币且最多两位小数" }, 400);
         }
-        return json({ ok: true, job: imports.submit(input) }, 202);
+        return json({ ok: true, job: await imports.submit(input) }, 202);
       }
       if (request.method === "GET" && url.pathname.startsWith("/api/account-import/jobs/")) {
         const job = imports.get(decodeURIComponent(url.pathname.slice("/api/account-import/jobs/".length)));
@@ -192,7 +192,7 @@ export function createHandler(
       }
       if (request.method === "POST" && url.pathname === "/api/account-lifecycle/jobs") {
         const input = await body(request) as unknown as LifecycleRequest;
-        try { return json({ ok: true, job: lifecycle.submit(input) }, 202); }
+        try { return json({ ok: true, job: await lifecycle.submit(input) }, 202); }
         catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
       }
       if (request.method === "GET" && /^\/api\/account-lifecycle\/jobs\/[^/]+$/u.test(url.pathname)) {
@@ -202,7 +202,7 @@ export function createHandler(
       }
       if (request.method === "POST" && /^\/api\/account-lifecycle\/jobs\/[^/]+\/settle$/u.test(url.pathname)) {
         const id = decodeURIComponent(url.pathname.split("/")[4]!);
-        try { return json({ ok: true, job: lifecycle.settle(id) }, 202); }
+        try { return json({ ok: true, job: await lifecycle.settle(id) }, 202); }
         catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 409); }
       }
       if (request.method === "POST" && url.pathname === "/api/admin/accounts/inspect") {
@@ -237,6 +237,28 @@ export function createHandler(
       if (request.method === "POST" && /^\/api\/internal\/upstream-operations\/[^/]+\/complete$/u.test(url.pathname)) {
         const operationId = decodeURIComponent(url.pathname.split("/")[4]!);
         return json(upstreams.completeOperation(operationId));
+      }
+      if (request.method === "GET" && /^\/api\/internal\/account-import-jobs\/[^/]+$/u.test(url.pathname)) {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        const job = imports.workerGet(id);
+        return job ? json({ ok: true, job, valuesPrinted: false }) : json({ ok: false, error: "导入作业不存在" }, 404);
+      }
+      if (request.method === "POST" && /^\/api\/internal\/account-import-jobs\/[^/]+$/u.test(url.pathname)) {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(imports.applyWorkerPatch(id, await body(request) as ImportJobPatch));
+      }
+      if (request.method === "GET" && /^\/api\/internal\/account-lifecycle-jobs\/[^/]+$/u.test(url.pathname)) {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        const job = lifecycle.workerGet(id);
+        return job ? json({ ok: true, job, valuesPrinted: false }) : json({ ok: false, error: "OAuth 生命周期作业不存在" }, 404);
+      }
+      if (request.method === "POST" && /^\/api\/internal\/account-lifecycle-jobs\/[^/]+$/u.test(url.pathname)) {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(lifecycle.applyWorkerPatch(id, await body(request) as LifecycleJobPatch));
       }
       if (request.method === "POST" && url.pathname === "/api/internal/execute-operation") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);

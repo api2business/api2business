@@ -13,6 +13,9 @@ export type AppCommand =
   | { kind: "records.delete"; id: string }
   | { kind: "credit.test"; execute: boolean }
   | { kind: "upstream.operation"; operationId: string }
+  | { kind: "account.import"; jobId: string }
+  | { kind: "account.lifecycle.detect"; jobId: string }
+  | { kind: "account.lifecycle.settle"; jobId: string }
   | { kind: "priority.plan.create"; recentCallLimit: number; operator: string }
   | { kind: "priority.plan.confirm"; planId: string; operator: string }
   | { kind: "priority.automation.run" };
@@ -39,6 +42,9 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "records.delete"
     || (command.kind === "credit.test" && command.execute)
     || command.kind === "upstream.operation"
+    || command.kind === "account.import"
+    || command.kind === "account.lifecycle.detect"
+    || command.kind === "account.lifecycle.settle"
     || command.kind === "priority.plan.create"
     || command.kind === "priority.plan.confirm"
     || command.kind === "priority.automation.run";
