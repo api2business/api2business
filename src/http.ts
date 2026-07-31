@@ -4,6 +4,7 @@ import type { ApplicationDispatcher } from "./dispatcher";
 import type { OperationsService } from "./operations-service";
 import type { AccountLifecycleService, LifecycleRequest } from "./account-lifecycle-service";
 import type { AccountImportService, AccountImportRequest } from "./account-import-service";
+import { UpstreamManagementError, type UpstreamManagementService } from "./upstream-management";
 import type { AppCommand, OperationRequest } from "./contracts";
 import {
   normalizeAccountIds,
@@ -37,7 +38,14 @@ async function body(request: Request): Promise<Record<string, unknown>> {
 
 function errorResponse(error: unknown): Response {
   const message = error instanceof Error ? error.message : String(error);
-  const status = /does not exist|no draw chance|no eligible/u.test(message) ? 409 : 500;
+  if (error instanceof UpstreamManagementError) {
+    return json({ ok: false, error: message, ...error.details }, error.status);
+  }
+  const status = /does not exist|no draw chance|no eligible/u.test(message)
+    ? 409
+    : /base_url|API key|后缀|费率|充值金额|幂等键|字段不能为空|当前账号缺少/u.test(message)
+    ? 400
+    : 500;
   if (status >= 500) console.error(JSON.stringify({ ok: false, component: "http", error: message }));
   return json({ ok: false, error: status >= 500 ? "服务暂时不可用，请稍后重试" : message }, status);
 }
@@ -84,6 +92,7 @@ export function createHandler(
   operations: OperationsService,
   imports: AccountImportService,
   lifecycle: AccountLifecycleService,
+  upstreams: UpstreamManagementService,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
@@ -111,10 +120,47 @@ export function createHandler(
         return await staticFile("score-display-freshness.js", "text/javascript; charset=utf-8");
       }
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
-      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/account-import": "account-import.html" } as Record<string, string>)[url.pathname];
+      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+      if (request.method === "GET" && url.pathname === "/api/upstreams") {
+        const page = pageNumber(url);
+        return json(await upstreams.list(page, url.searchParams.get("search")));
+      }
+      if (request.method === "POST" && url.pathname === "/api/upstreams") {
+        const input = await body(request);
+        if (typeof input.baseUrl !== "string" || typeof input.apiKey !== "string"
+          || typeof input.suffix !== "string" || input.apiKey.trim() === "") {
+          return json({ ok: false, error: "base_url、API key 和后缀不能为空" }, 400);
+        }
+        return json(await upstreams.create({
+          baseUrl: input.baseUrl,
+          apiKey: input.apiKey,
+          suffix: input.suffix,
+          rateCnyPerApiUsd: input.rateCnyPerApiUsd,
+          rechargeCny: input.rechargeCny,
+          operationId: typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
+          description: typeof input.description === "string" ? input.description : undefined,
+        }), 201);
+      }
+      if (request.method === "PATCH" && /^\/api\/upstreams\/[1-9]\d*$/u.test(url.pathname)) {
+        const id = Number(url.pathname.split("/")[3]);
+        const input = await body(request);
+        return json(await upstreams.update(id, {
+          suffix: input.suffix,
+          rateCnyPerApiUsd: input.rateCnyPerApiUsd,
+        }));
+      }
+      if (request.method === "POST" && /^\/api\/upstreams\/[1-9]\d*\/recharge$/u.test(url.pathname)) {
+        const id = Number(url.pathname.split("/")[3]);
+        const input = await body(request);
+        return json(await upstreams.recharge(id, {
+          amountCny: input.amountCny,
+          operationId: typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
+          description: typeof input.description === "string" ? input.description : undefined,
+        }));
+      }
       if (request.method === "GET" && url.pathname === "/api/account-import/options") return json(imports.options());
       if (request.method === "POST" && url.pathname === "/api/account-import/jobs") {
         const input = await body(request) as unknown as AccountImportRequest;

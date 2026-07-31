@@ -35,6 +35,7 @@ import {
 import { collectUserBalanceLiability } from "./user-balance-liability";
 import { collectDailyProfitFacts } from "./daily-profit-facts";
 import { readAccountImportCosts } from "./account-import-cost-ledger";
+import { readUpstreamRechargeCosts } from "./upstream-recharge-ledger";
 import {
   collectAccountImportEconomics,
   type AccountImportEconomicsInput,
@@ -141,11 +142,24 @@ export class OperationsService {
     const accountImports = readAccountImportCosts(this.config.operations.accountImportLedgerPath)
       .filter((entry) => entry.period === period)
       .map((entry) => ({ ...entry, readOnly: true }));
+    const upstreamRecharges = readUpstreamRechargeCosts(this.config.operations.upstreamRechargeLedgerPath)
+      .filter((entry) => entry.period === period)
+      .map((entry) => ({
+        source: "upstream-recharge",
+        occurred_on: entry.occurredOn,
+        direction: "expense",
+        category: "upstream-recharge",
+        amount_cny: entry.amountCny,
+        description: entry.description,
+        accountId: entry.accountId,
+        readOnly: true,
+      }));
     const alipay = await this.alipay(period);
     const staticRows = [
       { source: "alipay", period, direction: "income", kind: "alipay-completed", amountCny: alipay.revenueCny, description: `${alipay.completedOrders} 笔已完成订单（已排除管理员测试）`, readOnly: true },
       ...yaml.revenues.map((row) => ({ ...row, direction: "income" })),
       ...yaml.costs.map((row) => ({ ...row, direction: "expense" })),
+      ...upstreamRecharges,
     ];
     const offset = (page - 1) * pageSize;
     const staticPage = staticRows.slice(offset, offset + pageSize);
@@ -158,7 +172,8 @@ export class OperationsService {
       + money(manualSummary.income_cny);
     const expenseCny = yaml.costs.filter((row) => row.period === period).reduce((sum, row) => sum + money(row.amountCny), 0)
       + money(manualSummary.expense_cny)
-      + accountImports.reduce((sum, row) => sum + money(row.amountCny), 0);
+      + accountImports.reduce((sum, row) => sum + money(row.amountCny), 0)
+      + upstreamRecharges.reduce((sum, row) => sum + money(row.amount_cny), 0);
     const totalIncomeCny = incomeCny + alipay.revenueCny;
     return {
       ok: true, period, accountImports: { count: accountImports.length }, alipay,

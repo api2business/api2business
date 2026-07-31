@@ -9,6 +9,7 @@ import { OperationsService } from "./operations-service";
 import { AccountImportService } from "./account-import-service";
 import { AccountLifecycleService } from "./account-lifecycle-service";
 import { SingleConnectionSub2ApiReadExecutor } from "./sub2api-read-executor";
+import { UpstreamManagementService } from "./upstream-management";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -40,10 +41,11 @@ const operations = new OperationsService(
 await operations.initialize();
 const imports = new AccountImportService(config, reads);
 const lifecycle = new AccountLifecycleService(config, reads);
+const upstreams = new UpstreamManagementService(config, reads);
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle, upstreams),
 });
 
 console.log(JSON.stringify({

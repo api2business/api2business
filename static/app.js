@@ -68,6 +68,7 @@ function shell() {
     ['lottery', '/lottery', '额度抽奖'],
     ['operations', '/operations', '经营管理'],
     ['account-import', '/account-import', '账号导入'],
+    ['upstreams', '/upstreams', '上游管理'],
   ]
   mount.innerHTML = `<header class="topbar">
     <a class="brand" href="/scores"><span class="brand-mark">AS</span><span><b>ApiState</b><small>Sub2API Operations</small></span></a>
@@ -558,7 +559,7 @@ function renderOperations(ledger, audits) {
   $('#ops-profit').textContent = cny(ledger.summary.grossProfitCny)
   const rows = ledger.records ?? []
   $('#cash-body').innerHTML = rows.length ? rows.map((row) => `<tr>
-    <td>${row.source === 'yaml' ? 'YAML（只读）' : row.source === 'alipay' ? '支付宝（只读）' : '手工数据库'}</td>
+    <td>${row.source === 'yaml' ? 'YAML（只读）' : row.source === 'alipay' ? '支付宝（只读）' : row.source === 'upstream-recharge' ? '上游充值（本地账本）' : '手工数据库'}</td>
     <td>${escapeHtml(row.occurred_on ?? row.period ?? '—')}</td>
     <td>${row.direction === 'income' ? '收入' : '支出'}</td>
     <td>${escapeHtml(row.category ?? row.kind ?? '—')}</td>
@@ -989,6 +990,197 @@ async function accountImportPage() {
   })
 }
 
+let upstreamPage = 1
+let upstreamSearch = ''
+let activeUpstream = null
+
+function upstreamStatus(row) {
+  if (row.status === 'active' && row.schedulable) return { label: '可调度', className: 'is-available' }
+  if (row.status === 'active') return { label: '已停调度', className: 'is-limited' }
+  return { label: row.status || '异常', className: 'is-error' }
+}
+
+function upstreamGroupMarkup(row) {
+  const ids = Array.isArray(row.groupIds) ? row.groupIds : []
+  const names = Array.isArray(row.groupNames) ? row.groupNames : []
+  if (!ids.length && !names.length) return '<span>未分组</span>'
+  return `<span>${escapeHtml(names.join('、') || '分组')} · ${escapeHtml(ids.map((id) => `#${id}`).join('、'))}</span>`
+}
+
+function upstreamOperationId(prefix) {
+  return `${prefix}-${typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
+}
+
+async function upstreamsPage() {
+  const createDialog = $('#upstream-create-dialog')
+  const editDialog = $('#upstream-edit-dialog')
+  const setState = (message, state = '') => {
+    $('#upstream-state').textContent = message
+    $('#upstream-state').dataset.state = state
+  }
+  let lastUpstreamRows = []
+  let createOperationId = null
+  let editRechargeOperationId = null
+  const render = (data) => {
+    const rows = Array.isArray(data.accounts) ? data.accounts : []
+    lastUpstreamRows = rows
+    $('#upstream-total').textContent = number(data.total)
+    $('#upstream-available').textContent = `${number(data.availableTotal)} / ${number(data.total)}`
+    $('#upstream-recharged').textContent = cny(data.rechargeTotalCny)
+    $('#upstream-page-metric').textContent = `${number(data.page)} / ${number(data.totalPages)}`
+    $('#upstream-query-state').textContent = data.search ? `筛选：${data.search} · 当前页 ${number(rows.length)} 条` : `当前页 ${number(rows.length)} 条 · 点击行编辑`
+    $('#upstream-body').innerHTML = rows.length ? rows.map((row) => {
+      const status = upstreamStatus(row)
+      return `<tr class="upstream-row" data-id="${escapeHtml(row.id)}" tabindex="0" role="button" aria-label="编辑 ${escapeHtml(row.name)}">
+        <td class="upstream-id-cell"><b>${escapeHtml(row.name)}</b><small>#${escapeHtml(row.id)}</small></td>
+        <td class="upstream-url" title="${escapeHtml(row.baseUrl)}">${escapeHtml(row.baseUrl)}</td>
+        <td class="upstream-muted">${escapeHtml(row.keyPrefix ?? '—')}</td>
+        <td>${escapeHtml(row.suffix ?? '—')}</td>
+        <td class="upstream-rate">${row.rateCnyPerApiUsd == null ? '—' : `¥${number(row.rateCnyPerApiUsd, 6)}`}</td>
+        <td><span class="upstream-status ${status.className}">${status.label}</span><small class="upstream-muted">${escapeHtml(row.status || '—')}</small></td>
+        <td><div class="upstream-groups">${upstreamGroupMarkup(row)}</div><small class="upstream-muted">Proxy #${escapeHtml(row.proxyId ?? '—')}</small></td>
+        <td>${cny(row.rechargeCny)}<small class="upstream-muted">${number(row.rechargeCount)} 笔</small></td>
+        <td class="upstream-muted">${time(row.updatedAt ?? row.createdAt)}</td>
+      </tr>`
+    }).join('') : '<tr><td colspan="9" class="empty">没有符合条件的 API-key 上游</td></tr>'
+    renderPager('upstream', data)
+  }
+  const load = async () => {
+    setState('读取中', 'refreshing')
+    try {
+      const query = new URLSearchParams({ page: String(upstreamPage) })
+      if (upstreamSearch) query.set('search', upstreamSearch)
+      const data = await requestJson(`/api/upstreams?${query}`)
+      upstreamPage = Number(data.page ?? upstreamPage)
+      render(data)
+      setState('已更新', 'ready')
+    } catch (error) {
+      setState('读取失败', 'unavailable')
+      $('#upstream-query-state').textContent = error instanceof Error ? error.message : String(error)
+      $('#upstream-body').innerHTML = `<tr><td colspan="9" class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</td></tr>`
+    }
+  }
+  const openEdit = (row) => {
+    activeUpstream = row
+    editRechargeOperationId = upstreamOperationId(`upstream-recharge-${row.id}`)
+    $('#upstream-edit-id').textContent = `#${row.id}`
+    $('#upstream-edit-summary').textContent = `${row.name} · ${row.status === 'active' && row.schedulable ? '当前可调度' : '当前不可调度'} · 已充值 ${cny(row.rechargeCny)}`
+    $('#upstream-edit-base-url').textContent = row.baseUrl
+    $('#upstream-edit-key-prefix').textContent = `Key ${row.keyPrefix ?? '—'}`
+    $('#upstream-edit-suffix').value = row.suffix ?? ''
+    $('#upstream-edit-rate').value = row.rateCnyPerApiUsd ?? ''
+    $('#upstream-edit-recharge').value = ''
+    $('#upstream-edit-state').textContent = ''
+    $('#upstream-edit-state').removeAttribute('data-state')
+    editDialog.showModal()
+  }
+  $('#upstream-search-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    upstreamSearch = $('#upstream-search').value.trim()
+    upstreamPage = 1
+    await load()
+  })
+  let searchTimer = null
+  $('#upstream-search').addEventListener('input', () => {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => {
+      upstreamSearch = $('#upstream-search').value.trim()
+      upstreamPage = 1
+      void load()
+    }, 280)
+  })
+  $('#upstream-prev').addEventListener('click', async () => { upstreamPage -= 1; await load() })
+  $('#upstream-next').addEventListener('click', async () => { upstreamPage += 1; await load() })
+  $('#upstream-body').addEventListener('click', (event) => {
+    const row = event.target.closest('.upstream-row')
+    if (!row) return
+    const id = Number(row.dataset.id)
+    const dataRow = lastUpstreamRows.find((item) => Number(item.id) === id)
+    if (dataRow) openEdit(dataRow)
+  })
+  $('#upstream-body').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    event.target.click()
+  })
+  $('#upstream-create').addEventListener('click', () => {
+    $('#upstream-create-state').textContent = '创建时将使用默认优先级 1、容量 16、混池 #2、自用 #3、Proxy #3 和切号模板。'
+    $('#upstream-create-state').removeAttribute('data-state')
+    createOperationId = upstreamOperationId('upstream-create')
+    createDialog.showModal()
+  })
+  createDialog.addEventListener('close', () => {
+    $('#upstream-create-api-key').value = ''
+    createOperationId = null
+  })
+  $('#upstream-create-form').addEventListener('submit', async (event) => {
+    if (event.submitter?.value === 'cancel') return
+    event.preventDefault()
+    const button = $('#upstream-create-submit')
+    button.disabled = true
+    $('#upstream-create-state').textContent = '正在调用 runtime 创建并绑定分组，API key 不会回显…'
+    try {
+      const operation = createOperationId ?? (createOperationId = upstreamOperationId('upstream-create'))
+      const rechargeValue = $('#upstream-create-recharge').value.trim()
+      const result = await requestJson('/api/upstreams', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': operation },
+        body: JSON.stringify({
+          baseUrl: $('#upstream-create-base-url').value,
+          apiKey: $('#upstream-create-api-key').value,
+          suffix: $('#upstream-create-suffix').value,
+          rateCnyPerApiUsd: Number($('#upstream-create-rate').value),
+          rechargeCny: rechargeValue ? Number(rechargeValue) : undefined,
+          operationId: operation,
+        }),
+      }, 300000)
+      $('#upstream-create-state').textContent = `创建成功：账号 #${result.account?.id ?? '—'}${result.accounting?.mutation ? `，已记账 ${cny(result.accounting.amountCny)}` : ''}`
+      $('#upstream-create-state').dataset.state = 'success'
+      $('#upstream-create-api-key').value = ''
+      createOperationId = null
+      await load()
+      setTimeout(() => { if (createDialog.open) createDialog.close() }, 350)
+    } catch (error) {
+      $('#upstream-create-state').textContent = error instanceof Error ? error.message : String(error)
+      $('#upstream-create-state').dataset.state = 'error'
+    } finally { button.disabled = false }
+  })
+  $('#upstream-edit-form').addEventListener('submit', async (event) => {
+    if (event.submitter?.value === 'cancel') return
+    event.preventDefault()
+    if (!activeUpstream) return
+    const button = $('#upstream-edit-submit')
+    button.disabled = true
+    $('#upstream-edit-state').textContent = '正在保存调整…'
+    $('#upstream-edit-state').removeAttribute('data-state')
+    try {
+      const id = Number(activeUpstream.id)
+      await requestJson(`/api/upstreams/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ suffix: $('#upstream-edit-suffix').value, rateCnyPerApiUsd: Number($('#upstream-edit-rate').value) }),
+      })
+      const rechargeValue = $('#upstream-edit-recharge').value.trim()
+      let recharge = null
+      if (rechargeValue) {
+        recharge = await requestJson(`/api/upstreams/${id}/recharge`, {
+          method: 'POST',
+          headers: { 'Idempotency-Key': editRechargeOperationId ?? upstreamOperationId(`upstream-recharge-${id}`) },
+          body: JSON.stringify({ amountCny: Number(rechargeValue) }),
+        }, 300000)
+      }
+      $('#upstream-edit-state').textContent = recharge?.recovered ? '调整与充值完成，已恢复调度。' : '调整完成。'
+      $('#upstream-edit-state').dataset.state = 'success'
+      editRechargeOperationId = null
+      await load()
+      setTimeout(() => { if (editDialog.open) editDialog.close() }, 350)
+    } catch (error) {
+      $('#upstream-edit-state').textContent = error instanceof Error ? error.message : String(error)
+      $('#upstream-edit-state').dataset.state = 'error'
+    } finally { button.disabled = false }
+  })
+  await load()
+}
+
 async function boot() {
   if (page === 'login') return await loginPage()
   shell()
@@ -997,6 +1189,7 @@ async function boot() {
   if (page === 'lottery') return await lotteryPage()
   if (page === 'operations') return await operationsPage()
   if (page === 'account-import') return await accountImportPage()
+  if (page === 'upstreams') return await upstreamsPage()
 }
 
 boot().catch((error) => {

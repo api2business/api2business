@@ -7,6 +7,16 @@ export type IdentityField = "username" | "email" | "emailLocalPart";
 export type OAuthPlanType = "k12" | "plus" | "free" | "team";
 export type OAuthIdealApiUsdPerAccount = Record<OAuthPlanType, number>;
 
+export interface UpstreamManagementConfig {
+  pageSize: number;
+  defaultTemplate: string;
+  primaryGroupId: number;
+  groupIds: number[];
+  priority: number;
+  capacity: number;
+  proxyId: number;
+}
+
 export interface SecretRef {
   sourceRef: string;
   sourceKey: string;
@@ -120,6 +130,7 @@ export interface AppConfig {
     databaseUrlEnv: string;
     ledgerYamlPath: string;
     accountImportLedgerPath: string;
+    upstreamRechargeLedgerPath: string;
     accountLifecycleLedgerPath: string;
     accountImportArchiveDirectory: string;
     accountLifecycle: {
@@ -137,6 +148,7 @@ export interface AppConfig {
       freeCostThresholdCny: number;
       plusCostThresholdCny: number;
     };
+    upstreamManagement: UpstreamManagementConfig;
     oauthEconomics: {
       excludedAccountIds: number[];
       idealApiUsdPerAccount: OAuthIdealApiUsdPerAccount;
@@ -436,6 +448,12 @@ export function loadConfig(path: string): AppConfig {
   const operations = object(raw.operations, "operations");
   const accountLifecycle = object(operations.accountLifecycle, "operations.accountLifecycle");
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
+  const upstreamManagement = object(operations.upstreamManagement, "operations.upstreamManagement");
+  const upstreamGroupIds = integers(upstreamManagement, "groupIds", "operations.upstreamManagement", 1, Number.MAX_SAFE_INTEGER);
+  const upstreamPrimaryGroupId = integerValue(upstreamManagement, "primaryGroupId", "operations.upstreamManagement", 1);
+  if (!upstreamGroupIds.includes(upstreamPrimaryGroupId)) {
+    throw new Error("operations.upstreamManagement.primaryGroupId must be included in groupIds");
+  }
   const oauthEconomics = object(operations.oauthEconomics, "operations.oauthEconomics");
   const idealApiUsdPerAccount = object(
     oauthEconomics.idealApiUsdPerAccount,
@@ -643,6 +661,7 @@ export function loadConfig(path: string): AppConfig {
       databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
       ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),
       accountImportLedgerPath: stringValue(operations, "accountImportLedgerPath", "operations"),
+      upstreamRechargeLedgerPath: stringValue(operations, "upstreamRechargeLedgerPath", "operations"),
       accountLifecycleLedgerPath: stringValue(operations, "accountLifecycleLedgerPath", "operations"),
       accountImportArchiveDirectory: stringValue(operations, "accountImportArchiveDirectory", "operations"),
       accountLifecycle: {
@@ -659,6 +678,15 @@ export function loadConfig(path: string): AppConfig {
         perAccountProxy: booleanValue(accountImportDefaults, "perAccountProxy", "operations.accountImportDefaults"),
         freeCostThresholdCny: numberValue(accountImportDefaults, "freeCostThresholdCny", "operations.accountImportDefaults", 0),
         plusCostThresholdCny: numberValue(accountImportDefaults, "plusCostThresholdCny", "operations.accountImportDefaults", 0),
+      },
+      upstreamManagement: {
+        pageSize: integerValue(upstreamManagement, "pageSize", "operations.upstreamManagement", 1, 100),
+        defaultTemplate: stringValue(upstreamManagement, "defaultTemplate", "operations.upstreamManagement"),
+        primaryGroupId: upstreamPrimaryGroupId,
+        groupIds: upstreamGroupIds,
+        priority: integerValue(upstreamManagement, "priority", "operations.upstreamManagement", 1, 1000),
+        capacity: integerValue(upstreamManagement, "capacity", "operations.upstreamManagement", 1, 100000),
+        proxyId: integerValue(upstreamManagement, "proxyId", "operations.upstreamManagement", 1),
       },
       oauthEconomics: {
         excludedAccountIds: integers(oauthEconomics, "excludedAccountIds", "operations.oauthEconomics", 1, Number.MAX_SAFE_INTEGER),
