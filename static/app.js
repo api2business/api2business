@@ -692,6 +692,7 @@ async function accountImportPage() {
   $('#import-priority').value = defaults.priority
   $('#import-capacity').value = defaults.capacity
   $('#import-proxy').value = defaults.sourceProxyId
+  $('#import-per-account-proxy').checked = defaults.perAccountProxy === true
   const planType = $('#import-plan-type')
   planType.innerHTML = options.planTypes.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join('')
   planType.value = defaults.planType
@@ -741,9 +742,14 @@ async function accountImportPage() {
     $('#import-job-id').textContent = `JOB ${job.id}`
     const labels = options.groups.filter((group) => job.settings.groupIds.includes(group.id)).map((group) => `${group.name} #${group.id}`).join('、')
     const result = job.result?.result
+    const runtimeSettings = job.result?.settings ?? {}
+    const perAccountProxy = runtimeSettings.assignmentMode === 'per-account-random' || job.settings.perAccountProxy === true
     const assignments = result?.proxyAssignments ?? []
     const usedProxies = new Set(assignments.filter((item) => item?.bound).map((item) => item.proxyId)).size
-    const proxyOutcome = assignments.length ? ` · 已分配 ${assignments.filter((item) => item?.bound).length} 个账号 / 使用 ${usedProxies} 个 Proxy` : ''
+    const sharedProxyId = runtimeSettings.sharedProxyId ?? result?.sharedProxyId
+    const proxyOutcome = perAccountProxy
+      ? (assignments.length ? ` · 已分配 ${assignments.filter((item) => item?.bound).length} 个账号 / 使用 ${usedProxies} 个 Proxy` : '')
+      : (sharedProxyId ? ` · 整批共用 Proxy #${sharedProxyId}` : '')
     const outcome = result ? ` · 新建 ${result.createdIds?.length ?? 0} · 更新 ${result.updatedIds?.length ?? 0} · 跳过 ${result.skippedIds?.length ?? result.skipped ?? 0} · 失败 ${result.failed ?? 0}${proxyOutcome}` : ''
     const accounting = job.accounting ? ` · 已记账 ${job.accounting.recordedCount} 个 / ${cny(job.accounting.totalCostCny)}` : ''
     const source = job.source?.format === 'zip' ? `ZIP ${job.source.jsonFileCount} 个 JSON · 包内去重 ${job.source.duplicateAccountCount}` : 'JSON'
@@ -760,6 +766,7 @@ async function accountImportPage() {
         content: importInputFormat === 'zip' ? importContent : $('#import-json').value, inputFormat: importInputFormat,
         priority: Number($('#import-priority').value), capacity: Number($('#import-capacity').value),
         groupIds, sourceProxyId: Number($('#import-proxy').value),
+        perAccountProxy: $('#import-per-account-proxy').checked,
         unitCostCny: Number($('#import-unit-cost').value), planType: planType.value, confirm: true,
       }) }, 30000)
       let job = response.job; renderJob(job)

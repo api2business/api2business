@@ -16,6 +16,7 @@ export interface AccountImportRequest {
   capacity: number;
   groupIds: number[];
   sourceProxyId: number;
+  perAccountProxy?: boolean;
   unitCostCny: number;
   planType: "k12" | "plus";
   confirm: boolean;
@@ -38,6 +39,7 @@ function validate(input: AccountImportRequest): void {
   if (!Number.isInteger(input.capacity) || input.capacity < 1 || input.capacity > 100000) throw new Error("容量必须为正整数");
   if (!Array.isArray(input.groupIds) || input.groupIds.length === 0 || input.groupIds.some((id) => !Number.isInteger(id) || id < 1)) throw new Error("至少选择一个有效分组");
   if (!Number.isInteger(input.sourceProxyId) || input.sourceProxyId < 3) throw new Error("代理池基准 ID 必须是不小于 3 的正整数");
+  if (input.perAccountProxy !== undefined && typeof input.perAccountProxy !== "boolean") throw new Error("逐账号代理选项必须是布尔值");
   if (!Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0
     || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
     throw new Error("账号单价必须为正数人民币，最多两位小数");
@@ -113,13 +115,17 @@ export class AccountImportService {
   }
 
   submit(input: AccountImportRequest): ImportJob {
-    validate(input);
-    const parsed = normalizeAccountImportInput(input.content, input.inputFormat);
+    const normalizedInput: AccountImportRequest = {
+      ...input,
+      perAccountProxy: input.perAccountProxy ?? this.config.operations.accountImportDefaults.perAccountProxy,
+    };
+    validate(normalizedInput);
+    const parsed = normalizeAccountImportInput(normalizedInput.content, normalizedInput.inputFormat);
     const id = randomUUID();
     const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, parsed.content);
     const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null,
       accountCount: parsed.accountCount, fingerprint: parsed.fingerprint, source: parsed.source,
-      settings: { priority: input.priority, capacity: input.capacity, groupIds: [...new Set(input.groupIds)], sourceProxyId: input.sourceProxyId, unitCostCny: input.unitCostCny, planType: input.planType, confirm: input.confirm },
+      settings: { priority: normalizedInput.priority, capacity: normalizedInput.capacity, groupIds: [...new Set(normalizedInput.groupIds)], sourceProxyId: normalizedInput.sourceProxyId, perAccountProxy: normalizedInput.perAccountProxy, unitCostCny: normalizedInput.unitCostCny, planType: normalizedInput.planType, confirm: normalizedInput.confirm },
       inputArchive: { stored: true, fileName: archiveFileName },
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);
@@ -144,7 +150,9 @@ export class AccountImportService {
       for (const skipped of plan.skipped) {
         this.log(job, "account", "skipped", `stage=account state=skipped index=${skipped.index}/${job.accountCount} account-id=${skipped.accountId}`);
       }
-      this.log(job, "proxy", "planned", `代理池候选 ${plan.proxyCandidateIds.length} 个，将为每个新建账号独立随机分配`);
+      this.log(job, "proxy", "planned", job.settings.perAccountProxy === true
+        ? `代理池候选 ${plan.proxyCandidateIds.length} 个，将为每个新建账号独立随机分配`
+        : `代理池候选 ${plan.proxyCandidateIds.length} 个，整批共用 Proxy #${plan.initialProxyId}（原生批量导入）`);
       if (plan.sourceIndexes.length === 0) {
         job.result = completedWithoutWrites(job, plan);
         job.state = "succeeded";
@@ -157,6 +165,7 @@ export class AccountImportService {
         "--capacity", String(job.settings.capacity), "--groups", job.settings.groupIds.join(","),
         "--source-proxy-id", String(job.settings.sourceProxyId), "--proxy-id", String(plan.initialProxyId),
         "--proxy-pool-ids", plan.proxyCandidateIds.join(","), "--existing-account-policy", "create", "--json"];
+      if (job.settings.perAccountProxy === true) args.push("--per-account-proxy");
       if (job.settings.confirm) args.push("--confirm");
       const child = Bun.spawn([this.config.monitor.cli.executable, ...args], { cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env });
       const stderrTask = this.captureProgress(job, child.stderr, plan);
@@ -175,7 +184,10 @@ export class AccountImportService {
         ? result.skippedIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) > 0) : [];
       const verifiedIds = [...new Set([...createdIds, ...updatedIds, ...skippedIds])];
       if (job.settings.confirm && verifiedIds.length > 0) {
-        output.verification = await verifyImportedAccounts(verifiedIds, job.settings, plan.proxyCandidateIds, this.reads);
+        output.verification = await verifyImportedAccounts(verifiedIds, job.settings, plan.proxyCandidateIds, this.reads, {
+          sharedProxyId: job.settings.perAccountProxy === true ? undefined : plan.initialProxyId,
+          strictProxyAccountIds: [...createdIds, ...updatedIds],
+        });
         const verification = output.verification as Record<string, unknown>;
         this.log(job, "verification", verification.ok === true ? "done" : "failed",
           `账号终态校验 ${verification.aligned}/${verification.selected} 对齐`);
@@ -243,7 +255,12 @@ function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan
     mode: "confirmed",
     mutation: false,
     file: { fingerprint: job.fingerprint, accountCount: job.accountCount, valuesPrinted: false },
-    settings: { ...job.settings, assignmentMode: "per-account-random", proxyCandidateCount: plan.proxyCandidateIds.length },
+    settings: {
+      ...job.settings,
+      assignmentMode: job.settings.perAccountProxy === true ? "per-account-random" : "batch-shared",
+      sharedProxyId: job.settings.perAccountProxy === true ? null : plan.initialProxyId,
+      proxyCandidateCount: plan.proxyCandidateIds.length,
+    },
     result: { createdIds: [], updatedIds: [], skippedIds: plan.skipped.map((item) => item.accountId), skipped: plan.skipped.length, failed: 0, failures: [], isolated: 0 },
     valuesPrinted: false,
   };

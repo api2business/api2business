@@ -25,6 +25,7 @@ export interface AccountImportPreflightSettings {
   capacity: number;
   groupIds: number[];
   sourceProxyId: number;
+  perAccountProxy?: boolean;
   planType: "k12" | "plus";
 }
 
@@ -101,6 +102,7 @@ export async function accountImportPreflight(
     capacity: settings.capacity,
     groupIds: [...new Set(settings.groupIds)].sort((a, b) => a - b),
     sourceProxyId: settings.sourceProxyId,
+    perAccountProxy: settings.perAccountProxy === true,
     planType: settings.planType,
   };
   const key = createHash("sha256").update(JSON.stringify({ userIds, accessHashes, settings: normalizedSettings })).digest("hex");
@@ -189,6 +191,7 @@ export async function accountImportPreflight(
     groupIds: normalizedSettings.groupIds,
     priority: settings.priority,
     capacity: settings.capacity,
+    perAccountProxy: settings.perAccountProxy === true,
   })).digest("hex").slice(0, 24);
   return {
     content: filteredContent,

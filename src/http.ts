@@ -119,6 +119,7 @@ export function createHandler(
       if (request.method === "POST" && url.pathname === "/api/account-import/jobs") {
         const input = await body(request) as unknown as AccountImportRequest;
         if (typeof input.content !== "string" || typeof input.confirm !== "boolean"
+          || (input.perAccountProxy !== undefined && typeof input.perAccountProxy !== "boolean")
           || (input.inputFormat !== undefined && input.inputFormat !== "json" && input.inputFormat !== "zip")
           || (input.planType !== "k12" && input.planType !== "plus")
           || !Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0

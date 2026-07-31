@@ -70,9 +70,11 @@ export async function verifyImportedAccounts(
   settings: { priority: number; capacity: number; groupIds: number[] },
   proxyCandidateIds: number[],
   reads: Sub2ApiReadClient,
+  proxyOptions: { sharedProxyId?: number; strictProxyAccountIds?: number[] } = {},
 ): Promise<Record<string, unknown>> {
   const inspected = await inspectAccounts(accountIds, reads);
   const rows = Array.isArray(inspected.accounts) ? inspected.accounts as Row[] : [];
+  const strictProxyAccountIds = new Set(proxyOptions.strictProxyAccountIds ?? []);
   const accounts = rows.map((row) => {
     const reasons: string[] = [];
     if (Number(row.priority) !== settings.priority) reasons.push("priority-mismatch");
@@ -80,6 +82,8 @@ export async function verifyImportedAccounts(
     const groups = integerArray(row.groupIds);
     if (settings.groupIds.some((id) => !groups.includes(id))) reasons.push("group-mismatch");
     if (!proxyCandidateIds.includes(Number(row.proxyId))) reasons.push(row.proxyId === null ? "proxy-unbound" : "proxy-outside-pool");
+    else if (proxyOptions.sharedProxyId !== undefined && strictProxyAccountIds.has(Number(row.id))
+      && Number(row.proxyId) !== proxyOptions.sharedProxyId) reasons.push("shared-proxy-mismatch");
     return { ...row, aligned: reasons.length === 0, reasons };
   });
   const missingIds = integerArray(inspected.missingIds);

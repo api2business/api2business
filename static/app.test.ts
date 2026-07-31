@@ -4,9 +4,12 @@ test("account import exposes only K12 and Plus with the configured price thresho
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
   expect(html).toContain('id="import-plan-type"');
+  expect(html).toContain('id="import-per-account-proxy"');
   expect(app).toContain("cost > defaults.plusCostThresholdCny ? 'plus' : 'k12'");
   expect(app).toContain("planTypeManuallySelected");
   expect(app).toContain("planType: planType.value");
+  expect(app).toContain("perAccountProxy: $('#import-per-account-proxy').checked");
+  expect(app).toContain("defaults.perAccountProxy === true");
   expect(app).not.toContain("value=\"free\"");
   expect(app).not.toContain("history.replaceState(null, '', `/account-import?job=");
   expect(app).not.toContain("new URLSearchParams(location.search).get('job')");
