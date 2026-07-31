@@ -112,10 +112,18 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(app).toContain("idealCnyPerApiUsd");
   expect(app).toContain("remainingIdealApiAmountUsd");
   expect(html).toContain("oauth-cost-ideal-remaining");
+  expect(html).toContain('id="oauth-cost-refresh-interval"');
+  expect(html).toContain('<option value="30" selected>30 秒</option>');
+  expect(html).toContain('<option value="0">关闭</option>');
+  expect(html).toContain('class="query-spinner"');
   expect(app).toContain("oauth-output-progress");
   expect(app).toContain("oauth-cost-output-progress");
   expect(app).toContain("oauth-cost-output-progress-label");
   expect(app).toContain("ratio > 1 ? 'is-over' : ''");
+  expect(app).toContain("scheduleOauthCostRefresh");
+  expect(app).toContain("readOauthRefreshInterval");
+  expect(app).toContain("button.classList.add('is-loading')");
+  expect(app).toContain("oauth-cost-output-progress-label");
   expect(app).toContain("renderRow(total");
 });
 
@@ -124,10 +132,12 @@ test("OAuth cost table separates live status buckets and does not infer archived
   const html = await Bun.file(new URL("./operations.html", import.meta.url)).text();
 
   expect(html).toContain("<th>状态分布</th>");
-  expect(app).toContain("statusDistributionCell(row)");
+  expect(app).toContain("statusDistributionCell(row,");
   expect(app).toContain("oauth-status-progress");
   expect(app).toContain("oauth-status-segment-rate-limited");
   expect(app).toContain("oauth-status-segment-divider");
+  expect(app).toContain("isTotal ? health : row");
+  expect(app).toContain("averageUnitCostCny == null && isTotal");
   expect(app).toContain("aria-label=\"账号状态分布\"");
   expect(app).toContain("row.scope === 'archived'");
   expect(app).toContain("oauth-status-unavailable");

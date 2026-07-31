@@ -316,8 +316,12 @@ let cashPage = 1
 let auditPage = 1
 let oauthPage = 1
 let oauthArchivedPage = 1
+let oauthRefreshTimer = null
+let oauthCostLoading = false
 let procurementPage = 1
 let procurementBudget = null
+const oauthRefreshIntervalStorageKey = 'apistate.operations.oauth-refresh-interval.v1'
+const oauthRefreshIntervals = new Set([0, 30, 60, 120, 300])
 
 function renderPager(prefix, pagination) {
   const page = Number(pagination?.page ?? 1)
@@ -647,12 +651,12 @@ function renderOauthCost(data) {
     const parsed = Number(value)
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
   }
-  const statusDistributionCell = (row) => {
+  const statusDistributionCell = (row, statusSource = row) => {
     if (row.scope === 'archived') return '<td class="oauth-status-distribution"><span class="oauth-status-unavailable">—</span></td>'
     const counts = {
-      normal: statusCount(row.normalCount),
-      rateLimited: statusCount(row.rateLimitedCount),
-      error: statusCount(row.errorCount),
+      normal: statusCount(statusSource.normalCount),
+      rateLimited: statusCount(statusSource.rateLimitedCount),
+      error: statusCount(statusSource.errorCount),
     }
     const total = counts.normal + counts.rateLimited + counts.error
     if (total === 0) return '<td class="oauth-status-distribution"><span class="oauth-status-unavailable">—</span></td>'
@@ -681,15 +685,20 @@ function renderOauthCost(data) {
       <small class="cost-breakdown">${idealLabel}</small>
     </td>`
   }
-  const renderRow = (row, scopeLabel, isTotal = false) => `<tr class="${isTotal ? 'oauth-total-row' : ''}">
+  const renderRow = (row, scopeLabel, isTotal = false) => {
+    const averageUnitCostCny = row.averageUnitCostCny == null && isTotal && Number(row.accountCount) > 0
+      ? Number(row.netAcquisitionCostCny) / Number(row.accountCount)
+      : row.averageUnitCostCny
+    return `<tr class="${isTotal ? 'oauth-total-row' : ''}">
       <td><b>${scopeLabel}</b></td><td><b>${escapeHtml(isTotal ? '合计' : (labels[row.planType] ?? row.planType))}</b></td><td>${number(row.accountCount)}</td>
-      <td>${number(row.usageAccountCount)}</td>${statusDistributionCell(row)}
+      <td>${number(row.usageAccountCount)}</td>${statusDistributionCell(row, isTotal ? health : row)}
       <td>${cny(row.netAcquisitionCostCny)}<small class="cost-breakdown">毛 ${cny(row.grossAcquisitionCostCny)} · 退款 ${cny(row.procurementRefundCny)}</small></td>
-      <td>${isTotal || row.averageUnitCostCny == null ? '—' : cny(row.averageUnitCostCny)}${isTotal ? '' : '<small class="cost-breakdown">净采购成本 / 号</small>'}</td>
+      <td>${averageUnitCostCny == null ? '—' : cny(averageUnitCostCny)}${isTotal ? '' : '<small class="cost-breakdown">净采购成本 / 号</small>'}</td>
       ${outputCell({ ...row, planType: isTotal ? 'total' : row.planType })}
       <td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td><td>${row.idealCnyPerApiUsd == null ? '—' : `¥${number(row.idealCnyPerApiUsd, 5)}`}</td>
       <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
     </tr>`
+  }
   const renderRows = (rows, target, emptyText, scopeLabel, total) => {
     const rowMarkup = rows.map((row) => renderRow(row, scopeLabel)).join('')
     const totalMarkup = total && number(total.accountCount) > 0 ? renderRow(total, `${scopeLabel}合计`, true) : ''
@@ -714,10 +723,46 @@ function usdText(value, digits = 2) {
   return Number.isFinite(numeric) ? `$${numeric.toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits })}` : '—'
 }
 
-async function loadOauthCost() {
+function clearOauthRefreshTimer() {
+  if (oauthRefreshTimer !== null) clearTimeout(oauthRefreshTimer)
+  oauthRefreshTimer = null
+}
+
+function readOauthRefreshInterval() {
+  try {
+    const value = Number(localStorage.getItem(oauthRefreshIntervalStorageKey))
+    return oauthRefreshIntervals.has(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+function writeOauthRefreshInterval(value) {
+  try {
+    localStorage.setItem(oauthRefreshIntervalStorageKey, String(value))
+  } catch {
+    // 隐私模式可能禁用存储，当前页面仍按选择继续刷新。
+  }
+}
+
+function scheduleOauthCostRefresh() {
+  clearOauthRefreshTimer()
+  const interval = Number($('#oauth-cost-refresh-interval')?.value)
+  if (!oauthRefreshIntervals.has(interval) || interval <= 0) return
+  oauthRefreshTimer = setTimeout(async () => {
+    await loadOauthCost({ automatic: true }).catch(() => null)
+    scheduleOauthCostRefresh()
+  }, interval * 1000)
+}
+
+async function loadOauthCost({ automatic = false } = {}) {
+  if (oauthCostLoading) return
+  oauthCostLoading = true
   const button = $('#oauth-cost-refresh')
   button.disabled = true
-  $('#oauth-cost-state').textContent = '正在通过单连接队列核算…'
+  button.classList.add('is-loading')
+  button.setAttribute('aria-busy', 'true')
+  $('#oauth-cost-state').textContent = automatic ? '自动刷新中，正在通过单连接队列核算…' : '正在通过单连接队列核算…'
   try {
     const data = await requestJson(`/api/operations/oauth-cost?page=${oauthPage}&archivedPage=${oauthArchivedPage}`, {}, 60000)
     renderOauthCost(data)
@@ -726,11 +771,22 @@ async function loadOauthCost() {
     throw error
   } finally {
     button.disabled = false
+    button.classList.remove('is-loading')
+    button.removeAttribute('aria-busy')
+    oauthCostLoading = false
+    if (!automatic) scheduleOauthCostRefresh()
   }
 }
 
 async function operationsPage() {
   $('#cash-date').value = operatingDay()
+  const refreshInterval = $('#oauth-cost-refresh-interval')
+  const storedRefreshInterval = readOauthRefreshInterval()
+  if (storedRefreshInterval !== null) refreshInterval.value = String(storedRefreshInterval)
+  refreshInterval.addEventListener('change', () => {
+    writeOauthRefreshInterval(refreshInterval.value)
+    scheduleOauthCostRefresh()
+  })
   $('#oauth-cost-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     oauthPage = 1
@@ -766,6 +822,7 @@ async function operationsPage() {
   $('#procurement-prev').addEventListener('click', async () => { procurementPage -= 1; await loadProcurement() })
   $('#procurement-next').addEventListener('click', async () => { procurementPage += 1; await loadProcurement() })
   await Promise.all([loadOperations({ showCached: true }), loadOauthCost()])
+  scheduleOauthCostRefresh()
 }
 
 function renderProcurement(result) {
