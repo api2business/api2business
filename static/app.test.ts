@@ -83,6 +83,7 @@ test("priority adjustment history is paginated instead of growing without bound"
 test("operations tables request fixed server-side pages of ten records", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./operations.html", import.meta.url)).text();
+  const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
   const http = await Bun.file(new URL("../src/http.ts", import.meta.url)).text();
 
   expect(http).toContain("operations.ledger(period, pageNumber(url), 10)");
@@ -121,6 +122,8 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(html).toContain('<option value="0">关闭</option>');
   expect(html).toContain('id="oauth-cost-refresh-countdown"');
   expect(html).toContain('class="oauth-cost-combined"');
+  expect(css).toContain(".oauth-cost-combined-grid .oauth-cost-ideal { padding-left: 0; border-left: 0; box-shadow: none; }");
+  expect(css).toContain("white-space: normal; overflow-wrap: anywhere;");
   expect(html).toContain('id="oauth-cost-health-chart"');
   expect(html.indexOf('class="oauth-cost-health-metric"')).toBeLessThan(html.indexOf('class="oauth-cost-output-metric"'));
   expect(html).toContain('class="query-spinner"');

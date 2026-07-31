@@ -260,7 +260,8 @@ button:disabled { cursor: wait; opacity: .48; }
   .oauth-cost-metrics > div:nth-child(2n) { border-right: 0; }
   .oauth-cost-combined { grid-column: 1 / -1; }
   .oauth-cost-combined-grid { grid-template-columns: 1fr; gap: 14px; }
-  .oauth-cost-combined-grid .oauth-cost-ideal { padding-left: 0; border-left: 0; }
+  .oauth-cost-combined-grid .oauth-cost-ideal { padding-left: 0; border-left: 0; box-shadow: none; }
+  .oauth-cost-metrics .oauth-cost-ideal .oauth-cost-remaining { white-space: normal; overflow-wrap: anywhere; }
 }
 
 @media (prefers-reduced-motion: reduce) {
