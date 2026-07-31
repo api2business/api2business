@@ -14,7 +14,7 @@
     <header class="page-head"><div><p class="eyebrow">OPERATIONS / DETERMINISTIC</p><h1>经营管理</h1></div></header>
     <section class="table-section oauth-cost-section">
       <div class="table-toolbar">
-        <div><h2>OAuth 综合成本</h2><p id="oauth-cost-state" class="section-state">等待查询</p></div>
+        <div><h2>OAuth 当前池实时成本</h2><p id="oauth-cost-state" class="section-state">等待查询当前池实时成本</p></div>
         <form id="oauth-cost-form" class="score-query-controls">
           <button id="oauth-cost-refresh" class="query-command" type="submit">刷新号池核算</button>
         </form>
@@ -24,10 +24,18 @@
         <div><span>净采购成本</span><strong id="oauth-cost-net">—</strong><small id="oauth-cost-gross">—</small></div>
         <div><span>API 美元产出</span><strong id="oauth-cost-output">—</strong><small id="oauth-cost-requests">—</small></div>
         <div class="oauth-cost-primary"><span>综合成本</span><strong id="oauth-cost-unit">—</strong><small>人民币 / API 美元</small></div>
+        <div class="oauth-cost-ideal"><span>理想成本</span><strong id="oauth-cost-ideal-unit">—</strong><small id="oauth-cost-ideal-output">已产出 API 额度 —</small><strong id="oauth-cost-ideal-remaining" class="oauth-cost-remaining">预计还能产出 —</strong></div>
         <div><span>号池状态</span><strong id="oauth-cost-health">—</strong><small id="oauth-cost-health-detail">—</small></div>
       </div>
-      <div class="table-wrap"><table class="data-table oauth-cost-table"><thead><tr><th>核算范围</th><th>账号类型</th><th>账号数</th><th>有产出</th><th>采购成本</th><th>API 美元产出</th><th>人民币 / 刀</th><th>请求</th><th>Token</th></tr></thead><tbody id="oauth-cost-body"><tr><td colspan="9" class="empty">正在读取 OAuth 成本</td></tr></tbody></table></div>
+      <div class="table-wrap"><table class="data-table oauth-cost-table"><thead><tr><th>核算范围</th><th>账号类型</th><th>账号数</th><th>有产出</th><th>状态分布</th><th>采购成本</th><th>平均单价</th><th>API 产出 / 理想产出</th><th>人民币 / 刀</th><th>理想人民币 / 刀</th><th>请求</th><th>Token</th></tr></thead><tbody id="oauth-cost-body"><tr><td colspan="12" class="empty">正在读取当前号池 OAuth 成本</td></tr></tbody></table></div>
       <div class="table-pager"><button id="oauth-prev" class="text-command" type="button">上一页</button><span id="oauth-page">1 / 1</span><button id="oauth-next" class="text-command" type="button">下一页</button></div>
+    </section>
+    <section class="table-section oauth-archived-section">
+      <div class="table-toolbar">
+        <div><h2>已归档 OAuth 成本</h2><p id="oauth-archived-state" class="section-state">等待查询已归档账号</p></div>
+      </div>
+      <div class="table-wrap"><table class="data-table oauth-cost-table"><thead><tr><th>核算范围</th><th>账号类型</th><th>账号数</th><th>有产出</th><th>状态分布</th><th>采购成本</th><th>平均单价</th><th>API 产出 / 理想产出</th><th>人民币 / 刀</th><th>理想人民币 / 刀</th><th>请求</th><th>Token</th></tr></thead><tbody id="oauth-archived-body"><tr><td colspan="12" class="empty">等待读取已归档 OAuth 成本</td></tr></tbody></table></div>
+      <div class="table-pager"><button id="oauth-archived-prev" class="text-command" type="button">上一页</button><span id="oauth-archived-page">1 / 1</span><button id="oauth-archived-next" class="text-command" type="button">下一页</button></div>
     </section>
     <section class="metric-strip operations-summary" aria-label="经营总览">
       <div><span>收入</span><strong id="ops-income">—</strong></div>

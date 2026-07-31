@@ -94,11 +94,38 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(app).toContain("/api/operations/oauth-cost?page=${oauthPage}");
   expect(app).toContain("JSON.stringify({ budgetCny: procurementBudget, page: procurementPage })");
   expect(app).not.toContain("procurementAllocations");
-  for (const prefix of ["oauth", "cash", "procurement", "audit"]) {
+  for (const prefix of ["oauth", "oauth-archived", "cash", "procurement", "audit"]) {
     expect(html).toContain(`id="${prefix}-prev"`);
     expect(html).toContain(`id="${prefix}-page"`);
     expect(html).toContain(`id="${prefix}-next"`);
   }
+  expect(html).toContain("OAuth 当前池实时成本");
+  expect(html).toContain("已归档 OAuth 成本");
+  expect(html).toContain("<th>平均单价</th>");
+  expect(html).toContain("<th>API 产出 / 理想产出</th>");
+  expect(html).not.toContain("<th>API 美元产出</th>");
+  expect(html).not.toContain("<th>理想 API 产出</th>");
+  expect(app).toContain("oauthArchivedPage");
+  expect(app).toContain("row.averageUnitCostCny");
+  expect(app).toContain("idealCnyPerApiUsd");
+  expect(app).toContain("remainingIdealApiAmountUsd");
+  expect(html).toContain("oauth-cost-ideal-remaining");
+  expect(app).toContain("oauth-output-progress");
+  expect(app).toContain("ratio > 1 ? 'is-over' : ''");
+  expect(app).toContain("renderRow(total");
+});
+
+test("OAuth cost table separates live status buckets and does not infer archived status", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./operations.html", import.meta.url)).text();
+
+  expect(html).toContain("<th>状态分布</th>");
+  expect(app).toContain("statusDistributionCell(row)");
+  expect(app).toContain("oauth-status-progress");
+  expect(app).toContain("oauth-status-segment-rate-limited");
+  expect(app).toContain("aria-label=\"账号状态分布\"");
+  expect(app).toContain("row.scope === 'archived'");
+  expect(app).toContain("oauth-status-unavailable");
 });
 
 test("score table separates Codex and Grok accounts with profile tabs", async () => {

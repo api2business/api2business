@@ -315,6 +315,7 @@ const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
 let cashPage = 1
 let auditPage = 1
 let oauthPage = 1
+let oauthArchivedPage = 1
 let procurementPage = 1
 let procurementBudget = null
 
@@ -599,24 +600,103 @@ function renderOauthCost(data) {
   $('#oauth-cost-output').innerHTML = usd(total.apiAmountUsd, 2)
   $('#oauth-cost-requests').textContent = `${number(total.requestCount)} 次请求 · ${compact(total.tokenCount)} Token`
   $('#oauth-cost-unit').textContent = total.cnyPerApiUsd == null ? '—' : `¥${number(total.cnyPerApiUsd, 5)}`
+  $('#oauth-cost-ideal-unit').textContent = total.idealCnyPerApiUsd == null ? '—' : `¥${number(total.idealCnyPerApiUsd, 5)}`
+  $('#oauth-cost-ideal-output').textContent = `已产出 API 额度 ${usdText(total.apiAmountUsd, 2)}`
+  $('#oauth-cost-ideal-remaining').textContent = total.remainingIdealApiAmountUsd == null
+    ? '预计还能产出 —（缺少理想配置）'
+    : `预计还能产出 ${usdText(total.remainingIdealApiAmountUsd, 2)}`
   $('#oauth-cost-health').textContent = `${number(health.normalCount)} 正常`
   $('#oauth-cost-health-detail').textContent = `限流 ${number(health.rateLimitedCount)} · 错误 ${number(health.errorCount)} · 未探测`
   const exclusions = data.exclusions ?? {}
   const excludedIds = Array.isArray(exclusions.accountIds) ? exclusions.accountIds : []
   const exclusionLabel = excludedIds.length ? ` · 已排除账号 #${excludedIds.join(', #')}` : ''
-  const warning = Array.isArray(data.warnings) ? data.warnings[0] : null
-  const warningLabel = warning?.missingData ? ` · 缺少${warning.missingData} ${number(warning.accountIds?.length ?? total.missingCostAccountCount)} 个` : ''
-  $('#oauth-cost-state').textContent = `当前号池全历史${exclusionLabel}${warningLabel} · ${data.complete ? '数据完整' : '有数据缺口'} · ${number(data.databaseQueries)} 次数据库查询`
-  const labels = { k12: 'K12', plus: 'Plus', free: 'Free' }
+  const currentWarningLabels = []
+  if (number(total.missingCostAccountCount) > 0) currentWarningLabels.push(`缺少采购成本 ${number(total.missingCostAccountCount)} 个`)
+  if (Array.isArray(total.missingIdealPlanTypes) && total.missingIdealPlanTypes.length > 0) {
+    currentWarningLabels.push(`缺少理想产出配置：${total.missingIdealPlanTypes.join(', ')}`)
+  }
+  const warningLabel = currentWarningLabels.length ? ` · ${currentWarningLabels.join('；')}` : ''
+  $('#oauth-cost-state').textContent = `当前号池核算 · 全历史用量${exclusionLabel}${warningLabel} · ${data.complete ? '数据完整' : '有数据缺口'} · ${number(data.databaseQueries)} 次数据库查询`
+  const labels = { k12: 'K12', plus: 'Plus', free: 'Free', team: 'Team' }
   const archived = data.archived ?? { groups: [] }
-  const groups = [...(pool.groups ?? []), ...(archived.groups ?? [])]
-  $('#oauth-cost-body').innerHTML = groups.length ? groups.map((row) => `<tr>
-    <td><b>${row.scope === 'archived' ? '已归档' : '当前号池'}</b></td><td><b>${escapeHtml(labels[row.planType] ?? row.planType)}</b></td><td>${number(row.accountCount)}</td>
-    <td>${number(row.usageAccountCount)}</td><td>${cny(row.netAcquisitionCostCny)}<small class="cost-breakdown">毛 ${cny(row.grossAcquisitionCostCny)} · 退款 ${cny(row.procurementRefundCny)}</small></td>
-    <td class="usd-cell">${usd(row.apiAmountUsd, 2)}</td><td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td>
-    <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
-  </tr>`).join('') : '<tr><td colspan="9" class="empty">当前没有 OAuth 账号或历史采购记录</td></tr>'
+  const statusCount = (value) => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+  }
+  const statusDistributionCell = (row) => {
+    if (row.scope === 'archived') return '<td class="oauth-status-distribution"><span class="oauth-status-unavailable">—</span></td>'
+    const counts = {
+      normal: statusCount(row.normalCount),
+      rateLimited: statusCount(row.rateLimitedCount),
+      error: statusCount(row.errorCount),
+    }
+    const total = counts.normal + counts.rateLimited + counts.error
+    if (total === 0) return '<td class="oauth-status-distribution"><span class="oauth-status-unavailable">—</span></td>'
+    const width = (value) => `${(value / total * 100).toFixed(2)}%`
+    return `<td class="oauth-status-distribution">
+      <div class="oauth-status-progress" role="progressbar" aria-label="账号状态分布" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${total}" aria-valuetext="正常 ${counts.normal}，限流 ${counts.rateLimited}，错误 ${counts.error}"><span class="oauth-status-segment oauth-status-segment-normal" style="width:${width(counts.normal)}"></span><span class="oauth-status-segment oauth-status-segment-rate-limited" style="width:${width(counts.rateLimited)}"></span><span class="oauth-status-segment oauth-status-segment-error" style="width:${width(counts.error)}"></span></div>
+      <div class="oauth-status-legend"><span class="oauth-status-normal">正常 ${counts.normal}</span><span class="oauth-status-rate-limited">限流 ${counts.rateLimited}</span><span class="oauth-status-error">错误 ${counts.error}</span></div>
+    </td>`
+  }
+  const outputProgress = (row) => {
+    const actual = Number(row.apiAmountUsd)
+    const ideal = Number(row.idealApiAmountUsd)
+    if (!Number.isFinite(actual) || !Number.isFinite(ideal) || ideal <= 0) {
+      return { percent: '—', width: '0', className: 'is-empty', value: null }
+    }
+    const ratio = actual / ideal
+    return {
+      percent: `${number(ratio * 100, 1)}%`,
+      width: Math.min(100, Math.max(0, ratio * 100)).toFixed(2),
+      className: ratio > 1 ? 'is-over' : '',
+      value: Math.min(100, Math.max(0, ratio * 100)),
+    }
+  }
+  const outputCell = (row) => {
+    const progress = outputProgress(row)
+    const idealLabel = row.idealApiAmountUsd == null
+      ? '理想产出缺少类型配置'
+      : row.planType === 'total' ? '理想总产出' : `理想 ${usd(row.idealApiUsdPerAccount, 2)} / 号`
+    const progressAttributes = progress.value === null
+      ? 'aria-valuetext="缺少理想产出配置"'
+      : `aria-valuenow="${progress.value.toFixed(1)}"`
+    return `<td class="oauth-output-cell">
+      <div class="oauth-output-values"><span class="oauth-output-actual">${usd(row.apiAmountUsd, 2)}</span><span class="oauth-output-separator">/</span><span class="oauth-output-ideal">${usd(row.idealApiAmountUsd, 2)}</span><b class="oauth-output-percent ${progress.className}">(${progress.percent})</b></div>
+      <div class="oauth-output-progress ${progress.className}" role="progressbar" aria-label="已产出占理想产出" aria-valuemin="0" aria-valuemax="100" ${progressAttributes}><span style="width:${progress.width}%"></span></div>
+      <small class="cost-breakdown">${idealLabel}</small>
+    </td>`
+  }
+  const renderRow = (row, scopeLabel, isTotal = false) => `<tr class="${isTotal ? 'oauth-total-row' : ''}">
+      <td><b>${scopeLabel}</b></td><td><b>${escapeHtml(isTotal ? '合计' : (labels[row.planType] ?? row.planType))}</b></td><td>${number(row.accountCount)}</td>
+      <td>${number(row.usageAccountCount)}</td>${statusDistributionCell(row)}
+      <td>${cny(row.netAcquisitionCostCny)}<small class="cost-breakdown">毛 ${cny(row.grossAcquisitionCostCny)} · 退款 ${cny(row.procurementRefundCny)}</small></td>
+      <td>${isTotal || row.averageUnitCostCny == null ? '—' : cny(row.averageUnitCostCny)}${isTotal ? '' : '<small class="cost-breakdown">净采购成本 / 号</small>'}</td>
+      ${outputCell({ ...row, planType: isTotal ? 'total' : row.planType })}
+      <td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td><td>${row.idealCnyPerApiUsd == null ? '—' : `¥${number(row.idealCnyPerApiUsd, 5)}`}</td>
+      <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
+    </tr>`
+  const renderRows = (rows, target, emptyText, scopeLabel, total) => {
+    const rowMarkup = rows.map((row) => renderRow(row, scopeLabel)).join('')
+    const totalMarkup = total && number(total.accountCount) > 0 ? renderRow(total, `${scopeLabel}合计`, true) : ''
+    $(target).innerHTML = rows.length ? rowMarkup + totalMarkup : `<tr><td colspan="12" class="empty">${emptyText}</td></tr>`
+  }
+  renderRows(pool.groups ?? [], '#oauth-cost-body', '当前号池没有 OAuth 账号或采购记录', '当前号池', total)
+  const archivedTotal = archived.total ?? {}
+  const archivedWarningLabels = []
+  if (number(archivedTotal.missingCostAccountCount) > 0) archivedWarningLabels.push(`缺少采购成本 ${number(archivedTotal.missingCostAccountCount)} 个`)
+  if (Array.isArray(archivedTotal.missingIdealPlanTypes) && archivedTotal.missingIdealPlanTypes.length > 0) {
+    archivedWarningLabels.push(`缺少理想产出配置：${archivedTotal.missingIdealPlanTypes.join(', ')}`)
+  }
+  const archivedWarningLabel = archivedWarningLabels.length ? ` · ${archivedWarningLabels.join('；')}` : ''
+  $('#oauth-archived-state').textContent = `已归档账号全历史用量 · ${number(archivedTotal.accountCount)} 个账号 · 净成本 ${cny(archivedTotal.netAcquisitionCostCny)} · 理想成本 ${archivedTotal.idealCnyPerApiUsd == null ? '—' : `¥${number(archivedTotal.idealCnyPerApiUsd, 5)}`}${archivedWarningLabel}`
+  renderRows(archived.groups ?? [], '#oauth-archived-body', '当前没有已归档 OAuth 采购记录', '已归档', archivedTotal)
   renderPager('oauth', data.pagination)
+  renderPager('oauth-archived', archived.pagination)
+}
+
+function usdText(value, digits = 2) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? `$${numeric.toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits })}` : '—'
 }
 
 async function loadOauthCost() {
@@ -624,7 +704,7 @@ async function loadOauthCost() {
   button.disabled = true
   $('#oauth-cost-state').textContent = '正在通过单连接队列核算…'
   try {
-    const data = await requestJson(`/api/operations/oauth-cost?page=${oauthPage}`, {}, 60000)
+    const data = await requestJson(`/api/operations/oauth-cost?page=${oauthPage}&archivedPage=${oauthArchivedPage}`, {}, 60000)
     renderOauthCost(data)
   } catch (error) {
     $('#oauth-cost-state').textContent = `核算失败：${error instanceof Error ? error.message : String(error)}`
@@ -639,10 +719,13 @@ async function operationsPage() {
   $('#oauth-cost-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     oauthPage = 1
+    oauthArchivedPage = 1
     await loadOauthCost()
   })
   $('#oauth-prev').addEventListener('click', async () => { oauthPage -= 1; await loadOauthCost() })
   $('#oauth-next').addEventListener('click', async () => { oauthPage += 1; await loadOauthCost() })
+  $('#oauth-archived-prev').addEventListener('click', async () => { oauthArchivedPage -= 1; await loadOauthCost() })
+  $('#oauth-archived-next').addEventListener('click', async () => { oauthArchivedPage += 1; await loadOauthCost() })
   $('#cash-prev').addEventListener('click', async () => { cashPage -= 1; await loadOperations() })
   $('#cash-next').addEventListener('click', async () => { cashPage += 1; await loadOperations() })
   $('#audit-prev').addEventListener('click', async () => { auditPage -= 1; await loadOperations() })

@@ -203,7 +203,9 @@ export function createHandler(
       }
       if (request.method === "GET" && url.pathname === "/api/operations/oauth-cost") {
         try {
-          return json(await operations.oauthPoolEconomics());
+          const archivedPage = positiveInteger(url.searchParams.get("archivedPage"), 1);
+          if (archivedPage === null) return json({ ok: false, error: "archivedPage must be a positive integer" }, 400);
+          return json(await operations.oauthPoolEconomics(pageNumber(url), 10, archivedPage));
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }

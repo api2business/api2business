@@ -1,4 +1,4 @@
-import type { AppConfig } from "./config";
+import type { AppConfig, OAuthIdealApiUsdPerAccount, OAuthPlanType } from "./config";
 import type { AccountImportCostEntry } from "./account-import-cost-ledger";
 import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
 
@@ -7,7 +7,7 @@ type Row = Record<string, unknown>;
 export interface OAuthAcquisitionCost {
   accountId: number;
   costCny: number;
-  planType: "k12" | "plus" | "free" | "team" | null;
+  planType: OAuthPlanType | null;
   batchIds: string[];
 }
 
@@ -16,13 +16,13 @@ export interface OAuthProcurementRefund {
   amountCny: number;
   accountIds: number[];
   batchId: string | null;
-  planType: "k12" | "plus" | "free" | "team" | null;
+  planType: OAuthPlanType | null;
 }
 
 interface CostRecord {
   accountId: number;
   amountCny: number;
-  planType: "k12" | "plus" | "free" | "team" | null;
+  planType: OAuthPlanType | null;
   batchId: string | null;
   source: "jsonl" | "yaml";
 }
@@ -47,7 +47,17 @@ WITH cost_input AS (
     COALESCE(a.schedulable, false) AS schedulable,
     a.rate_limit_reset_at,
     a.overload_until,
-    a.temp_unschedulable_until
+    a.temp_unschedulable_until,
+    CASE
+      WHEN a.rate_limit_reset_at IS NOT NULL
+        AND a.rate_limit_reset_at > NOW() THEN 'rate_limited'
+      WHEN a.status = 'active'
+        AND COALESCE(a.schedulable, false)
+        AND (a.overload_until IS NULL OR a.overload_until <= NOW())
+        AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW())
+        THEN 'normal'
+      ELSE 'error'
+    END AS state_bucket
   FROM accounts a
   WHERE a.deleted_at IS NULL
     AND LOWER(a.platform) = 'openai'
@@ -99,7 +109,10 @@ WITH cost_input AS (
     COALESCE(SUM(usage.token_count), 0)::bigint AS token_count,
     COALESCE(SUM(usage.api_amount_usd), 0)::numeric AS api_amount_usd,
     MIN(usage.first_used_at) AS first_used_at,
-    MAX(usage.last_used_at) AS last_used_at
+    MAX(usage.last_used_at) AS last_used_at,
+    COUNT(*) FILTER (WHERE current_account.state_bucket = 'normal')::int AS normal_count,
+    COUNT(*) FILTER (WHERE current_account.state_bucket = 'rate_limited')::int AS rate_limited_count,
+    COUNT(*) FILTER (WHERE current_account.state_bucket = 'error')::int AS error_count
   FROM current_accounts current_account
   LEFT JOIN cost_scope cost ON cost.account_id = current_account.id
   LEFT JOIN usage_totals usage ON usage.account_id = current_account.id
@@ -121,24 +134,17 @@ WITH cost_input AS (
     COALESCE(SUM(usage.token_count), 0)::bigint AS token_count,
     COALESCE(SUM(usage.api_amount_usd), 0)::numeric AS api_amount_usd,
     MIN(usage.first_used_at) AS first_used_at,
-    MAX(usage.last_used_at) AS last_used_at
+    MAX(usage.last_used_at) AS last_used_at,
+    0::int AS normal_count,
+    0::int AS rate_limited_count,
+    0::int AS error_count
   FROM cost_scope cost
   LEFT JOIN usage_totals usage ON usage.account_id = cost.account_id
   WHERE NOT cost.is_current
   GROUP BY cost.plan_type
 ), health_scope AS (
   SELECT
-    current_account.*,
-    CASE
-      WHEN current_account.rate_limit_reset_at IS NOT NULL
-        AND current_account.rate_limit_reset_at > NOW() THEN 'rate_limited'
-      WHEN current_account.status = 'active'
-        AND current_account.schedulable
-        AND (current_account.overload_until IS NULL OR current_account.overload_until <= NOW())
-        AND (current_account.temp_unschedulable_until IS NULL OR current_account.temp_unschedulable_until <= NOW())
-        THEN 'normal'
-      ELSE 'error'
-    END AS state_bucket
+    current_account.*
   FROM current_accounts current_account
 ), health_row AS (
   SELECT
@@ -171,9 +177,9 @@ SELECT
   rows.api_amount_usd,
   rows.first_used_at,
   rows.last_used_at,
-  NULL::int AS normal_count,
-  NULL::int AS rate_limited_count,
-  NULL::int AS error_count,
+  rows.normal_count,
+  rows.rate_limited_count,
+  rows.error_count,
   NULL::int AS active_count,
   NULL::int AS schedulable_count,
   NULL::int AS active_rate_limit_count,
@@ -242,7 +248,7 @@ function localTime(value: unknown, timezone: string): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString("sv-SE", { timeZone: timezone }).replace(" ", "T");
 }
 
-function planType(value: unknown): "k12" | "plus" | "free" | "team" | null {
+function planType(value: unknown): OAuthPlanType | null {
   return value === "k12" || value === "plus" || value === "free" || value === "team" ? value : null;
 }
 
@@ -360,18 +366,32 @@ function refundAllocations(
   return { byAccount, totalCny };
 }
 
-function projectGroup(row: Row, timezone: string, refunds: Map<number, number>) {
+function projectGroup(
+  row: Row,
+  timezone: string,
+  refunds: Map<number, number>,
+  idealApiUsdPerAccount: OAuthIdealApiUsdPerAccount,
+) {
   const accountIds = arrayNumbers(row.account_ids);
+  const rowPlanType = String(row.plan_type ?? "unknown");
+  const configuredPlanType = planType(rowPlanType);
+  const idealApiUsdPerAccountValue = configuredPlanType === null
+    ? null
+    : idealApiUsdPerAccount[configuredPlanType];
+  const accountCount = number(row.account_count);
   const grossAcquisitionCostCny = money(number(row.acquisition_cost_cny));
   const procurementRefundCny = money(accountIds.reduce((sum, id) => sum + (refunds.get(id) ?? 0), 0));
   const netAcquisitionCostCny = money(Math.max(0, grossAcquisitionCostCny - procurementRefundCny));
   const apiAmountUsd = rounded(number(row.api_amount_usd), 8);
   const missingCostAccountCount = number(row.missing_cost_account_count);
   const missingCostAccountIds = arrayNumbers(row.missing_cost_account_ids);
+  const idealApiAmountUsd = idealApiUsdPerAccountValue === null
+    ? null
+    : rounded(accountCount * idealApiUsdPerAccountValue, 8);
   return {
     scope: String(row.scope ?? ""),
-    planType: String(row.plan_type ?? "unknown"),
-    accountCount: number(row.account_count),
+    planType: rowPlanType,
+    accountCount,
     matchedCostAccountCount: number(row.matched_cost_account_count),
     missingCostAccountCount,
     missingCostAccountIds,
@@ -385,9 +405,24 @@ function projectGroup(row: Row, timezone: string, refunds: Map<number, number>) 
     procurementRefundCny,
     netAcquisitionCostCny,
     acquisitionCostCny: netAcquisitionCostCny,
+    averageUnitCostCny: accountCount > 0
+      ? rounded(netAcquisitionCostCny / accountCount, 6)
+      : null,
     cnyPerApiUsd: apiAmountUsd > 0
       ? rounded(netAcquisitionCostCny / apiAmountUsd, 6)
       : null,
+    idealApiUsdPerAccount: idealApiUsdPerAccountValue,
+    idealApiAmountUsd,
+    remainingIdealApiAmountUsd: idealApiAmountUsd === null
+      ? null
+      : rounded(Math.max(0, idealApiAmountUsd - apiAmountUsd), 8),
+    idealCnyPerApiUsd: idealApiAmountUsd !== null && idealApiAmountUsd > 0
+      ? rounded(netAcquisitionCostCny / idealApiAmountUsd, 6)
+      : null,
+    idealCostComplete: idealApiAmountUsd !== null,
+    normalCount: number(row.normal_count),
+    rateLimitedCount: number(row.rate_limited_count),
+    errorCount: number(row.error_count),
     firstUsedAt: localTime(row.first_used_at, timezone),
     lastUsedAt: localTime(row.last_used_at, timezone),
   };
@@ -401,7 +436,17 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
   const net = scoped.reduce((sum, group) => sum + number(group.netAcquisitionCostCny), 0);
   const missingCostAccountCount = scoped.reduce((sum, group) => sum + number(group.missingCostAccountCount), 0);
   const missingCostAccountIds = [...new Set(scoped.flatMap((group) => arrayNumbers(group.missingCostAccountIds)))].sort((left, right) => left - right);
+  const missingIdealPlanTypes = [...new Set(
+    scoped
+      .filter((group) => group.idealApiAmountUsd === null)
+      .map((group) => String(group.planType ?? "unknown")),
+  )].sort();
+  const idealCostComplete = scoped.length > 0 && missingIdealPlanTypes.length === 0;
+  const idealApiAmountUsd = idealCostComplete
+    ? rounded(scoped.reduce((sum, group) => sum + number(group.idealApiAmountUsd), 0), 8)
+    : null;
   const total = {
+    scope,
     accountCount: scoped.reduce((sum, group) => sum + number(group.accountCount), 0),
     matchedCostAccountCount: scoped.reduce((sum, group) => sum + number(group.matchedCostAccountCount), 0),
     missingCostAccountCount,
@@ -417,8 +462,18 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
     netAcquisitionCostCny: money(net),
     acquisitionCostCny: money(net),
     cnyPerApiUsd: apiAmountUsd > 0 ? rounded(net / apiAmountUsd, 6) : null,
+    idealApiAmountUsd,
+    remainingIdealApiAmountUsd: idealApiAmountUsd === null
+      ? null
+      : rounded(Math.max(0, idealApiAmountUsd - apiAmountUsd), 8),
+    idealCnyPerApiUsd: idealApiAmountUsd !== null && idealApiAmountUsd > 0
+      ? rounded(net / idealApiAmountUsd, 6)
+      : null,
+    idealCostComplete,
+    missingIdealPlanTypes,
     complete: scoped.length > 0 && missingCostAccountCount === 0
-      && apiAmountUsd > 0,
+      && apiAmountUsd > 0
+      && idealCostComplete,
   };
   return total;
 }
@@ -472,7 +527,12 @@ export async function collectOAuthPoolEconomics(
         source: "accounts.status/schedulable/runtime-cooldown-fields",
       };
     } else if (row.row_kind === "group") {
-      groups.push(projectGroup(row, config.monitor.timezone, allocations.byAccount));
+      groups.push(projectGroup(
+        row,
+        config.monitor.timezone,
+        allocations.byAccount,
+        config.operations.oauthEconomics.idealApiUsdPerAccount,
+      ));
     }
   }
   const poolGroups = groups.filter((group) => group.scope === "pool");
@@ -500,9 +560,53 @@ export async function collectOAuthPoolEconomics(
     cnyPerApiUsd: pool.apiAmountUsd + archived.apiAmountUsd > 0
       ? rounded((pool.netAcquisitionCostCny + archived.netAcquisitionCostCny) / (pool.apiAmountUsd + archived.apiAmountUsd), 6)
       : null,
+    idealApiAmountUsd: pool.idealApiAmountUsd !== null
+      && (archivedGroups.length === 0 || archived.idealApiAmountUsd !== null)
+      ? rounded(pool.idealApiAmountUsd + (archived.idealApiAmountUsd ?? 0), 8)
+      : null,
+    remainingIdealApiAmountUsd: pool.idealApiAmountUsd !== null
+      && (archivedGroups.length === 0 || archived.idealApiAmountUsd !== null)
+      ? rounded(
+        Math.max(0, (pool.idealApiAmountUsd + (archived.idealApiAmountUsd ?? 0))
+          - (pool.apiAmountUsd + archived.apiAmountUsd)),
+        8,
+      )
+      : null,
+    idealCnyPerApiUsd: pool.idealApiAmountUsd !== null
+      && (archivedGroups.length === 0 || archived.idealApiAmountUsd !== null)
+      && (pool.idealApiAmountUsd + (archived.idealApiAmountUsd ?? 0)) > 0
+      ? rounded(
+        (pool.netAcquisitionCostCny + archived.netAcquisitionCostCny)
+          / (pool.idealApiAmountUsd + (archived.idealApiAmountUsd ?? 0)),
+        6,
+      )
+      : null,
+    idealCostComplete: pool.idealCostComplete && (archivedGroups.length === 0 || archived.idealCostComplete),
+    missingIdealPlanTypes: [...new Set([
+      ...pool.missingIdealPlanTypes,
+      ...archived.missingIdealPlanTypes,
+    ])].sort(),
     complete: pool.complete && (archivedGroups.length === 0 || archived.complete),
   };
   const missingCostAccountIds = arrayNumbers(all.missingCostAccountIds);
+  const missingIdealPlanTypes = Array.isArray(all.missingIdealPlanTypes) ? all.missingIdealPlanTypes : [];
+  const warnings: Array<Record<string, unknown>> = [];
+  if (missingCostAccountIds.length > 0) {
+    warnings.push({
+      code: "missing_acquisition_cost",
+      message: `有 ${missingCostAccountIds.length} 个 OAuth 账号缺少采购成本记录，综合成本仅按已知池内成本计算`,
+      accountIds: missingCostAccountIds,
+      missingData: "acquisition_cost_cny",
+    });
+  }
+  if (missingIdealPlanTypes.length > 0) {
+    warnings.push({
+      code: "missing_ideal_api_output",
+      message: `账号类型 ${missingIdealPlanTypes.join(", ")} 缺少理想 API 美元产出配置，理想成本暂不计算`,
+      planTypes: missingIdealPlanTypes,
+      missingData: "ideal_api_usd_per_account",
+    });
+  }
   return {
     ok: true,
     complete: pool.complete,
@@ -512,12 +616,7 @@ export async function collectOAuthPoolEconomics(
     pool: { groups: poolGroups, total: pool },
     archived: { groups: archivedGroups, total: archived },
     all: { total: all },
-    warnings: missingCostAccountIds.length > 0 ? [{
-      code: "missing_acquisition_cost",
-      message: `有 ${missingCostAccountIds.length} 个 OAuth 账号缺少采购成本记录，综合成本仅按已知池内成本计算`,
-      accountIds: missingCostAccountIds,
-      missingData: "acquisition_cost_cny",
-    }] : [],
+    warnings,
     exclusions: { accountIds: excludedAccountIds, count: excludedAccountIds.length },
     groups: poolGroups,
     total: pool,

@@ -4,6 +4,8 @@ import { DateTime } from "luxon";
 import { parse } from "yaml";
 
 export type IdentityField = "username" | "email" | "emailLocalPart";
+export type OAuthPlanType = "k12" | "plus" | "free" | "team";
+export type OAuthIdealApiUsdPerAccount = Record<OAuthPlanType, number>;
 
 export interface SecretRef {
   sourceRef: string;
@@ -135,7 +137,10 @@ export interface AppConfig {
       freeCostThresholdCny: number;
       plusCostThresholdCny: number;
     };
-    oauthEconomics: { excludedAccountIds: number[] };
+    oauthEconomics: {
+      excludedAccountIds: number[];
+      idealApiUsdPerAccount: OAuthIdealApiUsdPerAccount;
+    };
     rechargeDenominationsCny: number[];
     planTtlMinutes: number;
     auditLimit: number;
@@ -432,6 +437,10 @@ export function loadConfig(path: string): AppConfig {
   const accountLifecycle = object(operations.accountLifecycle, "operations.accountLifecycle");
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
   const oauthEconomics = object(operations.oauthEconomics, "operations.oauthEconomics");
+  const idealApiUsdPerAccount = object(
+    oauthEconomics.idealApiUsdPerAccount,
+    "operations.oauthEconomics.idealApiUsdPerAccount",
+  );
   const automationSafety = object(operations.automationSafety, "operations.automationSafety");
   const priorityWrite = object(operations.priorityWrite, "operations.priorityWrite");
   const interBatchMinimumDelayMs = integerValue(
@@ -653,6 +662,12 @@ export function loadConfig(path: string): AppConfig {
       },
       oauthEconomics: {
         excludedAccountIds: integers(oauthEconomics, "excludedAccountIds", "operations.oauthEconomics", 1, Number.MAX_SAFE_INTEGER),
+        idealApiUsdPerAccount: {
+          free: numberValue(idealApiUsdPerAccount, "free", "operations.oauthEconomics.idealApiUsdPerAccount", 0.000001),
+          k12: numberValue(idealApiUsdPerAccount, "k12", "operations.oauthEconomics.idealApiUsdPerAccount", 0.000001),
+          plus: numberValue(idealApiUsdPerAccount, "plus", "operations.oauthEconomics.idealApiUsdPerAccount", 0.000001),
+          team: numberValue(idealApiUsdPerAccount, "team", "operations.oauthEconomics.idealApiUsdPerAccount", 0.000001),
+        },
       },
       rechargeDenominationsCny: integers(operations, "rechargeDenominationsCny", "operations", 1, 100000),
       planTtlMinutes: integerValue(operations, "planTtlMinutes", "operations", 1, 1440),

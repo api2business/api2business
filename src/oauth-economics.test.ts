@@ -16,6 +16,15 @@ const jsonlEntry = (accountId: number, amountCny: number, batchId = "batch-a"): 
   unitCostCny: amountCny, amountCny,
 });
 
+const testConfig = {
+  monitor: { timezone: "Asia/Shanghai" },
+  operations: {
+    oauthEconomics: {
+      idealApiUsdPerAccount: { free: 3.5, k12: 20, plus: 140, team: 140 },
+    },
+  },
+} as AppConfig;
+
 test("JSONL is authoritative for the same account while YAML multi-entry costs accumulate", () => {
   const result = mergeOAuthAcquisitionCosts(
     [jsonlEntry(101, 3.3)],
@@ -44,8 +53,8 @@ test("refunds require declared account scope and reduce each accounting section"
   const reads = {
     query: async () => ({
       rows: [
-        { row_kind: "group", scope: "pool", plan_type: "k12", account_count: 1, matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1, orphaned_account_count: 0, account_ids: [101], missing_cost_account_ids: [], usage_account_count: 1, acquisition_cost_cny: 3.3, request_count: 2, token_count: 30, api_amount_usd: 10, first_used_at: "2026-07-30T00:00:00.000Z", last_used_at: "2026-07-30T01:00:00.000Z" },
-        { row_kind: "group", scope: "archived", plan_type: "k12", account_count: 1, matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1, orphaned_account_count: 0, account_ids: [102], missing_cost_account_ids: [], usage_account_count: 1, acquisition_cost_cny: 3.3, request_count: 1, token_count: 20, api_amount_usd: 5, first_used_at: "2026-07-30T00:00:00.000Z", last_used_at: "2026-07-30T01:00:00.000Z" },
+        { row_kind: "group", scope: "pool", plan_type: "k12", account_count: 1, matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1, orphaned_account_count: 0, account_ids: [101], missing_cost_account_ids: [], usage_account_count: 1, acquisition_cost_cny: 3.3, request_count: 2, token_count: 30, api_amount_usd: 10, normal_count: 1, rate_limited_count: 0, error_count: 0, first_used_at: "2026-07-30T00:00:00.000Z", last_used_at: "2026-07-30T01:00:00.000Z" },
+        { row_kind: "group", scope: "archived", plan_type: "k12", account_count: 1, matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1, orphaned_account_count: 0, account_ids: [102], missing_cost_account_ids: [], usage_account_count: 1, acquisition_cost_cny: 3.3, request_count: 1, token_count: 20, api_amount_usd: 5, normal_count: 0, rate_limited_count: 0, error_count: 0, first_used_at: "2026-07-30T00:00:00.000Z", last_used_at: "2026-07-30T01:00:00.000Z" },
         { row_kind: "health", account_count: 1, normal_count: 1, rate_limited_count: 0, error_count: 0, active_count: 1, schedulable_count: 1, active_rate_limit_count: 0, active_overload_count: 0, active_temp_unschedulable_count: 0 },
       ],
       queueDurationMs: 1, queryDurationMs: 2, totalDurationMs: 3,
@@ -54,7 +63,7 @@ test("refunds require declared account scope and reduce each accounting section"
     }),
   } as unknown as Sub2ApiReadClient;
   const result = await collectOAuthPoolEconomics(
-    { monitor: { timezone: "Asia/Shanghai" } } as AppConfig,
+    testConfig,
     reads,
     {
       costs: [
@@ -67,8 +76,31 @@ test("refunds require declared account scope and reduce each accounting section"
   );
   const pool = result.pool as { total: Record<string, unknown> };
   const archived = result.archived as { total: Record<string, unknown> };
-  expect(pool.total).toEqual(expect.objectContaining({ netAcquisitionCostCny: 0, apiAmountUsd: 10, cnyPerApiUsd: 0 }));
-  expect(archived.total).toEqual(expect.objectContaining({ netAcquisitionCostCny: 3.3, apiAmountUsd: 5, cnyPerApiUsd: 0.66 }));
+  expect(pool.total).toEqual(expect.objectContaining({
+    netAcquisitionCostCny: 0,
+    apiAmountUsd: 10,
+    cnyPerApiUsd: 0,
+    idealApiAmountUsd: 20,
+    remainingIdealApiAmountUsd: 10,
+    idealCnyPerApiUsd: 0,
+  }));
+  expect(archived.total).toEqual(expect.objectContaining({
+    netAcquisitionCostCny: 3.3,
+    apiAmountUsd: 5,
+    cnyPerApiUsd: 0.66,
+    idealApiAmountUsd: 20,
+    remainingIdealApiAmountUsd: 15,
+    idealCnyPerApiUsd: 0.165,
+  }));
+  expect(pool.total).not.toHaveProperty("averageUnitCostCny");
+  expect(archived.total).not.toHaveProperty("averageUnitCostCny");
+  expect((result.all as { total: Record<string, unknown> }).total).not.toHaveProperty("averageUnitCostCny");
+  expect((result.pool as { groups: Array<Record<string, unknown>> }).groups[0]).toEqual(expect.objectContaining({
+    averageUnitCostCny: 0,
+    normalCount: 1,
+    rateLimitedCount: 0,
+    errorCount: 0,
+  }));
   expect(result.health).toMatchObject({ normalCount: 1, rateLimitedCount: 0, errorCount: 0, probeStarted: false });
 });
 
@@ -85,12 +117,94 @@ test("publishes a known pool unit cost with a missing-cost warning", async () =>
     }),
   } as unknown as Sub2ApiReadClient;
   const result = await collectOAuthPoolEconomics(
-    { monitor: { timezone: "Asia/Shanghai" } } as AppConfig,
+    testConfig,
     reads,
     { costs: [{ accountId: 256, costCny: 20, planType: "team", batchIds: [] }], refunds: [], ledger: {} },
   );
-  expect((result.pool as Record<string, any>).total).toEqual(expect.objectContaining({ cnyPerApiUsd: 0.2, missingCostAccountIds: [257], complete: false }));
+  expect((result.pool as Record<string, any>).total).toEqual(expect.objectContaining({
+    cnyPerApiUsd: 0.2,
+    idealApiAmountUsd: 280,
+    remainingIdealApiAmountUsd: 180,
+    idealCnyPerApiUsd: 0.071429,
+    missingCostAccountIds: [257],
+    complete: false,
+  }));
   expect(result.warnings).toEqual([expect.objectContaining({ code: "missing_acquisition_cost", accountIds: [257], missingData: "acquisition_cost_cny" })]);
+});
+
+test("unknown account plan keeps actual economics and warns instead of inventing ideal output", async () => {
+  const reads = {
+    query: async () => ({
+      rows: [{
+        row_kind: "group", scope: "pool", plan_type: "enterprise", account_count: 1,
+        matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1,
+        orphaned_account_count: 0, account_ids: [300], missing_cost_account_ids: [], usage_account_count: 1,
+        acquisition_cost_cny: 2, request_count: 1, token_count: 10, api_amount_usd: 1,
+        first_used_at: null, last_used_at: null,
+      },
+      {
+        row_kind: "health", account_count: 1, normal_count: 1, rate_limited_count: 0, error_count: 0,
+        active_count: 1, schedulable_count: 1, active_rate_limit_count: 0, active_overload_count: 0,
+        active_temp_unschedulable_count: 0,
+      }],
+      queueDurationMs: 1, queryDurationMs: 1, totalDurationMs: 1,
+      queryStartedAt: "2026-07-30T00:00:00.000Z", queryCompletedAt: "2026-07-30T00:00:00.001Z",
+      deduplicated: false, cached: false,
+    }),
+  } as unknown as Sub2ApiReadClient;
+  const result = await collectOAuthPoolEconomics(
+    testConfig,
+    reads,
+    { costs: [{ accountId: 300, costCny: 2, planType: null, batchIds: [] }], refunds: [], ledger: {} },
+  );
+  expect((result.pool as Record<string, any>).total).toEqual(expect.objectContaining({
+    cnyPerApiUsd: 2,
+    idealApiAmountUsd: null,
+    idealCnyPerApiUsd: null,
+    complete: false,
+  }));
+  expect(result.warnings).toEqual([expect.objectContaining({
+    code: "missing_ideal_api_output",
+    planTypes: ["enterprise"],
+    missingData: "ideal_api_usd_per_account",
+  })]);
+});
+
+test("remaining ideal output is zero when actual output exceeds the ideal target", async () => {
+  const reads = {
+    query: async () => ({
+      rows: [
+        {
+          row_kind: "group", scope: "pool", plan_type: "k12", account_count: 1,
+          matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1,
+          orphaned_account_count: 0, account_ids: [301], missing_cost_account_ids: [], usage_account_count: 1,
+          acquisition_cost_cny: 2, request_count: 1, token_count: 10, api_amount_usd: 25,
+          first_used_at: null, last_used_at: null, normal_count: 1, rate_limited_count: 0, error_count: 0,
+        },
+        {
+          row_kind: "health", account_count: 1, normal_count: 1, rate_limited_count: 0, error_count: 0,
+          active_count: 1, schedulable_count: 1, active_rate_limit_count: 0, active_overload_count: 0,
+          active_temp_unschedulable_count: 0,
+        },
+      ],
+      queueDurationMs: 1, queryDurationMs: 1, totalDurationMs: 1,
+      queryStartedAt: "2026-07-30T00:00:00.000Z", queryCompletedAt: "2026-07-30T00:00:00.001Z",
+      deduplicated: false, cached: false,
+    }),
+  } as unknown as Sub2ApiReadClient;
+  const result = await collectOAuthPoolEconomics(
+    testConfig,
+    reads,
+    { costs: [{ accountId: 301, costCny: 2, planType: "k12", batchIds: [] }], refunds: [], ledger: {} },
+  );
+  expect((result.pool as Record<string, any>).groups[0]).toEqual(expect.objectContaining({
+    apiAmountUsd: 25,
+    idealApiAmountUsd: 20,
+    remainingIdealApiAmountUsd: 0,
+  }));
+  expect((result.pool as Record<string, any>).total).toEqual(expect.objectContaining({
+    remainingIdealApiAmountUsd: 0,
+  }));
 });
 
 test("OAuth economics SQL uses current openai/oauth rows, all history, and runtime state fields", () => {
@@ -103,6 +217,7 @@ test("OAuth economics SQL uses current openai/oauth rows, all history, and runti
   expect(oauthEconomicsSql).toContain("rate_limit_reset_at");
   expect(oauthEconomicsSql).toContain("schedulable");
   expect(oauthEconomicsSql).toContain("NOW()");
+  expect(oauthEconomicsSql).toContain("COUNT(*) FILTER (WHERE current_account.state_bucket = 'normal')");
   expect(oauthEconomicsSql).not.toContain("access_token");
   expect(oauthEconomicsSql).not.toContain("refresh_token");
 });
@@ -125,7 +240,7 @@ test("passes configured pool exclusions to the single queued query", async () =>
     },
   } as unknown as Sub2ApiReadClient;
   const result = await collectOAuthPoolEconomics(
-    { monitor: { timezone: "Asia/Shanghai" } } as AppConfig,
+    testConfig,
     reads,
     { costs: [], refunds: [], excludedAccountIds: [15, 15], ledger: {} },
   );
@@ -136,7 +251,7 @@ test("passes configured pool exclusions to the single queued query", async () =>
 test("refund amount cannot exceed the declared batch cost", async () => {
   const reads = { query: async () => { throw new Error("query must not start"); } } as unknown as Sub2ApiReadClient;
   await expect(collectOAuthPoolEconomics(
-    { monitor: { timezone: "Asia/Shanghai" } } as AppConfig,
+    testConfig,
     reads,
     {
       costs: [{ accountId: 101, costCny: 3.3, planType: "k12", batchIds: ["batch-a"] }],

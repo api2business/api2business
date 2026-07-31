@@ -1030,7 +1030,7 @@ export class OperationsService {
     return await collectAccountImportEconomics(this.config, this.reads, input, "manual");
   }
 
-  async oauthPoolEconomics() {
+  async oauthPoolEconomics(page = 1, pageSize = 10, archivedPage = 1) {
     const yaml = this.yamlLedger();
     const importEntries = readAccountImportCosts(this.config.operations.accountImportLedgerPath);
     const merged = mergeOAuthAcquisitionCosts(importEntries, yaml.costs);
@@ -1039,7 +1039,7 @@ export class OperationsService {
     const yamlAcquisitionCostCny = yaml.costs
       .filter((entry) => entry.kind === "acquisition")
       .reduce((sum, entry) => sum + money(entry.amountCny), 0);
-    return await collectOAuthPoolEconomics(this.config, this.reads, {
+    const result = await collectOAuthPoolEconomics(this.config, this.reads, {
       costs: merged.costs,
       refunds,
       excludedAccountIds: this.config.operations.oauthEconomics.excludedAccountIds,
@@ -1052,6 +1052,26 @@ export class OperationsService {
         mergedCostAccountCount: merged.costs.length,
       },
     }, "manual");
+    const paginate = (rows: Array<Record<string, unknown>>, currentPage: number) => ({
+      rows: rows.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+      pagination: {
+        page: currentPage,
+        pageSize,
+        total: rows.length,
+        totalPages: Math.max(1, Math.ceil(rows.length / pageSize)),
+      },
+    });
+    const poolFacts = result.pool as Record<string, unknown> & { groups: Array<Record<string, unknown>> };
+    const archivedFacts = result.archived as Record<string, unknown> & { groups: Array<Record<string, unknown>> };
+    const poolPage = paginate(poolFacts.groups, page);
+    const archivedResult = paginate(archivedFacts.groups, archivedPage);
+    return {
+      ...result,
+      pool: { ...poolFacts, groups: poolPage.rows, pagination: poolPage.pagination },
+      archived: { ...archivedFacts, groups: archivedResult.rows, pagination: archivedResult.pagination },
+      groups: poolPage.rows,
+      pagination: poolPage.pagination,
+    };
   }
 
   async oauthImportEconomics(day: string, page = 1, pageSize = 10) {
