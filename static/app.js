@@ -701,7 +701,9 @@ async function accountImportPage() {
   $('#import-unit-cost').addEventListener('input', () => {
     if (planTypeManuallySelected) return
     const cost = Number($('#import-unit-cost').value)
-    planType.value = Number.isFinite(cost) && cost > defaults.plusCostThresholdCny ? 'plus' : 'k12'
+    planType.value = Number.isFinite(cost)
+      ? (cost < defaults.freeCostThresholdCny ? 'free' : cost > defaults.plusCostThresholdCny ? 'plus' : 'k12')
+      : defaults.planType
   })
   $('#import-groups').innerHTML = options.groups.map((group) => `<label><input type="checkbox" value="${group.id}" ${defaults.groupIds.includes(group.id) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${group.id}</b></span></label>`).join('')
   const fileInput = $('#import-file')

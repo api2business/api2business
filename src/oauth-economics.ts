@@ -7,7 +7,7 @@ type Row = Record<string, unknown>;
 export interface OAuthAcquisitionCost {
   accountId: number;
   costCny: number;
-  planType: "k12" | "plus" | "team" | null;
+  planType: "k12" | "plus" | "free" | "team" | null;
   batchIds: string[];
 }
 
@@ -16,13 +16,13 @@ export interface OAuthProcurementRefund {
   amountCny: number;
   accountIds: number[];
   batchId: string | null;
-  planType: "k12" | "plus" | "team" | null;
+  planType: "k12" | "plus" | "free" | "team" | null;
 }
 
 interface CostRecord {
   accountId: number;
   amountCny: number;
-  planType: "k12" | "plus" | "team" | null;
+  planType: "k12" | "plus" | "free" | "team" | null;
   batchId: string | null;
   source: "jsonl" | "yaml";
 }
@@ -242,8 +242,8 @@ function localTime(value: unknown, timezone: string): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString("sv-SE", { timeZone: timezone }).replace(" ", "T");
 }
 
-function planType(value: unknown): "k12" | "plus" | "team" | null {
-  return value === "k12" || value === "plus" || value === "team" ? value : null;
+function planType(value: unknown): "k12" | "plus" | "free" | "team" | null {
+  return value === "k12" || value === "plus" || value === "free" || value === "team" ? value : null;
 }
 
 function yamlAccountId(value: unknown): number | null {

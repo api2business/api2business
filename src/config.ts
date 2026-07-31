@@ -132,6 +132,7 @@ export interface AppConfig {
       groupIds: number[];
       sourceProxyId: number;
       perAccountProxy: boolean;
+      freeCostThresholdCny: number;
       plusCostThresholdCny: number;
     };
     oauthEconomics: { excludedAccountIds: number[] };
@@ -647,6 +648,7 @@ export function loadConfig(path: string): AppConfig {
         groupIds: integers(accountImportDefaults, "groupIds", "operations.accountImportDefaults", 1, Number.MAX_SAFE_INTEGER),
         sourceProxyId: integerValue(accountImportDefaults, "sourceProxyId", "operations.accountImportDefaults", 3),
         perAccountProxy: booleanValue(accountImportDefaults, "perAccountProxy", "operations.accountImportDefaults"),
+        freeCostThresholdCny: numberValue(accountImportDefaults, "freeCostThresholdCny", "operations.accountImportDefaults", 0),
         plusCostThresholdCny: numberValue(accountImportDefaults, "plusCostThresholdCny", "operations.accountImportDefaults", 0),
       },
       oauthEconomics: {

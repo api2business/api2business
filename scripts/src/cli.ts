@@ -157,7 +157,7 @@ function help(): Record<string, unknown> {
       "priority plan create --over-api [--calls N]",
       "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
-      "accounts import --file <json|zip> --unit-cost-cny <CNY> [--priority 1 --capacity 16 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
+      "accounts import --file <json|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|free] [--priority 1 --capacity 16 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
@@ -345,9 +345,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (!parsed.file) throw new Error("accounts import requires --file");
     if (parsed.unitCostCny === null) throw new Error("accounts import requires --unit-cost-cny in CNY");
     const defaults = config.operations.accountImportDefaults;
-    const inferredPlanType = parsed.unitCostCny > defaults.plusCostThresholdCny ? "plus" : "k12";
+    const inferredPlanType = parsed.unitCostCny < defaults.freeCostThresholdCny ? "free"
+      : parsed.unitCostCny > defaults.plusCostThresholdCny ? "plus" : "k12";
     const planType = parsed.planType ?? inferredPlanType;
-    if (planType !== "k12" && planType !== "plus") throw new Error("--plan-type must be k12 or plus");
+    if (planType !== "k12" && planType !== "plus" && planType !== "free") throw new Error("--plan-type must be k12, plus, or free");
     const groupIds = (parsed.groups ?? defaults.groupIds.join(",")).split(",").map(Number);
     const zip = parsed.file.toLowerCase().endsWith(".zip");
     return await client.accountImport({ content: readFileSync(parsed.file, zip ? "base64" : "utf8"), inputFormat: zip ? "zip" : "json",

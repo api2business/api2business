@@ -121,10 +121,10 @@ export function createHandler(
         if (typeof input.content !== "string" || typeof input.confirm !== "boolean"
           || (input.perAccountProxy !== undefined && typeof input.perAccountProxy !== "boolean")
           || (input.inputFormat !== undefined && input.inputFormat !== "json" && input.inputFormat !== "zip")
-          || (input.planType !== "k12" && input.planType !== "plus")
+          || (input.planType !== "k12" && input.planType !== "plus" && input.planType !== "free")
           || !Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0
           || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
-          return json({ ok: false, error: "导入参数无效：账号类型只允许 k12 或 plus，账号单价须为正数人民币且最多两位小数" }, 400);
+          return json({ ok: false, error: "导入参数无效：账号类型只允许 k12、plus 或 free，账号单价须为正数人民币且最多两位小数" }, 400);
         }
         return json({ ok: true, job: imports.submit(input) }, 202);
       }

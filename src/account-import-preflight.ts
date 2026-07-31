@@ -26,7 +26,7 @@ export interface AccountImportPreflightSettings {
   groupIds: number[];
   sourceProxyId: number;
   perAccountProxy?: boolean;
-  planType: "k12" | "plus";
+  planType: "k12" | "plus" | "free";
 }
 
 export interface AccountImportPreflightPlan {

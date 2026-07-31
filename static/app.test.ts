@@ -1,16 +1,17 @@
 import { expect, test } from "bun:test";
 
-test("account import exposes only K12 and Plus with the configured price threshold", async () => {
+test("account import exposes K12, Plus, and Free with configured price thresholds", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
   expect(html).toContain('id="import-plan-type"');
   expect(html).toContain('id="import-per-account-proxy"');
+  expect(app).toContain("cost < defaults.freeCostThresholdCny ? 'free'");
   expect(app).toContain("cost > defaults.plusCostThresholdCny ? 'plus' : 'k12'");
   expect(app).toContain("planTypeManuallySelected");
   expect(app).toContain("planType: planType.value");
   expect(app).toContain("perAccountProxy: $('#import-per-account-proxy').checked");
   expect(app).toContain("defaults.perAccountProxy === true");
-  expect(app).not.toContain("value=\"free\"");
+  expect(app).toContain("planType.value = defaults.planType");
   expect(app).not.toContain("history.replaceState(null, '', `/account-import?job=");
   expect(app).not.toContain("new URLSearchParams(location.search).get('job')");
 });

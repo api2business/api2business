@@ -101,3 +101,20 @@ test("selects the same initial proxy for the same import identity regardless of 
   expect(first.proxyCandidateIds).toContain(first.initialProxyId);
   expect((JSON.parse(first.content) as { accounts: Array<{ credentials: { plan_type: string } }> }).accounts[0]?.credentials.plan_type).toBe("plus");
 });
+
+test("accepts Free as the selected import plan type and overlays credentials", async () => {
+  const reads = {
+    query: async () => ({
+      rows: [{ row_kind: "proxy", id: 3 }],
+      queueDurationMs: 0, queryDurationMs: 0, totalDurationMs: 0,
+      queryStartedAt: "2026-01-01T00:00:00.000Z", queryCompletedAt: "2026-01-01T00:00:00.000Z",
+      deduplicated: false, cached: false,
+    }),
+  } as unknown as Sub2ApiReadClient;
+  const plan = await accountImportPreflight(JSON.stringify({ accounts: [
+    { credentials: { chatgpt_user_id: "user-free", access_token: "token-free" } },
+  ], proxies: [] }), {
+    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, planType: "free",
+  }, reads);
+  expect((JSON.parse(plan.content) as { accounts: Array<{ credentials: { plan_type: string } }> }).accounts[0]?.credentials.plan_type).toBe("free");
+});

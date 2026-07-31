@@ -12,7 +12,7 @@ export interface AccountImportCostEntry {
   period: string;
   fingerprint: string;
   batchId: string;
-  planType: "k12" | "plus" | null;
+  planType: "k12" | "plus" | "free" | null;
   accountId: number;
   unitCostCny: number;
   amountCny: number;
@@ -45,7 +45,7 @@ function parseEntry(value: unknown, line: number): AccountImportCostEntry {
     throw new Error(`账号导入成本账本第 ${line} 行字段无效`);
   }
   const fingerprint = row.fingerprint as string;
-  const planType = row.planType === "k12" || row.planType === "plus" ? row.planType : null;
+  const planType = row.planType === "k12" || row.planType === "plus" || row.planType === "free" ? row.planType : null;
   return {
     ...row,
     batchId: typeof row.batchId === "string" && row.batchId ? row.batchId : accountImportBatchId(fingerprint),
@@ -81,7 +81,7 @@ export function recordAccountImportCosts(input: {
   fingerprint: string;
   accountIds: number[];
   unitCostCny: number;
-  planType?: "k12" | "plus";
+  planType?: "k12" | "plus" | "free";
   occurredAt?: string;
   occurredOn: string;
 }) {

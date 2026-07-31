@@ -32,6 +32,14 @@ test("JSONL is authoritative for the same account while YAML multi-entry costs a
   ]));
 });
 
+test("keeps Free import costs in the OAuth accounting input", () => {
+  const result = mergeOAuthAcquisitionCosts([{
+    ...jsonlEntry(103, 0.5),
+    planType: "free",
+  }], []);
+  expect(result.costs).toEqual([expect.objectContaining({ accountId: 103, costCny: 0.5, planType: "free" })]);
+});
+
 test("refunds require declared account scope and reduce each accounting section", async () => {
   const reads = {
     query: async () => ({

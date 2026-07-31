@@ -35,3 +35,23 @@ test("records CNY account costs once per stable account id", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("preserves Free as an import label in the CNY ledger", () => {
+  const directory = mkdtempSync(join(tmpdir(), "apistate-cost-ledger-free-"));
+  const path = join(directory, "costs.jsonl");
+  try {
+    recordAccountImportCosts({
+      path,
+      fingerprint: "free-batch",
+      accountIds: [103],
+      unitCostCny: 0.5,
+      planType: "free",
+      occurredOn: "2026-07-31",
+    });
+    expect(readAccountImportCosts(path)).toEqual([
+      expect.objectContaining({ accountId: 103, planType: "free", unitCostCny: 0.5, amountCny: 0.5 }),
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
