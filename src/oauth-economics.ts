@@ -283,7 +283,7 @@ export function mergeOAuthAcquisitionCosts(
     if (row.kind !== "acquisition") continue;
     const accountId = yamlAccountId(row.accountId);
     const amountCny = Number(row.amountCny);
-    if (accountId === null || !Number.isFinite(amountCny) || amountCny <= 0) continue;
+    if (accountId === null || !Number.isFinite(amountCny) || amountCny < 0) continue;
     yamlEntryCount += 1;
     if (jsonlAccountIds.has(accountId)) {
       yamlSuppressedCount += 1;

@@ -114,7 +114,7 @@ export function readLifecycleAcquisitionCosts(config: AppConfig, day: string): A
   return records(profit.periodCosts)
     .filter((entry) => entry.kind === "acquisition" && entry.occurredOn === day)
     .map((entry) => ({ accountId: positiveInteger(entry.accountId), costCny: number(entry.amountCny) }))
-    .filter((entry): entry is { accountId: number; costCny: number } => entry.accountId !== null && entry.costCny > 0);
+    .filter((entry): entry is { accountId: number; costCny: number } => entry.accountId !== null && entry.costCny >= 0);
 }
 
 function mergeLifecycleCosts(
