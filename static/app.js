@@ -601,7 +601,10 @@ function renderOauthCost(data) {
   $('#oauth-cost-unit').textContent = total.cnyPerApiUsd == null ? '—' : `¥${number(total.cnyPerApiUsd, 5)}`
   $('#oauth-cost-health').textContent = `${number(health.normalCount)} 正常`
   $('#oauth-cost-health-detail').textContent = `限流 ${number(health.rateLimitedCount)} · 错误 ${number(health.errorCount)} · 未探测`
-  $('#oauth-cost-state').textContent = `当前号池全历史 · ${data.complete ? '数据完整' : '数据不完整'} · ${number(data.databaseQueries)} 次数据库查询`
+  const exclusions = data.exclusions ?? {}
+  const excludedIds = Array.isArray(exclusions.accountIds) ? exclusions.accountIds : []
+  const exclusionLabel = excludedIds.length ? ` · 已排除账号 #${excludedIds.join(', #')}` : ''
+  $('#oauth-cost-state').textContent = `当前号池全历史${exclusionLabel} · ${data.complete ? '数据完整' : '数据不完整'} · ${number(data.databaseQueries)} 次数据库查询`
   const labels = { k12: 'K12', plus: 'Plus', free: 'Free' }
   const archived = data.archived ?? { groups: [] }
   const groups = [...(pool.groups ?? []), ...(archived.groups ?? [])]
