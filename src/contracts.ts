@@ -13,7 +13,9 @@ export type AppCommand =
   | { kind: "records.delete"; id: string }
   | { kind: "credit.test"; execute: boolean }
   | { kind: "upstream.operation"; operationId: string }
-  | { kind: "priority.plan.confirm"; planId: string; operator: string };
+  | { kind: "priority.plan.create"; recentCallLimit: number; operator: string }
+  | { kind: "priority.plan.confirm"; planId: string; operator: string }
+  | { kind: "priority.automation.run" };
 
 export interface OperationRequest {
   operationId: string;
@@ -37,5 +39,7 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "records.delete"
     || (command.kind === "credit.test" && command.execute)
     || command.kind === "upstream.operation"
-    || command.kind === "priority.plan.confirm";
+    || command.kind === "priority.plan.create"
+    || command.kind === "priority.plan.confirm"
+    || command.kind === "priority.automation.run";
 }

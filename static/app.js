@@ -509,9 +509,10 @@ async function setupPriorityPanel(options) {
     button.disabled = true
     planProgress('开始读取最近调用并生成调整计划', true)
     try {
-      const plan = await requestJson('/api/operations/priority-plans', {
+      const submitted = await requestJson('/api/operations/priority-plans', {
         method: 'POST', body: JSON.stringify({ recentCallLimit: Number($('#score-call-limit').value) }),
-      }, 90000)
+      }, 20000)
+      const plan = await waitWorkflow(submitted.workflowId, 600000)
       activePlanId = plan.planId
       $('#confirm-plan').disabled = plan.changedCount === 0
       setPriorityPlan(plan.changes, true)
@@ -528,7 +529,7 @@ async function setupPriorityPanel(options) {
     button.disabled = true
     $('#generate-plan').disabled = true
     $('#query-scores').disabled = true
-    planProgress('已提交确认，后端 API 正在批量写入；随后通过 PostgreSQL 直连回读')
+    planProgress('已提交确认，Temporal worker 正在批量写入；随后通过读队列回读')
     try {
       const result = await requestJson(`/api/operations/priority-plans/${encodeURIComponent(activePlanId)}/confirm`, { method: 'POST', body: '{}' }, 600000)
       planProgress(`调整成功，后端已写入并由 PostgreSQL 验证 ${number(result.verifiedCount)} 个账号`)
@@ -1030,6 +1031,20 @@ async function waitUpstreamJob(workflowId, timeoutMs = 600000) {
       return status.result
     }
     if (Date.now() >= deadline) throw new Error('上游作业等待超时，请到上游列表核对作业结果')
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+}
+
+async function waitWorkflow(workflowId, timeoutMs = 600000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const status = await requestJson(`/api/admin/workflows/${encodeURIComponent(workflowId)}`, {}, 20000)
+    if (status.terminal) {
+      if (status.state !== 'completed') throw new Error(status.error ?? `作业${status.state ?? '失败'}`)
+      if (!status.result?.ok) throw new Error(status.result?.error ?? '作业未成功完成')
+      return status.result
+    }
+    if (Date.now() >= deadline) throw new Error('作业等待超时，请使用 workflow status 查询结果')
     await new Promise((resolve) => setTimeout(resolve, 1000))
   }
 }

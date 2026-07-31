@@ -52,9 +52,13 @@ const scores = new AccountScoreService(
 async function executeWorkerOperation(operation: OperationRequest): Promise<unknown> {
   const command = operation.command;
   if (command.kind === "scores.refresh") return await scores.refresh();
+  if (command.kind === "priority.plan.create") {
+    return await operations.generatePriorityPlan(command.recentCallLimit, command.operator);
+  }
   if (command.kind === "priority.plan.confirm") {
     return await operations.confirmPriorityPlan(command.planId, command.operator);
   }
+  if (command.kind === "priority.automation.run") return await operations.runDueAutomation();
   if (command.kind === "upstream.operation") {
     const response = await internal.upstreamOperation(command.operationId);
     const pending = response.operation as UpstreamWorkerOperation | undefined;
@@ -125,7 +129,9 @@ let consecutiveAutomationFailures = 0;
 const automationLoop = (async () => {
   while (!stopping) {
     try {
-      const result = await operations.runDueAutomation();
+      const result = temporal
+        ? await temporal.execute({ kind: "priority.automation.run" }) as Awaited<ReturnType<OperationsService["runDueAutomation"]>>
+        : await operations.runDueAutomation();
       consecutiveAutomationFailures = 0;
       if (result.due || (result as Record<string, unknown>).recovered === true) {
         console.log(JSON.stringify({ component: "priority-automation", ...result, valuesPrinted: false }));

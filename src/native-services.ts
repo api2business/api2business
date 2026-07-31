@@ -85,10 +85,7 @@ export function nativeComponentRequiresTemporalAddress(
   config: AppConfig,
   component: NativeServiceId,
 ): boolean {
-  return config.monitor.automaticRefresh.enabled
-    && config.runtime.native.services[component].envKeys.includes(
-      config.temporal.addressEnv,
-    );
+  return config.runtime.native.services[component].envKeys.includes(config.temporal.addressEnv);
 }
 
 function nativeEnvironment(

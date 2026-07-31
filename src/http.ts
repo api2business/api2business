@@ -323,7 +323,11 @@ export function createHandler(
         const input = await body(request);
         const limit = Number(input.recentCallLimit ?? config.monitor.recentCallLimit);
         if (!config.monitor.recentCallOptions.includes(limit)) return json({ ok: false, error: "评分样本档位无效" }, 400);
-        return json(await operations.generatePriorityPlan(limit, config.webAuth.username));
+        return json(await dispatcher.submit({
+          kind: "priority.plan.create",
+          recentCallLimit: limit,
+          operator: config.webAuth.username,
+        }), 202);
       }
       if (request.method === "GET" && url.pathname === "/api/operations/priority-state") {
         const limit = Number(url.searchParams.get("recentCallLimit") ?? config.monitor.recentCallLimit);
