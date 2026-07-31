@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config";
+import { isOAuthAccount } from "./account-score-eligibility";
 
 type Row = Record<string, unknown>;
 type ProcurementPolicy = AppConfig["sub2api"]["priorityPlan"]["procurementAdvice"];
@@ -67,7 +68,8 @@ export function buildProcurementAdvice(
 
   const scope = rows.filter((row) => {
     const groups = Array.isArray(row.groupIds) ? row.groupIds : [];
-    return row.platform === priorityPolicy.platform
+    return !isOAuthAccount(row)
+      && row.platform === priorityPolicy.platform
       && row.confidence === priorityPolicy.requiredConfidence
       && groups.some((id) => typeof id === "number" && priorityPolicy.eligibleGroupIds.includes(id))
       && number(row.score) !== null;

@@ -20,6 +20,8 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("e.recent_rank <= $4");
   expect(recentAccountAggregateQuery.match(/LIMIT \$1/gu)?.length).toBe(3);
   expect(recentAccountAggregateQuery).toContain("a.name = $2::text");
+  expect(recentAccountAggregateQuery).toContain("a.type AS account_type");
+  expect(recentAccountAggregateQuery).toContain("LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'");
   expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.name = $3::text");
   expect(recentAccountAggregateQuery).toContain("e.client_status_code BETWEEN 200 AND 399");
@@ -61,6 +63,7 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(row.availabilityReason).toMatchObject({ code: "account-error", label: "账号错误" });
   expect(row.currentStateScoreImpact).toBe("none");
   expect(row.priority).toBe(5);
+  expect(row.accountType).toBeNull();
 });
 
 test("unavailable reasons distinguish weekly quota, billing, authentication, and missing evidence", () => {

@@ -1,6 +1,7 @@
 import type { AppConfig } from "./config";
 import type { PriorityPlanPolicy } from "./config";
 import { buildProcurementAdvice } from "./account-procurement-advice";
+import { isOAuthAccount } from "./account-score-eligibility";
 
 type ScoreRow = Record<string, unknown>;
 
@@ -41,7 +42,8 @@ function buildPriorityProfile(
     : [];
   const profileRow = (row: ScoreRow): boolean => {
     const groups = Array.isArray(row.groupIds) ? row.groupIds : [];
-    return row.platform === policy.platform
+    return !isOAuthAccount(row)
+      && row.platform === policy.platform
       && groups.some((id) => typeof id === "number" && policy.eligibleGroupIds.includes(id));
   };
   const fixedAccountIds = new Set(Object.keys(policy.fixedPriorities));
@@ -119,7 +121,7 @@ function buildPriorityProfile(
       priorities,
       changes: fixedChanges,
       procurementAdvice: profile === "codex"
-        ? buildProcurementAdvice(rows, config, { minimum: 0, maximum: 0 })
+        ? buildProcurementAdvice(rows.filter((row) => !isOAuthAccount(row)), config, { minimum: 0, maximum: 0 })
         : { enabled: false, statusAlerts: [], recommendations: [] },
     };
   }
@@ -199,7 +201,7 @@ function buildPriorityProfile(
     };
   });
   const procurementAdvice = profile === "codex"
-    ? buildProcurementAdvice(rows, config, { minimum: minimumCost, maximum: maximumCost })
+    ? buildProcurementAdvice(rows.filter((row) => !isOAuthAccount(row)), config, { minimum: minimumCost, maximum: maximumCost })
     : { enabled: false, statusAlerts: [], recommendations: [] };
   return {
     ok: true,

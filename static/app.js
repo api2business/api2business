@@ -108,6 +108,8 @@ let scoreNextRefreshAt = null
 let priorityPlanRows = new Map()
 let priorityPlanVisible = false
 let activeScoreProfile = 'codex'
+let scorePage = 1
+const scorePageSize = 10
 
 function scoreProfile(row) {
   return String(row.platform ?? '').toLowerCase() === 'grok' ? 'grok' : 'codex'
@@ -146,8 +148,12 @@ function renderRefreshClock() {
 
 function renderScoreRows() {
   const term = ($('#score-filter')?.value ?? '').trim().toLowerCase()
-  const rows = scoreRowsForActiveProfile()
-    .filter((row) => `${row.accountName} ${row.groupName}`.toLowerCase().includes(term))
+  const filteredRows = scoreRowsForActiveProfile()
+    .filter((row) => `${row.accountName ?? ''} ${row.groupName ?? ''} ${(row.groupNames ?? []).join(' ')}`.toLowerCase().includes(term))
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / scorePageSize))
+  scorePage = Math.min(Math.max(scorePage, 1), totalPages)
+  const start = (scorePage - 1) * scorePageSize
+  const rows = filteredRows.slice(start, start + scorePageSize)
   $('#score-body').innerHTML = rows.length ? rows.map((row) => {
     const usage = row.usage ?? {}
     const planRow = priorityPlanRows.get(String(row.accountId))
@@ -177,6 +183,10 @@ function renderScoreRows() {
       <td class="availability-cell"><span class="availability ${available ? 'is-up' : 'is-down'}">${available ? '可用' : '不可用'}</span>${available ? '' : `<small title="${escapeHtml(reasonDetail)}">${escapeHtml(reason.label ?? '原因未记录')}</small>`}</td>
     </tr>`
   }).join('') : '<tr><td colspan="17" class="empty">没有匹配的账号</td></tr>'
+  const range = filteredRows.length === 0 ? '0 条' : `${start + 1}-${Math.min(start + scorePageSize, filteredRows.length)} / ${number(filteredRows.length)} 条`
+  $('#score-page').textContent = `${scorePage} / ${totalPages} · ${range}`
+  $('#score-prev').disabled = scorePage <= 1
+  $('#score-next').disabled = scorePage >= totalPages
 }
 
 function renderScoreMetrics(data = {}) {
@@ -210,10 +220,22 @@ function renderScores(data) {
 
 async function scoresPage() {
   const select = $('#score-call-limit')
-  $('#score-filter').addEventListener('input', renderScoreRows)
+  $('#score-filter').addEventListener('input', () => {
+    scorePage = 1
+    renderScoreRows()
+  })
+  $('#score-prev').addEventListener('click', () => {
+    scorePage -= 1
+    renderScoreRows()
+  })
+  $('#score-next').addEventListener('click', () => {
+    scorePage += 1
+    renderScoreRows()
+  })
   document.querySelectorAll('[data-score-profile]').forEach((button) => {
     button.addEventListener('click', () => {
       activeScoreProfile = button.dataset.scoreProfile
+      scorePage = 1
       document.querySelectorAll('[data-score-profile]').forEach((candidate) => {
         const selected = candidate === button
         candidate.classList.toggle('is-active', selected)

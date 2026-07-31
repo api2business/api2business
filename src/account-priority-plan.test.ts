@@ -103,6 +103,22 @@ test("priority plan reports billing depletion without scheduling unavailable acc
   expect(plan.priorities).not.toHaveProperty("1");
 });
 
+test("OAuth accounts are excluded from scoring-derived priority changes", () => {
+  const oauth = account(3, "https://oauth.example plus 0.1", 99);
+  (oauth as Record<string, unknown>).accountType = "oauth";
+  oauth.priority = 1;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    account(1, "https://alpha.example plus 0.1", 90),
+    oauth,
+  ] }, config);
+
+  expect(plan.eligibleCount).toBe(1);
+  expect(plan.changes).not.toEqual(expect.arrayContaining([
+    expect.objectContaining({ accountId: 3 }),
+  ]));
+  expect(plan.priorities).not.toHaveProperty("3");
+});
+
 test("reserve policy dynamically lowers priority as weekly quota is depleted", () => {
   const reserveConfig = structuredClone(config);
   reserveConfig.sub2api.priorityPlan.reservePolicies = {

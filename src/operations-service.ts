@@ -46,7 +46,7 @@ import {
 } from "./oauth-economics";
 
 const prioritiesByIdSql = `
-SELECT id::text AS id, priority::int AS priority
+SELECT id::text AS id, priority::int AS priority, type AS account_type
 FROM accounts
 WHERE id = ANY(string_to_array($1, ',')::bigint[])
 `;
@@ -305,6 +305,12 @@ export class OperationsService {
         String(row.id),
         Number(row.priority),
       ]));
+      const oauthIds = query.rows
+        .filter((row) => String(row.account_type ?? "").trim().toLowerCase() === "oauth")
+        .map((row) => String(row.id));
+      if (oauthIds.length > 0) {
+        throw new Error(`priority verification rejected OAuth accounts: ${oauthIds.join(",")}`);
+      }
       verifiedCount = [...expected].filter(([id, priority]) => actual.get(id) === priority).length;
       unmatchedPriorities = Object.fromEntries(
         [...expected].filter(([id, priority]) => actual.get(id) !== priority),

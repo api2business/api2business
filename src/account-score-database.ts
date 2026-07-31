@@ -3,6 +3,7 @@ import type {
   Sub2ApiReadClient,
   Sub2ApiReadPriority,
 } from "./sub2api-read-executor";
+import { isOAuthAccount } from "./account-score-eligibility";
 
 type Row = Record<string, unknown>;
 
@@ -12,6 +13,7 @@ WITH target_accounts AS (
     a.id AS account_id,
     a.name AS account_name,
     a.platform,
+    a.type AS account_type,
     a.status,
     a.schedulable,
     a.error_message,
@@ -30,6 +32,7 @@ WITH target_accounts AS (
   JOIN account_groups ag ON ag.account_id = a.id
   JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
   WHERE a.deleted_at IS NULL
+    AND LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'
     AND ($2::text IS NULL OR a.id::text = $2::text OR a.name = $2::text)
     AND (
       $3::text IS NULL
@@ -317,6 +320,7 @@ export function scoreRecentDatabaseRow(
     accountId: numeric(row.account_id),
     accountName,
     platform: row.platform,
+    accountType: row.account_type ?? row.type ?? null,
     status: row.status,
     schedulable: row.schedulable,
     priority: numeric(row.priority),
@@ -444,13 +448,15 @@ export async function collectRecentCallScoresFromDatabase(
       || String(row.account_name) === accountSelector);
     if (accountSelector !== null && selected.length !== 1) throw new Error(`account selector did not resolve exactly once: ${accountSelector}`);
     if (groupSelector !== null && selected.length === 0) throw new Error(`group selector resolved no scoreable accounts: ${groupSelector}`);
-    const accounts = sortScores(selected.map((row) => scoreRecentDatabaseRow(
-      row,
-      recentCallLimit,
-      String(row.platform) === "grok" ? config.sub2api.grokScorePolicy : config.sub2api.scorePolicy,
-      Date.now(),
-      (String(row.platform) === "grok" ? config.sub2api.grokPriorityPlan : config.sub2api.priorityPlan).procurementAdvice.billingErrorPatterns,
-    )));
+    const accounts = sortScores(selected
+      .filter((row) => !isOAuthAccount(row))
+      .map((row) => scoreRecentDatabaseRow(
+        row,
+        recentCallLimit,
+        String(row.platform) === "grok" ? config.sub2api.grokScorePolicy : config.sub2api.scorePolicy,
+        Date.now(),
+        (String(row.platform) === "grok" ? config.sub2api.grokPriorityPlan : config.sub2api.priorityPlan).procurementAdvice.billingErrorPatterns,
+      )));
   return {
       ok: true,
       mode: "recent-account-calls-postgresql-local-score",

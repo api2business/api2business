@@ -2,12 +2,14 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname } from "node:path";
 import { mergeAccountScores } from "./account-score-aggregation";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
+import { isOAuthAccount } from "./account-score-eligibility";
 import type { AppConfig } from "./config";
 import type { Sub2ApiClient } from "./sub2api-client";
 import type { RuntimePolicyEventSource } from "./runtime-policy-events";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 interface ScoreSnapshot {
+  cacheVersion: string;
   ok: boolean;
   status: "ready" | "refreshing" | "stale" | "unavailable";
   refreshedAt: string | null;
@@ -20,6 +22,8 @@ interface ScoreSnapshot {
   source: string;
   collection?: Record<string, unknown>;
 }
+
+const scoreCacheVersion = "api-key-only-v1";
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -64,6 +68,8 @@ export class AccountScoreService {
     return {
       ...result,
       accounts,
+      accountCount: accounts.length,
+      scoringScope: "non-oauth-accounts",
       status: "ready",
       refreshedAt: new Date().toISOString(),
       nextRefreshAt: null,
@@ -122,6 +128,7 @@ export class AccountScoreService {
         Array.isArray(row.groupNames) ? row.groupNames.map(String) : [],
       ))];
       this.snapshot = {
+        cacheVersion: scoreCacheVersion,
         ok: true,
         status: "ready",
         refreshedAt: refreshedAt.toISOString(),
@@ -155,6 +162,7 @@ export class AccountScoreService {
 
   private poolAccounts(accounts: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
     return accounts.filter((row) => {
+      if (isOAuthAccount(row)) return false;
       const eligibleGroupIds = String(row.platform ?? "").toLowerCase() === "grok"
         ? this.config.sub2api.grokPriorityPlan.eligibleGroupIds
         : this.config.sub2api.priorityPlan.eligibleGroupIds;
@@ -167,12 +175,15 @@ export class AccountScoreService {
     if (existsSync(this.cachePath)) {
       try {
         const cached = record(JSON.parse(readFileSync(this.cachePath, "utf8"))) as ScoreSnapshot | null;
-        if (cached) return { ...cached, accounts: mergeAccountScores(records(cached.accounts)) };
+        if (cached && cached.cacheVersion === scoreCacheVersion) {
+          return { ...cached, accounts: this.poolAccounts(mergeAccountScores(records(cached.accounts))) };
+        }
       } catch {
         // Invalid cache is replaced by the next successful refresh.
       }
     }
     return {
+      cacheVersion: scoreCacheVersion,
       ok: false,
       status: "unavailable",
       refreshedAt: null,

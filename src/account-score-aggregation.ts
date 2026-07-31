@@ -1,3 +1,5 @@
+import { isOAuthAccount } from "./account-score-eligibility";
+
 type Row = Record<string, unknown>;
 
 function record(value: unknown): Row | null {
@@ -53,7 +55,10 @@ function assessment(grade: string): string {
 
 export function mergeAccountScores(rows: Row[]): Row[] {
   const grouped = new Map<string, Row[]>();
-  for (const row of rows) grouped.set(accountKey(row), [...(grouped.get(accountKey(row)) ?? []), row]);
+  for (const row of rows) {
+    if (isOAuthAccount(row)) continue;
+    grouped.set(accountKey(row), [...(grouped.get(accountKey(row)) ?? []), row]);
+  }
 
   return [...grouped.values()].map((accountRows) => {
     const representative = accountRows[0]!;

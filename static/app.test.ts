@@ -157,6 +157,20 @@ test("score table separates Codex and Grok accounts with profile tabs", async ()
   expect(app).toContain("candidate.setAttribute('aria-selected', String(selected))");
 });
 
+test("score table renders a bounded ten-row page with local navigation", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+
+  expect(app).toContain("const scorePageSize = 10");
+  expect(app).toContain("filteredRows.slice(start, start + scorePageSize)");
+  expect(app).toContain("$('#score-prev').addEventListener('click'");
+  expect(app).toContain("$('#score-next').addEventListener('click'");
+  expect(app).toContain("scorePage = 1");
+  expect(html).toContain('id="score-prev"');
+  expect(html).toContain('id="score-page"');
+  expect(html).toContain('id="score-next"');
+});
+
 test("zero-change priority history is labelled as converged", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
 
