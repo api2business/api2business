@@ -166,9 +166,9 @@ function help(): Record<string, unknown> {
       "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
       "accounts oauth-economics [--over-api]",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
-      "accounts lifecycle retire-errors --day YYYY-MM-DD [--confirm] --over-api",
-      "accounts lifecycle status --id <job-id> --over-api",
-      "accounts lifecycle settle --id <job-id> --confirm --over-api",
+      "accounts lifecycle retire plan --day YYYY-MM-DD --over-api",
+      "accounts lifecycle retire status --id <plan-id> --over-api",
+      "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
@@ -242,6 +242,43 @@ export function summarizeWorkflowStatus(value: Record<string, unknown>): Record<
     summary.disclosure = "add --json for the complete workflow result";
   }
   return summary;
+}
+
+export function summarizeLifecycleResponse(value: Record<string, unknown>): Record<string, unknown> {
+  const job = record(value.job);
+  if (!job) return value;
+  const result = record(job.result);
+  const summary = record(result?.summary);
+  const settlement = record(job.settlement);
+  const accounting = record(settlement?.accounting);
+  const entry = record(accounting?.entry);
+  const logs = Array.isArray(job.logs) ? job.logs.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
+  return {
+    target: value.target,
+    transport: value.transport,
+    ok: value.ok,
+    planId: job.id,
+    state: job.state,
+    day: record(job.settings)?.day,
+    selectionMode: record(job.settings)?.selectionMode,
+    candidateCount: Array.isArray(job.candidates) ? job.candidates.length : 0,
+    excludedRateLimited: summary?.excludedRateLimited ?? null,
+    error: job.error ?? null,
+    settlement: entry ? {
+      accountCount: entry.accountCount,
+      grossAcquisitionCostCny: entry.grossAcquisitionCostCny,
+      apiAmountUsd: entry.apiAmountUsd,
+      grossCnyPerApiUsd: entry.grossCnyPerApiUsd,
+      remainingAccountCount: Array.isArray(settlement?.remainingAccountIds) ? settlement.remainingAccountIds.length : null,
+    } : null,
+    latestLog: logs.at(-1) ?? null,
+    next: job.state === "queued" || job.state === "running"
+      ? `accounts lifecycle retire status --id ${String(job.id)} --over-api`
+      : job.state === "succeeded"
+        ? `accounts lifecycle retire confirm --id ${String(job.id)} --confirm --over-api`
+        : null,
+    disclosure: "add --json for full candidates and logs",
+  };
 }
 
 function appCommand(parsed: Parsed, config: ReturnType<typeof loadConfig>): AppCommand | Record<string, unknown> {
@@ -372,15 +409,32 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       if (parsed.planType !== "k12" && parsed.planType !== "plus") throw new Error("--plan-type must be k12 or plus");
       return await client.accountLifecycleDetect({ day: parsed.day, planType: parsed.planType, model: parsed.model, confirm: parsed.confirm });
     }
-    if (verb === "retire-errors") {
-      if (!parsed.day) throw new Error("accounts lifecycle retire-errors requires --day");
-      return await client.accountLifecycleDetect({ day: parsed.day, planType: "all", selectionMode: "database-error", confirm: parsed.confirm });
+    if (verb === "retire") {
+      const phase = parsed.command[3];
+      if (phase === "plan") {
+        if (!parsed.day) throw new Error("accounts lifecycle retire plan requires --day");
+        if (parsed.confirm) throw new Error("retire plan does not accept --confirm; create the plan first");
+        return await client.accountLifecycleDetect({ day: parsed.day, planType: "all", selectionMode: "database-error", confirm: false });
+      }
+      if (!parsed.id) throw new Error(`accounts lifecycle retire ${phase ?? ""} requires --id`);
+      if (phase === "status") return await client.accountLifecycleStatus(parsed.id);
+      if (phase === "confirm") {
+        if (!parsed.confirm) return { ok: true, mutation: false, planId: parsed.id,
+          hint: `review with accounts lifecycle retire status --id ${parsed.id}, then add --confirm` };
+        const status = await client.accountLifecycleStatus(parsed.id);
+        const job = record(status.job);
+        const settings = record(job?.settings);
+        if (!job || settings?.selectionMode !== "database-error") throw new Error("retire confirm requires a database-error retirement plan");
+        if (job.state !== "succeeded") throw new Error(`retirement plan must be succeeded before confirm; current state is ${String(job.state)}`);
+        return await client.accountLifecycleSettle(parsed.id);
+      }
+      throw new Error("accounts lifecycle retire requires plan, status, or confirm");
     }
     if (!parsed.id) throw new Error(`accounts lifecycle ${verb ?? ""} requires --id`);
     if (verb === "status") return await client.accountLifecycleStatus(parsed.id);
     if (verb === "settle") return parsed.confirm ? await client.accountLifecycleSettle(parsed.id)
       : { ok: true, mutation: false, id: parsed.id, hint: "add --confirm to settle and delete the confirmed-dead batch" };
-    throw new Error("accounts lifecycle requires detect, retire-errors, status, or settle");
+    throw new Error("accounts lifecycle requires detect, status, settle, or retire plan|status|confirm");
   }
   if (group === "accounts" && action === "status") {
     if (!parsed.id) throw new Error("accounts status requires --id");
@@ -567,6 +621,7 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "accounts import-economics") emitAccountImportEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts oauth-economics") emitOAuthEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "profit daily") emitDailyProfit(output, parsed.json);
+    else if (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle" && !parsed.json) emit(summarizeLifecycleResponse(output), false);
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);
