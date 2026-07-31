@@ -72,9 +72,14 @@ function shell() {
   ]
   mount.innerHTML = `<header class="topbar">
     <a class="brand" href="/scores"><span class="brand-mark">AS</span><span><b>ApiState</b><small>Sub2API Operations</small></span></a>
-    <nav>${links.map(([id, href, label]) => `<a href="${href}"${page === id ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
+    <nav class="primary-nav" aria-label="主导航">${links.map(([id, href, label]) => `<a href="${href}"${page === id ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
     <div class="topbar-actions"><span class="live-sign"><i></i> PK01</span><button id="logout" class="text-command" type="button">退出</button></div>
   </header>`
+  const primaryNav = mount.querySelector('.primary-nav')
+  const activeLink = primaryNav?.querySelector('a[aria-current="page"]')
+  if (primaryNav && activeLink && primaryNav.scrollWidth > primaryNav.clientWidth) {
+    requestAnimationFrame(() => activeLink.scrollIntoView({ block: 'nearest', inline: 'center' }))
+  }
   $('#logout').addEventListener('click', async () => {
     await requestJson('/api/logout', { method: 'POST', body: '{}' }).catch(() => null)
     location.assign('/login')

@@ -87,6 +87,19 @@ test("priority adjustment history is paginated instead of growing without bound"
   expect(html).toContain('id="history-next"');
 });
 
+test("shared navigation remains stable and horizontally scrollable", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
+
+  expect(app).toContain('class="primary-nav" aria-label="主导航"');
+  expect(app).toContain("primaryNav.scrollWidth > primaryNav.clientWidth");
+  expect(app).toContain("activeLink.scrollIntoView({ block: 'nearest', inline: 'center' })");
+  expect(css).toContain("grid-template-columns: 260px minmax(0, 1fr) max-content");
+  expect(css).toContain("flex-wrap: nowrap");
+  expect(css).toContain("overflow-x: auto");
+  expect(css).toContain("-webkit-overflow-scrolling: touch");
+});
+
 test("operations tables request fixed server-side pages of ten records", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./operations.html", import.meta.url)).text();
