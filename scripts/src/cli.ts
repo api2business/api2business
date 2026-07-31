@@ -432,9 +432,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     }
     if (!parsed.id) throw new Error(`accounts lifecycle ${verb ?? ""} requires --id`);
     if (verb === "status") return await client.accountLifecycleStatus(parsed.id);
-    if (verb === "settle") return parsed.confirm ? await client.accountLifecycleSettle(parsed.id)
-      : { ok: true, mutation: false, id: parsed.id, hint: "add --confirm to settle and delete the confirmed-dead batch" };
-    throw new Error("accounts lifecycle requires detect, status, settle, or retire plan|status|confirm");
+    throw new Error("accounts lifecycle requires detect, status, or retire plan|status|confirm");
   }
   if (group === "accounts" && action === "status") {
     if (!parsed.id) throw new Error("accounts status requires --id");
