@@ -9,7 +9,7 @@
   --alert: #ff6b4a;
   --info: #70b7d4;
   --warning: #f0c84b;
-  --status-normal: #b6cc82;
+  --status-normal: #c9f15a;
   --status-rate-limited: #cdb37e;
   --status-error: #c98c82;
   --sans: "DIN 2014", "Noto Sans SC", "PingFang SC", sans-serif;
@@ -221,7 +221,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .oauth-cost-metrics #oauth-cost-output .usd-value { font-size: 28px; }
 .oauth-cost-table { min-width: 1370px; }
 .oauth-status-distribution { min-width: 220px; }
-.oauth-status-normal { color: var(--status-normal); }
+.oauth-status-normal { color: var(--status-normal); font-weight: 700; }
 .oauth-status-rate-limited { color: var(--status-rate-limited); }
 .oauth-status-error { color: var(--status-error); }
 .oauth-status-unavailable { color: var(--muted); }

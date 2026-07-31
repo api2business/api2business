@@ -118,6 +118,7 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(html).toContain('id="oauth-cost-refresh-countdown"');
   expect(html).toContain('class="oauth-cost-combined"');
   expect(html).toContain('id="oauth-cost-health-chart"');
+  expect(html.indexOf('class="oauth-cost-health-metric"')).toBeLessThan(html.indexOf('class="oauth-cost-output-metric"'));
   expect(html).toContain('class="query-spinner"');
   expect(app).toContain("oauth-output-progress");
   expect(app).toContain("oauth-cost-output-progress");
