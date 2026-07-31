@@ -202,7 +202,7 @@ test("uses the bounded successful-result cache without a second database query",
   await executor.close();
 });
 
-test("worker and CLI cannot instantiate or import the Sub2API database owner", () => {
+test("worker and CLI keep the Sub2API database owner in the API read broker", () => {
   const worker = readFileSync(new URL("./worker.ts", import.meta.url), "utf8");
   const cli = readFileSync(
     new URL("../scripts/src/cli.ts", import.meta.url),
@@ -215,10 +215,10 @@ test("worker and CLI cannot instantiate or import the Sub2API database owner", (
     expect(source).not.toContain("readSecret(config, config.sub2api.scoreDatabase");
     expect(source).not.toContain("scoreDatabaseUrlEnv");
   }
-  expect(worker).not.toContain("OperationsStore");
+  expect(worker).toContain("OperationsStore");
   expect(worker).not.toContain("createServerContext");
   expect(worker).toContain(
-    "const workflowEnabled = config.monitor.automaticRefresh.enabled",
+    "const temporalAddressValue = process.env[config.temporal.addressEnv]",
   );
   expect(worker).toContain("else await standaloneStop");
 });

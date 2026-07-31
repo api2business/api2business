@@ -592,7 +592,7 @@ export async function collectOAuthPoolEconomics(
   const expectedAllComplete = pool.expectedApiAmountUsd !== null
     && (archivedGroups.length === 0 || archived.expectedApiAmountUsd !== null);
   const expectedAllApiAmountUsd = expectedAllComplete
-    ? rounded(pool.expectedApiAmountUsd + (archived.expectedApiAmountUsd ?? 0), 8)
+    ? rounded((pool.expectedApiAmountUsd ?? 0) + (archived.expectedApiAmountUsd ?? 0), 8)
     : null;
   const all = {
     accountCount: pool.accountCount + archived.accountCount,

@@ -1,5 +1,7 @@
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import type { TemporalGateway } from "./temporal-client";
+import { runBoundedProcess } from "./bounded-process";
 import {
   readUpstreamRechargeCosts,
   rechargeTotalsByAccount,
@@ -49,22 +51,48 @@ export interface UpstreamAccount {
   rechargeCount: number;
 }
 
+export interface UpstreamCreateInput {
+  baseUrl: string;
+  apiKey: string;
+  suffix: string;
+  rateCnyPerApiUsd: number;
+  rechargeCny: number | null;
+  priority: number;
+  capacity: number;
+  groupIds: number[];
+  operationId: string;
+  description?: string;
+}
+
+export type UpstreamWorkerOperation =
+  | { action: "create"; input: UpstreamCreateInput }
+  | { action: "update"; input: { id: number; suffix?: string; rateCnyPerApiUsd?: number } }
+  | { action: "recharge"; input: { id: number; amountCny: number; operationId: string; description?: string } };
+
 export function buildRuntimeCreateArgs(
   target: string,
   settings: AppConfig["operations"]["upstreamManagement"],
   name: string,
   baseUrl: string,
+  overrides: {
+    priority?: number;
+    capacity?: number;
+    groupIds?: number[];
+  } = {},
 ): string[] {
+  const groupIds = overrides.groupIds ?? settings.groupIds;
+  const initialGroupId = groupIds.includes(settings.primaryGroupId) ? settings.primaryGroupId : groupIds[0];
+  if (initialGroupId === undefined) throw new Error("至少选择一个有效号池");
   return [
     "platform-infra", "sub2api", "codex-pool", "runtime", "create",
     "--target", target,
     "--name", name,
     "--base-url", baseUrl,
-    "--group", String(settings.primaryGroupId),
+    "--group", String(initialGroupId),
     "--platform", "openai",
     "--kind", "temp-unschedulable",
-    "--priority", String(settings.priority),
-    "--capacity", String(settings.capacity),
+    "--priority", String(overrides.priority ?? settings.priority),
+    "--capacity", String(overrides.capacity ?? settings.capacity),
     "--proxy-id", String(settings.proxyId),
     "--template", settings.defaultTemplate,
     "--confirm", "--json",
@@ -166,6 +194,31 @@ export function validateRecharge(value: unknown): number {
   return money(amount);
 }
 
+export function validatePriority(value: unknown): number {
+  const priority = Number(value);
+  if (!Number.isSafeInteger(priority) || priority < 1 || priority > 1000) {
+    throw new Error("初始优先级必须为 1 至 1000");
+  }
+  return priority;
+}
+
+export function validateCapacity(value: unknown): number {
+  const capacity = Number(value);
+  if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 100000) {
+    throw new Error("并发容量必须为 1 至 100000");
+  }
+  return capacity;
+}
+
+export function validateGroupIds(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length === 0 || value.some((item) => !Number.isSafeInteger(Number(item)) || Number(item) < 1)) {
+    throw new Error("至少选择一个有效号池");
+  }
+  const groupIds = [...new Set(value.map(Number))].sort((left, right) => left - right);
+  if (groupIds.length === 0) throw new Error("至少选择一个有效号池");
+  return groupIds;
+}
+
 export function formatRate(value: number): string {
   return value.toFixed(6).replace(/0+$/u, "").replace(/\.$/u, "");
 }
@@ -202,15 +255,16 @@ function parseJsonObject(stdout: string): Row | null {
   if (!trimmed) return null;
   const end = trimmed.lastIndexOf("}");
   if (end < 0) return null;
+  const candidates: Row[] = [];
   for (let start = trimmed.lastIndexOf("{"); start >= 0; start = trimmed.lastIndexOf("{", start - 1)) {
     try {
       const parsed = JSON.parse(trimmed.slice(start, end + 1)) as unknown;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Row;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) candidates.push(parsed as Row);
     } catch {
       // Continue with the previous JSON object boundary.
     }
   }
-  return null;
+  return candidates.find((candidate) => candidate.ok === true) ?? candidates[0] ?? null;
 }
 
 function nestedError(value: unknown): string | null {
@@ -229,10 +283,14 @@ function nestedError(value: unknown): string | null {
 }
 
 export function findAccountId(value: unknown): number | null {
+  return findAccountIdIn(value, false);
+}
+
+function findAccountIdIn(value: unknown, allowPlainId: boolean): number | null {
   if (!value || typeof value !== "object") return null;
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findAccountId(item);
+      const found = findAccountIdIn(item, allowPlainId);
       if (found !== null) return found;
     }
     return null;
@@ -242,8 +300,12 @@ export function findAccountId(value: unknown): number | null {
     const id = positiveInteger(row[key]);
     if (id !== null) return id;
   }
-  for (const key of ["runtime", "items", "actual", "result", "projection"]) {
-    const found = findAccountId(row[key]);
+  if (allowPlainId) {
+    const id = positiveInteger(row.id);
+    if (id !== null) return id;
+  }
+  for (const key of ["account", "accountInfo", "createdAccount", "accountData", "data", "runtime", "items", "actual", "result", "projection"]) {
+    const found = findAccountIdIn(row[key], ["account", "accountInfo", "createdAccount", "accountData", "data"].includes(key));
     if (found !== null) return found;
   }
   return null;
@@ -291,17 +353,32 @@ function operationId(value: string | null | undefined, prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+function isAlreadyExistsError(error: unknown): boolean {
+  return error instanceof UpstreamManagementError
+    && /account-name-already-exists|账号名称已存在|already exists/iu.test(error.message);
+}
+
 interface RuntimeCliResult {
   ok: boolean;
   exitCode: number;
   parsed: Row | null;
   error: string | null;
+  outputTruncated: boolean;
 }
 
 export class UpstreamManagementService {
   private ledgerWriteChain: Promise<void> = Promise.resolve();
+  private readonly pendingOperations = new Map<string, {
+    operation: UpstreamWorkerOperation;
+    submitted: Record<string, unknown>;
+    expiresAt: number;
+  }>();
 
-  constructor(private readonly config: AppConfig, private readonly reads: Sub2ApiReadClient) {}
+  constructor(
+    private readonly config: AppConfig,
+    private readonly reads: Sub2ApiReadClient,
+    private readonly temporal: TemporalGateway | null = null,
+  ) {}
 
   private readLedger(): UpstreamRechargeCostEntry[] {
     return readUpstreamRechargeCosts(this.config.operations.upstreamRechargeLedgerPath);
@@ -338,33 +415,168 @@ export class UpstreamManagementService {
     };
   }
 
+  options(): Record<string, unknown> {
+    const settings = this.config.operations.upstreamManagement;
+    return {
+      ok: true,
+      defaults: {
+        priority: settings.priority,
+        capacity: settings.capacity,
+        groupIds: [...settings.groupIds],
+      },
+      groups: [
+        { id: 2, name: "混池（unidesk-codex-pool）" },
+        { id: 3, name: "自用" },
+        { id: 6, name: "Grok" },
+      ],
+      valuesRedacted: true,
+    };
+  }
+
+  private prunePendingOperations(): void {
+    const now = Date.now();
+    for (const [id, entry] of this.pendingOperations) {
+      if (entry.expiresAt <= now) this.pendingOperations.delete(id);
+    }
+  }
+
+  private async submitOperation(
+    operationIdValue: string,
+    operation: UpstreamWorkerOperation,
+  ): Promise<Record<string, unknown>> {
+    this.prunePendingOperations();
+    const previous = this.pendingOperations.get(operationIdValue);
+    if (previous) return { ...previous.submitted };
+    if (!this.temporal) throw new UpstreamManagementError("Temporal worker 当前不可用", 503, { operation: operation.action });
+    const submitted = await this.temporal.submit({ kind: "upstream.operation", operationId: operationIdValue });
+    const result: Record<string, unknown> = {
+      ...submitted,
+      ok: true,
+      operation: "submitted",
+      action: operation.action,
+      operationId: operationIdValue,
+    };
+    this.pendingOperations.set(operationIdValue, {
+      operation,
+      submitted: result,
+      expiresAt: Date.now() + 30 * 60_000,
+    });
+    return result;
+  }
+
+  private createInput(input: {
+    baseUrl: string;
+    apiKey: string;
+    suffix: string;
+    rateCnyPerApiUsd: unknown;
+    rechargeCny?: unknown;
+    priority?: unknown;
+    capacity?: unknown;
+    groupIds?: unknown;
+    operationId?: string | null;
+    description?: string;
+  }): UpstreamCreateInput {
+    const settings = this.config.operations.upstreamManagement;
+    const baseUrl = normalizeBaseUrl(input.baseUrl);
+    const suffix = validateSuffix(input.suffix);
+    const rateCnyPerApiUsd = validateRate(input.rateCnyPerApiUsd);
+    const apiKey = input.apiKey.trim();
+    if (!/^sk-[A-Za-z0-9_=+/.-]{16,}$/u.test(apiKey)) throw new Error("API key 格式无效");
+    const rechargeCny = input.rechargeCny === undefined || input.rechargeCny === null || input.rechargeCny === ""
+      ? null : validateRecharge(input.rechargeCny);
+    const priority = input.priority === undefined || input.priority === null || input.priority === ""
+      ? settings.priority : validatePriority(input.priority);
+    const capacity = input.capacity === undefined || input.capacity === null || input.capacity === ""
+      ? settings.capacity : validateCapacity(input.capacity);
+    const groupIds = input.groupIds === undefined || input.groupIds === null
+      ? [...settings.groupIds] : validateGroupIds(input.groupIds);
+    return {
+      baseUrl,
+      apiKey,
+      suffix,
+      rateCnyPerApiUsd,
+      rechargeCny,
+      priority,
+      capacity,
+      groupIds,
+      operationId: operationId(input.operationId, "upstream-create"),
+      description: input.description,
+    };
+  }
+
+  async submitCreate(input: Parameters<UpstreamManagementService["create"]>[0] & {
+    operationId?: string | null;
+  }): Promise<Record<string, unknown>> {
+    const prepared = this.createInput(input);
+    return await this.submitOperation(prepared.operationId, { action: "create", input: prepared });
+  }
+
+  async submitUpdate(id: number, input: {
+    suffix?: unknown;
+    rateCnyPerApiUsd?: unknown;
+    operationId?: string | null;
+  }): Promise<Record<string, unknown>> {
+    if (!positiveInteger(id)) throw new Error("上游账号 ID 无效");
+    const suffix = input.suffix === undefined ? undefined : validateSuffix(String(input.suffix));
+    const rateCnyPerApiUsd = input.rateCnyPerApiUsd === undefined ? undefined : validateRate(input.rateCnyPerApiUsd);
+    const idempotency = operationId(input.operationId, `upstream-update-${id}`);
+    return await this.submitOperation(idempotency, {
+      action: "update",
+      input: { id, suffix, rateCnyPerApiUsd },
+    });
+  }
+
+  async submitRecharge(id: number, input: {
+    amountCny: unknown;
+    operationId?: string | null;
+    description?: string;
+  }): Promise<Record<string, unknown>> {
+    if (!positiveInteger(id)) throw new Error("上游账号 ID 无效");
+    const amountCny = validateRecharge(input.amountCny);
+    const idempotency = operationId(input.operationId, `upstream-recharge-${id}`);
+    return await this.submitOperation(idempotency, {
+      action: "recharge",
+      input: { id, amountCny, operationId: idempotency, description: input.description },
+    });
+  }
+
+  claimOperation(id: string): UpstreamWorkerOperation | null {
+    this.prunePendingOperations();
+    return this.pendingOperations.get(id)?.operation ?? null;
+  }
+
+  completeOperation(id: string): Record<string, unknown> {
+    const deleted = this.pendingOperations.delete(id);
+    return { ok: true, operationId: id, released: deleted, valuesPrinted: false };
+  }
+
+  async workflowStatus(id: string): Promise<Record<string, unknown>> {
+    if (!this.temporal) throw new UpstreamManagementError("Temporal worker 当前不可用", 503, { operation: "status" });
+    return await this.temporal.status(id);
+  }
+
   private async runtime(args: string[], apiKey: string | null = null): Promise<RuntimeCliResult> {
     const command = [this.config.monitor.cli.executable, this.config.monitor.cli.entrypoint, ...args];
-    const child = Bun.spawn(command, {
+    const result = await runBoundedProcess(command, {
       cwd: this.config.monitor.cli.workDir,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
+      stdin: apiKey ?? undefined,
       env: process.env,
+      timeoutMs: this.config.monitor.cli.timeoutMs,
     });
-    if (apiKey !== null) child.stdin.write(apiKey);
-    child.stdin.end();
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, this.config.monitor.cli.timeoutMs);
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
-    clearTimeout(timer);
+    const { stdout, stderr, exitCode, timedOut, stdoutTruncated, stderrTruncated } = result;
     const parsed = parseJsonObject(stdout);
-    const error = timedOut
+    const error = stdoutTruncated || stderrTruncated
+      ? "runtime CLI 输出超过上限"
+      : timedOut
       ? `runtime CLI 超时（${this.config.monitor.cli.timeoutMs}ms）`
       : nestedError(parsed) ?? (stderr.trim() ? safeMessage(stderr.trim()) : null);
-    return { ok: !timedOut && exitCode === 0 && parsed?.ok === true, exitCode: timedOut ? 124 : exitCode, parsed, error };
+    return {
+      ok: !timedOut && !stdoutTruncated && !stderrTruncated && exitCode === 0 && parsed?.ok === true,
+      exitCode,
+      parsed,
+      error,
+      outputTruncated: stdoutTruncated || stderrTruncated,
+    };
   }
 
   private async requireRuntime(args: string[], apiKey: string | null, operation: string): Promise<RuntimeCliResult> {
@@ -396,6 +608,43 @@ export class UpstreamManagementService {
     if (!row) return null;
     const entries = this.readLedger();
     return rowToAccount(row, rechargeTotalsByAccount(entries), entries);
+  }
+
+  private async accountQueryByIdentity(name: string, baseUrl: string): Promise<UpstreamAccount | null> {
+    const query = await this.reads.query<Row>({
+      key: `upstream-account-identity:${name}:${baseUrl}`,
+      kind: "upstream-account-identity",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: `${accountSelect}
+        WHERE a.deleted_at IS NULL
+          AND LOWER(a.type) = 'apikey'
+          AND a.name = $1::text
+          AND RTRIM(COALESCE(a.credentials->>'base_url', ''), '/') = RTRIM($2::text, '/')
+        GROUP BY a.id
+        ORDER BY a.id DESC
+        LIMIT 1`,
+      parameters: [name, baseUrl],
+    });
+    const row = query.rows[0];
+    if (!row) return null;
+    const entries = this.readLedger();
+    return rowToAccount(row, rechargeTotalsByAccount(entries), entries);
+  }
+
+  private async resolveCreatedAccount(
+    accountId: number | null,
+    name: string,
+    baseUrl: string,
+  ): Promise<UpstreamAccount | null> {
+    const direct = accountId === null ? null : await this.accountQuery(accountId);
+    if (direct) return direct;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const byIdentity = await this.accountQueryByIdentity(name, baseUrl);
+      if (byIdentity) return byIdentity;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return null;
   }
 
   async list(page: number, search: string | null): Promise<Record<string, unknown>> {
@@ -458,6 +707,9 @@ export class UpstreamManagementService {
     suffix: string;
     rateCnyPerApiUsd: unknown;
     rechargeCny?: unknown;
+    priority?: unknown;
+    capacity?: unknown;
+    groupIds?: unknown;
     operationId?: string | null;
     description?: string;
   }): Promise<Record<string, unknown>> {
@@ -469,21 +721,47 @@ export class UpstreamManagementService {
       ? null : validateRecharge(input.rechargeCny);
     const name = formatUpstreamName(baseUrl, suffix, rate);
     const settings = this.config.operations.upstreamManagement;
+    const priority = input.priority === undefined || input.priority === null || input.priority === ""
+      ? settings.priority : validatePriority(input.priority);
+    const capacity = input.capacity === undefined || input.capacity === null || input.capacity === ""
+      ? settings.capacity : validateCapacity(input.capacity);
+    const groupIds = input.groupIds === undefined || input.groupIds === null
+      ? [...settings.groupIds] : validateGroupIds(input.groupIds);
     const target = this.config.monitor.target;
-    const createResult = await this.requireRuntime(
-      buildRuntimeCreateArgs(target, settings, name, baseUrl),
-      input.apiKey.trim(),
-      "runtime create",
-    );
-    const accountId = findAccountId(createResult.parsed);
-    if (accountId === null) throw new UpstreamManagementError("runtime 创建成功但未返回账号 ID", 502, { operation: "create" });
+    let createResult: RuntimeCliResult | null = null;
+    let account = await this.accountQueryByIdentity(name, baseUrl);
+    let recovered = account !== null;
+    if (!account) {
+      try {
+        createResult = await this.requireRuntime(
+          buildRuntimeCreateArgs(target, settings, name, baseUrl, { priority, capacity, groupIds }),
+          input.apiKey.trim(),
+          "runtime create",
+        );
+      } catch (error) {
+        if (!isAlreadyExistsError(error)) throw error;
+        recovered = true;
+      }
+    }
+    const accountId = findAccountId(createResult?.parsed) ?? account?.id ?? null;
+    account = await this.resolveCreatedAccount(accountId, name, baseUrl);
+    if (!account) {
+      throw new UpstreamManagementError(
+        recovered || createResult !== null
+          ? "runtime 已创建或已存在账号，但排队回读未找到稳定账号 ID；请勿重复创建，稍后从上游列表重试"
+          : "runtime 创建失败且排队回读未找到同名账号",
+        502,
+        { operation: "create", partial: recovered || createResult !== null },
+      );
+    }
+    const resolvedAccountId = account.id;
     try {
       await this.requireRuntime([
         "platform-infra", "sub2api", "codex-pool", "runtime", "apply",
         "--target", target,
-        "--account", String(accountId),
+        "--account", String(resolvedAccountId),
         "--kind", "groups",
-        "--groups", settings.groupIds.join(","),
+        "--groups", groupIds.join(","),
         "--confirm", "--json",
       ], null, "上游分组绑定");
     } catch (error) {
@@ -491,18 +769,16 @@ export class UpstreamManagementService {
         throw new UpstreamManagementError("账号已创建，但默认分组绑定失败", 502, {
           operation: "groups",
           partial: true,
-          accountId,
+          accountId: resolvedAccountId,
         });
       }
       throw error;
     }
-    let account = await this.accountQuery(accountId);
-    if (!account) throw new UpstreamManagementError("runtime 创建完成但排队查询未找到账号", 502, { operation: "create", accountId });
     let accounting: Record<string, unknown> | null = null;
     if (recharge !== null) {
       try {
         accounting = await this.recordRecharge({
-          operationId: operationId(input.operationId, `upstream-create-${accountId}`),
+          operationId: operationId(input.operationId, `upstream-create-${resolvedAccountId}`),
           account,
           amountCny: recharge,
           description: input.description,
@@ -511,16 +787,16 @@ export class UpstreamManagementService {
         throw new UpstreamManagementError(
           `账号已创建，但人民币充值记账失败：${error instanceof Error ? error.message : String(error)}`,
           500,
-          { operation: "accounting", partial: true, accountId },
+          { operation: "accounting", partial: true, accountId: resolvedAccountId },
         );
       }
-      const refreshed = await this.accountQuery(accountId);
+      const refreshed = await this.accountQuery(resolvedAccountId);
       if (!refreshed) throw new UpstreamManagementError("充值记账完成但排队查询未找到账号", 502, {
-        operation: "create", partial: true, accountId, accounting,
+        operation: "create", partial: true, accountId: resolvedAccountId, accounting,
       });
       account = refreshed;
     }
-    return { ok: true, operation: "create", account, accounting };
+    return { ok: true, operation: recovered ? "create-recovered" : "create", recovered, account, accounting };
   }
 
   async update(id: number, input: {

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import type { AppConfig } from "./config";
 import type { Sub2ApiSystemLog } from "./sub2api-client";
+import { runBoundedProcess } from "./bounded-process";
 
 type Row = Record<string, unknown>;
 
@@ -62,23 +63,15 @@ export class UniDeskRuntimePolicyEventSource implements RuntimePolicyEventSource
       "--since", window,
       "--raw",
     ];
-    const child = Bun.spawn([this.config.monitor.cli.executable, ...args], {
+    const result = await runBoundedProcess([this.config.monitor.cli.executable, ...args], {
       cwd: this.workDir,
-      stdout: "pipe",
-      stderr: "pipe",
       env: { ...Bun.env, UNIDESK_MAIN_SERVER_IP: this.config.monitor.cli.mainServerHost },
+      timeoutMs: this.config.monitor.cli.timeoutMs,
+      maxOutputBytes: 16 * 1024 * 1024,
     });
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, this.config.monitor.cli.timeoutMs);
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]).finally(() => clearTimeout(timeout));
-    if (timedOut) throw new Error(`runtime events CLI timed out after ${this.config.monitor.cli.timeoutMs}ms`);
+    const { stdout, stderr, exitCode } = result;
+    if (result.timedOut) throw new Error(`runtime events CLI timed out after ${this.config.monitor.cli.timeoutMs}ms`);
+    if (result.stdoutTruncated || result.stderrTruncated) throw new Error("runtime events CLI output exceeded the bounded limit");
     if (exitCode !== 0) throw new Error(`runtime events CLI exited ${exitCode}: ${stderr.trim().slice(-600)}`);
     const payload = readCliPayload(stdout);
     const rows = Array.isArray(payload.events) ? payload.events.map(record).filter((item): item is Row => item !== null) : [];

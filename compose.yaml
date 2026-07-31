@@ -16,7 +16,9 @@ services:
     restart: unless-stopped
     network_mode: host
     env_file: .state/compose/apistate.env
-    volumes: ["/workspace/unidesk:/workspace/unidesk:ro"]
+    volumes:
+      - /workspace/unidesk:/workspace/unidesk:ro
+      - /root/apistate/.state/ledger:/root/apistate/.state/ledger
     command: ["bun", "src/worker.ts", "--config", "config/sub2rank.yaml", "--runtime", "compose"]
     depends_on: [api]
   web:

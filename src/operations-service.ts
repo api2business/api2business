@@ -36,6 +36,7 @@ import { collectUserBalanceLiability } from "./user-balance-liability";
 import { collectDailyProfitFacts } from "./daily-profit-facts";
 import { readAccountImportCosts } from "./account-import-cost-ledger";
 import { readUpstreamRechargeCosts } from "./upstream-recharge-ledger";
+import { runBoundedProcess } from "./bounded-process";
 import {
   collectAccountImportEconomics,
   type AccountImportEconomicsInput,
@@ -356,27 +357,19 @@ export class OperationsService {
       "--target", this.config.monitor.target, "--kind", "priority",
       "--priorities-json", JSON.stringify(priorities), "--write-only", "--confirm",
     ];
-    const proc = Bun.spawn([this.config.monitor.cli.executable, ...args], {
-      cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe",
-      env: { ...Bun.env, UNIDESK_MAIN_SERVER_IP: this.config.monitor.cli.mainServerHost },
-    });
     const startedAt = Date.now();
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      proc.kill();
-    }, this.config.monitor.cli.timeoutMs);
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
-    ]);
-    clearTimeout(timeout);
+    const processResult = await runBoundedProcess([this.config.monitor.cli.executable, ...args], {
+      cwd: this.config.monitor.cli.workDir,
+      env: { ...Bun.env, UNIDESK_MAIN_SERVER_IP: this.config.monitor.cli.mainServerHost },
+      timeoutMs: this.config.monitor.cli.timeoutMs,
+    });
     return {
-      ok: !timedOut && exitCode === 0,
-      exitCode,
-      timedOut,
+      ok: !processResult.timedOut && !processResult.stdoutTruncated && !processResult.stderrTruncated && processResult.exitCode === 0,
+      exitCode: processResult.exitCode,
+      timedOut: processResult.timedOut,
       writeDurationMs: Date.now() - startedAt,
-      outputAvailable: stdout.length > 0,
-      error: stderr.slice(-1000),
+      outputAvailable: processResult.stdout.length > 0,
+      error: processResult.stderr.slice(-1000),
     };
   }
 

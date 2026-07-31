@@ -4,6 +4,7 @@ import type { AppConfig } from "./config";
 import { readAccountImportCosts } from "./account-import-cost-ledger";
 import { parseAccountEconomicsWindow } from "./account-batch-economics";
 import { recordLifecycleSettlement } from "./account-lifecycle-ledger";
+import { runBoundedProcess } from "./bounded-process";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { parse } from "yaml";
 
@@ -199,16 +200,14 @@ export class AccountLifecycleService {
   }
 
   private async runCli(args: string[], timeoutMs: number): Promise<Row> {
-    const proc = Bun.spawn([this.config.monitor.cli.executable, this.config.monitor.cli.entrypoint, ...args], {
-      cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env,
+    const result = await runBoundedProcess([this.config.monitor.cli.executable, this.config.monitor.cli.entrypoint, ...args], {
+      cwd: this.config.monitor.cli.workDir,
+      env: process.env,
+      timeoutMs,
     });
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; proc.kill(); }, timeoutMs);
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
-    ]);
-    clearTimeout(timer);
-    if (timedOut) throw new Error("UniDesk runtime CLI timed out");
+    const { stdout, stderr, exitCode } = result;
+    if (result.timedOut) throw new Error("UniDesk runtime CLI timed out");
+    if (result.stdoutTruncated || result.stderrTruncated) throw new Error("UniDesk runtime CLI output exceeded the bounded limit");
     let output: Row;
     try { output = JSON.parse(stdout) as Row; }
     catch { throw new Error(`UniDesk runtime CLI returned invalid JSON: ${safeMessage(stderr || stdout)}`); }

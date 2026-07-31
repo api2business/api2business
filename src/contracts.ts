@@ -11,7 +11,9 @@ export type AppCommand =
   | { kind: "lottery.reset"; draws: number; includeRecords: boolean }
   | { kind: "records.list"; limit: number }
   | { kind: "records.delete"; id: string }
-  | { kind: "credit.test"; execute: boolean };
+  | { kind: "credit.test"; execute: boolean }
+  | { kind: "upstream.operation"; operationId: string }
+  | { kind: "priority.plan.confirm"; planId: string; operator: string };
 
 export interface OperationRequest {
   operationId: string;
@@ -33,5 +35,7 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "lottery.draw"
     || command.kind === "lottery.reset"
     || command.kind === "records.delete"
-    || (command.kind === "credit.test" && command.execute);
+    || (command.kind === "credit.test" && command.execute)
+    || command.kind === "upstream.operation"
+    || command.kind === "priority.plan.confirm";
 }

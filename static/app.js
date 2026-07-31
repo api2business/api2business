@@ -1020,6 +1020,20 @@ function upstreamOperationId(prefix) {
   return `${prefix}-${typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
 }
 
+async function waitUpstreamJob(workflowId, timeoutMs = 600000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const status = await requestJson(`/api/upstreams/jobs/${encodeURIComponent(workflowId)}`, {}, 20000)
+    if (status.terminal) {
+      if (status.state !== 'completed') throw new Error(status.error ?? `上游作业${status.state ?? '失败'}`)
+      if (!status.result?.ok) throw new Error(status.result?.error ?? '上游作业未成功完成')
+      return status.result
+    }
+    if (Date.now() >= deadline) throw new Error('上游作业等待超时，请到上游列表核对作业结果')
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+}
+
 async function upstreamsPage() {
   const createDialog = $('#upstream-create-dialog')
   const editDialog = $('#upstream-edit-dialog')
@@ -1030,6 +1044,18 @@ async function upstreamsPage() {
   let lastUpstreamRows = []
   let createOperationId = null
   let editRechargeOperationId = null
+  let upstreamGroupOptions = []
+  try {
+    const options = await requestJson('/api/upstreams/options')
+    upstreamGroupOptions = Array.isArray(options.groups) ? options.groups : []
+    const defaults = options.defaults ?? {}
+    $('#upstream-create-priority').value = String(defaults.priority ?? 1)
+    $('#upstream-create-capacity').value = String(defaults.capacity ?? 16)
+    const defaultGroupIds = Array.isArray(defaults.groupIds) ? defaults.groupIds.map(Number) : [2, 3]
+    $('#upstream-create-groups').innerHTML = upstreamGroupOptions.map((group) => `<label><input type="checkbox" value="${escapeHtml(group.id)}" ${defaultGroupIds.includes(Number(group.id)) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${escapeHtml(group.id)}</b></span></label>`).join('')
+  } catch (error) {
+    $('#upstream-create-groups').innerHTML = `<span class="upstream-group-loading">号池选项读取失败：${escapeHtml(error instanceof Error ? error.message : String(error))}</span>`
+  }
   const render = (data) => {
     const rows = Array.isArray(data.accounts) ? data.accounts : []
     lastUpstreamRows = rows
@@ -1113,7 +1139,7 @@ async function upstreamsPage() {
     event.target.click()
   })
   $('#upstream-create').addEventListener('click', () => {
-    $('#upstream-create-state').textContent = '创建时将使用默认优先级 1、容量 16、混池 #2、自用 #3、Proxy #3 和切号模板。'
+    $('#upstream-create-state').textContent = '创建时将使用当前优先级、并发容量、号池、Proxy #3 和切号模板。'
     $('#upstream-create-state').removeAttribute('data-state')
     createOperationId = upstreamOperationId('upstream-create')
     createDialog.showModal()
@@ -1127,11 +1153,13 @@ async function upstreamsPage() {
     event.preventDefault()
     const button = $('#upstream-create-submit')
     button.disabled = true
-    $('#upstream-create-state').textContent = '正在调用 runtime 创建并绑定分组，API key 不会回显…'
+    $('#upstream-create-state').textContent = '作业已提交，Temporal worker 正在创建并绑定分组，API key 不会回显…'
     try {
       const operation = createOperationId ?? (createOperationId = upstreamOperationId('upstream-create'))
       const rechargeValue = $('#upstream-create-recharge').value.trim()
-      const result = await requestJson('/api/upstreams', {
+      const groupIds = [...document.querySelectorAll('#upstream-create-groups input:checked')].map((input) => Number(input.value))
+      if (groupIds.length === 0) throw new Error('至少选择一个号池')
+      const submitted = await requestJson('/api/upstreams', {
         method: 'POST',
         headers: { 'Idempotency-Key': operation },
         body: JSON.stringify({
@@ -1139,10 +1167,14 @@ async function upstreamsPage() {
           apiKey: $('#upstream-create-api-key').value,
           suffix: $('#upstream-create-suffix').value,
           rateCnyPerApiUsd: Number($('#upstream-create-rate').value),
+          priority: Number($('#upstream-create-priority').value),
+          capacity: Number($('#upstream-create-capacity').value),
+          groupIds,
           rechargeCny: rechargeValue ? Number(rechargeValue) : undefined,
           operationId: operation,
         }),
-      }, 300000)
+      }, 20000)
+      const result = await waitUpstreamJob(submitted.workflowId)
       $('#upstream-create-state').textContent = `创建成功：账号 #${result.account?.id ?? '—'}${result.accounting?.mutation ? `，已记账 ${cny(result.accounting.amountCny)}` : ''}`
       $('#upstream-create-state').dataset.state = 'success'
       $('#upstream-create-api-key').value = ''
@@ -1164,18 +1196,21 @@ async function upstreamsPage() {
     $('#upstream-edit-state').removeAttribute('data-state')
     try {
       const id = Number(activeUpstream.id)
-      await requestJson(`/api/upstreams/${id}`, {
+      const submittedUpdate = await requestJson(`/api/upstreams/${id}`, {
         method: 'PATCH',
+        headers: { 'Idempotency-Key': upstreamOperationId(`upstream-update-${id}`) },
         body: JSON.stringify({ suffix: $('#upstream-edit-suffix').value, rateCnyPerApiUsd: Number($('#upstream-edit-rate').value) }),
       })
+      await waitUpstreamJob(submittedUpdate.workflowId)
       const rechargeValue = $('#upstream-edit-recharge').value.trim()
       let recharge = null
       if (rechargeValue) {
-        recharge = await requestJson(`/api/upstreams/${id}/recharge`, {
+        const submittedRecharge = await requestJson(`/api/upstreams/${id}/recharge`, {
           method: 'POST',
           headers: { 'Idempotency-Key': editRechargeOperationId ?? upstreamOperationId(`upstream-recharge-${id}`) },
           body: JSON.stringify({ amountCny: Number(rechargeValue) }),
-        }, 300000)
+        }, 20000)
+        recharge = await waitUpstreamJob(submittedRecharge.workflowId)
       }
       $('#upstream-edit-state').textContent = recharge?.recovered ? '调整与充值完成，已恢复调度。' : '调整完成。'
       $('#upstream-edit-state').dataset.state = 'success'

@@ -26,7 +26,6 @@ const reads = new SingleConnectionSub2ApiReadExecutor(
 );
 const context = createServerContext(config, target, reads);
 const temporalAddress = process.env[config.temporal.addressEnv];
-if (config.monitor.automaticRefresh.enabled && !temporalAddress) throw new Error(`server target requires env ${config.temporal.addressEnv}`);
 const temporal = temporalAddress
   ? await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId })
   : null;
@@ -41,11 +40,11 @@ const operations = new OperationsService(
 await operations.initialize();
 const imports = new AccountImportService(config, reads);
 const lifecycle = new AccountLifecycleService(config, reads);
-const upstreams = new UpstreamManagementService(config, reads);
+const upstreams = new UpstreamManagementService(config, reads, temporal);
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle, upstreams),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle, upstreams, reads),
 });
 
 console.log(JSON.stringify({

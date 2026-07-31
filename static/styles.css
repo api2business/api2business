@@ -303,6 +303,9 @@ button:disabled { cursor: wait; opacity: .48; }
 .upstream-dialog footer .text-command { color: var(--muted); }
 .upstream-dialog [data-state="error"] { color: var(--alert); }
 .upstream-dialog [data-state="success"] { color: var(--signal); }
+.upstream-group-picker { margin: 18px 0 0; }
+.upstream-group-picker label { cursor: pointer; }
+.upstream-group-loading { color: var(--muted); font: 10px/1.4 var(--mono); }
 
 @media (max-width: 700px) {
   .upstream-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }

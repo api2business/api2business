@@ -6,6 +6,14 @@ import { automationPollDelayMs } from "./automation-poll-backoff";
 import type { OperationRequest } from "./contracts";
 import { requiredOption } from "./runtime-args";
 import { temporalAddress, TemporalGateway } from "./temporal-client";
+import { RemoteSub2ApiReadClient } from "./remote-sub2api-read-client";
+import { UpstreamManagementService, type UpstreamWorkerOperation } from "./upstream-management";
+import { OperationsStore } from "./operations-store";
+import { OperationsService } from "./operations-service";
+import { AccountScoreService } from "./account-score-service";
+import { Sub2ApiClient } from "./sub2api-client";
+import { UniDeskRuntimePolicyEventSource } from "./runtime-policy-events";
+import { resolveDataPath } from "./config";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -19,10 +27,47 @@ if (!internalTarget || internalTarget.mode !== "http") {
 const internal = new AdminHttpClient(config, runtimeId === "compose"
   ? { ...internalTarget, baseUrl: "http://127.0.0.1:8080", adminToken: { envKey: target.adminTokenEnv } }
   : internalTarget);
-const workflowEnabled = config.monitor.automaticRefresh.enabled;
+const temporalAddressValue = process.env[config.temporal.addressEnv];
+const workflowEnabled = Boolean(temporalAddressValue);
 const connection = workflowEnabled
   ? await NativeConnection.connect({ address: temporalAddress(config) })
   : null;
+const remoteReads = new RemoteSub2ApiReadClient(internal);
+const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
+if (!operationsDatabaseUrl) throw new Error(`worker requires env ${config.operations.databaseUrlEnv}`);
+const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), remoteReads);
+await operations.initialize();
+const upstreams = new UpstreamManagementService(config, remoteReads);
+const email = process.env[target.sub2apiAdminEmailEnv];
+const password = process.env[target.sub2apiAdminPasswordEnv];
+if (!email || !password) throw new Error("worker requires Sub2API admin credentials");
+const scores = new AccountScoreService(
+  config,
+  resolveDataPath(config, target.scoreCachePath),
+  new Sub2ApiClient(config, { email, password }),
+  new UniDeskRuntimePolicyEventSource(config, target.monitorWorkDir),
+  remoteReads,
+);
+
+async function executeWorkerOperation(operation: OperationRequest): Promise<unknown> {
+  const command = operation.command;
+  if (command.kind === "scores.refresh") return await scores.refresh();
+  if (command.kind === "priority.plan.confirm") {
+    return await operations.confirmPriorityPlan(command.planId, command.operator);
+  }
+  if (command.kind === "upstream.operation") {
+    const response = await internal.upstreamOperation(command.operationId);
+    const pending = response.operation as UpstreamWorkerOperation | undefined;
+    if (!pending) throw new Error("上游 Temporal 作业缺少有效操作内容");
+    let result: Record<string, unknown>;
+    if (pending.action === "create") result = await upstreams.create(pending.input);
+    else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
+    else result = await upstreams.recharge(pending.input.id, pending.input);
+    await internal.completeUpstreamOperation(command.operationId);
+    return result;
+  }
+  return await internal.executeOperation(operation);
+}
 const worker = connection
   ? await Worker.create({
     connection,
@@ -30,8 +75,7 @@ const worker = connection
     taskQueue: target.temporalTaskQueue,
     workflowsPath: fileURLToPath(new URL("./workflows.ts", import.meta.url)),
     activities: {
-      executeOperation: async (operation: OperationRequest) =>
-        await internal.executeOperation(operation),
+      executeOperation: executeWorkerOperation,
     },
   })
   : null;
@@ -42,9 +86,10 @@ const temporal = workflowEnabled
   })
   : null;
 const schedule = temporal
+  && config.monitor.automaticRefresh.enabled
   ? await temporal.ensureScoreSchedule()
   : {
-    enabled: false,
+    enabled: config.monitor.automaticRefresh.enabled,
     started: false,
     workflowId: target.scoreScheduleWorkflowId,
   };
@@ -80,9 +125,9 @@ let consecutiveAutomationFailures = 0;
 const automationLoop = (async () => {
   while (!stopping) {
     try {
-      const result = await internal.runDueAutomation();
+      const result = await operations.runDueAutomation();
       consecutiveAutomationFailures = 0;
-      if (result.due || result.recovered) {
+      if (result.due || (result as Record<string, unknown>).recovered === true) {
         console.log(JSON.stringify({ component: "priority-automation", ...result, valuesPrinted: false }));
       }
     } catch (error) {
@@ -133,6 +178,8 @@ try {
   state = "stopping";
   health.stop(true);
   await automationLoop;
+  scores.close();
+  await operations.close();
   if (temporal) await temporal.close();
   if (connection) await connection.close();
   console.log(JSON.stringify({ ok: true, component: "apistate-worker", state: "stopped", valuesPrinted: false }));

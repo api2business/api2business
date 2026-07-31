@@ -1,6 +1,10 @@
 import type { AppConfig, HttpCliTarget } from "./config";
 import type { OperationRequest } from "./contracts";
 import { readSecret } from "./secrets";
+import type {
+  Sub2ApiReadRequest,
+  Sub2ApiReadResult,
+} from "./sub2api-read-executor";
 
 export class AdminHttpClient {
   private readonly token: string;
@@ -198,6 +202,23 @@ export class AdminHttpClient {
       throw new Error("ApiState internal operation response identity mismatch");
     }
     return response.result;
+  }
+  sub2ApiRead<Row extends Record<string, unknown>>(
+    request: Sub2ApiReadRequest,
+  ): Promise<Sub2ApiReadResult<Row>> {
+    return this.request("/api/internal/sub2api-read", {
+      method: "POST",
+      body: JSON.stringify(request),
+    }, this.config.sub2api.scoreDatabase.queueTimeoutMs + this.config.sub2api.scoreDatabase.statementTimeoutMs + 10000);
+  }
+  upstreamOperation(operationId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/internal/upstream-operations/${encodeURIComponent(operationId)}`);
+  }
+  completeUpstreamOperation(operationId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/internal/upstream-operations/${encodeURIComponent(operationId)}/complete`, {
+      method: "POST",
+      body: "{}",
+    });
   }
   runDueAutomation(): Promise<Record<string, unknown>> {
     return this.request(

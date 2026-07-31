@@ -6,6 +6,7 @@ import type { AccountLifecycleService, LifecycleRequest } from "./account-lifecy
 import type { AccountImportService, AccountImportRequest } from "./account-import-service";
 import { UpstreamManagementError, type UpstreamManagementService } from "./upstream-management";
 import type { AppCommand, OperationRequest } from "./contracts";
+import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import {
   normalizeAccountIds,
   parseAccountEconomicsWindow,
@@ -93,15 +94,15 @@ export function createHandler(
   imports: AccountImportService,
   lifecycle: AccountLifecycleService,
   upstreams: UpstreamManagementService,
+  reads: Sub2ApiReadClient,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
     const session = sessionAuthorized(request, config, auth);
-    const apiKey = apiKeyAuthorized(request, auth) || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
+      const apiKey = apiKeyAuthorized(request, auth) || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        const scores = await dispatcher.dispatch({ kind: "scores.get" }) as Record<string, unknown>;
-        return json({ ok: true, service: "apistate-api", scoreStatus: scores.status, refreshedAt: scores.refreshedAt });
+        return json({ ok: true, service: "apistate-api" });
       }
       if (request.method === "POST" && url.pathname === "/api/login") {
         const input = await body(request);
@@ -124,6 +125,13 @@ export function createHandler(
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+      if (request.method === "GET" && url.pathname === "/api/upstreams/options") {
+        return json(upstreams.options());
+      }
+      if (request.method === "GET" && /^\/api\/upstreams\/jobs\/[^/]+$/u.test(url.pathname)) {
+        const workflowId = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(await upstreams.workflowStatus(workflowId));
+      }
       if (request.method === "GET" && url.pathname === "/api/upstreams") {
         const page = pageNumber(url);
         return json(await upstreams.list(page, url.searchParams.get("search")));
@@ -134,28 +142,32 @@ export function createHandler(
           || typeof input.suffix !== "string" || input.apiKey.trim() === "") {
           return json({ ok: false, error: "base_url、API key 和后缀不能为空" }, 400);
         }
-        return json(await upstreams.create({
+        return json(await upstreams.submitCreate({
           baseUrl: input.baseUrl,
           apiKey: input.apiKey,
           suffix: input.suffix,
           rateCnyPerApiUsd: input.rateCnyPerApiUsd,
           rechargeCny: input.rechargeCny,
+          priority: input.priority,
+          capacity: input.capacity,
+          groupIds: input.groupIds,
           operationId: typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
           description: typeof input.description === "string" ? input.description : undefined,
-        }), 201);
+        }), 202);
       }
       if (request.method === "PATCH" && /^\/api\/upstreams\/[1-9]\d*$/u.test(url.pathname)) {
         const id = Number(url.pathname.split("/")[3]);
         const input = await body(request);
-        return json(await upstreams.update(id, {
+        return json(await upstreams.submitUpdate(id, {
           suffix: input.suffix,
           rateCnyPerApiUsd: input.rateCnyPerApiUsd,
+          operationId: typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
         }));
       }
       if (request.method === "POST" && /^\/api\/upstreams\/[1-9]\d*\/recharge$/u.test(url.pathname)) {
         const id = Number(url.pathname.split("/")[3]);
         const input = await body(request);
-        return json(await upstreams.recharge(id, {
+        return json(await upstreams.submitRecharge(id, {
           amountCny: input.amountCny,
           operationId: typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
           description: typeof input.description === "string" ? input.description : undefined,
@@ -197,6 +209,35 @@ export function createHandler(
         const input = await body(request);
         return json(await imports.inspect(normalizeAccountIds(input.accountIds)));
       }
+      if (request.method === "POST" && url.pathname === "/api/internal/sub2api-read") {
+        const input = await body(request);
+        if (typeof input.key !== "string" || typeof input.kind !== "string" || typeof input.sql !== "string"
+          || !Array.isArray(input.parameters)) {
+          return json({ ok: false, error: "invalid Sub2API read request" }, 400);
+        }
+        return json(await reads.query({
+          key: input.key,
+          kind: input.kind,
+          sql: input.sql,
+          parameters: input.parameters,
+          priority: input.priority === "automatic" ? "automatic" : "manual",
+          cacheMode: input.cacheMode === "prefer-cache" ? "prefer-cache" : "bypass-cache",
+          setupStatements: Array.isArray(input.setupStatements)
+            ? input.setupStatements.filter((value): value is string => typeof value === "string")
+            : undefined,
+        }));
+      }
+      if (request.method === "GET" && /^\/api\/internal\/upstream-operations\/[^/]+$/u.test(url.pathname)) {
+        const operationId = decodeURIComponent(url.pathname.split("/")[4]!);
+        const operation = upstreams.claimOperation(operationId);
+        return operation
+          ? json({ ok: true, operationId, operation, valuesPrinted: false })
+          : json({ ok: false, error: "上游作业不存在或已过期" }, 404);
+      }
+      if (request.method === "POST" && /^\/api\/internal\/upstream-operations\/[^/]+\/complete$/u.test(url.pathname)) {
+        const operationId = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(upstreams.completeOperation(operationId));
+      }
       if (request.method === "POST" && url.pathname === "/api/internal/execute-operation") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
         const operation = operationRequest(await body(request));
@@ -209,7 +250,7 @@ export function createHandler(
       }
       if (request.method === "POST" && url.pathname === "/api/internal/priority-automation/run-due") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
-        return json(await operations.runDueAutomation());
+        return json({ ok: true, due: false, skipped: true, reason: "priority automation is owned by Temporal worker" });
       }
       if (request.method === "GET" && url.pathname === "/api/status") {
         const scores = await dispatcher.dispatch({ kind: "scores.get" }) as Record<string, unknown>;
@@ -220,8 +261,7 @@ export function createHandler(
         return json({ ...state, availableCallOptions: config.monitor.recentCallOptions, snapshotOk: state.ok, ok: true });
       }
       if (request.method === "POST" && url.pathname === "/api/scores/refresh") {
-        const state = await dispatcher.dispatch({ kind: "scores.refresh" }) as Record<string, unknown>;
-        return json({ ...state, snapshotOk: state.ok, ok: true });
+        return json(await dispatcher.submit({ kind: "scores.refresh" }), 202);
       }
       if (request.method === "POST" && url.pathname === "/api/scores/rank") {
         const input = await body(request);
@@ -318,7 +358,7 @@ export function createHandler(
       }
       if (request.method === "POST" && /^\/api\/operations\/priority-plans\/[^/]+\/confirm$/u.test(url.pathname)) {
         const id = decodeURIComponent(url.pathname.split("/")[4]!);
-        return json(await operations.confirmPriorityPlan(id, config.webAuth.username));
+        return json(await dispatcher.submit({ kind: "priority.plan.confirm", planId: id, operator: config.webAuth.username }), 202);
       }
       if (request.method === "POST" && url.pathname === "/api/operations/procurement") {
         const input = await body(request);

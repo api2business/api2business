@@ -23,6 +23,9 @@ export async function dispatchDirect(services: DispatcherServices, command: AppC
   if (command.kind === "records.list") return { ok: true, records: services.lottery.listRecords(command.limit) };
   if (command.kind === "records.delete") return services.lottery.deleteRecord(command.id);
   if (command.kind === "credit.test") return await services.lottery.creditTest(command.execute);
+  if (command.kind === "upstream.operation" || command.kind === "priority.plan.confirm") {
+    throw new Error(`${command.kind} must be executed by the Temporal worker`);
+  }
   const exhaustive: never = command;
   throw new Error(`unsupported command ${JSON.stringify(exhaustive)}`);
 }
