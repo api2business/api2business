@@ -44,7 +44,7 @@ function errorResponse(error: unknown): Response {
   }
   const status = /does not exist|no draw chance|no eligible/u.test(message)
     ? 409
-    : /base_url|API key|后缀|费率|充值金额|幂等键|字段不能为空|当前账号缺少/u.test(message)
+    : /base_url|API key|后缀|费率|充值金额|幂等键|字段不能为空|当前账号缺少|JSON|ZIP|去重后的账号数量|账号数量/u.test(message)
     ? 400
     : 500;
   if (status >= 500) console.error(JSON.stringify({ ok: false, component: "http", error: message }));
