@@ -113,6 +113,8 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(app).toContain("remainingIdealApiAmountUsd");
   expect(html).toContain("oauth-cost-ideal-remaining");
   expect(app).toContain("oauth-output-progress");
+  expect(app).toContain("oauth-cost-output-progress");
+  expect(app).toContain("oauth-cost-output-progress-label");
   expect(app).toContain("ratio > 1 ? 'is-over' : ''");
   expect(app).toContain("renderRow(total");
 });
@@ -125,6 +127,7 @@ test("OAuth cost table separates live status buckets and does not infer archived
   expect(app).toContain("statusDistributionCell(row)");
   expect(app).toContain("oauth-status-progress");
   expect(app).toContain("oauth-status-segment-rate-limited");
+  expect(app).toContain("oauth-status-segment-divider");
   expect(app).toContain("aria-label=\"账号状态分布\"");
   expect(app).toContain("row.scope === 'archived'");
   expect(app).toContain("oauth-status-unavailable");

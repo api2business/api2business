@@ -593,11 +593,35 @@ function renderOauthCost(data) {
   const pool = data.pool ?? { total: data.total ?? {}, groups: data.groups ?? [] }
   const total = pool.total ?? {}
   const health = data.health ?? {}
+  const outputProgress = (row) => {
+    const actual = Number(row.apiAmountUsd)
+    const ideal = Number(row.idealApiAmountUsd)
+    if (!Number.isFinite(actual) || !Number.isFinite(ideal) || ideal <= 0) {
+      return { percent: '—', width: '0', className: 'is-empty', value: null }
+    }
+    const ratio = actual / ideal
+    return {
+      percent: `${number(ratio * 100, 1)}%`,
+      width: Math.min(100, Math.max(0, ratio * 100)).toFixed(2),
+      className: ratio > 1 ? 'is-over' : '',
+      value: Math.min(100, Math.max(0, ratio * 100)),
+    }
+  }
+  const totalOutputProgress = outputProgress(total)
   $('#oauth-cost-accounts').textContent = number(total.accountCount)
   $('#oauth-cost-active').textContent = `${number(total.usageAccountCount)} 个已有产出`
   $('#oauth-cost-net').textContent = cny(total.netAcquisitionCostCny)
   $('#oauth-cost-gross').textContent = `毛成本 ${cny(total.grossAcquisitionCostCny)} · 退款 ${cny(total.procurementRefundCny)}`
   $('#oauth-cost-output').innerHTML = usd(total.apiAmountUsd, 2)
+  const outputProgressBar = $('#oauth-cost-output-progress')
+  outputProgressBar.className = `oauth-output-progress oauth-output-total-progress ${totalOutputProgress.className}`
+  outputProgressBar.querySelector('span').style.width = `${totalOutputProgress.width}%`
+  outputProgressBar.setAttribute('aria-valuetext', totalOutputProgress.value === null ? '缺少预期产出配置' : `已产出占预期产出 ${totalOutputProgress.percent}`)
+  if (totalOutputProgress.value === null) outputProgressBar.removeAttribute('aria-valuenow')
+  else outputProgressBar.setAttribute('aria-valuenow', totalOutputProgress.value.toFixed(1))
+  $('#oauth-cost-output-progress-label').textContent = total.idealApiAmountUsd == null
+    ? '已产出 / 预期 —'
+    : `已产出 / 预期 ${usdText(total.apiAmountUsd, 2)} / ${usdText(total.idealApiAmountUsd, 2)} · ${totalOutputProgress.percent}`
   $('#oauth-cost-requests').textContent = `${number(total.requestCount)} 次请求 · ${compact(total.tokenCount)} Token`
   $('#oauth-cost-unit').textContent = total.cnyPerApiUsd == null ? '—' : `¥${number(total.cnyPerApiUsd, 5)}`
   $('#oauth-cost-ideal-unit').textContent = total.idealCnyPerApiUsd == null ? '—' : `¥${number(total.idealCnyPerApiUsd, 5)}`
@@ -633,24 +657,15 @@ function renderOauthCost(data) {
     const total = counts.normal + counts.rateLimited + counts.error
     if (total === 0) return '<td class="oauth-status-distribution"><span class="oauth-status-unavailable">—</span></td>'
     const width = (value) => `${(value / total * 100).toFixed(2)}%`
+    const segments = [
+      ['normal', counts.normal, 'oauth-status-segment-normal'],
+      ['rateLimited', counts.rateLimited, 'oauth-status-segment-rate-limited'],
+      ['error', counts.error, 'oauth-status-segment-error'],
+    ].filter(([, count]) => count > 0)
     return `<td class="oauth-status-distribution">
-      <div class="oauth-status-progress" role="progressbar" aria-label="账号状态分布" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${total}" aria-valuetext="正常 ${counts.normal}，限流 ${counts.rateLimited}，错误 ${counts.error}"><span class="oauth-status-segment oauth-status-segment-normal" style="width:${width(counts.normal)}"></span><span class="oauth-status-segment oauth-status-segment-rate-limited" style="width:${width(counts.rateLimited)}"></span><span class="oauth-status-segment oauth-status-segment-error" style="width:${width(counts.error)}"></span></div>
+      <div class="oauth-status-progress" role="progressbar" aria-label="账号状态分布" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${total}" aria-valuetext="正常 ${counts.normal}，限流 ${counts.rateLimited}，错误 ${counts.error}">${segments.map(([, count, className], index) => `<span class="oauth-status-segment ${className}${index > 0 ? ' oauth-status-segment-divider' : ''}" style="width:${width(count)}"></span>`).join('')}</div>
       <div class="oauth-status-legend"><span class="oauth-status-normal">正常 ${counts.normal}</span><span class="oauth-status-rate-limited">限流 ${counts.rateLimited}</span><span class="oauth-status-error">错误 ${counts.error}</span></div>
     </td>`
-  }
-  const outputProgress = (row) => {
-    const actual = Number(row.apiAmountUsd)
-    const ideal = Number(row.idealApiAmountUsd)
-    if (!Number.isFinite(actual) || !Number.isFinite(ideal) || ideal <= 0) {
-      return { percent: '—', width: '0', className: 'is-empty', value: null }
-    }
-    const ratio = actual / ideal
-    return {
-      percent: `${number(ratio * 100, 1)}%`,
-      width: Math.min(100, Math.max(0, ratio * 100)).toFixed(2),
-      className: ratio > 1 ? 'is-over' : '',
-      value: Math.min(100, Math.max(0, ratio * 100)),
-    }
   }
   const outputCell = (row) => {
     const progress = outputProgress(row)

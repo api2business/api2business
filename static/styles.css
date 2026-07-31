@@ -9,6 +9,9 @@
   --alert: #ff6b4a;
   --info: #70b7d4;
   --warning: #f0c84b;
+  --status-normal: #b6cc82;
+  --status-rate-limited: #cdb37e;
+  --status-error: #c98c82;
   --sans: "DIN 2014", "Noto Sans SC", "PingFang SC", sans-serif;
   --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }
@@ -196,19 +199,23 @@ button:disabled { cursor: wait; opacity: .48; }
 .oauth-cost-metrics .oauth-cost-ideal { box-shadow: inset 3px 0 var(--info); }
 .oauth-cost-metrics .oauth-cost-ideal strong { color: var(--info); }
 .oauth-cost-metrics .oauth-cost-ideal .oauth-cost-remaining { margin-top: 12px; color: var(--signal); font-size: 17px; line-height: 1.15; white-space: nowrap; }
+.oauth-cost-output-metric { min-width: 0; }
+.oauth-cost-output-meta { display: grid; gap: 3px; margin-top: 7px; min-width: 0; }
+.oauth-cost-output-meta small { margin-top: 0; overflow: hidden; text-overflow: ellipsis; }
 .oauth-cost-metrics #oauth-cost-output .usd-value,
 .oauth-cost-metrics #oauth-cost-ideal-output .usd-value { justify-content: flex-start; font-size: 24px; }
 .oauth-cost-table { min-width: 1370px; }
 .oauth-status-distribution { min-width: 220px; }
-.oauth-status-normal { color: var(--signal); }
-.oauth-status-rate-limited { color: var(--warning); }
-.oauth-status-error { color: var(--alert); }
+.oauth-status-normal { color: var(--status-normal); }
+.oauth-status-rate-limited { color: var(--status-rate-limited); }
+.oauth-status-error { color: var(--status-error); }
 .oauth-status-unavailable { color: var(--muted); }
 .oauth-status-progress { display: flex; width: 100%; height: 7px; overflow: hidden; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
 .oauth-status-segment { display: block; height: 100%; min-width: 0; }
-.oauth-status-segment-normal { background: var(--signal); }
-.oauth-status-segment-rate-limited { background: var(--warning); }
-.oauth-status-segment-error { background: var(--alert); }
+.oauth-status-segment-normal { background: var(--status-normal); }
+.oauth-status-segment-rate-limited { background: var(--status-rate-limited); }
+.oauth-status-segment-error { background: var(--status-error); }
+.oauth-status-segment-divider { box-shadow: inset 1px 0 rgba(17,20,18,.78); }
 .oauth-status-legend { display: flex; gap: 9px; margin-top: 7px; font: 10px/1 var(--mono); }
 .oauth-total-row td { border-top: 2px solid var(--line); background: rgba(175, 221, 74, .035); }
 .oauth-output-cell { min-width: 210px; }
@@ -221,6 +228,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .oauth-output-percent.is-over { color: var(--info); }
 .oauth-output-progress { height: 6px; margin-top: 8px; overflow: hidden; background: rgba(175, 221, 74, .12); border: 1px solid rgba(175, 221, 74, .2); }
 .oauth-output-progress > span { display: block; height: 100%; background: var(--signal); transition: width .2s ease; }
+.oauth-output-total-progress { margin-top: 8px; }
 .oauth-output-progress.is-over { background: rgba(120, 184, 222, .16); border-color: rgba(120, 184, 222, .35); }
 .oauth-output-progress.is-over > span { background: var(--info); }
 .oauth-output-progress.is-empty { background: rgba(255,255,255,.04); border-color: var(--line); }
