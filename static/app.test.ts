@@ -131,7 +131,7 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(app).toContain("readOauthRefreshInterval");
   expect(app).toContain("button.classList.add('is-loading')");
   expect(app).toContain("oauth-cost-output-progress-label");
-  expect(app).toContain("renderRow(total");
+  expect(app).not.toContain("renderRow(total");
 });
 
 test("OAuth cost table separates live status buckets and does not infer archived status", async () => {
@@ -139,11 +139,12 @@ test("OAuth cost table separates live status buckets and does not infer archived
   const html = await Bun.file(new URL("./operations.html", import.meta.url)).text();
 
   expect(html).toContain("<th>状态分布</th>");
-  expect(app).toContain("statusDistributionCell(row,");
+  expect(app).toContain("statusDistributionCell(row)");
   expect(app).toContain("oauth-status-donut");
   expect(app).toContain("statusDonutMarkup");
-  expect(app).toContain("isTotal ? health : row");
-  expect(app).toContain("averageUnitCostCny == null && isTotal");
+  expect(app).not.toContain("isTotal ? health : row");
+  expect(app).not.toContain("averageUnitCostCny == null && isTotal");
+  expect(app).not.toContain("oauth-total-row");
   expect(app).toContain("aria-label=\"账号状态分布\"");
   expect(app).toContain("row.scope === 'archived'");
   expect(app).toContain("oauth-status-unavailable");

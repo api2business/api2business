@@ -10,8 +10,8 @@
   --info: #70b7d4;
   --warning: #f0c84b;
   --status-normal: #c9f15a;
-  --status-rate-limited: #cdb37e;
-  --status-error: #c98c82;
+  --status-rate-limited: #7d6b43;
+  --status-error: #774843;
   --sans: "DIN 2014", "Noto Sans SC", "PingFang SC", sans-serif;
   --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }
@@ -234,8 +234,6 @@ button:disabled { cursor: wait; opacity: .48; }
 .oauth-status-legend { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 0; font: 10px/1 var(--mono); }
 .oauth-health-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .oauth-cost-health-metric { min-width: 0; }
-.oauth-total-row .oauth-status-distribution { min-width: 220px; }
-.oauth-total-row td { border-top: 2px solid var(--line); background: rgba(175, 221, 74, .035); }
 .oauth-output-cell { min-width: 210px; }
 .oauth-output-values { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; font: 650 12px/1.15 var(--mono); }
 .oauth-output-values .usd-value { font-size: 12px; }

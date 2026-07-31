@@ -695,26 +695,24 @@ function renderOauthCost(data) {
   $('#oauth-cost-state').textContent = `当前号池核算 · 全历史用量${exclusionLabel}${warningLabel} · ${data.complete ? '数据完整' : '有数据缺口'} · ${number(data.databaseQueries)} 次数据库查询`
   const labels = { k12: 'K12', plus: 'Plus', free: 'Free', team: 'Team' }
   const archived = data.archived ?? { groups: [] }
-  const statusDistributionCell = (row, statusSource = row) => {
+  const statusDistributionCell = (row) => {
     if (row.scope === 'archived') return '<td class="oauth-status-distribution"><span class="oauth-status-unavailable">—</span></td>'
-    const counts = statusCounts(statusSource)
+    const counts = statusCounts(row)
     const total = counts.normal + counts.rateLimited + counts.error
     if (total === 0) return '<td class="oauth-status-distribution"><span class="oauth-status-unavailable">—</span></td>'
     return `<td class="oauth-status-distribution">
-      <div class="oauth-status-visual" role="group" aria-label="账号状态分布">${statusDonutMarkup(statusSource)}<div class="oauth-status-legend"><span class="oauth-status-normal">正常 ${counts.normal}</span><span class="oauth-status-rate-limited">限流 ${counts.rateLimited}</span><span class="oauth-status-error">错误 ${counts.error}</span></div></div>
+      <div class="oauth-status-visual" role="group" aria-label="账号状态分布">${statusDonutMarkup(row)}<div class="oauth-status-legend"><span class="oauth-status-normal">正常 ${counts.normal}</span><span class="oauth-status-rate-limited">限流 ${counts.rateLimited}</span><span class="oauth-status-error">错误 ${counts.error}</span></div></div>
     </td>`
   }
   const outputCell = (row) => {
     const progress = outputProgress(row)
     const rowExpectedAmount = expectedAmount(row)
-    const configuredExpectedLabel = row.planType === 'total'
-      ? '正常账号按各类型预期'
-      : `正常号按 ${usd(row.expectedApiUsdPerAccount ?? row.idealApiUsdPerAccount, 2)} / 号`
+    const configuredExpectedLabel = `正常号按 ${usd(row.expectedApiUsdPerAccount ?? row.idealApiUsdPerAccount, 2)} / 号`
     const expectedLabel = rowExpectedAmount == null
       ? '预期产出缺少类型配置'
       : row.expectedOutputBasis === 'status-adjusted'
         ? `${configuredExpectedLabel}，限流/错误按当前产出`
-        : row.planType === 'total' ? '预期总产出' : `预期 ${usd(row.expectedApiUsdPerAccount ?? row.idealApiUsdPerAccount, 2)} / 号`
+        : `预期 ${usd(row.expectedApiUsdPerAccount ?? row.idealApiUsdPerAccount, 2)} / 号`
     const progressAttributes = progress.value === null
       ? 'aria-valuetext="缺少预期产出配置"'
       : `aria-valuenow="${progress.value.toFixed(1)}"`
@@ -724,26 +722,22 @@ function renderOauthCost(data) {
       <small class="cost-breakdown">${expectedLabel}</small>
     </td>`
   }
-  const renderRow = (row, scopeLabel, isTotal = false) => {
-    const averageUnitCostCny = row.averageUnitCostCny == null && isTotal && Number(row.accountCount) > 0
-      ? Number(row.netAcquisitionCostCny) / Number(row.accountCount)
-      : row.averageUnitCostCny
-    return `<tr class="${isTotal ? 'oauth-total-row' : ''}">
-      <td><b>${scopeLabel}</b></td><td><b>${escapeHtml(isTotal ? '合计' : (labels[row.planType] ?? row.planType))}</b></td><td>${number(row.accountCount)}</td>
-      <td>${number(row.usageAccountCount)}</td>${statusDistributionCell(row, isTotal ? health : row)}
+  const renderRow = (row, scopeLabel) => {
+    return `<tr>
+      <td><b>${scopeLabel}</b></td><td><b>${escapeHtml(labels[row.planType] ?? row.planType)}</b></td><td>${number(row.accountCount)}</td>
+      <td>${number(row.usageAccountCount)}</td>${statusDistributionCell(row)}
       <td>${cny(row.netAcquisitionCostCny)}<small class="cost-breakdown">毛 ${cny(row.grossAcquisitionCostCny)} · 退款 ${cny(row.procurementRefundCny)}</small></td>
-      <td>${averageUnitCostCny == null ? '—' : cny(averageUnitCostCny)}${isTotal ? '' : '<small class="cost-breakdown">净采购成本 / 号</small>'}</td>
-      ${outputCell({ ...row, planType: isTotal ? 'total' : row.planType })}
+      <td>${row.averageUnitCostCny == null ? '—' : cny(row.averageUnitCostCny)}<small class="cost-breakdown">净采购成本 / 号</small></td>
+      ${outputCell(row)}
       <td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td><td>${expectedUnitCost(row) == null ? '—' : `¥${number(expectedUnitCost(row), 5)}`}</td>
       <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
     </tr>`
   }
-  const renderRows = (rows, target, emptyText, scopeLabel, total) => {
+  const renderRows = (rows, target, emptyText, scopeLabel) => {
     const rowMarkup = rows.map((row) => renderRow(row, scopeLabel)).join('')
-    const totalMarkup = total && number(total.accountCount) > 0 ? renderRow(total, `${scopeLabel}合计`, true) : ''
-    $(target).innerHTML = rows.length ? rowMarkup + totalMarkup : `<tr><td colspan="12" class="empty">${emptyText}</td></tr>`
+    $(target).innerHTML = rows.length ? rowMarkup : `<tr><td colspan="12" class="empty">${emptyText}</td></tr>`
   }
-  renderRows(pool.groups ?? [], '#oauth-cost-body', '当前号池没有 OAuth 账号或采购记录', '当前号池', total)
+  renderRows(pool.groups ?? [], '#oauth-cost-body', '当前号池没有 OAuth 账号或采购记录', '当前号池')
   const archivedTotal = archived.total ?? {}
   const archivedWarningLabels = []
   if (number(archivedTotal.missingCostAccountCount) > 0) archivedWarningLabels.push(`缺少采购成本 ${number(archivedTotal.missingCostAccountCount)} 个`)
@@ -754,7 +748,7 @@ function renderOauthCost(data) {
   const archivedWarningLabel = archivedWarningLabels.length ? ` · ${archivedWarningLabels.join('；')}` : ''
   const archivedExpectedUnitCost = expectedUnitCost(archivedTotal)
   $('#oauth-archived-state').textContent = `已归档账号全历史用量 · ${number(archivedTotal.accountCount)} 个账号 · 净成本 ${cny(archivedTotal.netAcquisitionCostCny)} · 预期成本 ${archivedExpectedUnitCost == null ? '—' : `¥${number(archivedExpectedUnitCost, 5)}`}${archivedWarningLabel}`
-  renderRows(archived.groups ?? [], '#oauth-archived-body', '当前没有已归档 OAuth 采购记录', '已归档', archivedTotal)
+  renderRows(archived.groups ?? [], '#oauth-archived-body', '当前没有已归档 OAuth 采购记录', '已归档')
   renderPager('oauth', data.pagination)
   renderPager('oauth-archived', archived.pagination)
 }
