@@ -701,7 +701,7 @@ async function accountImportPage() {
   $('#import-unit-cost').addEventListener('input', () => {
     if (planTypeManuallySelected) return
     const cost = Number($('#import-unit-cost').value)
-    planType.value = Number.isFinite(cost)
+    planType.value = Number.isFinite(cost) && cost > 0
       ? (cost < defaults.freeCostThresholdCny ? 'free' : cost > defaults.plusCostThresholdCny ? 'plus' : 'k12')
       : defaults.planType
   })

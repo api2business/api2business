@@ -7,6 +7,7 @@ test("account import exposes K12, Plus, and Free with configured price threshold
   expect(html).toContain('id="import-per-account-proxy"');
   expect(app).toContain("cost < defaults.freeCostThresholdCny ? 'free'");
   expect(app).toContain("cost > defaults.plusCostThresholdCny ? 'plus' : 'k12'");
+  expect(app).toContain("Number.isFinite(cost) && cost > 0");
   expect(app).toContain("planTypeManuallySelected");
   expect(app).toContain("planType: planType.value");
   expect(app).toContain("perAccountProxy: $('#import-per-account-proxy').checked");
