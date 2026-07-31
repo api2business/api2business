@@ -644,19 +644,24 @@ function renderOauthCost(data) {
     return `<div class="oauth-status-donut ${extraClass}" style="--oauth-normal-end:${normalEnd}%;--oauth-rate-end:${rateEnd}%" role="img" aria-label="正常 ${counts.normal}，限流 ${counts.rateLimited}，错误 ${counts.error}"></div>`
   }
   const expectedAmount = (row) => row.expectedApiAmountUsd ?? row.idealApiAmountUsd
+  const configuredExpectedAmount = (row) => row.configuredExpectedApiAmountUsd ?? expectedAmount(row)
   const expectedRemaining = (row) => row.remainingExpectedApiAmountUsd ?? row.remainingIdealApiAmountUsd
   const expectedUnitCost = (row) => row.expectedCnyPerApiUsd ?? row.idealCnyPerApiUsd
   const outputProgress = (row) => {
     const actual = Number(row.apiAmountUsd)
     const expected = Number(expectedAmount(row))
-    if (!Number.isFinite(actual) || !Number.isFinite(expected) || expected <= 0) {
-      return { percent: '—', width: '0', className: 'is-empty', value: null }
+    const configuredExpected = Number(configuredExpectedAmount(row))
+    if (!Number.isFinite(actual) || !Number.isFinite(expected) || !Number.isFinite(configuredExpected) || configuredExpected <= 0) {
+      return { percent: '—', width: '0', invalidStart: '100', className: 'is-empty', value: null }
     }
-    const ratio = actual / expected
+    const ratio = actual / configuredExpected
+    const invalidStart = Math.min(100, Math.max(0, expected / configuredExpected * 100))
+    const invalidated = invalidStart < 99.995
     return {
       percent: `${number(ratio * 100, 1)}%`,
       width: Math.min(100, Math.max(0, ratio * 100)).toFixed(2),
-      className: ratio > 1 ? 'is-over' : '',
+      invalidStart: invalidStart.toFixed(2),
+      className: `${ratio > 1 ? 'is-over' : ''}${invalidated ? ' has-invalidated' : ''}`.trim(),
       value: Math.min(100, Math.max(0, ratio * 100)),
     }
   }
@@ -669,14 +674,16 @@ function renderOauthCost(data) {
   const outputProgressBar = $('#oauth-cost-output-progress')
   outputProgressBar.className = `oauth-output-progress oauth-output-total-progress ${totalOutputProgress.className}`
   outputProgressBar.querySelector('span').style.width = `${totalOutputProgress.width}%`
+  outputProgressBar.style.setProperty('--invalid-start', `${totalOutputProgress.invalidStart}%`)
   outputProgressBar.setAttribute('aria-valuetext', totalOutputProgress.value === null ? '缺少预期产出配置' : `已产出占预期产出 ${totalOutputProgress.percent}`)
   if (totalOutputProgress.value === null) outputProgressBar.removeAttribute('aria-valuenow')
   else outputProgressBar.setAttribute('aria-valuenow', totalOutputProgress.value.toFixed(1))
   const totalExpectedAmount = expectedAmount(total)
+  const totalConfiguredExpectedAmount = configuredExpectedAmount(total)
   const totalExpectedRemaining = expectedRemaining(total)
   $('#oauth-cost-output-progress-label').textContent = totalExpectedAmount == null
     ? '已产出 / 预期 —'
-    : `已产出 / 预期 ${usdText(total.apiAmountUsd, 2)} / ${usdText(totalExpectedAmount, 2)} · ${totalOutputProgress.percent}`
+    : `当前产出 ${usdText(total.apiAmountUsd, 2)} / 实时预期 ${usdText(totalExpectedAmount, 2)} / 初始预期 ${usdText(totalConfiguredExpectedAmount, 2)}（100%）· 当前 / 初始 ${totalOutputProgress.percent}`
   $('#oauth-cost-requests').textContent = `${number(total.requestCount)} 次请求 · ${compact(total.tokenCount)} Token`
   $('#oauth-cost-unit').textContent = total.cnyPerApiUsd == null ? '—' : `¥${number(total.cnyPerApiUsd, 5)}`
   const totalExpectedUnitCost = expectedUnitCost(total)
@@ -713,6 +720,7 @@ function renderOauthCost(data) {
   const outputCell = (row) => {
     const progress = outputProgress(row)
     const rowExpectedAmount = expectedAmount(row)
+    const rowConfiguredExpectedAmount = configuredExpectedAmount(row)
     const configuredExpectedLabel = `正常号按 ${usd(row.expectedApiUsdPerAccount ?? row.idealApiUsdPerAccount, 2)} / 号`
     const expectedLabel = rowExpectedAmount == null
       ? '预期产出缺少类型配置'
@@ -723,8 +731,9 @@ function renderOauthCost(data) {
       ? 'aria-valuetext="缺少预期产出配置"'
       : `aria-valuenow="${progress.value.toFixed(1)}"`
     return `<td class="oauth-output-cell">
-      <div class="oauth-output-values"><span class="oauth-output-actual">${usd(row.apiAmountUsd, 2)}</span><span class="oauth-output-separator">/</span><span class="oauth-output-ideal">${usd(rowExpectedAmount, 2)}</span><b class="oauth-output-percent ${progress.className}">(${progress.percent})</b></div>
-      <div class="oauth-output-progress ${progress.className}" role="progressbar" aria-label="已产出占预期产出" aria-valuemin="0" aria-valuemax="100" ${progressAttributes}><span style="width:${progress.width}%"></span></div>
+      <div class="oauth-output-values"><span class="oauth-output-actual">${usd(row.apiAmountUsd, 2)}</span><span class="oauth-output-separator">/</span><span class="oauth-output-ideal">${usd(rowExpectedAmount, 2)}</span><span class="oauth-output-separator">/</span><span class="oauth-output-initial">${usd(rowConfiguredExpectedAmount, 2)}</span><b class="oauth-output-percent ${progress.className}">(初始 ${progress.percent})</b></div>
+      <div class="oauth-output-progress ${progress.className}" style="--invalid-start:${progress.invalidStart}%" role="progressbar" aria-label="当前产出占初始预期产出" aria-valuemin="0" aria-valuemax="100" ${progressAttributes}><span style="width:${progress.width}%"></span></div>
+      <small class="cost-breakdown">当前产出 / 实时预期 / 初始预期（100%）</small>
       <small class="cost-breakdown">${expectedLabel}</small>
     </td>`
   }

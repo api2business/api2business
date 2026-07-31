@@ -4,6 +4,7 @@
 | Date | Source | What Went Wrong | What To Do Instead |
 |------|--------|-----------------|--------------------|
 | 2026-07-31 | self | TaskTree 命令后在 `/workspace/unidesk` 继续读取 ApiState 源码，导致只读命令找不到文件 | TaskTree 操作和 ApiState 开发分开调用，并为每次命令显式设置正确工作目录 |
+| 2026-07-31 | user | OAuth 产出展示曾使用“全局固定预期”，且第三个值只放在次级说明中 | 统一使用“当前产出 / 实时预期 / 初始预期”，三值在顶部摘要和表格主行直接并列；初始预期固定为 100% |
 
 ## User Preferences
 - 非 OAuth 上游先按账号评分排序，再把排序归一化到优先级 100 至 300。

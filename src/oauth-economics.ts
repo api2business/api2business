@@ -401,6 +401,9 @@ function projectGroup(
   const statusCount = normalCount + rateLimitedCount + errorCount;
   const statusCoverageComplete = row.scope === "pool" && statusCount === accountCount;
   const statusAdjusted = statusCoverageComplete && rateLimitedCount + errorCount > 0;
+  const configuredExpectedApiAmountUsd = idealApiUsdPerAccountValue === null
+    ? null
+    : rounded(accountCount * idealApiUsdPerAccountValue, 8);
   const expectedApiAmountUsd = idealApiUsdPerAccountValue === null
     ? statusCoverageComplete && normalCount === 0 ? unavailableApiAmountUsd : null
     : statusCoverageComplete
@@ -432,6 +435,10 @@ function projectGroup(
       ? rounded(netAcquisitionCostCny / apiAmountUsd, 6)
       : null,
     expectedApiUsdPerAccount: idealApiUsdPerAccountValue,
+    configuredExpectedApiAmountUsd,
+    invalidatedExpectedApiAmountUsd: configuredExpectedApiAmountUsd === null || expectedApiAmountUsd === null
+      ? null
+      : rounded(Math.max(0, configuredExpectedApiAmountUsd - expectedApiAmountUsd), 8),
     expectedApiAmountUsd,
     remainingExpectedApiAmountUsd: expectedApiAmountUsd === null
       ? null
@@ -476,6 +483,11 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
   const expectedApiAmountUsd = expectedCostComplete
     ? rounded(scoped.reduce((sum, group) => sum + number(group.expectedApiAmountUsd), 0), 8)
     : null;
+  const configuredExpectedComplete = scoped.length > 0
+    && scoped.every((group) => group.configuredExpectedApiAmountUsd !== null);
+  const configuredExpectedApiAmountUsd = configuredExpectedComplete
+    ? rounded(scoped.reduce((sum, group) => sum + number(group.configuredExpectedApiAmountUsd), 0), 8)
+    : null;
   const unavailableApiAmountUsd = rounded(
     scoped.reduce((sum, group) => sum + number(group.unavailableApiAmountUsd), 0),
     8,
@@ -502,6 +514,10 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
     acquisitionCostCny: money(net),
     cnyPerApiUsd: apiAmountUsd > 0 ? rounded(net / apiAmountUsd, 6) : null,
     expectedApiAmountUsd,
+    configuredExpectedApiAmountUsd,
+    invalidatedExpectedApiAmountUsd: configuredExpectedApiAmountUsd === null || expectedApiAmountUsd === null
+      ? null
+      : rounded(Math.max(0, configuredExpectedApiAmountUsd - expectedApiAmountUsd), 8),
     remainingExpectedApiAmountUsd: expectedApiAmountUsd === null
       ? null
       : rounded(Math.max(0, expectedApiAmountUsd - apiAmountUsd), 8),

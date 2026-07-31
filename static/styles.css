@@ -236,7 +236,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .oauth-status-legend { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 0; font: 10px/1 var(--mono); }
 .oauth-health-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .oauth-cost-health-metric { min-width: 0; }
-.oauth-output-cell { min-width: 210px; }
+.oauth-output-cell { min-width: 290px; }
 .oauth-output-values { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; font: 650 12px/1.15 var(--mono); }
 .oauth-output-values .usd-value { font-size: 12px; }
 .oauth-output-actual { color: var(--signal); }
@@ -246,6 +246,8 @@ button:disabled { cursor: wait; opacity: .48; }
 .oauth-output-percent.is-over { color: var(--info); }
 .oauth-output-progress { height: 6px; margin-top: 8px; overflow: hidden; background: rgba(175, 221, 74, .12); border: 1px solid rgba(175, 221, 74, .2); }
 .oauth-output-progress > span { display: block; height: 100%; background: var(--signal); transition: width .2s ease; }
+.oauth-output-progress.has-invalidated { background: linear-gradient(90deg, rgba(175,221,74,.12) 0 var(--invalid-start), rgba(103,42,38,.72) var(--invalid-start) 100%); border-color: rgba(138,62,54,.72); }
+.oauth-output-progress.has-invalidated > span { position: relative; background: var(--signal); }
 .oauth-output-total-progress { margin-top: 8px; }
 .oauth-output-progress.is-over { background: rgba(120, 184, 222, .16); border-color: rgba(120, 184, 222, .35); }
 .oauth-output-progress.is-over > span { background: var(--info); }

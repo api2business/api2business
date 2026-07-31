@@ -144,6 +144,8 @@ test("current rate-limited and error accounts converge expected output to their 
   const pool = result.pool as { groups: Array<Record<string, unknown>>; total: Record<string, unknown> };
   expect(pool.groups[0]).toEqual(expect.objectContaining({
     unavailableApiAmountUsd: 7.5,
+    configuredExpectedApiAmountUsd: 60,
+    invalidatedExpectedApiAmountUsd: 32.5,
     expectedApiAmountUsd: 27.5,
     remainingExpectedApiAmountUsd: 19,
     expectedCnyPerApiUsd: 0.24,
@@ -151,6 +153,8 @@ test("current rate-limited and error accounts converge expected output to their 
     idealApiAmountUsd: 27.5,
   }));
   expect(pool.total).toEqual(expect.objectContaining({
+    configuredExpectedApiAmountUsd: 60,
+    invalidatedExpectedApiAmountUsd: 32.5,
     expectedApiAmountUsd: 27.5,
     expectedCnyPerApiUsd: 0.24,
     expectedOutputBasis: "status-adjusted",
