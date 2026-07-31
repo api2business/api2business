@@ -166,6 +166,7 @@ function help(): Record<string, unknown> {
       "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
       "accounts oauth-economics [--over-api]",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
+      "accounts lifecycle retire-errors --day YYYY-MM-DD [--confirm] --over-api",
       "accounts lifecycle status --id <job-id> --over-api",
       "accounts lifecycle settle --id <job-id> --confirm --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
@@ -371,11 +372,15 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       if (parsed.planType !== "k12" && parsed.planType !== "plus") throw new Error("--plan-type must be k12 or plus");
       return await client.accountLifecycleDetect({ day: parsed.day, planType: parsed.planType, model: parsed.model, confirm: parsed.confirm });
     }
+    if (verb === "retire-errors") {
+      if (!parsed.day) throw new Error("accounts lifecycle retire-errors requires --day");
+      return await client.accountLifecycleDetect({ day: parsed.day, planType: "all", selectionMode: "database-error", confirm: parsed.confirm });
+    }
     if (!parsed.id) throw new Error(`accounts lifecycle ${verb ?? ""} requires --id`);
     if (verb === "status") return await client.accountLifecycleStatus(parsed.id);
     if (verb === "settle") return parsed.confirm ? await client.accountLifecycleSettle(parsed.id)
       : { ok: true, mutation: false, id: parsed.id, hint: "add --confirm to settle and delete the confirmed-dead batch" };
-    throw new Error("accounts lifecycle requires detect, status, or settle");
+    throw new Error("accounts lifecycle requires detect, retire-errors, status, or settle");
   }
   if (group === "accounts" && action === "status") {
     if (!parsed.id) throw new Error("accounts status requires --id");

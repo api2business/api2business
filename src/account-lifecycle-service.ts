@@ -9,7 +9,8 @@ import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import type { TemporalGateway } from "./temporal-client";
 import { parse } from "yaml";
 
-type PlanType = "k12" | "plus";
+type PlanType = "k12" | "plus" | "free" | "team" | "all";
+type SelectionMode = "probe" | "database-error";
 type JobState = "queued" | "running" | "succeeded" | "settling" | "settled" | "failed";
 type Row = Record<string, unknown>;
 
@@ -18,6 +19,7 @@ export interface LifecycleRequest {
   planType: PlanType;
   model?: string;
   confirm: boolean;
+  selectionMode?: SelectionMode;
 }
 
 export interface LifecycleJob {
@@ -25,7 +27,7 @@ export interface LifecycleJob {
   state: JobState;
   createdAt: string;
   completedAt: string | null;
-  settings: { day: string; planType: PlanType; model: string; confirm: boolean };
+  settings: { day: string; planType: PlanType; model: string; confirm: boolean; selectionMode: SelectionMode };
   fingerprint: string | null;
   logs: Array<{ timestamp: string; stage: string; state: string; message: string }>;
   candidates: Row[];
@@ -71,6 +73,15 @@ SELECT cost.account_id, cost.cost_cny,
   (account.id IS NOT NULL) AS exists,
   account.platform, account.type,
   COALESCE(NULLIF(LOWER(account.credentials->>'plan_type'), ''), 'unknown') AS plan_type,
+  account.status, COALESCE(account.schedulable, false) AS schedulable,
+  account.rate_limit_reset_at, account.overload_until, account.temp_unschedulable_until,
+  CASE
+    WHEN account.rate_limit_reset_at IS NOT NULL AND account.rate_limit_reset_at > NOW() THEN 'rate_limited'
+    WHEN account.status = 'active' AND COALESCE(account.schedulable, false)
+      AND (account.overload_until IS NULL OR account.overload_until <= NOW())
+      AND (account.temp_unschedulable_until IS NULL OR account.temp_unschedulable_until <= NOW()) THEN 'normal'
+    ELSE 'error'
+  END AS state_bucket,
   COALESCE(usage.request_count, 0)::bigint AS request_count,
   COALESCE(usage.token_count, 0)::bigint AS token_count,
   COALESCE(usage.api_amount_usd, 0)::numeric AS api_amount_usd
@@ -163,12 +174,14 @@ export class AccountLifecycleService {
 
   async submit(input: LifecycleRequest): Promise<LifecycleJob> {
     parseAccountEconomicsWindow({ day: input.day }, this.config.monitor.timezone);
-    if (input.planType !== "k12" && input.planType !== "plus") throw new Error("planType must be k12 or plus");
+    if (!["k12", "plus", "free", "team", "all"].includes(input.planType)) throw new Error("planType is invalid");
+    const selectionMode = input.selectionMode ?? "probe";
+    if (selectionMode !== "probe" && selectionMode !== "database-error") throw new Error("selectionMode is invalid");
     const model = input.model?.trim() || this.config.operations.accountLifecycle.defaultModel;
     if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(model)) throw new Error("model is invalid");
     const job: LifecycleJob = {
       id: randomUUID(), state: "queued", createdAt: new Date().toISOString(), completedAt: null,
-      settings: { day: input.day, planType: input.planType, model, confirm: input.confirm },
+      settings: { day: input.day, planType: input.planType, model, confirm: input.confirm, selectionMode },
       fingerprint: null, logs: [], candidates: [], result: null, settlement: null, error: null,
     };
     this.jobs.set(job.id, job);
@@ -290,6 +303,9 @@ export class AccountLifecycleService {
     return query.rows.map((row) => ({
       accountId: number(row.account_id), costCny: number(row.cost_cny), exists: row.exists === true,
       platform: row.platform ?? null, type: row.type ?? null, planType: row.plan_type ?? "unknown",
+      status: row.status ?? null, schedulable: row.schedulable === true, stateBucket: row.state_bucket ?? "error",
+      rateLimitResetAt: row.rate_limit_reset_at ?? null, overloadUntil: row.overload_until ?? null,
+      tempUnschedulableUntil: row.temp_unschedulable_until ?? null,
       requestCount: number(row.request_count), tokenCount: number(row.token_count), apiAmountUsd: number(row.api_amount_usd),
     }));
   }
@@ -320,7 +336,25 @@ export class AccountLifecycleService {
       this.log(job, "candidates", "start", `读取 ${job.settings.day} 的 ${job.settings.planType.toUpperCase()} OAuth 候选`);
       await this.persistWorkerJob(job);
       const rows = await this.facts(job.settings.day);
-      job.candidates = rows.filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth" && row.planType === job.settings.planType);
+      const eligible = rows.filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth"
+        && (job.settings.planType === "all" || row.planType === job.settings.planType));
+      if (job.settings.selectionMode === "database-error") {
+        const rateLimited = eligible.filter((row) => row.stateBucket === "rate_limited");
+        job.candidates = eligible.filter((row) => row.stateBucket === "error");
+        if (job.candidates.length === 0) throw new Error(`没有匹配的错误账号；已排除限流 ${rateLimited.length} 个`);
+        const accountIds = job.candidates.map((row) => number(row.accountId));
+        job.fingerprint = createHash("sha256").update(JSON.stringify({ day: job.settings.day, selectionMode: job.settings.selectionMode, accountIds })).digest("hex");
+        job.result = {
+          tests: job.candidates.map((row) => ({ accountId: row.accountId, classification: "dead", reason: "database-error" })),
+          summary: { alive: 0, dead: job.candidates.length, unknown: 0, excludedRateLimited: rateLimited.length },
+          mode: "database-error", valuesPrinted: false,
+        };
+        job.state = "succeeded";
+        this.log(job, "candidates", "done", `错误候选 ${job.candidates.length} 个，已排除限流 ${rateLimited.length} 个；未发起主动探测`);
+        await this.persistWorkerJob(job);
+        return;
+      }
+      job.candidates = eligible;
       if (job.candidates.length === 0) throw new Error("没有匹配的 OpenAI OAuth 候选账号");
       const accountIds = job.candidates.map((row) => number(row.accountId));
       job.fingerprint = createHash("sha256").update(JSON.stringify({ day: job.settings.day, planType: job.settings.planType, accountIds })).digest("hex");
@@ -373,8 +407,11 @@ export class AccountLifecycleService {
 
   private async finishSettlement(job: LifecycleJob): Promise<void> {
     try {
-      const current = (await this.facts(job.settings.day))
-        .filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth" && row.planType === job.settings.planType);
+      const currentEligible = (await this.facts(job.settings.day))
+        .filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth"
+          && (job.settings.planType === "all" || row.planType === job.settings.planType));
+      const current = job.settings.selectionMode === "database-error"
+        ? currentEligible.filter((row) => row.stateBucket === "error") : currentEligible;
       const currentIds = current.map((row) => number(row.accountId));
       const expectedIds = job.candidates.map((row) => number(row.accountId));
       if (JSON.stringify(currentIds) !== JSON.stringify(expectedIds)) throw new Error("候选账号范围已变化，请重新检测");

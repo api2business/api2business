@@ -8,7 +8,7 @@ export interface AccountLifecycleSettlement {
   source: "oauth-lifecycle-settlement";
   occurredAt: string;
   acquisitionDay: string;
-  planType: "k12" | "plus";
+  planType: "k12" | "plus" | "free" | "team" | "all";
   accountIds: number[];
   accountCount: number;
   grossAcquisitionCostCny: number;
