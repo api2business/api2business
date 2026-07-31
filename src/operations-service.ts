@@ -1042,6 +1042,7 @@ export class OperationsService {
     return await collectOAuthPoolEconomics(this.config, this.reads, {
       costs: merged.costs,
       refunds,
+      excludedAccountIds: this.config.operations.oauthEconomics.excludedAccountIds,
       ledger: {
         jsonlEntryCount: merged.jsonlEntryCount,
         jsonlCostCny: money(jsonlCostCny),

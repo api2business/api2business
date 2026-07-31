@@ -34,6 +34,11 @@ WITH cost_input AS (
     COALESCE(string_to_array(NULLIF($1::text, ''), ',')::bigint[], '{}'::bigint[]),
     COALESCE(string_to_array(NULLIF($2::text, ''), ',')::numeric[], '{}'::numeric[])
   ) AS item(account_id, cost_cny)
+), excluded_accounts AS (
+  SELECT account_id
+  FROM unnest(
+    COALESCE(string_to_array(NULLIF($3::text, ''), ',')::bigint[], '{}'::bigint[])
+  ) AS item(account_id)
 ), current_accounts AS (
   SELECT
     a.id,
@@ -47,6 +52,7 @@ WITH cost_input AS (
   WHERE a.deleted_at IS NULL
     AND LOWER(a.platform) = 'openai'
     AND LOWER(a.type) = 'oauth'
+    AND NOT EXISTS (SELECT 1 FROM excluded_accounts excluded WHERE excluded.account_id = a.id)
 ), cost_scope AS (
   SELECT
     cost.account_id,
@@ -60,6 +66,7 @@ WITH cost_input AS (
   FROM cost_input cost
   LEFT JOIN current_accounts current_account ON current_account.id = cost.account_id
   LEFT JOIN accounts account ON account.id = cost.account_id
+  WHERE NOT EXISTS (SELECT 1 FROM excluded_accounts excluded WHERE excluded.account_id = cost.account_id)
 ), usage_targets AS (
   SELECT id AS account_id FROM current_accounts
   UNION
@@ -411,18 +418,26 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
 export async function collectOAuthPoolEconomics(
   config: AppConfig,
   reads: Sub2ApiReadClient,
-  input: { costs: OAuthAcquisitionCost[]; refunds: OAuthProcurementRefund[]; ledger: Record<string, unknown> },
+  input: {
+    costs: OAuthAcquisitionCost[];
+    refunds: OAuthProcurementRefund[];
+    ledger: Record<string, unknown>;
+    excludedAccountIds?: number[];
+  },
   priority: Sub2ApiReadPriority = "manual",
 ): Promise<Row> {
   const allocations = refundAllocations(input.refunds, input.costs);
   const accountIds = input.costs.map((cost) => cost.accountId);
   const costValues = input.costs.map((cost) => cost.costCny);
+  const excludedAccountIds = [...new Set(
+    (input.excludedAccountIds ?? []).filter((id): id is number => positiveInteger(id) !== null),
+  )].sort((left, right) => left - right);
   const startedAt = performance.now();
   const query = await reads.query<Row>({
-    key: JSON.stringify(["accounts.oauth-economics", input.costs, input.refunds]),
+    key: JSON.stringify(["accounts.oauth-economics", input.costs, input.refunds, excludedAccountIds]),
     kind: "accounts.oauth-economics",
     sql: oauthEconomicsSql,
-    parameters: [accountIds.join(","), costValues.join(",")],
+    parameters: [accountIds.join(","), costValues.join(","), excludedAccountIds.join(",")],
     priority,
     cacheMode: "bypass-cache",
   });
@@ -485,6 +500,7 @@ export async function collectOAuthPoolEconomics(
     pool: { groups: poolGroups, total: pool },
     archived: { groups: archivedGroups, total: archived },
     all: { total: all },
+    exclusions: { accountIds: excludedAccountIds, count: excludedAccountIds.length },
     groups: poolGroups,
     total: pool,
     health,

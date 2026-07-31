@@ -27,6 +27,8 @@ export function emitOAuthEconomics(value: Record<string, unknown>, json: boolean
   }
   const health = record(value.health) ?? {};
   console.log(`APISTATE OAUTH POOL ECONOMICS complete=${String(value.complete)} usageScope=${String(value.usageScope)} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)}`);
+  const exclusions = record(value.exclusions) ?? {};
+  console.log(`EXCLUSIONS count=${String(exclusions.count ?? 0)} accountIds=${Array.isArray(exclusions.accountIds) ? exclusions.accountIds.join(",") : ""}`);
   printPart("POOL", value.pool);
   printPart("ARCHIVED", value.archived);
   console.log(`HEALTH accounts=${String(health.accountCount)} normal=${String(health.normalCount)} rateLimited=${String(health.rateLimitedCount)} error=${String(health.errorCount)} active=${String(health.activeCount)} schedulable=${String(health.schedulableCount)} probeStarted=${String(health.probeStarted)}`);

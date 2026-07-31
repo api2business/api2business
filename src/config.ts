@@ -133,6 +133,7 @@ export interface AppConfig {
       sourceProxyId: number;
       plusCostThresholdCny: number;
     };
+    oauthEconomics: { excludedAccountIds: number[] };
     rechargeDenominationsCny: number[];
     planTtlMinutes: number;
     auditLimit: number;
@@ -428,6 +429,7 @@ export function loadConfig(path: string): AppConfig {
   const operations = object(raw.operations, "operations");
   const accountLifecycle = object(operations.accountLifecycle, "operations.accountLifecycle");
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
+  const oauthEconomics = object(operations.oauthEconomics, "operations.oauthEconomics");
   const automationSafety = object(operations.automationSafety, "operations.automationSafety");
   const priorityWrite = object(operations.priorityWrite, "operations.priorityWrite");
   const interBatchMinimumDelayMs = integerValue(
@@ -644,6 +646,9 @@ export function loadConfig(path: string): AppConfig {
         groupIds: integers(accountImportDefaults, "groupIds", "operations.accountImportDefaults", 1, Number.MAX_SAFE_INTEGER),
         sourceProxyId: integerValue(accountImportDefaults, "sourceProxyId", "operations.accountImportDefaults", 3),
         plusCostThresholdCny: numberValue(accountImportDefaults, "plusCostThresholdCny", "operations.accountImportDefaults", 0),
+      },
+      oauthEconomics: {
+        excludedAccountIds: integers(oauthEconomics, "excludedAccountIds", "operations.oauthEconomics", 1, Number.MAX_SAFE_INTEGER),
       },
       rechargeDenominationsCny: integers(operations, "rechargeDenominationsCny", "operations", 1, 100000),
       planTtlMinutes: integerValue(operations, "planTtlMinutes", "operations", 1, 1440),

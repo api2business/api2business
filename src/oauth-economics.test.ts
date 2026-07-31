@@ -68,12 +68,40 @@ test("OAuth economics SQL uses current openai/oauth rows, all history, and runti
   expect(oauthEconomicsSql).toContain("a.deleted_at IS NULL");
   expect(oauthEconomicsSql).toContain("LOWER(a.platform) = 'openai'");
   expect(oauthEconomicsSql).toContain("LOWER(a.type) = 'oauth'");
+  expect(oauthEconomicsSql).toContain("excluded_accounts");
+  expect(oauthEconomicsSql).toContain("$3::text");
   expect(oauthEconomicsSql).toContain("FROM usage_logs usage");
   expect(oauthEconomicsSql).toContain("rate_limit_reset_at");
   expect(oauthEconomicsSql).toContain("schedulable");
   expect(oauthEconomicsSql).toContain("NOW()");
   expect(oauthEconomicsSql).not.toContain("access_token");
   expect(oauthEconomicsSql).not.toContain("refresh_token");
+});
+
+test("passes configured pool exclusions to the single queued query", async () => {
+  let parameters: unknown[] | undefined;
+  const reads = {
+    query: async (request: { parameters: unknown[] }) => {
+      parameters = request.parameters;
+      return {
+        rows: [{
+          row_kind: "health", account_count: 0, normal_count: 0, rate_limited_count: 0, error_count: 0,
+          active_count: 0, schedulable_count: 0, active_rate_limit_count: 0, active_overload_count: 0,
+          active_temp_unschedulable_count: 0,
+        }],
+        queueDurationMs: 1, queryDurationMs: 1, totalDurationMs: 1,
+        queryStartedAt: "2026-07-30T00:00:00.000Z", queryCompletedAt: "2026-07-30T00:00:00.001Z",
+        deduplicated: false, cached: false,
+      };
+    },
+  } as unknown as Sub2ApiReadClient;
+  const result = await collectOAuthPoolEconomics(
+    { monitor: { timezone: "Asia/Shanghai" } } as AppConfig,
+    reads,
+    { costs: [], refunds: [], excludedAccountIds: [15, 15], ledger: {} },
+  );
+  expect(parameters?.[2]).toBe("15");
+  expect(result.exclusions).toEqual({ accountIds: [15], count: 1 });
 });
 
 test("refund amount cannot exceed the declared batch cost", async () => {
