@@ -244,6 +244,11 @@ button:disabled { cursor: wait; opacity: .48; }
 .oauth-output-separator { color: var(--muted); }
 .oauth-output-percent { margin-left: auto; color: var(--signal); font: 650 12px/1 var(--mono); }
 .oauth-output-percent.is-over { color: var(--info); }
+.oauth-cost-calculation { min-width: 300px; }
+.oauth-cost-calculation > div { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; font: 650 12px/1.15 var(--mono); }
+.oauth-cost-calculation > div span { color: var(--muted); }
+.oauth-cost-calculation > div b:nth-of-type(1) { color: var(--signal); }
+.oauth-cost-calculation > div b:nth-of-type(2) { color: var(--info); }
 .oauth-output-progress { height: 6px; margin-top: 8px; overflow: hidden; background: rgba(175, 221, 74, .12); border: 1px solid rgba(175, 221, 74, .2); }
 .oauth-output-progress > span { display: block; height: 100%; background: var(--signal); transition: width .2s ease; }
 .oauth-output-progress.has-invalidated { background: linear-gradient(90deg, rgba(175,221,74,.12) 0 var(--invalid-start), rgba(103,42,38,.72) var(--invalid-start) 100%); border-color: rgba(138,62,54,.72); }

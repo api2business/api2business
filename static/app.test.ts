@@ -129,7 +129,9 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(html.match(/<th>当前产出 \/ 实时预期 \/ 初始预期<\/th>/g)?.length).toBe(2);
   expect(html).toContain("<small>预期成本</small>");
   expect(html).toContain("<span>已消耗的实时成本</span>");
-  expect(html).toContain("<th>预期人民币 / 刀</th>");
+  expect(html.match(/<th>成本计算<\/th>/g)?.length).toBe(2);
+  expect(html).not.toContain("<th>人民币 / 刀</th>");
+  expect(html).not.toContain("<th>预期人民币 / 刀</th>");
   expect(html).not.toContain("<th>API 美元产出</th>");
   expect(html).not.toContain("<th>理想 API 产出</th>");
   expect(app).toContain("oauthArchivedPage");
@@ -138,6 +140,8 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(app).toContain("remainingIdealApiAmountUsd");
   expect(app).toContain("expectedApiAmountUsd");
   expect(app).toContain("expectedCnyPerApiUsd");
+  expect(app).toContain("configuredExpectedCnyPerApiUsd");
+  expect(app).toContain("实时成本 / 实时预期成本 / 初始预期成本");
   expect(app).toContain("限流/错误按当前产出");
   expect(app).toContain("当前产出 / 实时预期 / 初始预期（100%）");
   expect(app).not.toContain("全局固定预期");
@@ -228,6 +232,6 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
-  expect(html).toContain('/app.js?v=oauth-output-v4');
-  expect(html).toContain('/styles.css?v=oauth-output-v4');
+  expect(html).toContain('/app.js?v=oauth-output-v5');
+  expect(html).toContain('/styles.css?v=oauth-output-v5');
 });

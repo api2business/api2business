@@ -446,6 +446,9 @@ function projectGroup(
     expectedCnyPerApiUsd: expectedApiAmountUsd !== null && expectedApiAmountUsd > 0
       ? rounded(netAcquisitionCostCny / expectedApiAmountUsd, 6)
       : null,
+    configuredExpectedCnyPerApiUsd: configuredExpectedApiAmountUsd !== null && configuredExpectedApiAmountUsd > 0
+      ? rounded(netAcquisitionCostCny / configuredExpectedApiAmountUsd, 6)
+      : null,
     expectedCostComplete: expectedApiAmountUsd !== null,
     expectedOutputBasis,
     // Keep the old names for existing CLI/API consumers during the field migration.
@@ -523,6 +526,9 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
       : rounded(Math.max(0, expectedApiAmountUsd - apiAmountUsd), 8),
     expectedCnyPerApiUsd: expectedApiAmountUsd !== null && expectedApiAmountUsd > 0
       ? rounded(net / expectedApiAmountUsd, 6)
+      : null,
+    configuredExpectedCnyPerApiUsd: configuredExpectedApiAmountUsd !== null && configuredExpectedApiAmountUsd > 0
+      ? rounded(net / configuredExpectedApiAmountUsd, 6)
       : null,
     expectedCostComplete,
     missingExpectedPlanTypes,

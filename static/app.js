@@ -647,6 +647,7 @@ function renderOauthCost(data) {
   const configuredExpectedAmount = (row) => row.configuredExpectedApiAmountUsd ?? expectedAmount(row)
   const expectedRemaining = (row) => row.remainingExpectedApiAmountUsd ?? row.remainingIdealApiAmountUsd
   const expectedUnitCost = (row) => row.expectedCnyPerApiUsd ?? row.idealCnyPerApiUsd
+  const configuredExpectedUnitCost = (row) => row.configuredExpectedCnyPerApiUsd
   const outputProgress = (row) => {
     const actual = Number(row.apiAmountUsd)
     const expected = Number(expectedAmount(row))
@@ -744,13 +745,13 @@ function renderOauthCost(data) {
       <td>${cny(row.netAcquisitionCostCny)}<small class="cost-breakdown">毛 ${cny(row.grossAcquisitionCostCny)} · 退款 ${cny(row.procurementRefundCny)}</small></td>
       <td>${row.averageUnitCostCny == null ? '—' : cny(row.averageUnitCostCny)}<small class="cost-breakdown">净采购成本 / 号</small></td>
       ${outputCell(row)}
-      <td>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</td><td>${expectedUnitCost(row) == null ? '—' : `¥${number(expectedUnitCost(row), 5)}`}</td>
+      <td class="oauth-cost-calculation"><div><b>${row.cnyPerApiUsd == null ? '—' : `¥${number(row.cnyPerApiUsd, 5)}`}</b><span>/</span><b>${expectedUnitCost(row) == null ? '—' : `¥${number(expectedUnitCost(row), 5)}`}</b><span>/</span><b>${configuredExpectedUnitCost(row) == null ? '—' : `¥${number(configuredExpectedUnitCost(row), 5)}`}</b></div><small class="cost-breakdown">实时成本 / 实时预期成本 / 初始预期成本</small></td>
       <td>${number(row.requestCount)}</td><td>${number(row.tokenCount)}</td>
     </tr>`
   }
   const renderRows = (rows, target, emptyText, scopeLabel) => {
     const rowMarkup = rows.map((row) => renderRow(row, scopeLabel)).join('')
-    $(target).innerHTML = rows.length ? rowMarkup : `<tr><td colspan="12" class="empty">${emptyText}</td></tr>`
+    $(target).innerHTML = rows.length ? rowMarkup : `<tr><td colspan="11" class="empty">${emptyText}</td></tr>`
   }
   renderRows(pool.groups ?? [], '#oauth-cost-body', '当前号池没有 OAuth 账号或采购记录', '当前号池')
   const archivedTotal = archived.total ?? {}
