@@ -36,8 +36,8 @@ test("refunds require declared account scope and reduce each accounting section"
   const reads = {
     query: async () => ({
       rows: [
-        { row_kind: "group", scope: "pool", plan_type: "k12", account_count: 1, matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1, orphaned_account_count: 0, account_ids: [101], usage_account_count: 1, acquisition_cost_cny: 3.3, request_count: 2, token_count: 30, api_amount_usd: 10, first_used_at: "2026-07-30T00:00:00.000Z", last_used_at: "2026-07-30T01:00:00.000Z" },
-        { row_kind: "group", scope: "archived", plan_type: "k12", account_count: 1, matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1, orphaned_account_count: 0, account_ids: [102], usage_account_count: 1, acquisition_cost_cny: 3.3, request_count: 1, token_count: 20, api_amount_usd: 5, first_used_at: "2026-07-30T00:00:00.000Z", last_used_at: "2026-07-30T01:00:00.000Z" },
+        { row_kind: "group", scope: "pool", plan_type: "k12", account_count: 1, matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1, orphaned_account_count: 0, account_ids: [101], missing_cost_account_ids: [], usage_account_count: 1, acquisition_cost_cny: 3.3, request_count: 2, token_count: 30, api_amount_usd: 10, first_used_at: "2026-07-30T00:00:00.000Z", last_used_at: "2026-07-30T01:00:00.000Z" },
+        { row_kind: "group", scope: "archived", plan_type: "k12", account_count: 1, matched_cost_account_count: 1, missing_cost_account_count: 0, present_account_count: 1, orphaned_account_count: 0, account_ids: [102], missing_cost_account_ids: [], usage_account_count: 1, acquisition_cost_cny: 3.3, request_count: 1, token_count: 20, api_amount_usd: 5, first_used_at: "2026-07-30T00:00:00.000Z", last_used_at: "2026-07-30T01:00:00.000Z" },
         { row_kind: "health", account_count: 1, normal_count: 1, rate_limited_count: 0, error_count: 0, active_count: 1, schedulable_count: 1, active_rate_limit_count: 0, active_overload_count: 0, active_temp_unschedulable_count: 0 },
       ],
       queueDurationMs: 1, queryDurationMs: 2, totalDurationMs: 3,
@@ -62,6 +62,27 @@ test("refunds require declared account scope and reduce each accounting section"
   expect(pool.total).toEqual(expect.objectContaining({ netAcquisitionCostCny: 0, apiAmountUsd: 10, cnyPerApiUsd: 0 }));
   expect(archived.total).toEqual(expect.objectContaining({ netAcquisitionCostCny: 3.3, apiAmountUsd: 5, cnyPerApiUsd: 0.66 }));
   expect(result.health).toMatchObject({ normalCount: 1, rateLimitedCount: 0, errorCount: 0, probeStarted: false });
+});
+
+test("publishes a known pool unit cost with a missing-cost warning", async () => {
+  const reads = {
+    query: async () => ({
+      rows: [
+        { row_kind: "group", scope: "pool", plan_type: "team", account_count: 2, matched_cost_account_count: 1, missing_cost_account_count: 1, present_account_count: 2, orphaned_account_count: 0, account_ids: [256, 257], missing_cost_account_ids: [257], usage_account_count: 2, acquisition_cost_cny: 20, request_count: 2, token_count: 30, api_amount_usd: 100, first_used_at: null, last_used_at: null },
+        { row_kind: "health", account_count: 2, normal_count: 2, rate_limited_count: 0, error_count: 0, active_count: 2, schedulable_count: 2, active_rate_limit_count: 0, active_overload_count: 0, active_temp_unschedulable_count: 0 },
+      ],
+      queueDurationMs: 1, queryDurationMs: 1, totalDurationMs: 1,
+      queryStartedAt: "2026-07-30T00:00:00.000Z", queryCompletedAt: "2026-07-30T00:00:00.001Z",
+      deduplicated: false, cached: false,
+    }),
+  } as unknown as Sub2ApiReadClient;
+  const result = await collectOAuthPoolEconomics(
+    { monitor: { timezone: "Asia/Shanghai" } } as AppConfig,
+    reads,
+    { costs: [{ accountId: 256, costCny: 20, planType: "team", batchIds: [] }], refunds: [], ledger: {} },
+  );
+  expect((result.pool as Record<string, any>).total).toEqual(expect.objectContaining({ cnyPerApiUsd: 0.2, missingCostAccountIds: [257], complete: false }));
+  expect(result.warnings).toEqual([expect.objectContaining({ code: "missing_acquisition_cost", accountIds: [257], missingData: "acquisition_cost_cny" })]);
 });
 
 test("OAuth economics SQL uses current openai/oauth rows, all history, and runtime state fields", () => {

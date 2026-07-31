@@ -7,7 +7,7 @@ type Row = Record<string, unknown>;
 export interface OAuthAcquisitionCost {
   accountId: number;
   costCny: number;
-  planType: "k12" | "plus" | null;
+  planType: "k12" | "plus" | "team" | null;
   batchIds: string[];
 }
 
@@ -16,13 +16,13 @@ export interface OAuthProcurementRefund {
   amountCny: number;
   accountIds: number[];
   batchId: string | null;
-  planType: "k12" | "plus" | null;
+  planType: "k12" | "plus" | "team" | null;
 }
 
 interface CostRecord {
   accountId: number;
   amountCny: number;
-  planType: "k12" | "plus" | null;
+  planType: "k12" | "plus" | "team" | null;
   batchId: string | null;
   source: "jsonl" | "yaml";
 }
@@ -92,6 +92,7 @@ WITH cost_input AS (
     COUNT(*)::int AS present_account_count,
     0::int AS orphaned_account_count,
     ARRAY_AGG(current_account.id ORDER BY current_account.id) AS account_ids,
+    ARRAY_AGG(current_account.id ORDER BY current_account.id) FILTER (WHERE cost.account_id IS NULL) AS missing_cost_account_ids,
     COUNT(usage.account_id)::int AS usage_account_count,
     COALESCE(SUM(cost.cost_cny), 0)::numeric AS acquisition_cost_cny,
     COALESCE(SUM(usage.request_count), 0)::bigint AS request_count,
@@ -113,6 +114,7 @@ WITH cost_input AS (
     COUNT(*) FILTER (WHERE cost.account_exists)::int AS present_account_count,
     COUNT(*) FILTER (WHERE NOT cost.account_exists)::int AS orphaned_account_count,
     ARRAY_AGG(cost.account_id ORDER BY cost.account_id) AS account_ids,
+    ARRAY[]::bigint[] AS missing_cost_account_ids,
     COUNT(usage.account_id)::int AS usage_account_count,
     COALESCE(SUM(cost.cost_cny), 0)::numeric AS acquisition_cost_cny,
     COALESCE(SUM(usage.request_count), 0)::bigint AS request_count,
@@ -161,6 +163,7 @@ SELECT
   rows.present_account_count,
   rows.orphaned_account_count,
   rows.account_ids,
+  rows.missing_cost_account_ids,
   rows.usage_account_count,
   rows.acquisition_cost_cny,
   rows.request_count,
@@ -187,6 +190,7 @@ SELECT
   NULL::int,
   NULL::int,
   NULL::int,
+  NULL::bigint[],
   NULL::bigint[],
   NULL::int,
   NULL::numeric,
@@ -238,8 +242,8 @@ function localTime(value: unknown, timezone: string): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString("sv-SE", { timeZone: timezone }).replace(" ", "T");
 }
 
-function planType(value: unknown): "k12" | "plus" | null {
-  return value === "k12" || value === "plus" ? value : null;
+function planType(value: unknown): "k12" | "plus" | "team" | null {
+  return value === "k12" || value === "plus" || value === "team" ? value : null;
 }
 
 function yamlAccountId(value: unknown): number | null {
@@ -363,12 +367,14 @@ function projectGroup(row: Row, timezone: string, refunds: Map<number, number>) 
   const netAcquisitionCostCny = money(Math.max(0, grossAcquisitionCostCny - procurementRefundCny));
   const apiAmountUsd = rounded(number(row.api_amount_usd), 8);
   const missingCostAccountCount = number(row.missing_cost_account_count);
+  const missingCostAccountIds = arrayNumbers(row.missing_cost_account_ids);
   return {
     scope: String(row.scope ?? ""),
     planType: String(row.plan_type ?? "unknown"),
     accountCount: number(row.account_count),
     matchedCostAccountCount: number(row.matched_cost_account_count),
     missingCostAccountCount,
+    missingCostAccountIds,
     presentAccountCount: number(row.present_account_count),
     orphanedAccountCount: number(row.orphaned_account_count),
     usageAccountCount: number(row.usage_account_count),
@@ -379,7 +385,7 @@ function projectGroup(row: Row, timezone: string, refunds: Map<number, number>) 
     procurementRefundCny,
     netAcquisitionCostCny,
     acquisitionCostCny: netAcquisitionCostCny,
-    cnyPerApiUsd: missingCostAccountCount === 0 && apiAmountUsd > 0
+    cnyPerApiUsd: apiAmountUsd > 0
       ? rounded(netAcquisitionCostCny / apiAmountUsd, 6)
       : null,
     firstUsedAt: localTime(row.first_used_at, timezone),
@@ -394,10 +400,12 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
   const refund = scoped.reduce((sum, group) => sum + number(group.procurementRefundCny), 0);
   const net = scoped.reduce((sum, group) => sum + number(group.netAcquisitionCostCny), 0);
   const missingCostAccountCount = scoped.reduce((sum, group) => sum + number(group.missingCostAccountCount), 0);
+  const missingCostAccountIds = [...new Set(scoped.flatMap((group) => arrayNumbers(group.missingCostAccountIds)))].sort((left, right) => left - right);
   const total = {
     accountCount: scoped.reduce((sum, group) => sum + number(group.accountCount), 0),
     matchedCostAccountCount: scoped.reduce((sum, group) => sum + number(group.matchedCostAccountCount), 0),
     missingCostAccountCount,
+    missingCostAccountIds,
     presentAccountCount: scoped.reduce((sum, group) => sum + number(group.presentAccountCount), 0),
     orphanedAccountCount: scoped.reduce((sum, group) => sum + number(group.orphanedAccountCount), 0),
     usageAccountCount: scoped.reduce((sum, group) => sum + number(group.usageAccountCount), 0),
@@ -408,7 +416,7 @@ function totalProjection(groups: Array<Record<string, unknown>>, scope: string) 
     procurementRefundCny: money(refund),
     netAcquisitionCostCny: money(net),
     acquisitionCostCny: money(net),
-    cnyPerApiUsd: missingCostAccountCount === 0 && apiAmountUsd > 0 ? rounded(net / apiAmountUsd, 6) : null,
+    cnyPerApiUsd: apiAmountUsd > 0 ? rounded(net / apiAmountUsd, 6) : null,
     complete: scoped.length > 0 && missingCostAccountCount === 0
       && apiAmountUsd > 0,
   };
@@ -475,6 +483,10 @@ export async function collectOAuthPoolEconomics(
     accountCount: pool.accountCount + archived.accountCount,
     matchedCostAccountCount: pool.matchedCostAccountCount + archived.matchedCostAccountCount,
     missingCostAccountCount: pool.missingCostAccountCount + archived.missingCostAccountCount,
+    missingCostAccountIds: [...new Set([
+      ...arrayNumbers(pool.missingCostAccountIds),
+      ...arrayNumbers(archived.missingCostAccountIds),
+    ])].sort((left, right) => left - right),
     presentAccountCount: pool.presentAccountCount + archived.presentAccountCount,
     orphanedAccountCount: pool.orphanedAccountCount + archived.orphanedAccountCount,
     usageAccountCount: pool.usageAccountCount + archived.usageAccountCount,
@@ -485,12 +497,12 @@ export async function collectOAuthPoolEconomics(
     procurementRefundCny: money(pool.procurementRefundCny + archived.procurementRefundCny),
     netAcquisitionCostCny: money(pool.netAcquisitionCostCny + archived.netAcquisitionCostCny),
     acquisitionCostCny: money(pool.netAcquisitionCostCny + archived.netAcquisitionCostCny),
-    cnyPerApiUsd: pool.missingCostAccountCount + archived.missingCostAccountCount === 0
-      && pool.apiAmountUsd + archived.apiAmountUsd > 0
+    cnyPerApiUsd: pool.apiAmountUsd + archived.apiAmountUsd > 0
       ? rounded((pool.netAcquisitionCostCny + archived.netAcquisitionCostCny) / (pool.apiAmountUsd + archived.apiAmountUsd), 6)
       : null,
     complete: pool.complete && (archivedGroups.length === 0 || archived.complete),
   };
+  const missingCostAccountIds = arrayNumbers(all.missingCostAccountIds);
   return {
     ok: true,
     complete: pool.complete,
@@ -500,6 +512,12 @@ export async function collectOAuthPoolEconomics(
     pool: { groups: poolGroups, total: pool },
     archived: { groups: archivedGroups, total: archived },
     all: { total: all },
+    warnings: missingCostAccountIds.length > 0 ? [{
+      code: "missing_acquisition_cost",
+      message: `有 ${missingCostAccountIds.length} 个 OAuth 账号缺少采购成本记录，综合成本仅按已知池内成本计算`,
+      accountIds: missingCostAccountIds,
+      missingData: "acquisition_cost_cny",
+    }] : [],
     exclusions: { accountIds: excludedAccountIds, count: excludedAccountIds.length },
     groups: poolGroups,
     total: pool,
