@@ -34,6 +34,7 @@ import {
 } from "./alipay-revenue-database";
 import { collectUserBalanceLiability } from "./user-balance-liability";
 import { collectDailyProfitFacts } from "./daily-profit-facts";
+import { buildDailyProfitReport } from "./daily-profit";
 import { readAccountImportCosts } from "./account-import-cost-ledger";
 import { readUpstreamRechargeCosts } from "./upstream-recharge-ledger";
 import { runBoundedProcess } from "./bounded-process";
@@ -136,6 +137,52 @@ export class OperationsService {
 
   async dailyProfitFacts(day: string) {
     return await collectDailyProfitFacts(this.config, this.reads, day, "manual");
+  }
+
+  async dailyProfit(day: string) {
+    const facts = await this.dailyProfitFacts(day);
+    const cash = await this.store.cashDaySummary(day) as Record<string, unknown>;
+    const root = parse(readFileSync(this.config.operations.ledgerYamlPath, "utf8")) as Record<string, unknown>;
+    const profit = (root.profit ?? {}) as Record<string, unknown>;
+    const revenues = records(profit.periodRevenues);
+    const costs = records(profit.periodCosts);
+    const importAccountIds = new Set(readAccountImportCosts(this.config.operations.accountImportLedgerPath)
+      .filter((entry) => entry.occurredOn === day)
+      .map((entry) => entry.accountId));
+    const dayRevenues = revenues.filter((row) => row.occurredOn === day);
+    const procurementRefundCny = dayRevenues
+      .filter((row) => row.kind === "procurement-refund")
+      .reduce((sum, row) => sum + Number(row.amountCny ?? 0), 0);
+    const yamlIncomeCny = dayRevenues
+      .filter((row) => row.kind !== "procurement-refund")
+      .reduce((sum, row) => sum + Number(row.amountCny ?? 0), 0);
+    const dayCosts = costs.filter((row) => row.occurredOn === day);
+    const duplicateAcquisitionIds = dayCosts
+      .filter((row) => row.kind === "acquisition" && importAccountIds.has(Number(row.accountId)))
+      .map((row) => Number(row.accountId));
+    const yamlCostCny = dayCosts
+      .filter((row) => !(row.kind === "acquisition" && importAccountIds.has(Number(row.accountId))))
+      .reduce((sum, row) => sum + Number(row.amountCny ?? 0), 0);
+    const upstreamEntries = readUpstreamRechargeCosts(this.config.operations.upstreamRechargeLedgerPath)
+      .filter((entry) => entry.occurredOn === day);
+    const rate = Number(profit.deferredCostRateCnyPerApiUsd);
+    if (!Number.isFinite(rate) || rate <= 0) throw new Error("profit.deferredCostRateCnyPerApiUsd must be a positive number");
+    const period = day.slice(0, 7);
+    const undatedEntries = [...revenues, ...costs]
+      .filter((row) => row.period === period && typeof row.occurredOn !== "string").length;
+    const warnings: string[] = [];
+    if (undatedEntries > 0) warnings.push(`${undatedEntries} 条月度 YAML 账目没有 occurredOn，未纳入自然日核算`);
+    if (duplicateAcquisitionIds.length > 0) warnings.push(`YAML 采购账号 #${duplicateAcquisitionIds.join(", #")} 已由导入账本计费，本次去重`);
+    return buildDailyProfitReport(facts, {
+      manualIncomeCny: Number(cash.income_cny ?? 0),
+      manualExpenseCny: Number(cash.expense_cny ?? 0),
+      yamlIncomeCny,
+      yamlCostCny,
+      procurementRefundCny,
+      upstreamRechargeCny: upstreamEntries.reduce((sum, entry) => sum + entry.amountCny, 0),
+      deferredCostRateCnyPerApiUsd: rate,
+      warnings,
+    });
   }
 
   async ledger(period = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }).slice(0, 7), page = 1, pageSize = 10) {

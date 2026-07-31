@@ -13,6 +13,7 @@ import { emitErrorAggregate } from "./error-aggregate-output";
 import { emitPriorityPlan } from "./priority-plan-output";
 import { emitAccountEconomics, emitAccountImportEconomics } from "./account-economics-output";
 import { emitOAuthEconomics } from "./oauth-economics-output";
+import { emitDailyProfit } from "./daily-profit-output";
 import { parseAccountIdSelector } from "../../src/account-batch-economics";
 
 interface Parsed {
@@ -148,6 +149,7 @@ function help(): Record<string, unknown> {
       "users impact --start <ISO> --end <ISO> [--affected-only]",
       "users balance-liability [--over-api]",
       "profit daily-facts --day YYYY-MM-DD [--over-api]",
+      "profit daily --day YYYY-MM-DD [--over-api]",
       "lottery status|draw|reset",
       "records list|delete",
       "credit test",
@@ -319,6 +321,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "profit" && action === "daily-facts") {
     if (!parsed.day) throw new Error("profit daily-facts requires --day");
     return await client.dailyProfitFacts(parsed.day);
+  }
+  if (group === "profit" && action === "daily") {
+    if (!parsed.day) throw new Error("profit daily requires --day");
+    return await client.dailyProfit(parsed.day);
   }
   if (group === "accounts" && action === "economics") {
     if (!parsed.accounts) throw new Error("accounts economics requires --accounts");
@@ -530,6 +536,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command.join(" ") === "users impact"
       || parsed.command.join(" ") === "users balance-liability"
       || parsed.command.join(" ") === "profit daily-facts"
+      || parsed.command.join(" ") === "profit daily"
       || parsed.command.join(" ") === "accounts economics"
       || parsed.command.join(" ") === "accounts import-economics"
       || parsed.command.join(" ") === "accounts oauth-economics"
@@ -554,6 +561,7 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "accounts economics") emitAccountEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts import-economics") emitAccountImportEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts oauth-economics") emitOAuthEconomics(output, parsed.json);
+    else if (parsed.command.join(" ") === "profit daily") emitDailyProfit(output, parsed.json);
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);

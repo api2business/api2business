@@ -529,6 +529,17 @@ export function createHandler(
         }
         return json(await operations.dailyProfitFacts(input.day));
       }
+      if (request.method === "POST" && url.pathname === "/api/admin/profit/daily") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const input = await body(request);
+        if (typeof input.day !== "string") return json({ ok: false, error: "day is required" }, 400);
+        try {
+          parseCompletedProfitDay(input.day, config.monitor.timezone);
+          return json(await operations.dailyProfit(input.day));
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
 
       if (!url.pathname.startsWith("/api/admin/")) return json({ ok: false, error: "not found" }, 404);
       if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);

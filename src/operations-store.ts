@@ -169,6 +169,18 @@ export class OperationsStore {
     return row ?? { income_cny: 0, expense_cny: 0 };
   }
 
+  async cashDaySummary(day: string) {
+    const [row] = await this.sql`
+      SELECT
+        COUNT(*) FILTER (WHERE voided_at IS NULL)::int AS total_count,
+        COALESCE(SUM(amount_cny) FILTER (WHERE direction='income' AND voided_at IS NULL), 0) AS income_cny,
+        COALESCE(SUM(amount_cny) FILTER (WHERE direction='expense' AND voided_at IS NULL), 0) AS expense_cny
+      FROM apistate_cash_entries
+      WHERE occurred_on=${day}
+    `;
+    return row ?? { total_count: 0, income_cny: 0, expense_cny: 0 };
+  }
+
   async listCashPage(limit: number, offset: number) {
     return await this.sql`
       SELECT id, occurred_on, direction, category, amount_cny, description,
