@@ -1252,14 +1252,14 @@ async function upstreamsPage() {
   let createOperationId = null
   let editRechargeOperationId = null
   let upstreamGroupOptions = []
-  const queryUsage = async (accountIds) => {
-    if (!accountIds.length) return { ok: true, succeeded: 0, failed: 0, databaseQueries: 0, results: [] }
+  const queryUsage = async (accountIds, onStatus = () => {}) => {
     const submitted = await requestJson('/api/upstreams/usage', {
       method: 'POST',
       headers: { 'Idempotency-Key': upstreamOperationId('upstream-usage') },
       body: JSON.stringify({ accountIds }),
     }, 20000)
-    return await waitUpstreamJob(submitted.workflowId)
+    onStatus({ state: 'submitted', workflowId: submitted.workflowId, terminal: false })
+    return await waitUpstreamJob(submitted.workflowId, onStatus)
   }
   const resetJobLog = (scope) => {
     $(`#upstream-${scope}-job`).textContent = 'JOB —'
@@ -1350,11 +1350,47 @@ async function upstreamsPage() {
     button.disabled = true
     button.classList.add('is-loading')
     button.setAttribute('aria-busy', 'true')
-    $('#upstream-usage-state').textContent = 'worker 正在并发查询当前页上游…'
+    $('#upstream-usage-state').textContent = '正在提交异步查询…'
     try {
-      const result = await queryUsage(lastUpstreamRows.map((row) => Number(row.id)))
+      const result = await queryUsage(lastUpstreamRows.map((row) => Number(row.id)), (status) => {
+        const state = String(status.state ?? 'unknown')
+        if (state === 'submitted') {
+          $('#upstream-usage-state').textContent = `已受理 ${status.workflowId} · 等待 worker`
+        } else if (!status.terminal) {
+          $('#upstream-usage-state').textContent = `worker ${state} · 后台查询中…`
+        } else {
+          $('#upstream-usage-state').textContent = state === 'completed' ? '查询完成，正在更新结果…' : `查询${state}`
+        }
+      })
       $('#upstream-usage-results').innerHTML = result.results?.length ? result.results.map(upstreamUsageMarkup).join('') : '<p class="empty">当前页没有可查询的上游</p>'
       $('#upstream-usage-state').textContent = `${number(result.succeeded)} 成功 · ${number(result.failed)} 失败 · ${number(result.databaseQueries)} 次排队 DB 查询`
+    } catch (error) {
+      $('#upstream-usage-state').textContent = error instanceof Error ? error.message : String(error)
+    } finally {
+      button.disabled = false
+      button.classList.remove('is-loading')
+      button.removeAttribute('aria-busy')
+    }
+  })
+  $('#upstream-usage-refresh-all').addEventListener('click', async () => {
+    const button = $('#upstream-usage-refresh-all')
+    button.disabled = true
+    button.classList.add('is-loading')
+    button.setAttribute('aria-busy', 'true')
+    $('#upstream-usage-state').textContent = '正在提交全量异步查询…'
+    try {
+      const result = await queryUsage([], (status) => {
+        const state = String(status.state ?? 'unknown')
+        if (state === 'submitted') {
+          $('#upstream-usage-state').textContent = `已受理 ${status.workflowId} · 等待 worker`
+        } else if (!status.terminal) {
+          $('#upstream-usage-state').textContent = `worker ${state} · 全量后台查询中…`
+        } else {
+          $('#upstream-usage-state').textContent = state === 'completed' ? '全量查询完成，正在更新结果…' : `全量查询${state}`
+        }
+      })
+      $('#upstream-usage-results').innerHTML = result.results?.length ? result.results.map(upstreamUsageMarkup).join('') : '<p class="empty">没有可查询的 API-key 上游</p>'
+      $('#upstream-usage-state').textContent = `全量 ${number(result.succeeded)} 成功 · ${number(result.failed)} 失败 · ${number(result.databaseQueries)} 次排队 DB 查询`
     } catch (error) {
       $('#upstream-usage-state').textContent = error instanceof Error ? error.message : String(error)
     } finally {

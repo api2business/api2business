@@ -34,8 +34,12 @@ test("upstream management exposes queued quota and usage queries", async () => {
   const html = await Bun.file(new URL("./upstreams.html", import.meta.url)).text();
   expect(html).toContain('id="upstream-usage-refresh"');
   expect(html).toContain('id="upstream-edit-usage"');
+  expect(html).toContain('id="upstream-usage-refresh-all"');
   expect(app).toContain("requestJson('/api/upstreams/usage'");
   expect(app).toContain("result.databaseQueries");
+  expect(app).toContain("queryUsage([], (status)");
+  expect(html).toContain('/app.js?v=async-usage-refresh-v1');
+  expect(html).toContain('/styles.css?v=async-usage-refresh-v1');
   expect(html).toContain('class="query-spinner"');
   expect(app).toContain("button.classList.add('is-loading')");
   expect(app).not.toContain("apiKey: activeUpstream");

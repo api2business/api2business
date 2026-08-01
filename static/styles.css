@@ -290,6 +290,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .upstream-table tbody tr:focus { outline: 2px solid var(--signal); outline-offset: -2px; }
 .upstream-usage-panel { border-top: 1px solid var(--line); padding: 22px 0 0; }
 .upstream-usage-panel > header, .upstream-edit-usage > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.upstream-usage-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .upstream-usage-panel h2 { margin: 2px 0 0; font-size: 18px; }
 .upstream-usage-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1px; margin-top: 12px; background: var(--line); border: 1px solid var(--line); }
 .upstream-usage-result { min-width: 0; padding: 13px; background: var(--surface); }
