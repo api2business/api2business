@@ -1249,6 +1249,8 @@ async function upstreamsPage() {
     $('#upstream-state').dataset.state = state
   }
   let lastUpstreamRows = []
+  let lastUpstreamData = null
+  const upstreamUsageById = new Map()
   let createOperationId = null
   let editRechargeOperationId = null
   let upstreamGroupOptions = []
@@ -1293,6 +1295,7 @@ async function upstreamsPage() {
   const render = (data) => {
     const rows = Array.isArray(data.accounts) ? data.accounts : []
     lastUpstreamRows = rows
+    lastUpstreamData = data
     $('#upstream-total').textContent = number(data.total)
     $('#upstream-available').textContent = `${number(data.availableTotal)} / ${number(data.total)}`
     $('#upstream-recharged').textContent = cny(data.rechargeTotalCny)
@@ -1300,18 +1303,26 @@ async function upstreamsPage() {
     $('#upstream-query-state').textContent = data.search ? `筛选：${data.search} · 当前页 ${number(rows.length)} 条` : `当前页 ${number(rows.length)} 条 · 点击行编辑`
     $('#upstream-body').innerHTML = rows.length ? rows.map((row) => {
       const status = upstreamStatus(row)
+      const usageResult = upstreamUsageById.get(Number(row.id))
+      const quota = usageResult?.quota ?? {}
+      const usage = usageResult?.usage ?? {}
+      const balance = usageResult ? usageResult.ok === true
+        ? quota.unlimited === true ? '无限额' : quota.remaining == null ? '—' : `${number(quota.remaining, 2)} ${quota.unit ?? ''}`
+        : '查询失败' : '未查询'
       return `<tr class="upstream-row" data-id="${escapeHtml(row.id)}" tabindex="0" role="button" aria-label="编辑 ${escapeHtml(row.name)}">
-        <td class="upstream-id-cell"><b>${escapeHtml(row.name)}</b><small>#${escapeHtml(row.id)}</small></td>
-        <td class="upstream-url" title="${escapeHtml(row.baseUrl)}">${escapeHtml(row.baseUrl)}</td>
+        <td class="upstream-id-cell"><b>${escapeHtml(row.name)}</b><a class="upstream-url-link" href="${escapeHtml(row.baseUrl)}" target="_blank" rel="noreferrer">${escapeHtml(row.baseUrl)}</a><small>#${escapeHtml(row.id)}</small></td>
         <td class="upstream-muted">${escapeHtml(row.keyPrefix ?? '—')}</td>
         <td>${escapeHtml(row.suffix ?? '—')}</td>
         <td class="upstream-rate">${row.rateCnyPerApiUsd == null ? '—' : `¥${number(row.rateCnyPerApiUsd, 6)}`}</td>
         <td><span class="upstream-status ${status.className}">${status.label}</span><small class="upstream-muted">${escapeHtml(row.status || '—')}</small></td>
+        <td class="upstream-balance" data-ok="${usageResult?.ok === true}">${escapeHtml(balance)}<small>${usageResult?.queriedAt ? time(usageResult.queriedAt) : '—'}</small></td>
+        <td>${usage.totalTokens == null ? '—' : compact(usage.totalTokens)}<small class="upstream-muted">${usage.requestCount == null ? '—' : `${number(usage.requestCount)} 次`}</small></td>
+        <td>${usage.actualCostUsd == null ? usage.costUsd == null ? '—' : usd(usage.costUsd) : usd(usage.actualCostUsd)}</td>
         <td><div class="upstream-groups">${upstreamGroupMarkup(row)}</div><small class="upstream-muted">Proxy #${escapeHtml(row.proxyId ?? '—')}</small></td>
         <td>${cny(row.rechargeCny)}<small class="upstream-muted">${number(row.rechargeCount)} 笔</small></td>
         <td class="upstream-muted">${time(row.updatedAt ?? row.createdAt)}</td>
       </tr>`
-    }).join('') : '<tr><td colspan="9" class="empty">没有符合条件的 API-key 上游</td></tr>'
+    }).join('') : '<tr><td colspan="11" class="empty">没有符合条件的 API-key 上游</td></tr>'
     renderPager('upstream', data)
   }
   const load = async () => {
@@ -1322,11 +1333,17 @@ async function upstreamsPage() {
       const data = await requestJson(`/api/upstreams?${query}`)
       upstreamPage = Number(data.page ?? upstreamPage)
       render(data)
+      const ids = lastUpstreamRows.map((row) => Number(row.id)).filter(Number.isSafeInteger)
+      if (ids.length) {
+        const cachedUsage = await requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`)
+        for (const result of cachedUsage.results ?? []) upstreamUsageById.set(Number(result.accountId), result)
+        render(data)
+      }
       setState('已更新', 'ready')
     } catch (error) {
       setState('读取失败', 'unavailable')
       $('#upstream-query-state').textContent = error instanceof Error ? error.message : String(error)
-      $('#upstream-body').innerHTML = `<tr><td colspan="9" class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</td></tr>`
+      $('#upstream-body').innerHTML = `<tr><td colspan="11" class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</td></tr>`
     }
   }
   const openEdit = (row) => {
@@ -1342,7 +1359,8 @@ async function upstreamsPage() {
     $('#upstream-edit-state').textContent = ''
     $('#upstream-edit-state').removeAttribute('data-state')
     resetJobLog('edit')
-    $('#upstream-edit-usage-result').innerHTML = '<p class="empty">尚未查询</p>'
+    const usageResult = upstreamUsageById.get(Number(row.id))
+    $('#upstream-edit-usage-result').innerHTML = usageResult ? upstreamUsageMarkup(usageResult) : '<p class="empty">尚未查询</p>'
     editDialog.showModal()
   }
   $('#upstream-usage-refresh').addEventListener('click', async () => {
@@ -1362,7 +1380,8 @@ async function upstreamsPage() {
           $('#upstream-usage-state').textContent = state === 'completed' ? '查询完成，正在更新结果…' : `查询${state}`
         }
       })
-      $('#upstream-usage-results').innerHTML = result.results?.length ? result.results.map(upstreamUsageMarkup).join('') : '<p class="empty">当前页没有可查询的上游</p>'
+      for (const item of result.results ?? []) upstreamUsageById.set(Number(item.accountId), item)
+      if (lastUpstreamData) render(lastUpstreamData)
       $('#upstream-usage-state').textContent = `${number(result.succeeded)} 成功 · ${number(result.failed)} 失败 · ${number(result.databaseQueries)} 次排队 DB 查询`
     } catch (error) {
       $('#upstream-usage-state').textContent = error instanceof Error ? error.message : String(error)
@@ -1389,7 +1408,8 @@ async function upstreamsPage() {
           $('#upstream-usage-state').textContent = state === 'completed' ? '全量查询完成，正在更新结果…' : `全量查询${state}`
         }
       })
-      $('#upstream-usage-results').innerHTML = result.results?.length ? result.results.map(upstreamUsageMarkup).join('') : '<p class="empty">没有可查询的 API-key 上游</p>'
+      for (const item of result.results ?? []) upstreamUsageById.set(Number(item.accountId), item)
+      if (lastUpstreamData) render(lastUpstreamData)
       $('#upstream-usage-state').textContent = `全量 ${number(result.succeeded)} 成功 · ${number(result.failed)} 失败 · ${number(result.databaseQueries)} 次排队 DB 查询`
     } catch (error) {
       $('#upstream-usage-state').textContent = error instanceof Error ? error.message : String(error)
@@ -1406,6 +1426,8 @@ async function upstreamsPage() {
     $('#upstream-edit-usage-result').innerHTML = '<p class="empty">正在查询…</p>'
     try {
       const result = await queryUsage([Number(activeUpstream.id)])
+      for (const item of result.results ?? []) upstreamUsageById.set(Number(item.accountId), item)
+      if (lastUpstreamData) render(lastUpstreamData)
       $('#upstream-edit-usage-result').innerHTML = result.results?.length ? upstreamUsageMarkup(result.results[0]) : '<p class="empty">未找到可查询账号</p>'
     } catch (error) {
       $('#upstream-edit-usage-result').innerHTML = `<p class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`
@@ -1429,6 +1451,7 @@ async function upstreamsPage() {
   $('#upstream-prev').addEventListener('click', async () => { upstreamPage -= 1; await load() })
   $('#upstream-next').addEventListener('click', async () => { upstreamPage += 1; await load() })
   $('#upstream-body').addEventListener('click', (event) => {
+    if (event.target.closest('a')) return
     const row = event.target.closest('.upstream-row')
     if (!row) return
     const id = Number(row.dataset.id)

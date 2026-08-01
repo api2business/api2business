@@ -88,6 +88,11 @@ export class OperationsStore {
         body text NOT NULL,
         cached_at timestamptz NOT NULL DEFAULT now()
       );
+      CREATE TABLE IF NOT EXISTS apistate_upstream_usage_cache (
+        account_id bigint PRIMARY KEY,
+        result jsonb NOT NULL,
+        queried_at timestamptz NOT NULL DEFAULT now()
+      );
       CREATE INDEX IF NOT EXISTS apistate_cash_entries_occurred_on_idx
         ON apistate_cash_entries(occurred_on DESC, created_at DESC);
       CREATE INDEX IF NOT EXISTS apistate_operation_audit_created_at_idx
@@ -114,6 +119,30 @@ export class OperationsStore {
       ON CONFLICT (cache_key) DO UPDATE SET
         status=EXCLUDED.status, headers=EXCLUDED.headers, body=EXCLUDED.body, cached_at=now()
     `;
+  }
+
+  async getUpstreamUsageCache(accountIds: number[]) {
+    if (!accountIds.length) return await this.sql`
+      SELECT account_id, result, queried_at FROM apistate_upstream_usage_cache ORDER BY account_id
+    `;
+    return await this.sql`
+      SELECT account_id, result, queried_at FROM apistate_upstream_usage_cache
+      WHERE account_id = ANY(${accountIds}::bigint[]) ORDER BY account_id
+    `;
+  }
+
+  async setUpstreamUsageCache(results: Array<Record<string, unknown>>) {
+    await this.sql.begin(async (tx) => {
+      for (const result of results) {
+        const accountId = Number(result.accountId);
+        if (!Number.isSafeInteger(accountId) || accountId <= 0) continue;
+        await tx`
+          INSERT INTO apistate_upstream_usage_cache (account_id, result, queried_at)
+          VALUES (${accountId}, ${result}::jsonb, now())
+          ON CONFLICT (account_id) DO UPDATE SET result=EXCLUDED.result, queried_at=now()
+        `;
+      }
+    });
   }
 
   async withPriorityOptimizationQueue<T>(

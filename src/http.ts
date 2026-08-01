@@ -144,6 +144,12 @@ export function createHandler(
         const page = pageNumber(url);
         return json(await upstreams.list(page, url.searchParams.get("search")));
       }
+      if (request.method === "GET" && url.pathname === "/api/upstreams/usage-cache") {
+        const selector = url.searchParams.get("accountIds");
+        const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
+        const rows = await operations.getUpstreamUsageCache(accountIds) as Array<Record<string, unknown>>;
+        return json({ ok: true, results: rows.map((row) => row.result), cachedAt: rows.map((row) => row.queried_at) });
+      }
       if (request.method === "POST" && url.pathname === "/api/upstreams/usage") {
         const input = await body(request);
         let accountIds: number[] = [];
@@ -278,6 +284,13 @@ export function createHandler(
       if (request.method === "POST" && /^\/api\/internal\/upstream-operations\/[^/]+\/complete$/u.test(url.pathname)) {
         const operationId = decodeURIComponent(url.pathname.split("/")[4]!);
         return json(upstreams.completeOperation(operationId));
+      }
+      if (request.method === "POST" && url.pathname === "/api/internal/upstream-usage-cache") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const input = await body(request);
+        if (!Array.isArray(input.results)) return json({ ok: false, error: "results must be an array" }, 400);
+        await operations.setUpstreamUsageCache(input.results as Array<Record<string, unknown>>);
+        return json({ ok: true, cached: input.results.length, valuesPrinted: false });
       }
       if (request.method === "GET" && /^\/api\/internal\/account-import-jobs\/[^/]+$/u.test(url.pathname)) {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);

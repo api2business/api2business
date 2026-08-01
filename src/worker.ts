@@ -101,7 +101,10 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
     else if (pending.action === "recharge") result = await upstreams.recharge(pending.input.id, pending.input);
     else if (pending.action === "template") result = await upstreams.applyTemplate(pending.input.accountIds);
-    else result = await upstreams.usage(pending.input.accountIds);
+    else {
+      result = await upstreams.usage(pending.input.accountIds);
+      if (Array.isArray(result.results)) await internal.upstreamUsageCache(result.results as Array<Record<string, unknown>>);
+    }
     await internal.completeUpstreamOperation(command.operationId);
     return result;
   }

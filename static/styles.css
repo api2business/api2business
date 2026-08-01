@@ -292,6 +292,10 @@ button:disabled { cursor: wait; opacity: .48; }
 .upstream-usage-panel > header, .upstream-edit-usage > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .upstream-usage-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .upstream-usage-panel h2 { margin: 2px 0 0; font-size: 18px; }
+.upstream-url-link { display: block; max-width: 320px; margin-top: 4px; overflow: hidden; color: var(--link); font: 10px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.upstream-balance { color: var(--paper); font-family: var(--mono); white-space: nowrap; }
+.upstream-balance[data-ok="false"] { color: var(--alert); }
+.upstream-balance small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
 .upstream-usage-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1px; margin-top: 12px; background: var(--line); border: 1px solid var(--line); }
 .upstream-usage-result { min-width: 0; padding: 13px; background: var(--surface); }
 .upstream-usage-result header { display: flex; justify-content: space-between; gap: 10px; }

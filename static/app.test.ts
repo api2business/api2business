@@ -38,8 +38,11 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(app).toContain("requestJson('/api/upstreams/usage'");
   expect(app).toContain("result.databaseQueries");
   expect(app).toContain("queryUsage([], (status)");
-  expect(html).toContain('/app.js?v=async-usage-refresh-v1');
-  expect(html).toContain('/styles.css?v=async-usage-refresh-v1');
+  expect(html).toContain('/app.js?v=usage-table-v1');
+  expect(html).toContain('/styles.css?v=usage-table-v1');
+  expect(html).toContain('<th>余额</th>');
+  expect(app).toContain("requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`)");
+  expect(app).toContain('class="upstream-url-link"');
   expect(html).toContain('class="query-spinner"');
   expect(app).toContain("button.classList.add('is-loading')");
   expect(app).not.toContain("apiKey: activeUpstream");

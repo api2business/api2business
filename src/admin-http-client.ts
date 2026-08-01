@@ -96,6 +96,12 @@ export class AdminHttpClient {
       body: JSON.stringify({ accountIds, operationId }),
     }, 30000);
   }
+  upstreamUsageCache(results: Array<Record<string, unknown>>): Promise<Record<string, unknown>> {
+    return this.request("/api/internal/upstream-usage-cache", {
+      method: "POST",
+      body: JSON.stringify({ results }),
+    });
+  }
   upstreamTemplate(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/template", {
       method: "POST",

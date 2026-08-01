@@ -122,6 +122,14 @@ export class OperationsService {
     await this.store.setApiCache(key, status, headers, body);
   }
 
+  async getUpstreamUsageCache(accountIds: number[]) {
+    return await this.store.getUpstreamUsageCache(accountIds);
+  }
+
+  async setUpstreamUsageCache(results: Array<Record<string, unknown>>): Promise<void> {
+    await this.store.setUpstreamUsageCache(results);
+  }
+
   private yamlLedger() {
     const root = parse(readFileSync(this.config.operations.ledgerYamlPath, "utf8")) as Record<string, unknown>;
     const profit = root.profit as Record<string, unknown> | undefined;
@@ -176,6 +184,21 @@ export class OperationsService {
       .reduce((sum, row) => sum + Number(row.amountCny ?? 0), 0);
     const upstreamEntries = readUpstreamRechargeCosts(this.config.operations.upstreamRechargeLedgerPath)
       .filter((entry) => entry.occurredOn === day);
+    const usageRows = await this.store.getUpstreamUsageCache(upstreamEntries.map((entry) => entry.accountId)) as Array<Record<string, unknown>>;
+    const usageByAccount = new Map(usageRows.map((row) => [Number(row.account_id), object(row.result)]));
+    const rechargeByWallet = new Map<string, number>();
+    const walletRemaining = new Map<string, number>();
+    for (const entry of upstreamEntries) {
+      const usage = usageByAccount.get(entry.accountId);
+      const baseUrl = String(usage?.baseUrl ?? entry.baseUrl ?? entry.accountName).replace(/\/v1\/?$/u, "").replace(/\/$/u, "");
+      rechargeByWallet.set(baseUrl, (rechargeByWallet.get(baseUrl) ?? 0) + entry.amountCny);
+      const remaining = Number(object(usage?.quota).remaining);
+      if (Number.isFinite(remaining)) walletRemaining.set(baseUrl, Math.max(walletRemaining.get(baseUrl) ?? 0, remaining));
+    }
+    const balanceRate = Number((profit.upstreamBalanceCnyPerApiUsd ?? 1));
+    if (!Number.isFinite(balanceRate) || balanceRate <= 0) throw new Error("profit.upstreamBalanceCnyPerApiUsd must be positive");
+    const upstreamCapitalCny = [...rechargeByWallet].reduce((sum, [wallet, recharge]) =>
+      sum + Math.min(recharge, (walletRemaining.get(wallet) ?? 0) * balanceRate), 0);
     const rate = Number(profit.deferredCostRateCnyPerApiUsd);
     if (!Number.isFinite(rate) || rate <= 0) throw new Error("profit.deferredCostRateCnyPerApiUsd must be a positive number");
     const period = day.slice(0, 7);
@@ -191,6 +214,8 @@ export class OperationsService {
       yamlCostCny,
       procurementRefundCny,
       upstreamRechargeCny: upstreamEntries.reduce((sum, entry) => sum + entry.amountCny, 0),
+      upstreamCapitalCny,
+      upstreamBalanceCnyPerApiUsd: balanceRate,
       deferredCostRateCnyPerApiUsd: rate,
       warnings,
     });

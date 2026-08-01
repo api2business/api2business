@@ -20,6 +20,8 @@ export interface DailyProfitLedgerInput {
   yamlCostCny: number;
   procurementRefundCny: number;
   upstreamRechargeCny: number;
+  upstreamCapitalCny?: number;
+  upstreamBalanceCnyPerApiUsd?: number;
   deferredCostRateCnyPerApiUsd: number;
   warnings?: string[];
 }
@@ -33,11 +35,17 @@ export function buildDailyProfitReport(facts: Row, ledger: DailyProfitLedgerInpu
   const totalRevenueCny = money(alipayRevenueCny + ledger.manualIncomeCny + ledger.yamlIncomeCny);
   const grossDirectCostCny = money(accountImportCny + ledger.upstreamRechargeCny
     + ledger.manualExpenseCny + ledger.yamlCostCny);
-  const totalDirectCostCny = money(grossDirectCostCny - ledger.procurementRefundCny);
-  const cashGrossProfitCny = money(totalRevenueCny - totalDirectCostCny);
+  const cashDirectCostCny = money(grossDirectCostCny - ledger.procurementRefundCny);
+  const upstreamCapitalCny = number(ledger.upstreamCapitalCny);
+  const upstreamBalanceCnyPerApiUsd = number(ledger.upstreamBalanceCnyPerApiUsd) || 1;
+  const consumedUpstreamCny = money(Math.max(0, ledger.upstreamRechargeCny - upstreamCapitalCny));
+  const totalDirectCostCny = money(accountImportCny + consumedUpstreamCny
+    + ledger.manualExpenseCny + ledger.yamlCostCny - ledger.procurementRefundCny);
+  const cashGrossProfitCny = money(totalRevenueCny - cashDirectCostCny);
+  const operatingGrossProfitCny = money(totalRevenueCny - totalDirectCostCny);
   const redeemableChangeUsd = decimal(number(liability?.redeemableChangeUsd));
   const deferredCostChangeCny = decimal(redeemableChangeUsd * ledger.deferredCostRateCnyPerApiUsd);
-  const adjustedProfitCny = money(cashGrossProfitCny - deferredCostChangeCny);
+  const adjustedProfitCny = money(operatingGrossProfitCny - deferredCostChangeCny);
   return {
     ok: true,
     mode: "daily-profit",
@@ -54,6 +62,8 @@ export function buildDailyProfitReport(facts: Row, ledger: DailyProfitLedgerInpu
     directCosts: {
       accountImportCny,
       upstreamRechargeCny: money(ledger.upstreamRechargeCny),
+      upstreamCapitalCny: money(upstreamCapitalCny),
+      upstreamConsumedCny: consumedUpstreamCny,
       manualExpenseCny: money(ledger.manualExpenseCny),
       yamlCostCny: money(ledger.yamlCostCny),
       procurementRefundCny: money(ledger.procurementRefundCny),
@@ -61,6 +71,12 @@ export function buildDailyProfitReport(facts: Row, ledger: DailyProfitLedgerInpu
       totalCny: totalDirectCostCny,
     },
     cashGrossProfitCny,
+    operatingGrossProfitCny,
+    capitalAdjusted: {
+      upstreamBalanceCnyPerApiUsd,
+      upstreamCapitalCny: money(upstreamCapitalCny),
+      treatment: "remaining_upstream_balance_is_capital",
+    },
     deferredCost: {
       openingRedeemableBalanceUsd: number((liability?.opening as Row | undefined)?.redeemableBalanceUsd),
       closingRedeemableBalanceUsd: number((liability?.closing as Row | undefined)?.redeemableBalanceUsd),
