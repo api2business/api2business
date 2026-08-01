@@ -8,6 +8,7 @@ const unusedReads = {} as Sub2ApiReadClient;
 
 test("selects the latest successful USD snapshot by normalized upstream wallet", () => {
   expect(normalizeUpstreamWallet("https://wallet.example.com/v1/")).toBe("https://wallet.example.com");
+  expect(normalizeUpstreamWallet("https://billing.example.com plus 0.05")).toBe("https://billing.example.com");
   const selected = latestSuccessfulUsageByWallet([
     { account_id: 49, queried_at: "2026-08-01T10:00:00Z", result: { ok: false, baseUrl: "https://wallet.example.com/v1" },
       last_success_at: "2026-08-01T09:30:00Z", last_success_result: { ok: true, baseUrl: "https://wallet.example.com/v1", quota: { unit: "USD", remaining: 13.95879651 } } },

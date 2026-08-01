@@ -63,7 +63,8 @@ function records(value: unknown): Array<Record<string, unknown>> {
 }
 
 export function normalizeUpstreamWallet(value: unknown): string {
-  return String(value ?? "").trim().replace(/\/v1\/?$/u, "").replace(/\/$/u, "");
+  const url = String(value ?? "").trim().split(/\s+/u)[0] ?? "";
+  return url.replace(/\/v1\/?$/u, "").replace(/\/$/u, "");
 }
 
 export function latestSuccessfulUsageByWallet(rows: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
@@ -218,14 +219,28 @@ export class OperationsService {
       .filter((row) => row.kind !== "procurement-refund")
       .reduce((sum, row) => sum + Number(row.amountCny ?? 0), 0);
     const dayCosts = costs.filter((row) => row.occurredOn === day);
+    const yamlUpstreamEntries = dayCosts
+      .filter((row) => row.kind === "recharge")
+      .map((row) => ({
+        accountId: Number(row.accountId),
+        accountName: String(row.accountName ?? ""),
+        baseUrl: String(row.baseUrl ?? row.accountName ?? ""),
+        amountCny: Number(row.amountCny ?? 0),
+      }))
+      .filter((entry) => Number.isSafeInteger(entry.accountId) && entry.accountId > 0
+        && Number.isFinite(entry.amountCny) && entry.amountCny > 0);
     const duplicateAcquisitionIds = dayCosts
       .filter((row) => row.kind === "acquisition" && importAccountIds.has(Number(row.accountId)))
       .map((row) => Number(row.accountId));
     const yamlCostCny = dayCosts
-      .filter((row) => !(row.kind === "acquisition" && importAccountIds.has(Number(row.accountId))))
+      .filter((row) => row.kind !== "recharge"
+        && !(row.kind === "acquisition" && importAccountIds.has(Number(row.accountId))))
       .reduce((sum, row) => sum + Number(row.amountCny ?? 0), 0);
-    const upstreamEntries = readUpstreamRechargeCosts(this.config.operations.upstreamRechargeLedgerPath)
-      .filter((entry) => entry.occurredOn === day);
+    const upstreamEntries = [
+      ...readUpstreamRechargeCosts(this.config.operations.upstreamRechargeLedgerPath)
+        .filter((entry) => entry.occurredOn === day),
+      ...yamlUpstreamEntries,
+    ];
     const usageRows = await this.store.getUpstreamUsageCache([]) as Array<Record<string, unknown>>;
     const usageByWallet = latestSuccessfulUsageByWallet(usageRows);
     const rechargeByWallet = new Map<string, number>();
