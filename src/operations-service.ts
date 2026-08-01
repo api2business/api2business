@@ -114,6 +114,14 @@ export class OperationsService {
     await this.store.close();
   }
 
+  async getApiCache(key: string) {
+    return await this.store.getApiCache(key);
+  }
+
+  async setApiCache(key: string, status: number, headers: Record<string, string>, body: string): Promise<void> {
+    await this.store.setApiCache(key, status, headers, body);
+  }
+
   private yamlLedger() {
     const root = parse(readFileSync(this.config.operations.ledgerYamlPath, "utf8")) as Record<string, unknown>;
     const profit = root.profit as Record<string, unknown> | undefined;

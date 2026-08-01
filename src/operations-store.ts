@@ -81,6 +81,13 @@ export class OperationsStore {
         result_summary jsonb NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now()
       );
+      CREATE TABLE IF NOT EXISTS apistate_api_cache (
+        cache_key text PRIMARY KEY,
+        status integer NOT NULL,
+        headers jsonb NOT NULL,
+        body text NOT NULL,
+        cached_at timestamptz NOT NULL DEFAULT now()
+      );
       CREATE INDEX IF NOT EXISTS apistate_cash_entries_occurred_on_idx
         ON apistate_cash_entries(occurred_on DESC, created_at DESC);
       CREATE INDEX IF NOT EXISTS apistate_operation_audit_created_at_idx
@@ -90,6 +97,23 @@ export class OperationsStore {
 
   async close(): Promise<void> {
     await Promise.all([this.sql.close(), this.priorityOptimizationQueueSql.close()]);
+  }
+
+  async getApiCache(key: string) {
+    const [row] = await this.sql`
+      SELECT cache_key, status, headers, body, cached_at
+      FROM apistate_api_cache WHERE cache_key=${key}
+    `;
+    return row ?? null;
+  }
+
+  async setApiCache(key: string, status: number, headers: Record<string, string>, body: string) {
+    await this.sql`
+      INSERT INTO apistate_api_cache (cache_key, status, headers, body, cached_at)
+      VALUES (${key}, ${status}, ${headers}::jsonb, ${body}, now())
+      ON CONFLICT (cache_key) DO UPDATE SET
+        status=EXCLUDED.status, headers=EXCLUDED.headers, body=EXCLUDED.body, cached_at=now()
+    `;
   }
 
   async withPriorityOptimizationQueue<T>(

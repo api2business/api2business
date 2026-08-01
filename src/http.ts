@@ -15,6 +15,7 @@ import {
 import { parseAlipayRevenueWindow } from "./alipay-revenue-database";
 import { parseCompletedProfitDay } from "./daily-profit-facts";
 import { normalizeExternalAccountCosts } from "./account-import-economics";
+import { createHash } from "node:crypto";
 import {
   apiKeyAuthorized,
   clearSessionCookie,
@@ -98,7 +99,12 @@ export function createHandler(
   reads: Sub2ApiReadClient,
   runtime: Sub2ApiRuntimeService,
 ): (request: Request) => Promise<Response> {
-  return async (request) => {
+  const cacheKey = (request: Request) => createHash("sha256").update(`${request.method} ${new URL(request.url).pathname}${new URL(request.url).search}`).digest("hex");
+  const cacheable = (request: Request) => request.method === "GET"
+    && new URL(request.url).pathname.startsWith("/api/")
+    && !/\/jobs(?:\/|$)|\/workflows(?:\/|$)|\/status$|\/health$/u.test(new URL(request.url).pathname);
+  const cacheRefreshes = new Set<string>();
+  const handle = async (request: Request) => {
     const url = new URL(request.url);
     const session = sessionAuthorized(request, config, auth);
       const apiKey = apiKeyAuthorized(request, auth) || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
@@ -641,5 +647,39 @@ export function createHandler(
     } catch (error) {
       return errorResponse(error);
     }
+  };
+  return async (request) => {
+    if (!cacheable(request)) return await handle(request);
+    const authorized = sessionAuthorized(request, config, auth)
+      || apiKeyAuthorized(request, auth)
+      || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
+    if (!authorized) return await handle(request);
+    const key = cacheKey(request);
+    const cached = await operations.getApiCache(key);
+    if (cached) {
+      if (!cacheRefreshes.has(key)) {
+        cacheRefreshes.add(key);
+        void handle(request).then(async (response) => {
+          if (response.ok) await response.clone().text().then(async (body) => {
+            const headers: Record<string, string> = {};
+            response.headers.forEach((value, name) => { if (name !== "cache-control" && name !== "content-length") headers[name] = value; });
+            await operations.setApiCache(key, response.status, headers, body);
+          });
+        }).catch(() => undefined).finally(() => cacheRefreshes.delete(key));
+      }
+      const headers = typeof cached.headers === "string" ? JSON.parse(cached.headers) : cached.headers;
+      return new Response(String(cached.body), {
+        status: Number(cached.status),
+        headers: { ...(headers as Record<string, string>), "cache-control": "no-store", "x-apistate-cache": "hit", "x-apistate-cached-at": String(cached.cached_at) },
+      });
+    }
+    const response = await handle(request);
+    if (response.ok) {
+      const body = await response.clone().text();
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, name) => { if (name !== "cache-control" && name !== "content-length") headers[name] = value; });
+      void operations.setApiCache(key, response.status, headers, body).catch(() => undefined);
+    }
+    return response;
   };
 }
