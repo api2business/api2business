@@ -25,3 +25,4 @@
 
 ## Domain Notes
 - Sub2API 优先级数字越小，调度越靠前。
+- Sub2API `/v1/usage` 的 `mode=unrestricted` 只表示 API Key 不受 quota/rate-limit；只有顶层 `remaining`/`balance` 或 `subscription`/`usage.total` 才是可展示的额度与用量数据，空 mode 响应必须继续探测其他协议并报不支持。
