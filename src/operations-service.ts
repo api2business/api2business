@@ -4,6 +4,7 @@ import type { AppConfig } from "./config";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
 import { collectErrorAggregateFromDatabase } from "./error-aggregate-database";
+import { collectErrorDiagnosisFromDatabase } from "./error-diagnose-database";
 import {
   collectErrorListFromDatabase,
   collectErrorRequestFromDatabase,
@@ -1041,6 +1042,25 @@ export class OperationsService {
       top,
       accountSelector,
       groupSelector,
+      "manual",
+    );
+  }
+
+  async errorDiagnose(
+    limit: number,
+    top: number,
+    accountSelector: string | null,
+    groupSelector: string | null,
+    failoverRequestIds: string[] | null,
+  ) {
+    return await collectErrorDiagnosisFromDatabase(
+      this.config,
+      this.reads,
+      limit,
+      top,
+      accountSelector,
+      groupSelector,
+      failoverRequestIds,
       "manual",
     );
   }

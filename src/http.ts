@@ -422,6 +422,30 @@ export function createHandler(
           url.searchParams.get("group"),
         ));
       }
+      if (request.method === "GET" && url.pathname === "/api/admin/errors/diagnose") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const limit = positiveInteger(
+          url.searchParams.get("limit"),
+          config.monitor.errorAggregateLimit,
+        );
+        const top = positiveInteger(
+          url.searchParams.get("top"),
+          config.monitor.errorAggregateTop,
+        );
+        if (limit === null || top === null) {
+          return json({ ok: false, error: "limit and top must be positive integers" }, 400);
+        }
+        return json(await operations.errorDiagnose(
+          limit,
+          top,
+          url.searchParams.get("account"),
+          url.searchParams.get("group"),
+          url.searchParams.has("failoverRequestIds")
+            ? (url.searchParams.get("failoverRequestIds") ?? "")
+              .split(",").filter((value) => /^[0-9a-f-]{36}$/iu.test(value))
+            : null,
+        ));
+      }
       if (request.method === "GET" && url.pathname === "/api/admin/errors") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
         const limit = positiveInteger(

@@ -194,6 +194,19 @@ export class AdminHttpClient {
     if (group) query.set("group", group);
     return this.request(`/api/admin/errors/aggregate?${query}`, {}, 60000);
   }
+  errorDiagnose(
+    limit: number,
+    top: number,
+    account: string | null,
+    group: string | null,
+    failoverRequestIds: string[] | null = null,
+  ): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ limit: String(limit), top: String(top) });
+    if (account) query.set("account", account);
+    if (group) query.set("group", group);
+    if (failoverRequestIds !== null) query.set("failoverRequestIds", failoverRequestIds.join(","));
+    return this.request(`/api/admin/errors/diagnose?${query}`, {}, 60000);
+  }
   errorList(limit: number): Promise<Record<string, unknown>> {
     return this.request(`/api/admin/errors?limit=${limit}`, {}, 60000);
   }

@@ -10,11 +10,15 @@ import { nativeAll, nativeLogs, nativeStart, nativeStatus, nativeStop } from "..
 import { TemporalGateway } from "../../src/temporal-client";
 import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
+import { emitErrorDiagnosis } from "./error-diagnose-output";
 import { emitPriorityPlan } from "./priority-plan-output";
 import { emitAccountEconomics, emitAccountImportEconomics } from "./account-economics-output";
 import { emitOAuthEconomics } from "./oauth-economics-output";
 import { emitDailyProfit } from "./daily-profit-output";
 import { parseAccountIdSelector } from "../../src/account-batch-economics";
+import { runBoundedProcess } from "../../src/bounded-process";
+
+type Row = Record<string, unknown>;
 
 interface Parsed {
   configPath: string;
@@ -144,6 +148,7 @@ function help(): Record<string, unknown> {
       "scores get|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
+      "errors diagnose [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors list [--limit N]",
       "errors get --request-id <request-id>",
       "users impact --start <ISO> --end <ISO> [--affected-only]",
@@ -492,6 +497,76 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       parsed.group,
     );
   }
+  if (group === "errors" && action === "diagnose") {
+    const eventProcess = await runBoundedProcess([
+      config.monitor.cli.executable,
+      config.monitor.cli.entrypoint,
+      "platform-infra", "sub2api", "codex-pool", "runtime", "events",
+      "--target", config.monitor.target,
+      "--since", "8h",
+      "--tail", "200000",
+      "--json",
+    ], {
+      cwd: config.monitor.cli.workDir,
+      env: { ...Bun.env, UNIDESK_MAIN_SERVER_IP: config.monitor.cli.mainServerHost },
+      timeoutMs: config.monitor.cli.timeoutMs,
+    });
+    let eventEnvelope: Row = {};
+    try { eventEnvelope = JSON.parse(eventProcess.stdout) as Row; } catch {}
+    const eventData = record(eventEnvelope.data);
+    const runtime = record(eventData?.runtime);
+    const failoverEvents = (Array.isArray(runtime?.events) ? runtime.events : [])
+      .map(record)
+      .filter((row): row is Row => row !== null
+        && row.marker === "openai.upstream_failover_switching"
+        && typeof row.clientRequestId === "string"
+        && /^[0-9a-f-]{36}$/iu.test(row.clientRequestId));
+    const failoverRequestIds = [...new Set(failoverEvents.map((row) => String(row.clientRequestId)))];
+    const diagnosis = await client.errorDiagnose(
+      parsed.limit ?? config.monitor.errorAggregateLimit,
+      parsed.top ?? config.monitor.errorAggregateTop,
+      parsed.account,
+      parsed.group,
+      failoverRequestIds,
+    );
+    const byClientRequestId = new Map<string, Row[]>();
+    for (const event of failoverEvents) {
+      const key = String(event.clientRequestId);
+      byClientRequestId.set(key, [...(byClientRequestId.get(key) ?? []), event]);
+    }
+    const chains = (Array.isArray(diagnosis.chains) ? diagnosis.chains : [])
+      .map(record)
+      .filter((row): row is Row => row !== null)
+      .map((chain) => ({
+        ...chain,
+        failoverTriggered: true,
+        failovers: (byClientRequestId.get(String(chain.requestId)) ?? []).map((event) => ({
+          at: event.createdAt ?? null,
+          requestId: event.requestId ?? null,
+          accountId: event.accountId ?? null,
+          upstreamStatus: event.upstreamStatus ?? null,
+        })),
+      }));
+    const summary = record(diagnosis.summary) ?? {};
+    return {
+      ...diagnosis,
+      mode: "error-diagnose-failed-failover",
+      summary: {
+        ...summary,
+        observedFailoverEvents: failoverEvents.length,
+        observedFailoverRequests: failoverRequestIds.length,
+        failoverFailedRequests: chains.length,
+      },
+      chains,
+      failoverEvidence: {
+        source: "sub2api-runtime-policy-events",
+        window: runtime?.window ?? "8h",
+        scannedLineCount: runtime?.scannedLineCount ?? 0,
+        eventQueryOk: eventProcess.exitCode === 0 && runtime?.ok === true,
+        eventQueryTimedOut: eventProcess.timedOut,
+      },
+    };
+  }
   if (group === "errors" && action === "list") {
     return await client.errorList(parsed.limit ?? config.monitor.errorAggregateLimit);
   }
@@ -614,6 +689,7 @@ export async function runCli(args: string[]): Promise<void> {
     if (parsed.command.join(" ") === "scores rank") emitScoreRanking(output, parsed.json);
     else if (parsed.command.join(" ") === "scores priority-plan") emitPriorityPlan(output, parsed.json);
     else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
+    else if (parsed.command.join(" ") === "errors diagnose") emitErrorDiagnosis(output, parsed.json);
     else if (parsed.command.join(" ") === "users impact") emitUserImpact(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts economics") emitAccountEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts import-economics") emitAccountImportEconomics(output, parsed.json);
