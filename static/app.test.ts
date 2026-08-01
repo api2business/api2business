@@ -29,6 +29,16 @@ test("account import supports Team manual selection and three price-inferred typ
   expect(app).not.toContain("new URLSearchParams(location.search).get('job')");
 });
 
+test("upstream management exposes queued quota and usage queries", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./upstreams.html", import.meta.url)).text();
+  expect(html).toContain('id="upstream-usage-refresh"');
+  expect(html).toContain('id="upstream-edit-usage"');
+  expect(app).toContain("requestJson('/api/upstreams/usage'");
+  expect(app).toContain("result.databaseQueries");
+  expect(app).not.toContain("apiKey: activeUpstream");
+});
+
 test("automation submit preserves the user's current form values", async () => {
   const source = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const start = source.indexOf("$('#automation-form').addEventListener");

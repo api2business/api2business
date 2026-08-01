@@ -13,13 +13,17 @@
   <main class="workspace upstream-workspace">
     <header class="page-head">
       <div><p class="eyebrow">UPSTREAMS / RUNTIME API-KEY</p><h1>上游管理</h1></div>
-      <div class="page-actions"><span id="upstream-state" class="state-badge">读取中</span><button id="upstream-create" class="query-command" type="button">新增上游</button></div>
+      <div class="page-actions"><span id="upstream-state" class="state-badge">读取中</span><button id="upstream-usage-refresh" class="query-command" type="button">刷新额度 / 用量</button><button id="upstream-create" class="query-command" type="button">新增上游</button></div>
     </header>
     <section class="metric-strip upstream-metrics" aria-label="上游概要">
       <div><span>上游账号</span><strong id="upstream-total">—</strong></div>
       <div><span>可调度（筛选结果）</span><strong id="upstream-available">—</strong></div>
       <div><span>全局充值成本</span><strong id="upstream-recharged">—</strong></div>
       <div><span>当前页</span><strong id="upstream-page-metric">—</strong></div>
+    </section>
+    <section id="upstream-usage-panel" class="upstream-usage-panel" aria-live="polite">
+      <header><div><p class="eyebrow">UPSTREAM QUOTA / USAGE</p><h2>额度与用量</h2></div><span id="upstream-usage-state" class="section-state">尚未查询</span></header>
+      <div id="upstream-usage-results" class="upstream-usage-results"><p class="empty">可查询当前页全部上游，或在账号弹窗中查询单个上游。</p></div>
     </section>
     <section class="table-section">
       <div class="table-toolbar">
@@ -69,6 +73,7 @@
         <label class="wide-field"><span>追加充值（人民币，可选）</span><input id="upstream-edit-recharge" type="number" min="0.01" step="0.01" placeholder="不充值" /></label>
       </div>
       <p id="upstream-edit-state" class="dialog-state"></p>
+      <section class="upstream-edit-usage"><header><strong>额度与用量</strong><button id="upstream-edit-usage" class="text-command" type="button">查询</button></header><div id="upstream-edit-usage-result" class="upstream-usage-results"><p class="empty">尚未查询</p></div></section>
       <section class="upstream-job-console" aria-label="调整日志"><header><span>调整日志</span><code id="upstream-edit-job">JOB —</code></header><ol id="upstream-edit-logs" class="upstream-job-logs"><li class="empty">等待提交</li></ol></section>
       <footer><button class="text-command" value="cancel" type="submit">取消</button><button id="upstream-edit-submit" class="primary-command" value="default" type="submit">保存调整</button></footer>
     </form>

@@ -1185,6 +1185,19 @@ function upstreamOperationId(prefix) {
   return `${prefix}-${typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
 }
 
+function upstreamUsageMarkup(result) {
+  const quota = result.quota ?? {}
+  const usage = result.usage ?? {}
+  const quotaValue = quota.unlimited === true ? '无限额' : quota.remaining == null ? '—' : number(quota.remaining, 2)
+  const quotaUnit = quota.unit ? ` ${quota.unit}` : ''
+  const warning = result.warning ? `<p>${escapeHtml(result.warning)}</p>` : ''
+  const error = result.error ? `<p>${escapeHtml(result.error)}</p>` : ''
+  return `<article class="upstream-usage-result" data-ok="${result.ok === true}">
+    <header><div><b>${escapeHtml(result.accountName ?? `账号 #${result.accountId}`)}</b><small>#${escapeHtml(result.accountId)} · ${escapeHtml(result.provider ?? 'unknown')}</small></div><small>${number(result.durationMs)} ms</small></header>
+    <dl><dt>剩余额度</dt><dd>${escapeHtml(quotaValue)}${escapeHtml(quotaUnit)}</dd><dt>已用额度</dt><dd>${quota.used == null ? '—' : escapeHtml(number(quota.used, 2))}</dd><dt>Token</dt><dd>${usage.totalTokens == null ? '—' : compact(usage.totalTokens)}</dd><dt>请求</dt><dd>${usage.requestCount == null ? '—' : number(usage.requestCount)}</dd><dt>API 费用</dt><dd>${usage.actualCostUsd == null ? usage.costUsd == null ? '—' : usd(usage.costUsd) : usd(usage.actualCostUsd)}</dd><dt>查询时间</dt><dd>${time(result.queriedAt)}</dd></dl>${warning}${error}
+  </article>`
+}
+
 async function waitUpstreamJob(workflowId, onStatus = () => {}, timeoutMs = 600000) {
   const deadline = Date.now() + timeoutMs
   let previousState = ''
@@ -1230,6 +1243,15 @@ async function upstreamsPage() {
   let createOperationId = null
   let editRechargeOperationId = null
   let upstreamGroupOptions = []
+  const queryUsage = async (accountIds) => {
+    if (!accountIds.length) return { ok: true, succeeded: 0, failed: 0, databaseQueries: 0, results: [] }
+    const submitted = await requestJson('/api/upstreams/usage', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': upstreamOperationId('upstream-usage') },
+      body: JSON.stringify({ accountIds }),
+    }, 20000)
+    return await waitUpstreamJob(submitted.workflowId)
+  }
   const resetJobLog = (scope) => {
     $(`#upstream-${scope}-job`).textContent = 'JOB —'
     $(`#upstream-${scope}-logs`).innerHTML = '<li class="empty">等待提交</li>'
@@ -1311,8 +1333,33 @@ async function upstreamsPage() {
     $('#upstream-edit-state').textContent = ''
     $('#upstream-edit-state').removeAttribute('data-state')
     resetJobLog('edit')
+    $('#upstream-edit-usage-result').innerHTML = '<p class="empty">尚未查询</p>'
     editDialog.showModal()
   }
+  $('#upstream-usage-refresh').addEventListener('click', async () => {
+    const button = $('#upstream-usage-refresh')
+    button.disabled = true
+    $('#upstream-usage-state').textContent = 'worker 正在并发查询当前页上游…'
+    try {
+      const result = await queryUsage(lastUpstreamRows.map((row) => Number(row.id)))
+      $('#upstream-usage-results').innerHTML = result.results?.length ? result.results.map(upstreamUsageMarkup).join('') : '<p class="empty">当前页没有可查询的上游</p>'
+      $('#upstream-usage-state').textContent = `${number(result.succeeded)} 成功 · ${number(result.failed)} 失败 · ${number(result.databaseQueries)} 次排队 DB 查询`
+    } catch (error) {
+      $('#upstream-usage-state').textContent = error instanceof Error ? error.message : String(error)
+    } finally { button.disabled = false }
+  })
+  $('#upstream-edit-usage').addEventListener('click', async () => {
+    if (!activeUpstream) return
+    const button = $('#upstream-edit-usage')
+    button.disabled = true
+    $('#upstream-edit-usage-result').innerHTML = '<p class="empty">正在查询…</p>'
+    try {
+      const result = await queryUsage([Number(activeUpstream.id)])
+      $('#upstream-edit-usage-result').innerHTML = result.results?.length ? upstreamUsageMarkup(result.results[0]) : '<p class="empty">未找到可查询账号</p>'
+    } catch (error) {
+      $('#upstream-edit-usage-result').innerHTML = `<p class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`
+    } finally { button.disabled = false }
+  })
   $('#upstream-search-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     upstreamSearch = $('#upstream-search').value.trim()

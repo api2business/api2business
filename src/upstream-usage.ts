@@ -63,7 +63,8 @@ async function requestJson(target: UpstreamUsageTarget, path: string, timeoutMs:
   status: number;
   payload: unknown;
 }> {
-  const response = await fetch(`${target.baseUrl.replace(/\/$/u, "")}${path}`, {
+  const controlBaseUrl = target.baseUrl.replace(/\/$/u, "").replace(/\/v1$/u, "");
+  const response = await fetch(`${controlBaseUrl}${path}`, {
     headers: {
       authorization: `Bearer ${target.apiKey}`,
       accept: "application/json",
