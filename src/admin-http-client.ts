@@ -102,6 +102,15 @@ export class AdminHttpClient {
       body: JSON.stringify({ results }),
     });
   }
+  upstreamUsageCacheRead(accountIds: number[]): Promise<Record<string, unknown>> {
+    const query = accountIds.length ? `?accountIds=${encodeURIComponent(accountIds.join(","))}` : "";
+    return this.request(`/api/upstreams/usage-cache${query}`);
+  }
+  upstreamUsageCacheRestore(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/usage-cache/restore", {
+      method: "POST", body: JSON.stringify(input),
+    });
+  }
   upstreamTemplate(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/template", {
       method: "POST",

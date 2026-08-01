@@ -62,6 +62,26 @@ function records(value: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
+export function normalizeUpstreamWallet(value: unknown): string {
+  return String(value ?? "").trim().replace(/\/v1\/?$/u, "").replace(/\/$/u, "");
+}
+
+export function latestSuccessfulUsageByWallet(rows: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
+  const selected = new Map<string, { result: Record<string, unknown>; queriedAt: number }>();
+  for (const row of rows) {
+    const result = object(row.last_success_result ?? row.result);
+    const wallet = normalizeUpstreamWallet(result.baseUrl);
+    const remaining = Number(object(result.quota).remaining);
+    const unit = String(object(result.quota).unit ?? "");
+    if (!wallet || result.ok !== true || unit !== "USD" || !Number.isFinite(remaining)) continue;
+    const queriedAt = Date.parse(String(row.last_success_at ?? row.queried_at ?? result.queriedAt ?? ""));
+    const timestamp = Number.isFinite(queriedAt) ? queriedAt : 0;
+    const previous = selected.get(wallet);
+    if (!previous || timestamp >= previous.queriedAt) selected.set(wallet, { result, queriedAt: timestamp });
+  }
+  return new Map([...selected].map(([wallet, entry]) => [wallet, entry.result]));
+}
+
 function money(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -126,6 +146,28 @@ export class OperationsService {
     return await this.store.getUpstreamUsageCache(accountIds);
   }
 
+  async restoreUpstreamUsageSuccess(input: Record<string, unknown>) {
+    const accountId = Number(input.accountId);
+    const remainingUsd = Number(input.remainingUsd);
+    const baseUrl = normalizeUpstreamWallet(input.baseUrl);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error("上游账号 ID 无效");
+    if (!Number.isFinite(remainingUsd) || remainingUsd < 0) throw new Error("历史成功余额必须是非负 USD 数值");
+    if (!baseUrl.startsWith("https://")) throw new Error("历史成功快照 base_url 无效");
+    if (input.confirm !== true) throw new Error("历史成功快照回填必须显式确认");
+    const result = {
+      ok: true,
+      accountId,
+      baseUrl,
+      provider: "operator-confirmed-history",
+      quota: { unit: "USD", remaining: remainingUsd },
+      queriedAt: new Date().toISOString(),
+      restored: true,
+      valuesPrinted: false,
+    };
+    await this.store.restoreUpstreamUsageSuccess(accountId, result);
+    return { ok: true, mutation: true, accountId, baseUrl, remainingUsd, valuesPrinted: false };
+  }
+
   async setUpstreamUsageCache(results: Array<Record<string, unknown>>): Promise<void> {
     await this.store.setUpstreamUsageCache(results);
   }
@@ -184,14 +226,14 @@ export class OperationsService {
       .reduce((sum, row) => sum + Number(row.amountCny ?? 0), 0);
     const upstreamEntries = readUpstreamRechargeCosts(this.config.operations.upstreamRechargeLedgerPath)
       .filter((entry) => entry.occurredOn === day);
-    const usageRows = await this.store.getUpstreamUsageCache(upstreamEntries.map((entry) => entry.accountId)) as Array<Record<string, unknown>>;
-    const usageByAccount = new Map(usageRows.map((row) => [Number(row.account_id), object(row.result)]));
+    const usageRows = await this.store.getUpstreamUsageCache([]) as Array<Record<string, unknown>>;
+    const usageByWallet = latestSuccessfulUsageByWallet(usageRows);
     const rechargeByWallet = new Map<string, number>();
     const walletRemaining = new Map<string, number>();
     const missingWallets = new Set<string>();
     for (const entry of upstreamEntries) {
-      const usage = usageByAccount.get(entry.accountId);
-      const baseUrl = String(usage?.baseUrl ?? entry.baseUrl ?? entry.accountName).replace(/\/v1\/?$/u, "").replace(/\/$/u, "");
+      const baseUrl = normalizeUpstreamWallet(entry.baseUrl ?? entry.accountName);
+      const usage = usageByWallet.get(baseUrl);
       rechargeByWallet.set(baseUrl, (rechargeByWallet.get(baseUrl) ?? 0) + entry.amountCny);
       const remaining = Number(object(usage?.quota).remaining);
       const unit = String(object(usage?.quota).unit ?? "");

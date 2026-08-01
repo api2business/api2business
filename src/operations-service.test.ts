@@ -1,10 +1,39 @@
 import { expect, test } from "bun:test";
 import type { AppConfig } from "./config";
-import { applyPlanTypeRefunds, OperationsService } from "./operations-service";
+import { applyPlanTypeRefunds, latestSuccessfulUsageByWallet, normalizeUpstreamWallet, OperationsService } from "./operations-service";
 import type { OperationsStore } from "./operations-store";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 const unusedReads = {} as Sub2ApiReadClient;
+
+test("selects the latest successful USD snapshot by normalized upstream wallet", () => {
+  expect(normalizeUpstreamWallet("https://wallet.example.com/v1/")).toBe("https://wallet.example.com");
+  const selected = latestSuccessfulUsageByWallet([
+    { account_id: 49, queried_at: "2026-08-01T10:00:00Z", result: { ok: false, baseUrl: "https://wallet.example.com/v1" },
+      last_success_at: "2026-08-01T09:30:00Z", last_success_result: { ok: true, baseUrl: "https://wallet.example.com/v1", quota: { unit: "USD", remaining: 13.95879651 } } },
+    { account_id: 50, queried_at: "2026-08-01T09:00:00Z", result: { ok: true, baseUrl: "https://wallet.example.com", quota: { unit: "USD", remaining: 13.95879651 } } },
+    { account_id: 51, queried_at: "2026-08-01T08:00:00Z", result: { ok: true, baseUrl: "https://wallet.example.com/v1/", quota: { unit: "USD", remaining: 12 } } },
+  ]);
+  expect(selected.get("https://wallet.example.com")).toMatchObject({ quota: { remaining: 13.95879651 } });
+});
+
+test("restores one operator-confirmed historical successful wallet snapshot", async () => {
+  const restored: Array<Record<string, unknown>> = [];
+  const store = {
+    async restoreUpstreamUsageSuccess(accountId: number, result: Record<string, unknown>) {
+      restored.push({ accountId, result });
+    },
+  } as unknown as OperationsStore;
+  const service = new OperationsService({} as AppConfig, store, unusedReads);
+  const result = await service.restoreUpstreamUsageSuccess({
+    accountId: 49,
+    baseUrl: "https://wallet.example.com/v1",
+    remainingUsd: 13.95879651,
+    confirm: true,
+  });
+  expect(result).toMatchObject({ mutation: true, accountId: 49, baseUrl: "https://wallet.example.com", remainingUsd: 13.95879651 });
+  expect(restored[0]).toMatchObject({ accountId: 49, result: { ok: true, provider: "operator-confirmed-history" } });
+});
 
 test("plan type refunds make group weighted cost equal the net total", () => {
   const groups = applyPlanTypeRefunds([

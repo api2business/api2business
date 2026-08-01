@@ -62,6 +62,7 @@ interface Parsed {
   suffix: string | null;
   rate: number | null;
   rechargeCny: number | null;
+  remainingUsd: number | null;
   page: number | null;
   search: string | null;
   apiKeyStdin: boolean;
@@ -83,7 +84,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--scope", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--page", "--search"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--scope", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--page", "--search"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -107,6 +108,13 @@ function parseArgs(args: string[]): Parsed {
     if (raw === null) return null;
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} must be a positive number`);
+    return parsed;
+  };
+  const nonNegativeDecimal = (name: string): number | null => {
+    const raw = value(args, name);
+    if (raw === null) return null;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${name} must be a non-negative number`);
     return parsed;
   };
   return {
@@ -149,6 +157,7 @@ function parseArgs(args: string[]): Parsed {
     externalCostsJson: value(args, "--external-costs-json"),
     baseUrl: value(args, "--base-url"), suffix: value(args, "--suffix"),
     rate: decimal("--rate"), rechargeCny: decimal("--recharge-cny"),
+    remainingUsd: nonNegativeDecimal("--remaining-usd"),
     page: integer("--page"), search: value(args, "--search"), apiKeyStdin: args.includes("--api-key-stdin"),
     templateOnly: args.includes("--template-only"),
   };
@@ -193,6 +202,8 @@ function help(): Record<string, unknown> {
       "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
       "upstreams list [--page N --search <text>] --over-api",
       "upstreams usage [--accounts <id-or-range,...>] --over-api",
+      "upstreams usage-cache [--accounts <id-or-range,...>] --over-api",
+      "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams create --base-url <https-url> --suffix <name> --rate <CNY/API_USD> [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
       "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--template-only] [--confirm] --over-api",
@@ -383,6 +394,19 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "upstreams" && action === "usage") {
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     return await client.upstreamUsage(accountIds, `upstream-usage-${crypto.randomUUID()}`);
+  }
+  if (group === "upstreams" && action === "usage-cache") {
+    if (parsed.command[2] === "restore") {
+      const accountId = Number(parsed.id);
+      if (!Number.isSafeInteger(accountId) || accountId <= 0 || !parsed.baseUrl || parsed.remainingUsd === null) {
+        throw new Error("upstreams usage-cache restore requires --id, --base-url, and --remaining-usd");
+      }
+      return await client.upstreamUsageCacheRestore({
+        accountId, baseUrl: parsed.baseUrl, remainingUsd: parsed.remainingUsd, confirm: parsed.confirm,
+      });
+    }
+    const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
+    return await client.upstreamUsageCacheRead(accountIds);
   }
   if (group === "upstreams" && action === "template") {
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];

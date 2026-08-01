@@ -98,8 +98,18 @@ export class OperationsStore {
       CREATE TABLE IF NOT EXISTS apistate_upstream_usage_cache (
         account_id bigint PRIMARY KEY,
         result jsonb NOT NULL,
-        queried_at timestamptz NOT NULL DEFAULT now()
+        queried_at timestamptz NOT NULL DEFAULT now(),
+        last_success_result jsonb,
+        last_success_at timestamptz
       );
+      ALTER TABLE apistate_upstream_usage_cache
+        ADD COLUMN IF NOT EXISTS last_success_result jsonb;
+      ALTER TABLE apistate_upstream_usage_cache
+        ADD COLUMN IF NOT EXISTS last_success_at timestamptz;
+      UPDATE apistate_upstream_usage_cache
+      SET last_success_result=result, last_success_at=queried_at
+      WHERE last_success_result IS NULL
+        AND COALESCE((result->>'ok')::boolean, false);
       CREATE INDEX IF NOT EXISTS apistate_cash_entries_occurred_on_idx
         ON apistate_cash_entries(occurred_on DESC, created_at DESC);
       CREATE INDEX IF NOT EXISTS apistate_operation_audit_created_at_idx
@@ -130,11 +140,13 @@ export class OperationsStore {
 
   async getUpstreamUsageCache(accountIds: number[]) {
     if (!accountIds.length) return await this.sql`
-      SELECT account_id, result, queried_at FROM apistate_upstream_usage_cache ORDER BY account_id
+      SELECT account_id, result, queried_at, last_success_result, last_success_at
+      FROM apistate_upstream_usage_cache ORDER BY account_id
     `;
     const accountIdArray = postgresBigintArrayLiteral(accountIds);
     return await this.sql`
-      SELECT account_id, result, queried_at FROM apistate_upstream_usage_cache
+      SELECT account_id, result, queried_at, last_success_result, last_success_at
+      FROM apistate_upstream_usage_cache
       WHERE account_id = ANY(${accountIdArray}::bigint[]) ORDER BY account_id
     `;
   }
@@ -145,14 +157,38 @@ export class OperationsStore {
         const accountId = Number(result.accountId);
         if (!Number.isSafeInteger(accountId) || accountId <= 0) continue;
         await tx`
-          INSERT INTO apistate_upstream_usage_cache (account_id, result, queried_at)
-          VALUES (${accountId}, ${result}::jsonb, now())
-          ON CONFLICT (account_id) DO UPDATE SET result=EXCLUDED.result, queried_at=now()
-          WHERE COALESCE((EXCLUDED.result->>'ok')::boolean, false)
-            OR NOT COALESCE((apistate_upstream_usage_cache.result->>'ok')::boolean, false)
+          INSERT INTO apistate_upstream_usage_cache (
+            account_id, result, queried_at, last_success_result, last_success_at
+          ) VALUES (
+            ${accountId}, ${result}::jsonb, now(),
+            CASE WHEN COALESCE((${result}::jsonb->>'ok')::boolean, false) THEN ${result}::jsonb ELSE NULL END,
+            CASE WHEN COALESCE((${result}::jsonb->>'ok')::boolean, false) THEN now() ELSE NULL END
+          )
+          ON CONFLICT (account_id) DO UPDATE SET
+            result=EXCLUDED.result,
+            queried_at=now(),
+            last_success_result=CASE
+              WHEN COALESCE((EXCLUDED.result->>'ok')::boolean, false) THEN EXCLUDED.result
+              ELSE apistate_upstream_usage_cache.last_success_result
+            END,
+            last_success_at=CASE
+              WHEN COALESCE((EXCLUDED.result->>'ok')::boolean, false) THEN now()
+              ELSE apistate_upstream_usage_cache.last_success_at
+            END
         `;
       }
     });
+  }
+
+  async restoreUpstreamUsageSuccess(accountId: number, result: Record<string, unknown>) {
+    await this.sql`
+      INSERT INTO apistate_upstream_usage_cache (
+        account_id, result, queried_at, last_success_result, last_success_at
+      ) VALUES (${accountId}, ${result}::jsonb, now(), ${result}::jsonb, now())
+      ON CONFLICT (account_id) DO UPDATE SET
+        last_success_result=EXCLUDED.last_success_result,
+        last_success_at=now()
+    `;
   }
 
   async withPriorityOptimizationQueue<T>(

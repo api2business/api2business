@@ -148,7 +148,17 @@ export function createHandler(
         const selector = url.searchParams.get("accountIds");
         const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
         const rows = await operations.getUpstreamUsageCache(accountIds) as Array<Record<string, unknown>>;
-        return json({ ok: true, results: rows.map((row) => row.result), cachedAt: rows.map((row) => row.queried_at) });
+        return json({
+          ok: true,
+          results: rows.map((row) => row.result),
+          cachedAt: rows.map((row) => row.queried_at),
+          lastSuccessfulResults: rows.map((row) => row.last_success_result),
+          lastSuccessfulAt: rows.map((row) => row.last_success_at),
+        });
+      }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/usage-cache/restore") {
+        try { return json(await operations.restoreUpstreamUsageSuccess(await body(request))); }
+        catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
       }
       if (request.method === "POST" && url.pathname === "/api/upstreams/usage") {
         const input = await body(request);
