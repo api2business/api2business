@@ -10,6 +10,13 @@ export interface PriorityOptimizationQueueLease {
   waitMs: number;
 }
 
+export function postgresBigintArrayLiteral(values: number[]): string {
+  if (values.some((value) => !Number.isSafeInteger(value) || value <= 0)) {
+    throw new Error("PostgreSQL bigint array values must be positive integers");
+  }
+  return `{${values.join(",")}}`;
+}
+
 export class OperationsStore {
   private readonly sql: SQL;
   private readonly priorityOptimizationQueueSql: SQL;
@@ -125,9 +132,10 @@ export class OperationsStore {
     if (!accountIds.length) return await this.sql`
       SELECT account_id, result, queried_at FROM apistate_upstream_usage_cache ORDER BY account_id
     `;
+    const accountIdArray = postgresBigintArrayLiteral(accountIds);
     return await this.sql`
       SELECT account_id, result, queried_at FROM apistate_upstream_usage_cache
-      WHERE account_id = ANY(${accountIds}::bigint[]) ORDER BY account_id
+      WHERE account_id = ANY(${accountIdArray}::bigint[]) ORDER BY account_id
     `;
   }
 
@@ -140,6 +148,8 @@ export class OperationsStore {
           INSERT INTO apistate_upstream_usage_cache (account_id, result, queried_at)
           VALUES (${accountId}, ${result}::jsonb, now())
           ON CONFLICT (account_id) DO UPDATE SET result=EXCLUDED.result, queried_at=now()
+          WHERE COALESCE((EXCLUDED.result->>'ok')::boolean, false)
+            OR NOT COALESCE((apistate_upstream_usage_cache.result->>'ok')::boolean, false)
         `;
       }
     });
