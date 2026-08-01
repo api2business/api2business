@@ -25,7 +25,7 @@ export async function inspectAccounts(accountIds: number[], reads: Sub2ApiReadCl
     cacheMode: "bypass-cache",
     sql: `
       SELECT
-        a.id, a.name, a.status, a.schedulable, a.priority,
+        a.id, a.name, a.platform, a.type, a.status, a.schedulable, a.priority,
         a.concurrency AS capacity, a.proxy_id,
         COALESCE(p.name, '') AS proxy_name,
         COALESCE(p.status, '') AS proxy_status,
@@ -45,6 +45,8 @@ export async function inspectAccounts(accountIds: number[], reads: Sub2ApiReadCl
   const accounts = query.rows.map((row) => ({
     id: integer(row.id),
     name: String(row.name ?? ""),
+    platform: String(row.platform ?? "").toLowerCase(),
+    type: String(row.type ?? "").toLowerCase(),
     status: String(row.status ?? ""),
     schedulable: row.schedulable === true,
     priority: integer(row.priority),
@@ -67,7 +69,7 @@ export async function inspectAccounts(accountIds: number[], reads: Sub2ApiReadCl
 
 export async function verifyImportedAccounts(
   accountIds: number[],
-  settings: { priority: number; capacity: number; groupIds: number[] },
+  settings: { priority: number; capacity: number; groupIds: number[]; platform?: "openai" | "grok" },
   proxyCandidateIds: number[],
   reads: Sub2ApiReadClient,
   proxyOptions: { sharedProxyId?: number; strictProxyAccountIds?: number[] } = {},
@@ -77,6 +79,8 @@ export async function verifyImportedAccounts(
   const strictProxyAccountIds = new Set(proxyOptions.strictProxyAccountIds ?? []);
   const accounts = rows.map((row) => {
     const reasons: string[] = [];
+    if (settings.platform && String(row.platform) !== settings.platform) reasons.push("platform-mismatch");
+    if (String(row.type) !== "oauth") reasons.push("type-mismatch");
     if (Number(row.priority) !== settings.priority) reasons.push("priority-mismatch");
     if (Number(row.capacity) !== settings.capacity) reasons.push("capacity-mismatch");
     const groups = integerArray(row.groupIds);

@@ -115,6 +115,7 @@ test("database score always projects failover and recovered request counts", () 
     failover_requests: 3,
     failover_recovered: 2,
     failover_failed: 1,
+    failover_aborted: 1,
     failure_requests: 0,
     stream_success_requests: 100,
     first_token_samples: 100,
@@ -141,6 +142,8 @@ test("database score always projects failover and recovered request counts", () 
   expect(recovered.failoverRequests).toBe(3);
   expect(recovered.failoverRecovered).toBe(2);
   expect(recovered.failoverFailed).toBe(1);
+  expect(recovered.failoverAborted).toBe(1);
+  expect(recovered.failoverNotTriggered).toBe(0);
   expect(recovered.failoverOutcomeMissing).toBe(0);
   expect(zero.failoverRequests).toBe(0);
   expect(zero.failoverRecovered).toBe(0);

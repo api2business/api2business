@@ -39,7 +39,7 @@ const email = process.env[target.sub2apiAdminEmailEnv];
 const password = process.env[target.sub2apiAdminPasswordEnv];
 if (!email || !password) throw new Error("worker requires Sub2API admin credentials");
 const sub2apiClient = new Sub2ApiClient(config, { email, password });
-const runtime = new Sub2ApiRuntimeService(sub2apiClient);
+const runtime = new Sub2ApiRuntimeService(sub2apiClient, config.operations.upstreamManagement.failoverRules);
 const accountImports = new AccountImportService(config, remoteReads, null, {
   get: async (id): Promise<ImportJob | null> => {
     const response = await internal.accountImportWorkerJob(id);
@@ -99,7 +99,9 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     let result: Record<string, unknown>;
     if (pending.action === "create") result = await upstreams.create(pending.input);
     else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
-    else result = await upstreams.recharge(pending.input.id, pending.input);
+    else if (pending.action === "recharge") result = await upstreams.recharge(pending.input.id, pending.input);
+    else if (pending.action === "template") result = await upstreams.applyTemplate(pending.input.accountIds);
+    else result = await upstreams.usage(pending.input.accountIds);
     await internal.completeUpstreamOperation(command.operationId);
     return result;
   }

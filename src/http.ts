@@ -7,6 +7,7 @@ import type { AccountImportService, ImportJobPatch, AccountImportRequest } from 
 import { UpstreamManagementError, type UpstreamManagementService } from "./upstream-management";
 import type { AppCommand, OperationRequest } from "./contracts";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import {
   normalizeAccountIds,
   parseAccountEconomicsWindow,
@@ -95,6 +96,7 @@ export function createHandler(
   lifecycle: AccountLifecycleService,
   upstreams: UpstreamManagementService,
   reads: Sub2ApiReadClient,
+  runtime: Sub2ApiRuntimeService,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
@@ -121,7 +123,7 @@ export function createHandler(
         return await staticFile("score-display-freshness.js", "text/javascript; charset=utf-8");
       }
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
-      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html" } as Record<string, string>)[url.pathname];
+      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
@@ -135,6 +137,32 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/upstreams") {
         const page = pageNumber(url);
         return json(await upstreams.list(page, url.searchParams.get("search")));
+      }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/usage") {
+        const input = await body(request);
+        let accountIds: number[] = [];
+        try {
+          if (input.accountIds !== undefined) accountIds = normalizeAccountIds(input.accountIds);
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+        return json(await upstreams.submitUsage(
+          accountIds,
+          typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
+        ), 202);
+      }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/template") {
+        const input = await body(request);
+        let accountIds: number[] = [];
+        try {
+          if (input.accountIds !== undefined) accountIds = normalizeAccountIds(input.accountIds);
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+        return json(await upstreams.submitTemplate(
+          accountIds,
+          typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
+        ), 202);
       }
       if (request.method === "POST" && url.pathname === "/api/upstreams") {
         const input = await body(request);
@@ -208,6 +236,13 @@ export function createHandler(
       if (request.method === "POST" && url.pathname === "/api/admin/accounts/inspect") {
         const input = await body(request);
         return json(await imports.inspect(normalizeAccountIds(input.accountIds)));
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/accounts/delete") {
+        const input = await body(request);
+        const accountIds = normalizeAccountIds(input.accountIds);
+        if (input.confirm !== true) return json({ ok: true, mutation: false, accountIds, hint: "confirm=true 才会执行删除" });
+        for (const accountId of accountIds) await runtime.deleteAccount(accountId);
+        return json({ ok: true, mutation: true, deleted: accountIds.length, accountIds });
       }
       if (request.method === "POST" && url.pathname === "/api/internal/sub2api-read") {
         const input = await body(request);
@@ -313,7 +348,9 @@ export function createHandler(
         try {
           const archivedPage = positiveInteger(url.searchParams.get("archivedPage"), 1);
           if (archivedPage === null) return json({ ok: false, error: "archivedPage must be a positive integer" }, 400);
-          return json(await operations.oauthPoolEconomics(pageNumber(url), 10, archivedPage));
+          const profile = url.searchParams.get("profile") ?? "codex";
+          if (profile !== "codex" && profile !== "grok") return json({ ok: false, error: "profile must be codex or grok" }, 400);
+          return json(await operations.oauthPoolEconomics(pageNumber(url), 10, archivedPage, profile));
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }
@@ -519,7 +556,10 @@ export function createHandler(
       if (request.method === "POST" && url.pathname === "/api/admin/accounts/oauth-economics") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
         try {
-          return json(await operations.oauthPoolEconomics());
+          const input = await body(request);
+          const profile = input.profile ?? "codex";
+          if (profile !== "codex" && profile !== "grok") throw new Error("profile must be codex or grok");
+          return json(await operations.oauthPoolEconomics(1, 10, 1, profile));
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }

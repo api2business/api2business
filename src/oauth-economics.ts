@@ -19,6 +19,8 @@ export interface OAuthProcurementRefund {
   planType: OAuthPlanType | null;
 }
 
+export type OAuthEconomicsProfile = "codex" | "grok";
+
 interface CostRecord {
   accountId: number;
   amountCny: number;
@@ -42,7 +44,7 @@ WITH cost_input AS (
 ), current_accounts AS (
   SELECT
     a.id,
-    COALESCE(NULLIF(LOWER(a.credentials->>'plan_type'), ''), 'unknown') AS plan_type,
+    COALESCE(NULLIF($6::text, ''), NULLIF(LOWER(a.credentials->>'plan_type'), ''), 'unknown') AS plan_type,
     a.status,
     COALESCE(a.schedulable, false) AS schedulable,
     a.rate_limit_reset_at,
@@ -60,8 +62,8 @@ WITH cost_input AS (
     END AS state_bucket
   FROM accounts a
   WHERE a.deleted_at IS NULL
-    AND LOWER(a.platform) = 'openai'
-    AND LOWER(a.type) = 'oauth'
+    AND LOWER(a.platform) = $4::text
+    AND (NULLIF($5::text, '') IS NULL OR LOWER(a.type) = $5::text)
     AND NOT EXISTS (SELECT 1 FROM excluded_accounts excluded WHERE excluded.account_id = a.id)
 ), cost_scope AS (
   SELECT
@@ -97,14 +99,14 @@ WITH cost_input AS (
     'pool'::text AS scope,
     current_account.plan_type,
     COUNT(*)::int AS account_count,
-    COUNT(cost.account_id)::int AS matched_cost_account_count,
-    COUNT(*) FILTER (WHERE cost.account_id IS NULL)::int AS missing_cost_account_count,
+    COUNT(*) FILTER (WHERE cost.account_id IS NOT NULL OR $7::numeric >= 0)::int AS matched_cost_account_count,
+    COUNT(*) FILTER (WHERE cost.account_id IS NULL AND $7::numeric < 0)::int AS missing_cost_account_count,
     COUNT(*)::int AS present_account_count,
     0::int AS orphaned_account_count,
     ARRAY_AGG(current_account.id ORDER BY current_account.id) AS account_ids,
-    ARRAY_AGG(current_account.id ORDER BY current_account.id) FILTER (WHERE cost.account_id IS NULL) AS missing_cost_account_ids,
+    ARRAY_AGG(current_account.id ORDER BY current_account.id) FILTER (WHERE cost.account_id IS NULL AND $7::numeric < 0) AS missing_cost_account_ids,
     COUNT(usage.account_id)::int AS usage_account_count,
-    COALESCE(SUM(cost.cost_cny), 0)::numeric AS acquisition_cost_cny,
+    COALESCE(SUM(COALESCE(cost.cost_cny, NULLIF($7::numeric, -1))), 0)::numeric AS acquisition_cost_cny,
     COALESCE(SUM(usage.request_count), 0)::bigint AS request_count,
     COALESCE(SUM(usage.token_count), 0)::bigint AS token_count,
     COALESCE(SUM(usage.api_amount_usd), 0)::numeric AS api_amount_usd,
@@ -558,9 +560,13 @@ export async function collectOAuthPoolEconomics(
     refunds: OAuthProcurementRefund[];
     ledger: Record<string, unknown>;
     excludedAccountIds?: number[];
+    profile?: OAuthEconomicsProfile;
+    syntheticUnitCostCny?: number;
   },
   priority: Sub2ApiReadPriority = "manual",
 ): Promise<Row> {
+  const profile = input.profile ?? "codex";
+  const syntheticUnitCostCny = input.syntheticUnitCostCny ?? -1;
   const allocations = refundAllocations(input.refunds, input.costs);
   const accountIds = input.costs.map((cost) => cost.accountId);
   const costValues = input.costs.map((cost) => cost.costCny);
@@ -569,10 +575,14 @@ export async function collectOAuthPoolEconomics(
   )].sort((left, right) => left - right);
   const startedAt = performance.now();
   const query = await reads.query<Row>({
-    key: JSON.stringify(["accounts.oauth-economics", input.costs, input.refunds, excludedAccountIds]),
+    key: JSON.stringify(["accounts.oauth-economics", profile, input.costs, input.refunds, excludedAccountIds, syntheticUnitCostCny]),
     kind: "accounts.oauth-economics",
     sql: oauthEconomicsSql,
-    parameters: [accountIds.join(","), costValues.join(","), excludedAccountIds.join(",")],
+    parameters: [
+      accountIds.join(","), costValues.join(","), excludedAccountIds.join(","),
+      profile === "grok" ? "grok" : "openai", profile === "grok" ? "" : "oauth",
+      profile === "grok" ? "free" : "", String(syntheticUnitCostCny),
+    ],
     priority,
     cacheMode: "bypass-cache",
   });
@@ -599,11 +609,17 @@ export async function collectOAuthPoolEconomics(
         source: "accounts.status/schedulable/runtime-cooldown-fields",
       };
     } else if (row.row_kind === "group") {
+      const expected = profile === "grok" && String(row.plan_type) === "free"
+        ? { ...config.operations.oauthEconomics.idealApiUsdPerAccount,
+            free: number(row.usage_account_count) > 0
+              ? rounded(number(row.api_amount_usd) / number(row.usage_account_count), 8)
+              : config.operations.oauthEconomics.idealApiUsdPerAccount.free }
+        : config.operations.oauthEconomics.idealApiUsdPerAccount;
       groups.push(projectGroup(
         row,
         config.monitor.timezone,
         allocations.byAccount,
-        config.operations.oauthEconomics.idealApiUsdPerAccount,
+        expected,
       ));
     }
   }
@@ -684,7 +700,7 @@ export async function collectOAuthPoolEconomics(
   if (missingCostAccountIds.length > 0) {
     warnings.push({
       code: "missing_acquisition_cost",
-      message: `有 ${missingCostAccountIds.length} 个 OAuth 账号缺少采购成本记录，综合成本仅按已知池内成本计算`,
+      message: `有 ${missingCostAccountIds.length} 个账号缺少采购成本记录，综合成本仅按已知池内成本计算`,
       accountIds: missingCostAccountIds,
       missingData: "acquisition_cost_cny",
     });
@@ -701,8 +717,12 @@ export async function collectOAuthPoolEconomics(
     ok: true,
     complete: pool.complete,
     mode: "oauth-pool-economics-postgresql",
-    accountingBasis: "openai-oauth-net-acquisition-cost",
+    accountingBasis: profile === "grok"
+      ? "grok-current-accounts-synthetic-unit-cost"
+      : "openai-oauth-net-acquisition-cost",
+    profile,
     usageScope: "all-history",
+    expectedCalibration: profile === "grok" ? "current-api-output-per-used-free-account" : "configured-by-plan-type",
     pool: { groups: poolGroups, total: pool },
     archived: { groups: archivedGroups, total: archived },
     all: { total: all },

@@ -39,3 +39,10 @@ test("runtime upstream settings validate priority, capacity, and pool selection"
   expect(() => validateCapacity(0)).toThrow("并发容量");
   expect(() => validateGroupIds([])).toThrow("号池");
 });
+
+test("failover template uses the Sub2API native error_code schema", async () => {
+  const config = await Bun.file(new URL("../config/sub2rank.yaml", import.meta.url)).text();
+  expect(config).toContain("errorCode: 502");
+  expect(config).toContain("errorCode: 524");
+  expect(config).not.toContain("statusCode:");
+});

@@ -7,7 +7,9 @@
     <form id="import-form" class="import-form">
       <div id="drop-zone" class="drop-zone" tabindex="0" role="button"><strong>拖拽 JSON 或 ZIP 到这里</strong><span>或点击选择文件</span><small id="file-state">尚未选择文件</small><input id="import-file" type="file" accept="application/json,application/zip,.json,.zip" hidden /></div>
       <label class="json-field"><span>JSON 内容</span><textarea id="import-json" spellcheck="false" placeholder="粘贴 Sub2API 导出的 JSON"></textarea></label>
+      <p id="import-platform-state" class="section-state">等待识别 Codex 或 Grok</p>
       <div class="import-settings">
+        <label><span>导入平台</span><select id="import-platform"><option value="auto">自动识别</option><option value="openai">Codex</option><option value="grok">Grok</option></select></label>
         <label><span>优先级</span><input id="import-priority" type="number" min="1" max="1000" value="1" required /></label>
         <label><span>容量</span><input id="import-capacity" type="number" min="1" value="16" required /></label>
         <label><span>代理池基准 ID</span><input id="import-proxy" type="number" min="3" value="3" required /></label>

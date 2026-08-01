@@ -52,6 +52,7 @@ interface Parsed {
   costCny: number | null;
   unitCostCny: number | null;
   planType: string | null;
+  profile: string | null;
   model: string | null;
   day: string | null;
   period: string | null;
@@ -63,6 +64,7 @@ interface Parsed {
   page: number | null;
   search: string | null;
   apiKeyStdin: boolean;
+  templateOnly: boolean;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -80,8 +82,8 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--page", "--search"]);
-  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--page", "--search"]);
+  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index]!;
@@ -132,6 +134,7 @@ function parseArgs(args: string[]): Parsed {
     costCny: decimal("--cost-cny"),
     unitCostCny: decimal("--unit-cost-cny"),
     planType: value(args, "--plan-type"),
+    profile: value(args, "--profile"),
     model: value(args, "--model"),
     affectedOnly: args.includes("--affected-only"),
     intervalSeconds: integer("--interval-seconds"),
@@ -145,6 +148,7 @@ function parseArgs(args: string[]): Parsed {
     baseUrl: value(args, "--base-url"), suffix: value(args, "--suffix"),
     rate: decimal("--rate"), rechargeCny: decimal("--recharge-cny"),
     page: integer("--page"), search: value(args, "--search"), apiKeyStdin: args.includes("--api-key-stdin"),
+    templateOnly: args.includes("--template-only"),
   };
 }
 
@@ -177,16 +181,19 @@ function help(): Record<string, unknown> {
       "accounts import --file <json|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 16 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
+      "accounts delete --accounts <id-or-range,...> [--confirm] --over-api",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
       "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
-      "accounts oauth-economics [--over-api]",
+      "accounts oauth-economics [--profile codex|grok] [--over-api]",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
       "accounts lifecycle retire plan --day YYYY-MM-DD --over-api",
       "accounts lifecycle retire status --id <plan-id> --over-api",
       "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
       "upstreams list [--page N --search <text>] --over-api",
+      "upstreams usage [--accounts <id-or-range,...>] --over-api",
+      "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams create --base-url <https-url> --suffix <name> --rate <CNY/API_USD> [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
-      "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--confirm] --over-api",
+      "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--template-only] [--confirm] --over-api",
       "upstreams status --id <workflow-id> --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
@@ -370,6 +377,15 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   const client = new AdminHttpClient(config, target);
   const [group, action] = parsed.command;
   if (group === "upstreams" && action === "list") return await client.upstreams(parsed.page ?? 1, parsed.search);
+  if (group === "upstreams" && action === "usage") {
+    const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
+    return await client.upstreamUsage(accountIds, `upstream-usage-${crypto.randomUUID()}`);
+  }
+  if (group === "upstreams" && action === "template") {
+    const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-template", accountIds, scope: accountIds.length ? "selected" : "all-api-key", hint: "add --confirm to execute" };
+    return await client.upstreamTemplate(accountIds, `upstream-template-${crypto.randomUUID()}`);
+  }
   if (group === "upstreams" && action === "status") {
     if (!parsed.id) throw new Error("upstreams status requires --id");
     return await client.upstreamJob(parsed.id);
@@ -388,7 +404,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "upstreams" && action === "update") {
     const id = Number(parsed.id);
     if (!Number.isSafeInteger(id) || id <= 0) throw new Error("upstreams update requires a positive --id");
-    if (parsed.suffix === null && parsed.rate === null) throw new Error("upstreams update requires --suffix or --rate");
+    if (parsed.suffix === null && parsed.rate === null && !parsed.templateOnly) throw new Error("upstreams update requires --suffix, --rate, or --template-only");
     const input = { ...(parsed.suffix === null ? {} : { suffix: parsed.suffix }), ...(parsed.rate === null ? {} : { rateCnyPerApiUsd: parsed.rate }) };
     if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-update", accountId: id, plan: input, hint: "add --confirm to execute" };
     return await client.upstreamUpdate(id, input, `upstream-update-${id}-${crypto.randomUUID()}`);
@@ -427,7 +443,15 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     }
     return await client.accountImportEconomics({ day: parsed.day, externalCosts });
   }
-  if (group === "accounts" && action === "oauth-economics") return await client.oauthPoolEconomics();
+  if (group === "accounts" && action === "oauth-economics") {
+    const profile = parsed.profile ?? "codex";
+    if (profile !== "codex" && profile !== "grok") throw new Error("--profile must be codex or grok");
+    return await client.oauthPoolEconomics(profile);
+  }
+  if (group === "accounts" && action === "delete") {
+    if (!parsed.accounts) throw new Error("accounts delete requires --accounts");
+    return await client.deleteAccounts(parseAccountIdSelector(parsed.accounts), parsed.confirm);
+  }
   if (group === "accounts" && action === "import") {
     if (!parsed.file) throw new Error("accounts import requires --file");
     if (parsed.unitCostCny === null) throw new Error("accounts import requires --unit-cost-cny in CNY");
@@ -536,50 +560,13 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     );
   }
   if (group === "errors" && action === "diagnose") {
-    const diagnosis = await client.errorDiagnose(
+    return await client.errorDiagnose(
       parsed.limit ?? config.monitor.errorAggregateLimit,
       parsed.top ?? config.monitor.errorAggregateTop,
       parsed.account,
       parsed.group,
       null,
     );
-    const byClientRequestId = new Map<string, Row[]>();
-    for (const event of failoverEvents) {
-      const key = String(event.clientRequestId);
-      byClientRequestId.set(key, [...(byClientRequestId.get(key) ?? []), event]);
-    }
-    const chains = (Array.isArray(diagnosis.chains) ? diagnosis.chains : [])
-      .map(record)
-      .filter((row): row is Row => row !== null)
-      .map((chain) => ({
-        ...chain,
-        failoverTriggered: true,
-        failovers: (byClientRequestId.get(String(chain.requestId)) ?? []).map((event) => ({
-          at: event.createdAt ?? null,
-          requestId: event.requestId ?? null,
-          accountId: event.accountId ?? null,
-          upstreamStatus: event.upstreamStatus ?? null,
-        })),
-      }));
-    const summary = record(diagnosis.summary) ?? {};
-    return {
-      ...diagnosis,
-      mode: "error-diagnose-failed-failover",
-      summary: {
-        ...summary,
-        observedFailoverEvents: failoverEvents.length,
-        observedFailoverRequests: failoverRequestIds.length,
-        failoverFailedRequests: chains.length,
-      },
-      chains,
-      failoverEvidence: {
-        source: "sub2api-runtime-policy-events",
-        window: runtime?.window ?? "8h",
-        scannedLineCount: runtime?.scannedLineCount ?? 0,
-        eventQueryOk: eventProcess.exitCode === 0 && runtime?.ok === true,
-        eventQueryTimedOut: eventProcess.timedOut,
-      },
-    };
   }
   if (group === "errors" && action === "list") {
     return await client.errorList(parsed.limit ?? config.monitor.errorAggregateLimit);

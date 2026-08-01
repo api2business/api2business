@@ -45,7 +45,7 @@ const upstreams = new UpstreamManagementService(config, reads, temporal, context
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle, upstreams, reads),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle, upstreams, reads, context.runtime),
 });
 
 console.log(JSON.stringify({

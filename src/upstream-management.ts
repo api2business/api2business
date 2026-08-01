@@ -3,6 +3,10 @@ import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { TemporalGateway } from "./temporal-client";
 import {
+  queryUpstreamUsageConcurrently,
+  type UpstreamUsageTarget,
+} from "./upstream-usage";
+import {
   readUpstreamRechargeCosts,
   rechargeTotalsByAccount,
   recordUpstreamRechargeCost,
@@ -67,7 +71,9 @@ export interface UpstreamCreateInput {
 export type UpstreamWorkerOperation =
   | { action: "create"; input: UpstreamCreateInput }
   | { action: "update"; input: { id: number; suffix?: string; rateCnyPerApiUsd?: number } }
-  | { action: "recharge"; input: { id: number; amountCny: number; operationId: string; description?: string } };
+  | { action: "recharge"; input: { id: number; amountCny: number; operationId: string; description?: string } }
+  | { action: "template"; input: { accountIds: number[] } }
+  | { action: "usage"; input: { accountIds: number[] } };
 
 const accountSelect = `
   SELECT
@@ -503,6 +509,20 @@ export class UpstreamManagementService {
     });
   }
 
+  async submitUsage(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds.map(Number))];
+    if (ids.some((id) => !positiveInteger(id))) throw new Error("上游账号 ID 无效");
+    const idempotency = operationId(operationIdValue, "upstream-usage");
+    return await this.submitOperation(idempotency, { action: "usage", input: { accountIds: ids } });
+  }
+
+  async submitTemplate(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds.map(Number))];
+    if (ids.some((id) => !positiveInteger(id))) throw new Error("上游账号 ID 无效");
+    const idempotency = operationId(operationIdValue, "upstream-template");
+    return await this.submitOperation(idempotency, { action: "template", input: { accountIds: ids } });
+  }
+
   claimOperation(id: string): UpstreamWorkerOperation | null {
     this.prunePendingOperations();
     return this.pendingOperations.get(id)?.operation ?? null;
@@ -652,6 +672,102 @@ export class UpstreamManagementService {
     };
   }
 
+  async usage(accountIds: number[]): Promise<Record<string, unknown>> {
+    const settings = this.config.operations.upstreamManagement;
+    const query = await this.reads.query<Row>({
+      key: `upstream-usage-targets:${accountIds.length ? accountIds.join(",") : "all"}`,
+      kind: "upstream-usage-targets",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: `SELECT
+          a.id,
+          a.name,
+          RTRIM(COALESCE(a.credentials->>'base_url', ''), '/') AS base_url,
+          COALESCE(a.credentials->>'api_key', '') AS api_key
+        FROM accounts a
+        WHERE a.deleted_at IS NULL
+          AND LOWER(a.type) = 'apikey'
+          AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
+          AND NULLIF(a.credentials->>'api_key', '') IS NOT NULL
+          AND ($1::text = '' OR a.id = ANY(string_to_array($1::text, $2::text)::bigint[]))
+        ORDER BY a.id`,
+      parameters: [accountIds.join(","), ","],
+    });
+    const targets = query.rows.map((item): UpstreamUsageTarget => ({
+      id: Number(item.id),
+      name: String(item.name ?? ""),
+      baseUrl: normalizeBaseUrl(String(item.base_url ?? "")),
+      apiKey: String(item.api_key ?? ""),
+    }));
+    const results = await queryUpstreamUsageConcurrently(targets, {
+      concurrency: settings.usageConcurrency,
+      timeoutMs: settings.usageTimeoutMs,
+      days: settings.usageDays,
+    });
+    return {
+      ok: true,
+      operation: "usage",
+      requestedAccountIds: accountIds,
+      targetCount: targets.length,
+      succeeded: results.filter((result) => result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+      providers: {
+        sub2api: results.filter((result) => result.provider === "sub2api").length,
+        newApi: results.filter((result) => result.provider === "new-api").length,
+        unknown: results.filter((result) => result.provider === "unknown").length,
+      },
+      databaseQueries: query.cached ? 0 : 1,
+      queueDurationMs: query.queueDurationMs,
+      queryDurationMs: query.queryDurationMs,
+      upstreamConcurrency: settings.usageConcurrency,
+      results,
+      valuesRedacted: true,
+    };
+  }
+
+  async applyTemplate(accountIds: number[]): Promise<Record<string, unknown>> {
+    if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+    const query = await this.reads.query<Row>({
+      key: `upstream-template-targets:${accountIds.length ? accountIds.join(",") : "all"}`,
+      kind: "upstream-template-targets",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: `SELECT a.id
+        FROM accounts a
+        WHERE a.deleted_at IS NULL
+          AND LOWER(a.type) = 'apikey'
+          AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
+          AND ($1::text = '' OR a.id = ANY(string_to_array($1::text, $2::text)::bigint[]))
+        ORDER BY a.id`,
+      parameters: [accountIds.join(","), ","],
+    });
+    const ids = query.rows.map((item) => Number(item.id)).filter((id) => positiveInteger(id) !== null);
+    const applied: number[] = [];
+    const failed: Array<{ accountId: number; error: string }> = [];
+    for (const accountId of ids) {
+      try {
+        await this.runtime.applyApiKeyFailoverTemplate(accountId);
+        applied.push(accountId);
+      } catch (error) {
+        failed.push({ accountId, error: safeMessage(error instanceof Error ? error.message : String(error)) });
+      }
+    }
+    return {
+      ok: failed.length === 0,
+      operation: "template",
+      requestedAccountIds: accountIds,
+      targetCount: ids.length,
+      appliedCount: applied.length,
+      failedCount: failed.length,
+      applied,
+      failed,
+      databaseQueries: query.cached ? 0 : 1,
+      queueDurationMs: query.queueDurationMs,
+      queryDurationMs: query.queryDurationMs,
+      valuesRedacted: true,
+    };
+  }
+
   async create(input: {
     baseUrl: string;
     apiKey: string;
@@ -755,14 +871,15 @@ export class UpstreamManagementService {
   }): Promise<Record<string, unknown>> {
     const account = await this.accountQuery(id);
     if (!account) throw new UpstreamManagementError("上游账号不存在", 404, { operation: "update", accountId: id });
-    const suffix = input.suffix === undefined ? account.suffix : validateSuffix(String(input.suffix));
-    const rate = input.rateCnyPerApiUsd === undefined ? account.rateCnyPerApiUsd : validateRate(input.rateCnyPerApiUsd);
-    if (!suffix || rate === null) throw new Error("当前账号缺少可解析的后缀或费率，请同时填写后缀和费率");
-    const name = formatUpstreamName(account.baseUrl, suffix, rate);
-    if (name !== account.name) {
-      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
-      await this.runtime.updateAccount(id, { name });
+    if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+    if (input.suffix !== undefined || input.rateCnyPerApiUsd !== undefined) {
+      const suffix = input.suffix === undefined ? account.suffix : validateSuffix(String(input.suffix));
+      const rate = input.rateCnyPerApiUsd === undefined ? account.rateCnyPerApiUsd : validateRate(input.rateCnyPerApiUsd);
+      if (!suffix || rate === null) throw new Error("当前账号缺少可解析的后缀或费率，请同时填写后缀和费率");
+      const name = formatUpstreamName(account.baseUrl, suffix, rate);
+      if (name !== account.name) await this.runtime.updateAccount(id, { name });
     }
+    await this.runtime.applyApiKeyFailoverTemplate(id);
     const updated = await this.accountQuery(id);
     if (!updated) throw new UpstreamManagementError("runtime 改名完成但排队查询未找到账号", 502, { operation: "update", accountId: id });
     return { ok: true, operation: "update", account: updated };

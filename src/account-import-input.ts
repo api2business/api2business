@@ -8,7 +8,8 @@ export interface NormalizedAccountImportInput {
   content: string;
   accountCount: number;
   fingerprint: string;
-  source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number };
+  platform: "openai" | "grok";
+  source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number; platform: "openai" | "grok" };
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -33,12 +34,21 @@ function accountIdentity(account: unknown): string {
   return accessToken ? `access:${createHash("sha256").update(accessToken).digest("hex")}` : "";
 }
 
+function accountPlatform(account: unknown): "openai" | "grok" {
+  const value = String(object(account)?.platform ?? "").trim().toLowerCase();
+  if (value === "openai") return "openai";
+  if (value === "grok") return "grok";
+  throw new Error(`账号 platform 只允许 openai 或 grok，收到 ${value || "空值"}`);
+}
+
 function canonicalize(payloads: Record<string, unknown>[], format: "json" | "zip"): NormalizedAccountImportInput {
   const accounts: unknown[] = [];
+  const platforms = new Set<"openai" | "grok">();
   const seen = new Set<string>();
   let duplicates = 0;
   for (const payload of payloads) {
     for (const account of payload.accounts as unknown[]) {
+      platforms.add(accountPlatform(account));
       const identity = accountIdentity(account);
       if (identity && seen.has(identity)) { duplicates += 1; continue; }
       if (identity) seen.add(identity);
@@ -46,12 +56,15 @@ function canonicalize(payloads: Record<string, unknown>[], format: "json" | "zip
     }
   }
   if (accounts.length < 1 || accounts.length > 100) throw new Error("去重后的账号数量必须为 1 至 100");
+  if (platforms.size !== 1) throw new Error("同一导入批次不能混合 openai 和 grok 账号");
+  const platform = [...platforms][0]!;
   const content = JSON.stringify({ accounts, proxies: [] });
   return {
     content,
     accountCount: accounts.length,
     fingerprint: createHash("sha256").update(content).digest("hex").slice(0, 16),
-    source: { format, jsonFileCount: payloads.length, duplicateAccountCount: duplicates },
+    platform,
+    source: { format, jsonFileCount: payloads.length, duplicateAccountCount: duplicates, platform },
   };
 }
 

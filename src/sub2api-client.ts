@@ -161,6 +161,10 @@ export class Sub2ApiClient {
     return await this.request<Sub2ApiGroup[]>("/admin/groups/all");
   }
 
+  async getAccount(id: number): Promise<Record<string, unknown>> {
+    return await this.request<Record<string, unknown>>(`/admin/accounts/${id}`);
+  }
+
   async listGroupAccounts(groupId: number, platform: string): Promise<Sub2ApiAccount[]> {
     const params = new URLSearchParams({
       page: "1",

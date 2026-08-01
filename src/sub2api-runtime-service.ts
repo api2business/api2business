@@ -15,6 +15,12 @@ interface CodexImportResult {
   failed?: unknown;
 }
 
+interface BatchCreateResult {
+  success?: unknown;
+  failed?: unknown;
+  results?: unknown;
+}
+
 function record(value: unknown): Row | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
 }
@@ -29,7 +35,19 @@ function identity(value: unknown): string {
 }
 
 export class Sub2ApiRuntimeService {
-  constructor(private readonly client: Sub2ApiClient) {}
+  constructor(
+    private readonly client: Sub2ApiClient,
+    private readonly apiKeyFailoverRules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }> = [],
+  ) {}
+
+  private apiKeyCredentials(value: unknown): Row {
+    return {
+      ...(record(value) ?? {}),
+      pool_mode: false,
+      temp_unschedulable_enabled: true,
+      temp_unschedulable_rules: this.apiKeyFailoverRules,
+    };
+  }
 
   async importAccounts(input: {
     content: string;
@@ -45,6 +63,11 @@ export class Sub2ApiRuntimeService {
     if (accounts.length === 0) throw new Error("runtime import contains no accounts");
     const types = new Set(accounts.map((account) => String(account.type ?? "oauth").toLowerCase()));
     if (types.size !== 1) throw new Error("runtime import does not allow mixed OAuth and API-key accounts");
+    const platforms = new Set(accounts.map((account) => String(account.platform ?? "").trim().toLowerCase()));
+    if (platforms.size !== 1 || (![...platforms].includes("openai") && ![...platforms].includes("grok"))) {
+      throw new Error("runtime import requires exactly one supported account platform");
+    }
+    const platform = [...platforms][0]!;
     const requestKey = `apistate-runtime-import-${identity({ payload, ...input, content: undefined })}`;
     const createdIds: number[] = [];
     const updatedIds: number[] = [];
@@ -52,9 +75,37 @@ export class Sub2ApiRuntimeService {
     const failures: Array<{ index: number; reason: string }> = [];
     let createdCount = 0;
 
-    if (types.has("apikey")) {
+    if (platform === "grok") {
       const prepared = accounts.map((account) => ({
         ...account,
+        platform: "grok",
+        type: "oauth",
+        priority: input.priority,
+        concurrency: input.capacity,
+        proxy_id: input.proxyId,
+        group_ids: input.groupIds,
+        confirm_mixed_channel_risk: true,
+      }));
+      const result = await this.client.mutate<BatchCreateResult>("POST", "/admin/accounts/batch", {
+        accounts: prepared,
+      }, requestKey);
+      const items = Array.isArray(result.results) ? result.results : [];
+      for (let offset = 0; offset < items.length; offset += 1) {
+        const item = record(items[offset]);
+        const accountId = positiveInteger(item?.id);
+        if (item?.success === true && accountId) createdIds.push(accountId);
+        else failures.push({ index: offset + 1, reason: String(item?.error ?? "Sub2API Grok batch import failed") });
+      }
+      const reportedSuccess = Number(result.success ?? 0);
+      const reportedFailed = Number(result.failed ?? 0);
+      const classifiedFailed = failures.length;
+      if (reportedSuccess !== createdIds.length || reportedFailed !== classifiedFailed || items.length !== accounts.length) {
+        failures.push({ index: 0, reason: `Sub2API Grok batch result mismatch: items ${items.length}/${accounts.length}, success ${reportedSuccess}/${createdIds.length}, failed ${reportedFailed}/${classifiedFailed}` });
+      }
+    } else if (types.has("apikey")) {
+      const prepared = accounts.map((account) => ({
+        ...account,
+        credentials: this.apiKeyCredentials(account.credentials),
         priority: input.priority,
         concurrency: input.capacity,
         proxy_id: input.proxyId,
@@ -127,13 +178,23 @@ export class Sub2ApiRuntimeService {
 
   async createApiKeyAccount(account: Row, idempotencyKey: string): Promise<Record<string, unknown>> {
     return await this.client.mutate("POST", "/admin/accounts/data", {
-      data: { accounts: [account], proxies: [] },
+      data: { accounts: [{ ...account, credentials: this.apiKeyCredentials(account.credentials) }], proxies: [] },
       skip_default_group_bind: true,
     }, idempotencyKey);
   }
 
   async updateAccount(accountId: number, patch: Row): Promise<unknown> {
     return await this.client.mutate("PUT", `/admin/accounts/${accountId}`, patch);
+  }
+
+  async applyApiKeyFailoverTemplate(accountId: number): Promise<unknown> {
+    const account = await this.client.getAccount(accountId);
+    if (String(account.type ?? "").toLowerCase() !== "apikey") {
+      throw new Error(`account ${accountId} is not an API-key account`);
+    }
+    return await this.updateAccount(accountId, {
+      credentials: this.apiKeyCredentials(account.credentials),
+    });
   }
 
   async setSchedulable(accountId: number, schedulable: boolean): Promise<unknown> {

@@ -14,6 +14,11 @@ test("account import supports Team manual selection and three price-inferred typ
   expect(app).toContain("cost < defaults.freeCostThresholdCny ? 'free'");
   expect(app).toContain("cost > defaults.plusCostThresholdCny ? 'plus' : 'k12'");
   expect(app).toContain("planTypeManuallySelected");
+  expect(app).toContain("自动识别");
+  expect(app).toContain("手动选择");
+  expect(app).toContain("platform: platformSelect.value === 'auto' ? undefined : platformSelect.value");
+  expect(app).toContain("Number(input.value) === 6");
+  expect(html).toContain('id="import-platform-state"');
   expect(app).not.toContain("? 'team'");
   expect(app).toContain("Math.round((total / count) * 100) / 100");
   expect(app).toContain("Array.isArray(payload?.accounts) ? payload.accounts.length : 0");
@@ -58,13 +63,13 @@ test("score rendering applies the monotonic freshness guard", async () => {
   expect(http).toContain('url.pathname === "/score-display-freshness.js"');
 });
 
-test("score table renders failover count before recovered count", async () => {
+test("score table aligns failures with the displayed rate before failover and recovery", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
-  expect(html).toContain("<th>切号 / 恢复</th>");
-  expect(app).toContain("${number(row.failoverRequests)} / ${number(row.failoverRecovered)}");
-  expect(app).not.toContain("${number(row.failoverRecovered)} / ${number(row.failoverRequests)}");
+  expect(html).toContain("<th>失败 / 切号 / 恢复</th>");
+  expect(app).toContain("${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}");
+  expect(app).toContain("未触发 ${number(row.failoverNotTriggered)}");
 });
 
 test("manual plan confirmation allows paced batches to finish before the browser timeout", async () => {
@@ -106,34 +111,47 @@ test("shared navigation remains stable and horizontally scrollable", async () =>
 test("operations tables request fixed server-side pages of ten records", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./operations.html", import.meta.url)).text();
+  const oauthHtml = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();
   const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
   const http = await Bun.file(new URL("../src/http.ts", import.meta.url)).text();
 
   expect(http).toContain("operations.ledger(period, pageNumber(url), 10)");
-  expect(http).toContain("operations.oauthPoolEconomics()");
+  expect(http).toContain("operations.oauthPoolEconomics(pageNumber(url), 10, archivedPage, profile)");
   expect(http).toContain("operations.audits(pageNumber(url), 10)");
   expect(http).toContain("operations.procurement(budget, config.webAuth.username, page, 10)");
   expect(app).toContain("/api/operations/ledger?page=${cashPage}");
   expect(app).toContain("/api/operations/audits?page=${auditPage}");
-  expect(app).toContain("/api/operations/oauth-cost?page=${oauthPage}");
+  expect(app).toContain("/api/operations/oauth-cost?profile=${oauthProfile}&page=${oauthPage}");
   expect(app).toContain("JSON.stringify({ budgetCny: procurementBudget, page: procurementPage })");
   expect(app).not.toContain("procurementAllocations");
-  for (const prefix of ["oauth", "oauth-archived", "cash", "procurement", "audit"]) {
+  for (const prefix of ["cash", "procurement", "audit"]) {
     expect(html).toContain(`id="${prefix}-prev"`);
     expect(html).toContain(`id="${prefix}-page"`);
     expect(html).toContain(`id="${prefix}-next"`);
   }
-  expect(html).toContain("OAuth 当前池实时成本");
-  expect(html).toContain("已归档 OAuth 成本");
-  expect(html).toContain("<th>平均单价</th>");
-  expect(html.match(/<th>当前产出 \/ 实时预期 \/ 初始预期<\/th>/g)?.length).toBe(2);
-  expect(html).toContain("<small>预期成本</small>");
-  expect(html).toContain("<span>已消耗的实时成本</span>");
-  expect(html.match(/<th>成本计算<\/th>/g)?.length).toBe(2);
-  expect(html).not.toContain("<th>人民币 / 刀</th>");
-  expect(html).not.toContain("<th>预期人民币 / 刀</th>");
-  expect(html).not.toContain("<th>API 美元产出</th>");
-  expect(html).not.toContain("<th>理想 API 产出</th>");
+  expect(html).not.toContain('id="oauth-cost-form"');
+  expect(html).not.toContain('id="oauth-cost-body"');
+  expect(html).not.toContain('id="oauth-archived-body"');
+  for (const prefix of ["oauth", "oauth-archived"]) {
+    expect(oauthHtml).toContain(`id="${prefix}-prev"`);
+    expect(oauthHtml).toContain(`id="${prefix}-page"`);
+    expect(oauthHtml).toContain(`id="${prefix}-next"`);
+  }
+  expect(oauthHtml).toContain("当前号池实时成本");
+  expect(oauthHtml).toContain('data-oauth-profile="codex"');
+  expect(oauthHtml).toContain('data-oauth-profile="grok"');
+  expect(app).toContain("profile=${oauthProfile}");
+  expect(app).toContain("current-api-output-per-used-free-account");
+  expect(oauthHtml).toContain("已归档 OAuth 成本");
+  expect(oauthHtml).toContain("<th>平均单价</th>");
+  expect(oauthHtml.match(/<th>当前产出 \/ 实时预期 \/ 初始预期<\/th>/g)?.length).toBe(2);
+  expect(oauthHtml).toContain("<small>预期成本</small>");
+  expect(oauthHtml).toContain("<span>已消耗的实时成本</span>");
+  expect(oauthHtml.match(/<th>成本计算<\/th>/g)?.length).toBe(2);
+  expect(oauthHtml).not.toContain("<th>人民币 / 刀</th>");
+  expect(oauthHtml).not.toContain("<th>预期人民币 / 刀</th>");
+  expect(oauthHtml).not.toContain("<th>API 美元产出</th>");
+  expect(oauthHtml).not.toContain("<th>理想 API 产出</th>");
   expect(app).toContain("oauthArchivedPage");
   expect(app).toContain("row.averageUnitCostCny");
   expect(app).toContain("idealCnyPerApiUsd");
@@ -145,17 +163,17 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(app).toContain("限流/错误按当前产出");
   expect(app).toContain("当前产出 / 实时预期 / 初始预期（100%）");
   expect(app).not.toContain("全局固定预期");
-  expect(html).toContain("oauth-cost-ideal-remaining");
-  expect(html).toContain('id="oauth-cost-refresh-interval"');
-  expect(html).toContain('<option value="30" selected>30 秒</option>');
-  expect(html).toContain('<option value="0">关闭</option>');
-  expect(html).toContain('id="oauth-cost-refresh-countdown"');
-  expect(html).toContain('class="oauth-cost-combined"');
+  expect(oauthHtml).toContain("oauth-cost-ideal-remaining");
+  expect(oauthHtml).toContain('id="oauth-cost-refresh-interval"');
+  expect(oauthHtml).toContain('<option value="30" selected>30 秒</option>');
+  expect(oauthHtml).toContain('<option value="0">关闭</option>');
+  expect(oauthHtml).toContain('id="oauth-cost-refresh-countdown"');
+  expect(oauthHtml).toContain('class="oauth-cost-combined"');
   expect(css).toContain(".oauth-cost-combined-grid .oauth-cost-ideal { padding-left: 0; border-left: 0; box-shadow: none; }");
   expect(css).toContain("white-space: normal; overflow-wrap: anywhere;");
-  expect(html).toContain('id="oauth-cost-health-chart"');
-  expect(html.indexOf('class="oauth-cost-health-metric"')).toBeLessThan(html.indexOf('class="oauth-cost-output-metric"'));
-  expect(html).toContain('class="query-spinner"');
+  expect(oauthHtml).toContain('id="oauth-cost-health-chart"');
+  expect(oauthHtml.indexOf('class="oauth-cost-health-metric"')).toBeLessThan(oauthHtml.indexOf('class="oauth-cost-output-metric"'));
+  expect(oauthHtml).toContain('class="query-spinner"');
   expect(app).toContain("oauth-output-progress");
   expect(app).toContain("oauth-cost-output-progress");
   expect(app).toContain("oauth-cost-output-progress-label");
@@ -169,7 +187,7 @@ test("operations tables request fixed server-side pages of ten records", async (
 
 test("OAuth cost table separates live status buckets and does not infer archived status", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
-  const html = await Bun.file(new URL("./operations.html", import.meta.url)).text();
+  const html = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();
 
   expect(html).toContain("<th>状态分布</th>");
   expect(app).toContain("statusDistributionCell(row)");

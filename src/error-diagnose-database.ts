@@ -64,6 +64,18 @@ classified AS (
       SELECT 1 FROM usage_logs u
       WHERE e.request_id IS NOT NULL AND u.request_id = e.request_id
     ) AS recovered,
+    EXISTS (
+      SELECT 1 FROM ops_system_logs system_log
+      WHERE e.request_id IS NOT NULL
+        AND system_log.request_id = e.request_id
+        AND system_log.message LIKE '%upstream_failover_switching'
+    ) AS failover_event,
+    EXISTS (
+      SELECT 1 FROM ops_system_logs system_log
+      WHERE e.request_id IS NOT NULL
+        AND system_log.request_id = e.request_id
+        AND system_log.message LIKE '%failover_aborted_client_disconnected'
+    ) AS failover_aborted,
     CASE
       WHEN message_text LIKE '%invalid_encrypted_content%' THEN 'invalid_encrypted_content'
       WHEN message_text LIKE '%bad_response_status_code%' THEN 'bad_response_status_code'
@@ -116,7 +128,7 @@ classified AS (
     ) AS signature
   FROM selected_errors e
 ),
-request_chains AS (
+error_chains AS (
   SELECT
     request_key,
     MIN(request_id::text) AS request_id,
@@ -125,7 +137,8 @@ request_chains AS (
     BOOL_OR(recovered) AS recovered,
     COUNT(*)::int AS attempt_count,
     COUNT(DISTINCT account_id)::int AS account_count,
-    COUNT(*) > 1 OR COUNT(DISTINCT account_id) > 1 AS failover_triggered,
+    BOOL_OR(failover_event) AS failover_triggered,
+    BOOL_OR(failover_aborted) AS failover_aborted,
     (ARRAY_AGG(model ORDER BY created_at, id))[1] AS model,
     (ARRAY_AGG(inbound_endpoint ORDER BY created_at, id))[1] AS inbound_endpoint,
     (ARRAY_AGG(upstream_endpoint ORDER BY created_at, id))[1] AS upstream_endpoint,
@@ -149,6 +162,61 @@ request_chains AS (
     ) ORDER BY created_at, id) AS attempts
   FROM classified
   GROUP BY request_key
+),
+failover_event_chains AS (
+  SELECT
+    l.request_id::text AS request_key,
+    MIN(l.created_at) AS first_at,
+    MAX(l.created_at) AS last_at,
+    COUNT(*)::int AS event_count,
+    COUNT(DISTINCT l.account_id)::int AS account_count,
+    JSONB_AGG(JSONB_BUILD_OBJECT(
+      'accountId', l.account_id,
+      'accountName', COALESCE(a.name, 'unattributed'),
+      'statusCode', COALESCE(NULLIF(l.extra->>'upstream_status', '')::int, 0),
+      'recordedStatusCode', NULL,
+      'upstreamStatusCode', COALESCE(NULLIF(l.extra->>'upstream_status', '')::int, 0),
+      'phase', 'upstream',
+      'errorType', 'failover_event',
+      'providerErrorCode', NULL,
+      'providerErrorType', NULL,
+      'businessLimited', false,
+      'stablePhrase', 'failover_switch',
+      'signature', CONCAT(COALESCE(NULLIF(l.extra->>'upstream_status', '')::int, 0), ':upstream:failover_event:-:failover_switch'),
+      'createdAt', l.created_at,
+      'switchCount', COALESCE(NULLIF(l.extra->>'switch_count', '')::int, 0),
+      'maxSwitches', COALESCE(NULLIF(l.extra->>'max_switches', '')::int, 0)
+    ) ORDER BY l.created_at, l.id) AS attempts
+  FROM ops_system_logs l
+  LEFT JOIN accounts a ON a.id = l.account_id
+  WHERE l.request_id::text IN (
+    SELECT DISTINCT request_id::text FROM selected_errors WHERE request_id IS NOT NULL
+  )
+    AND l.message LIKE '%upstream_failover_switching'
+  GROUP BY l.request_id::text
+),
+request_chains AS (
+  SELECT
+    e.request_key,
+    e.request_id,
+    LEAST(e.first_at, COALESCE(f.first_at, e.first_at)) AS first_at,
+    GREATEST(e.last_at, COALESCE(f.last_at, e.last_at)) AS last_at,
+    e.recovered,
+    JSONB_ARRAY_LENGTH(COALESCE(f.attempts, '[]'::jsonb) || e.attempts)::int AS attempt_count,
+    (SELECT COUNT(DISTINCT attempt->>'accountId')::int
+      FROM JSONB_ARRAY_ELEMENTS(COALESCE(f.attempts, '[]'::jsonb) || e.attempts) AS attempt
+      WHERE attempt->>'accountId' IS NOT NULL) AS account_count,
+    e.failover_triggered OR f.request_key IS NOT NULL AS failover_triggered,
+    e.failover_aborted,
+    e.model,
+    e.inbound_endpoint,
+    e.upstream_endpoint,
+    e.stream,
+    e.final_signature,
+    e.final_status_code,
+    COALESCE(f.attempts, '[]'::jsonb) || e.attempts AS attempts
+  FROM error_chains e
+  LEFT JOIN failover_event_chains f ON f.request_key = e.request_key
 ),
 signature_rows AS (
   SELECT
@@ -187,6 +255,8 @@ SELECT
     AS failover_recovered_requests,
   (SELECT COUNT(*) FILTER (WHERE failover_triggered AND NOT recovered)::int FROM request_chains)
     AS failover_failed_requests,
+  (SELECT COUNT(*) FILTER (WHERE failover_aborted)::int FROM request_chains)
+    AS failover_aborted_requests,
   COALESCE((
     SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
       'signature', signature,
@@ -210,6 +280,7 @@ SELECT
       'attemptCount', attempt_count,
       'accountCount', account_count,
       'failoverTriggered', failover_triggered,
+      'failoverAborted', failover_aborted,
       'recovered', recovered,
       'customerVisible', NOT recovered,
       'finalStatusCode', final_status_code,
@@ -235,6 +306,7 @@ export function projectErrorDiagnoseRow(row: Row): Row {
     failoverTriggeredRequests: integer(row.failover_triggered_requests),
     failoverRecoveredRequests: integer(row.failover_recovered_requests),
     failoverFailedRequests: integer(row.failover_failed_requests),
+    failoverAbortedRequests: integer(row.failover_aborted_requests),
   };
   const signatures = Array.isArray(row.signatures) ? row.signatures : [];
   const chains = Array.isArray(row.chains) ? row.chains : [];

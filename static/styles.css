@@ -115,6 +115,8 @@ button:disabled { cursor: wait; opacity: .48; }
 .grade-risk { color: var(--alert); background: rgba(255,107,74,.1); }
 .availability { font-size: 11px; }
 .availability-cell small { display: block; max-width: 128px; margin-top: 4px; overflow: hidden; color: #ff9a82; font: 10px/1.2 var(--mono); text-overflow: ellipsis; }
+.failover-cell { min-width: 132px; white-space: nowrap; }
+.failover-cell small { display: block; margin-top: 3px; color: var(--muted); font: 10px/1.2 var(--mono); }
 .availability::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; background: currentColor; }
 .is-up { color: var(--signal); }
 .is-down { color: var(--alert); }

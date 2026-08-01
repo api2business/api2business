@@ -72,6 +72,9 @@ account_stats AS (
         AND e.client_status_code >= 400
     )::int AS failover_failed,
     COUNT(DISTINCT e.request_id) FILTER (
+      WHERE e.request_id IS NOT NULL AND f.aborted
+    )::int AS failover_aborted,
+    COUNT(DISTINCT e.request_id) FILTER (
       WHERE e.kind = 'error' AND e.scoreable AND e.request_id IS NOT NULL
     )::int AS failure_requests,
     COUNT(*) FILTER (
@@ -180,8 +183,15 @@ account_stats AS (
       FROM ops_system_logs system_log
       WHERE system_log.account_id = a.account_id
         AND system_log.request_id = e.request_id
-        AND system_log.message = 'openai.upstream_failover_switching'
-    ) AS triggered
+        AND system_log.message LIKE '%upstream_failover_switching'
+    ) AS triggered,
+    EXISTS (
+      SELECT 1
+      FROM ops_system_logs system_log
+      WHERE system_log.account_id = a.account_id
+        AND system_log.request_id = e.request_id
+        AND system_log.message LIKE '%failover_aborted_client_disconnected'
+    ) AS aborted
   ) f ON true
   GROUP BY a.account_id
 )
@@ -280,6 +290,8 @@ export function scoreRecentDatabaseRow(
     Math.max(0, failoverRequests - failoverRecovered),
     numeric(row.failover_failed) ?? 0,
   );
+  const failoverAborted = numeric(row.failover_aborted) ?? 0;
+  const failoverNotTriggered = Math.max(0, failureRequests - failoverRequests - failoverAborted);
   const failoverRate = attributedRequests > 0 ? Math.round(failoverRequests / attributedRequests * 1_000_000) / 1_000_000 : null;
   const firstTokenSamples = numeric(row.first_token_samples) ?? 0;
   const streamSuccessRequests = numeric(row.stream_success_requests) ?? 0;
@@ -354,6 +366,8 @@ export function scoreRecentDatabaseRow(
     failoverRequests,
     failoverRecovered,
     failoverFailed,
+    failoverAborted,
+    failoverNotTriggered,
     failoverOutcomeMissing: Math.max(0, failoverRequests - failoverRecovered - failoverFailed),
     failoverRate,
     streamSuccessRequests,

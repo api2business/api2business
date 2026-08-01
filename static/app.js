@@ -67,6 +67,7 @@ function shell() {
     ['ranking', '/ranking', '用户用量'],
     ['lottery', '/lottery', '额度抽奖'],
     ['operations', '/operations', '经营管理'],
+    ['oauth-cost', '/oauth-cost', 'OAuth 实时成本'],
     ['account-import', '/account-import', '账号导入'],
     ['upstreams', '/upstreams', '上游管理'],
   ]
@@ -241,7 +242,10 @@ function renderScoreRows() {
       <td>${compact(usage.requestCount)}</td>
       <td>${compact(usage.tokenCount)}</td>
       <td class="usd-cell">${usd(usage.apiAmountUsd)}</td>
-      <td>${number(row.failoverRequests)} / ${number(row.failoverRecovered)}</td>
+      <td class="failover-cell" title="失败 ${number(row.failureRequests)} 次；触发切号 ${number(row.failoverRequests)} 次，其中恢复 ${number(row.failoverRecovered)} 次；未触发切号 ${number(row.failoverNotTriggered)} 次">
+        <span>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}</span>
+        <small>未触发 ${number(row.failoverNotTriggered)}</small>
+      </td>
       <td class="availability-cell"><span class="availability ${available ? 'is-up' : 'is-down'}">${available ? '可用' : '不可用'}</span>${available ? '' : `<small title="${escapeHtml(reasonDetail)}">${escapeHtml(reason.label ?? '原因未记录')}</small>`}</td>
     </tr>`
   }).join('') : '<tr><td colspan="17" class="empty">没有匹配的账号</td></tr>'
@@ -404,6 +408,7 @@ let cashPage = 1
 let auditPage = 1
 let oauthPage = 1
 let oauthArchivedPage = 1
+let oauthProfile = 'codex'
 let oauthRefreshTimer = null
 let oauthRefreshCountdownTimer = null
 let oauthRefreshDueAt = null
@@ -694,6 +699,8 @@ async function loadOperations({ showCached = false } = {}) {
 }
 
 function renderOauthCost(data) {
+  const profileLabel = data.profile === 'grok' ? 'Grok' : 'Codex'
+  $('#oauth-cost-pool-title').textContent = `${profileLabel} 当前号池实时成本`
   const pool = data.pool ?? { total: data.total ?? {}, groups: data.groups ?? [] }
   const total = pool.total ?? {}
   const health = data.health ?? {}
@@ -777,7 +784,10 @@ function renderOauthCost(data) {
     currentWarningLabels.push(`缺少预期产出配置：${missingExpectedPlanTypes.join(', ')}`)
   }
   const warningLabel = currentWarningLabels.length ? ` · ${currentWarningLabels.join('；')}` : ''
-  $('#oauth-cost-state').textContent = `当前号池核算 · 全历史用量${exclusionLabel}${warningLabel} · ${data.complete ? '数据完整' : '有数据缺口'} · ${number(data.databaseQueries)} 次数据库查询`
+  const calibrationLabel = data.expectedCalibration === 'current-api-output-per-used-free-account'
+    ? ' · Free 初始预期按当前产出/有产出账号动态估算'
+    : ''
+  $('#oauth-cost-state').textContent = `${profileLabel} 当前号池核算 · 全历史用量${calibrationLabel}${exclusionLabel}${warningLabel} · ${data.complete ? '数据完整' : '有数据缺口'} · ${number(data.databaseQueries)} 次数据库查询`
   const labels = { k12: 'K12', plus: 'Plus', free: 'Free', team: 'Team' }
   const archived = data.archived ?? { groups: [] }
   const statusDistributionCell = (row) => {
@@ -915,7 +925,7 @@ async function loadOauthCost({ automatic = false } = {}) {
   button.setAttribute('aria-busy', 'true')
   $('#oauth-cost-state').textContent = automatic ? '自动刷新中，正在通过单连接队列核算…' : '正在通过单连接队列核算…'
   try {
-    const data = await requestJson(`/api/operations/oauth-cost?page=${oauthPage}&archivedPage=${oauthArchivedPage}`, {}, 60000)
+    const data = await requestJson(`/api/operations/oauth-cost?profile=${oauthProfile}&page=${oauthPage}&archivedPage=${oauthArchivedPage}`, {}, 60000)
     renderOauthCost(data)
   } catch (error) {
     $('#oauth-cost-state').textContent = `核算失败：${error instanceof Error ? error.message : String(error)}`
@@ -931,23 +941,6 @@ async function loadOauthCost({ automatic = false } = {}) {
 
 async function operationsPage() {
   $('#cash-date').value = operatingDay()
-  const refreshInterval = $('#oauth-cost-refresh-interval')
-  const storedRefreshInterval = readOauthRefreshInterval()
-  if (storedRefreshInterval !== null) refreshInterval.value = String(storedRefreshInterval)
-  refreshInterval.addEventListener('change', () => {
-    writeOauthRefreshInterval(refreshInterval.value)
-    scheduleOauthCostRefresh()
-  })
-  $('#oauth-cost-form').addEventListener('submit', async (event) => {
-    event.preventDefault()
-    oauthPage = 1
-    oauthArchivedPage = 1
-    await loadOauthCost()
-  })
-  $('#oauth-prev').addEventListener('click', async () => { oauthPage -= 1; await loadOauthCost() })
-  $('#oauth-next').addEventListener('click', async () => { oauthPage += 1; await loadOauthCost() })
-  $('#oauth-archived-prev').addEventListener('click', async () => { oauthArchivedPage -= 1; await loadOauthCost() })
-  $('#oauth-archived-next').addEventListener('click', async () => { oauthArchivedPage += 1; await loadOauthCost() })
   $('#cash-prev').addEventListener('click', async () => { cashPage -= 1; await loadOperations() })
   $('#cash-next').addEventListener('click', async () => { cashPage += 1; await loadOperations() })
   $('#audit-prev').addEventListener('click', async () => { auditPage -= 1; await loadOperations() })
@@ -972,7 +965,40 @@ async function operationsPage() {
   })
   $('#procurement-prev').addEventListener('click', async () => { procurementPage -= 1; await loadProcurement() })
   $('#procurement-next').addEventListener('click', async () => { procurementPage += 1; await loadProcurement() })
-  await Promise.all([loadOperations({ showCached: true }), loadOauthCost()])
+  await Promise.all([loadOperations({ showCached: true }), loadProcurement()])
+}
+
+async function oauthCostPage() {
+  document.querySelectorAll('[data-oauth-profile]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const selected = button.dataset.oauthProfile
+      if (selected !== 'codex' && selected !== 'grok' || selected === oauthProfile) return
+      oauthProfile = selected
+      oauthPage = 1
+      oauthArchivedPage = 1
+      document.querySelectorAll('[data-oauth-profile]').forEach((candidate) => {
+        const active = candidate.dataset.oauthProfile === oauthProfile
+        candidate.classList.toggle('is-active', active)
+        candidate.setAttribute('aria-selected', String(active))
+      })
+      await loadOauthCost()
+    })
+  })
+  const refreshInterval = $('#oauth-cost-refresh-interval')
+  const storedRefreshInterval = readOauthRefreshInterval()
+  if (storedRefreshInterval !== null) refreshInterval.value = String(storedRefreshInterval)
+  refreshInterval.addEventListener('change', () => {
+    writeOauthRefreshInterval(refreshInterval.value)
+    scheduleOauthCostRefresh()
+  })
+  $('#oauth-cost-form').addEventListener('submit', async (event) => {
+    event.preventDefault(); oauthPage = 1; oauthArchivedPage = 1; await loadOauthCost()
+  })
+  $('#oauth-prev').addEventListener('click', async () => { oauthPage -= 1; await loadOauthCost() })
+  $('#oauth-next').addEventListener('click', async () => { oauthPage += 1; await loadOauthCost() })
+  $('#oauth-archived-prev').addEventListener('click', async () => { oauthArchivedPage -= 1; await loadOauthCost() })
+  $('#oauth-archived-next').addEventListener('click', async () => { oauthArchivedPage += 1; await loadOauthCost() })
+  await loadOauthCost()
   scheduleOauthCostRefresh()
 }
 
@@ -1017,6 +1043,36 @@ async function accountImportPage() {
   const zone = $('#drop-zone')
   let importInputFormat = 'json'
   let importContent = ''
+  const platformSelect = $('#import-platform')
+  const detectedImportPlatform = () => {
+    if (importInputFormat !== 'json') return null
+    try {
+      const payload = JSON.parse(importContent)
+      const platforms = new Set((payload?.accounts ?? []).map((account) => String(account?.platform ?? '').toLowerCase()))
+      return platforms.size === 1 && (platforms.has('openai') || platforms.has('grok')) ? [...platforms][0] : null
+    } catch { return null }
+  }
+  const applyDetectedPlatform = () => {
+    const detected = detectedImportPlatform()
+    const platform = platformSelect.value === 'auto' ? detected : platformSelect.value
+    if (!platform) {
+      $('#import-platform-state').textContent = importInputFormat === 'zip' ? 'ZIP 提交后由服务端自动识别 Codex 或 Grok' : '等待识别 Codex 或 Grok'
+      return
+    }
+    if (platform === 'grok') {
+      planType.value = 'free'
+      planTypeManuallySelected = false
+    }
+    document.querySelectorAll('#import-groups input').forEach((input) => {
+      input.checked = platform === 'grok' ? Number(input.value) === 6 : defaults.groupIds.includes(Number(input.value))
+    })
+    $('#file-state').dataset.platform = platform
+    const source = platformSelect.value === 'auto' ? '自动识别' : '手动选择'
+    $('#import-platform-state').textContent = platform === 'grok'
+      ? `${source} Grok · 当前固定 Free · 默认导入 Grok #6`
+      : `${source} Codex · 类型继续按单价自动选择或手动调整`
+  }
+  platformSelect.addEventListener('change', applyDetectedPlatform)
   const importedAccountCount = () => {
     if (importInputFormat !== 'json') return 0
     try {
@@ -1048,12 +1104,14 @@ async function accountImportPage() {
     $('#import-json').disabled = zip
     $('#import-json').placeholder = zip ? 'ZIP 将在服务端安全合并，二进制内容不会回显' : '粘贴 Sub2API 导出的 JSON'
     $('#file-state').textContent = `${file.name} · ${number(file.size)} bytes`
+    applyDetectedPlatform()
     updateUnitCostFromTotal()
   }
   $('#import-json').addEventListener('input', () => {
     if ($('#import-json').disabled) return
     importInputFormat = 'json'
     importContent = $('#import-json').value
+    applyDetectedPlatform()
     updateUnitCostFromTotal()
   })
   zone.addEventListener('click', () => fileInput.click())
@@ -1079,7 +1137,8 @@ async function accountImportPage() {
     const outcome = result ? ` · 新建 ${result.createdIds?.length ?? 0} · 更新 ${result.updatedIds?.length ?? 0} · 跳过 ${result.skippedIds?.length ?? result.skipped ?? 0} · 失败 ${result.failed ?? 0}${proxyOutcome}` : ''
     const accounting = job.accounting ? ` · 已记账 ${job.accounting.recordedCount} 个 / ${cny(job.accounting.totalCostCny)}` : ''
     const source = job.source?.format === 'zip' ? `ZIP ${job.source.jsonFileCount} 个 JSON · 包内去重 ${job.source.duplicateAccountCount}` : 'JSON'
-    $('#import-summary').textContent = `${source} · ${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
+    const platform = job.source?.platform === 'grok' ? 'Grok' : 'GPT'
+    $('#import-summary').textContent = `${source} · ${platform} · ${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
     $('#import-logs').innerHTML = job.logs.length ? job.logs.map((log) => `<li data-state="${escapeHtml(log.state)}"><time>${time(log.timestamp)}</time><b>${escapeHtml(log.stage)}</b><span>${escapeHtml(log.message)}</span></li>`).join('') : '<li class="empty">等待作业启动</li>'
     $('#import-logs').scrollTop = $('#import-logs').scrollHeight
   }
@@ -1093,7 +1152,8 @@ async function accountImportPage() {
         priority: Number($('#import-priority').value), capacity: Number($('#import-capacity').value),
         groupIds, sourceProxyId: Number($('#import-proxy').value),
         perAccountProxy: $('#import-per-account-proxy').checked,
-        unitCostCny: Number($('#import-unit-cost').value), planType: planType.value, confirm: true,
+        unitCostCny: Number($('#import-unit-cost').value), planType: planType.value,
+        platform: platformSelect.value === 'auto' ? undefined : platformSelect.value, confirm: true,
       }) }, 30000)
       let job = response.job; renderJob(job)
       while (job.state === 'queued' || job.state === 'running') {
@@ -1392,6 +1452,7 @@ async function boot() {
   if (page === 'ranking') return await rankingPage()
   if (page === 'lottery') return await lotteryPage()
   if (page === 'operations') return await operationsPage()
+  if (page === 'oauth-cost') return await oauthCostPage()
   if (page === 'account-import') return await accountImportPage()
   if (page === 'upstreams') return await upstreamsPage()
 }

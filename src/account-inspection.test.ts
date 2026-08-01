@@ -12,12 +12,12 @@ function reads(rows: Array<Record<string, unknown>>): Sub2ApiReadClient {
 
 test("inspects only runtime fields without credentials", async () => {
   const result = await inspectAccounts([99], reads([{
-    id: 99, name: "account", status: "active", schedulable: true,
+    id: 99, name: "account", platform: "openai", type: "oauth", status: "active", schedulable: true,
     priority: 1, capacity: 5, proxy_id: 8, proxy_name: "pool-8", proxy_status: "active",
     group_ids: [2, 3], group_names: ["pool", "self"], credentials: { access_token: "secret" },
   }]));
   expect(result.accounts).toEqual([{
-    id: 99, name: "account", status: "active", schedulable: true,
+    id: 99, name: "account", platform: "openai", type: "oauth", status: "active", schedulable: true,
     priority: 1, capacity: 5, proxyId: 8, proxyName: "pool-8", proxyStatus: "active",
     groupIds: [2, 3], groupNames: ["pool", "self"],
   }]);
@@ -26,7 +26,7 @@ test("inspects only runtime fields without credentials", async () => {
 
 test("reports an unbound imported account as misaligned", async () => {
   const result = await verifyImportedAccounts([99], { priority: 1, capacity: 5, groupIds: [2, 3] }, [3, 8], reads([{
-    id: 99, name: "account", status: "active", schedulable: true,
+    id: 99, name: "account", platform: "openai", type: "oauth", status: "active", schedulable: true,
     priority: 1, capacity: 5, proxy_id: null, proxy_name: "", proxy_status: "",
     group_ids: [2, 3], group_names: ["pool", "self"],
   }]));

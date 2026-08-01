@@ -89,6 +89,20 @@ export class AdminHttpClient {
   upstreamJob(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/upstreams/jobs/${encodeURIComponent(id)}`);
   }
+  upstreamUsage(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/usage", {
+      method: "POST",
+      headers: { "Idempotency-Key": operationId },
+      body: JSON.stringify({ accountIds, operationId }),
+    }, 30000);
+  }
+  upstreamTemplate(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/template", {
+      method: "POST",
+      headers: { "Idempotency-Key": operationId },
+      body: JSON.stringify({ accountIds, operationId }),
+    }, 30000);
+  }
   priorityAutomation(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-automation"); }
   priorityHistory(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-history"); }
   accountImport(input: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -127,6 +141,11 @@ export class AdminHttpClient {
       method: "POST", body: JSON.stringify({ accountIds }),
     }, 60000);
   }
+  deleteAccounts(accountIds: number[], confirm: boolean): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/accounts/delete", {
+      method: "POST", body: JSON.stringify({ accountIds, confirm }),
+    }, 60000);
+  }
   accountBatchEconomics(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request("/api/admin/accounts/economics", {
       method: "POST",
@@ -139,10 +158,10 @@ export class AdminHttpClient {
       body: JSON.stringify(input),
     }, 60000);
   }
-  oauthPoolEconomics(): Promise<Record<string, unknown>> {
+  oauthPoolEconomics(profile: "codex" | "grok" = "codex"): Promise<Record<string, unknown>> {
     return this.request("/api/admin/accounts/oauth-economics", {
       method: "POST",
-      body: "{}",
+      body: JSON.stringify({ profile }),
     }, 60000);
   }
   alipayRevenue(input: Record<string, unknown>): Promise<Record<string, unknown>> {

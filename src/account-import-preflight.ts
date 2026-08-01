@@ -22,6 +22,7 @@ interface ImportIdentity {
 }
 
 export interface AccountImportPreflightSettings {
+  platform: "openai" | "grok";
   priority: number;
   capacity: number;
   groupIds: number[];
@@ -64,7 +65,7 @@ function identity(account: unknown, index: number): ImportIdentity {
   const accessToken = text(credentials?.access_token);
   return {
     index,
-    userId: text(credentials?.chatgpt_user_id),
+    userId: text(credentials?.chatgpt_user_id) || text(credentials?.user_id) || text(credentials?.account_id),
     accessTokenSha256: accessToken ? createHash("sha256").update(accessToken).digest("hex") : "",
   };
 }
@@ -105,6 +106,7 @@ export async function accountImportPreflight(
     sourceProxyId: settings.sourceProxyId,
     perAccountProxy: settings.perAccountProxy === true,
     planType: settings.planType,
+    platform: settings.platform,
   };
   const key = createHash("sha256").update(JSON.stringify({ userIds, accessHashes, settings: normalizedSettings })).digest("hex");
   const result = await reads.query<AccountRow>({
@@ -123,7 +125,7 @@ export async function accountImportPreflight(
       ), matched_accounts AS (
         SELECT
         a.id,
-        COALESCE(a.credentials->>'chatgpt_user_id', '') AS user_id,
+        COALESCE(NULLIF(a.credentials->>'chatgpt_user_id', ''), NULLIF(a.credentials->>'user_id', ''), a.credentials->>'account_id', '') AS user_id,
         COALESCE(a.extra->>'access_token_sha256', '') AS access_token_sha256,
         a.priority,
         a.concurrency,
@@ -135,10 +137,10 @@ export async function accountImportPreflight(
       LEFT JOIN account_groups ag ON ag.account_id = a.id
       LEFT JOIN proxies p ON p.id = a.proxy_id AND p.deleted_at IS NULL
       WHERE a.deleted_at IS NULL
-        AND a.platform = 'openai'
-        AND a.type = 'oauth'
+        AND LOWER(a.platform) = $4::text
+        AND ($4::text = 'grok' OR LOWER(a.type) = 'oauth')
         AND (
-          COALESCE(a.credentials->>'chatgpt_user_id', '') = ANY(string_to_array($1, ','))
+          COALESCE(NULLIF(a.credentials->>'chatgpt_user_id', ''), NULLIF(a.credentials->>'user_id', ''), a.credentials->>'account_id', '') = ANY(string_to_array($1, ','))
           OR COALESCE(a.extra->>'access_token_sha256', '') = ANY(string_to_array($2, ','))
         )
         GROUP BY a.id, p.name
@@ -153,7 +155,7 @@ export async function accountImportPreflight(
       FROM matching_proxies proxy
       ORDER BY row_kind, id
     `,
-    parameters: [userIds.join(","), accessHashes.join(","), settings.sourceProxyId],
+    parameters: [userIds.join(","), accessHashes.join(","), settings.sourceProxyId, settings.platform],
   });
   const proxyCandidateIds = result.rows.filter((row) => row.row_kind === "proxy")
     .map((row) => integer(row.id)).filter((id): id is number => id !== null)
@@ -182,7 +184,7 @@ export async function accountImportPreflight(
     }
     const account = record(accounts[offset]);
     const credentials = record(account?.credentials);
-    remaining.push({ ...account, credentials: { ...credentials, plan_type: settings.planType } });
+    remaining.push({ ...account, platform: settings.platform, credentials: { ...credentials, plan_type: settings.planType } });
     sourceIndexes.push(offset + 1);
   }
   const filteredContent = JSON.stringify({ ...payload, accounts: remaining });

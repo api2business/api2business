@@ -20,6 +20,7 @@ export interface AccountImportRequest {
   perAccountProxy?: boolean;
   unitCostCny: number;
   planType: OAuthPlanType;
+  platform?: "openai" | "grok";
   confirm: boolean;
 }
 
@@ -28,7 +29,7 @@ export interface ImportJob {
   id: string; state: "queued" | "running" | "succeeded" | "failed"; createdAt: string;
   completedAt: string | null; fingerprint: string; accountCount: number; settings: Omit<AccountImportRequest, "content">;
   inputArchive: { stored: true; fileName: string };
-  source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number };
+  source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number; platform: "openai" | "grok" };
   logs: ImportLog[]; result: Record<string, unknown> | null; accounting: Record<string, unknown> | null; error: string | null;
   workflow?: { workflowId: string; runId: string; state: "submitted" };
 }
@@ -63,6 +64,8 @@ function validate(input: AccountImportRequest): void {
   if (input.planType !== "k12" && input.planType !== "plus" && input.planType !== "team" && input.planType !== "free") {
     throw new Error("账号类型只允许 k12、plus、team 或 free");
   }
+  if (input.platform !== "openai" && input.platform !== "grok") throw new Error("账号平台识别结果无效");
+  if (input.platform === "grok" && input.planType !== "free") throw new Error("Grok 导入当前只支持 free 类型");
 }
 
 function safeMessage(value: string): string {
@@ -139,17 +142,23 @@ export class AccountImportService {
   }
 
   async submit(input: AccountImportRequest): Promise<ImportJob> {
+    const parsed = normalizeAccountImportInput(input.content, input.inputFormat);
+    const selectedPlatform = input.platform ?? parsed.platform;
     const normalizedInput: AccountImportRequest = {
       ...input,
+      platform: selectedPlatform,
+      planType: selectedPlatform === "grok" ? "free" : input.planType,
+      groupIds: selectedPlatform === "grok" && input.groupIds.length === 2
+        && input.groupIds.includes(2) && input.groupIds.includes(3) ? [6] : input.groupIds,
       perAccountProxy: input.perAccountProxy ?? this.config.operations.accountImportDefaults.perAccountProxy,
     };
     validate(normalizedInput);
-    const parsed = normalizeAccountImportInput(normalizedInput.content, normalizedInput.inputFormat);
     const id = randomUUID();
-    const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, parsed.content);
+    const selectedContent = overrideAccountImportPlatform(parsed.content, selectedPlatform);
+    const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, selectedContent);
     const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null,
-      accountCount: parsed.accountCount, fingerprint: parsed.fingerprint, source: parsed.source,
-      settings: { priority: normalizedInput.priority, capacity: normalizedInput.capacity, groupIds: [...new Set(normalizedInput.groupIds)], sourceProxyId: normalizedInput.sourceProxyId, perAccountProxy: normalizedInput.perAccountProxy, unitCostCny: normalizedInput.unitCostCny, planType: normalizedInput.planType, confirm: normalizedInput.confirm },
+      accountCount: parsed.accountCount, fingerprint: parsed.fingerprint, source: { ...parsed.source, platform: selectedPlatform },
+      settings: { priority: normalizedInput.priority, capacity: normalizedInput.capacity, groupIds: [...new Set(normalizedInput.groupIds)], sourceProxyId: normalizedInput.sourceProxyId, perAccountProxy: normalizedInput.perAccountProxy, unitCostCny: normalizedInput.unitCostCny, planType: normalizedInput.planType, platform: normalizedInput.platform, confirm: normalizedInput.confirm },
       inputArchive: { stored: true, fileName: archiveFileName },
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);
@@ -220,7 +229,10 @@ export class AccountImportService {
     try {
       if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
       job.state = "running"; this.log(job, "job", "start", `开始处理 ${job.accountCount} 个账号`); await this.persistWorkerJob(job);
-      const plan = await accountImportPreflight(content, job.settings, this.reads);
+      const plan = await accountImportPreflight(content, {
+        ...job.settings,
+        platform: job.settings.platform ?? job.source.platform,
+      }, this.reads);
       for (const skipped of plan.skipped) {
         this.log(job, "account", "skipped", `stage=account state=skipped index=${skipped.index}/${job.accountCount} account-id=${skipped.accountId}`);
       }
@@ -369,4 +381,16 @@ function mergePreflightResult(output: Record<string, unknown>, job: ImportJob, p
 function accountImportFileProjection(file: Record<string, unknown>, job: ImportJob): void {
   file.accountCount = job.accountCount;
   file.fingerprint = job.fingerprint;
+}
+
+function overrideAccountImportPlatform(content: string, platform: "openai" | "grok"): string {
+  const payload = JSON.parse(content) as Record<string, unknown>;
+  const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+  return JSON.stringify({
+    ...payload,
+    accounts: accounts.map((value) => {
+      const account = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      return { ...account, platform };
+    }),
+  });
 }

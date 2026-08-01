@@ -25,6 +25,7 @@ test("error diagnosis projection exposes bounded facts without raw payloads", ()
     failover_triggered_requests: 2,
     failover_recovered_requests: 1,
     failover_failed_requests: 1,
+    failover_aborted_requests: 1,
     signatures: [{
       signature: "502:upstream:upstream_error:-:upstream_overloaded",
       stablePhrase: "upstream_overloaded",
@@ -40,6 +41,7 @@ test("error diagnosis projection exposes bounded facts without raw payloads", ()
     failoverTriggeredRequests: 2,
     failoverRecoveredRequests: 1,
     failoverFailedRequests: 1,
+    failoverAbortedRequests: 1,
   });
   expect(projected.analysisHints).toEqual({
     failoverWithoutRecovery: 1,

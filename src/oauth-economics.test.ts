@@ -264,10 +264,12 @@ test("remaining ideal output is zero when actual output exceeds the ideal target
   }));
 });
 
-test("OAuth economics SQL uses current openai/oauth rows, all history, and runtime state fields", () => {
+test("OAuth economics SQL selects a parameterized pool and optional account type", () => {
   expect(oauthEconomicsSql).toContain("a.deleted_at IS NULL");
-  expect(oauthEconomicsSql).toContain("LOWER(a.platform) = 'openai'");
-  expect(oauthEconomicsSql).toContain("LOWER(a.type) = 'oauth'");
+  expect(oauthEconomicsSql).toContain("LOWER(a.platform) = $4::text");
+  expect(oauthEconomicsSql).toContain("LOWER(a.type) = $5::text");
+  expect(oauthEconomicsSql).toContain("NULLIF($6::text, '')");
+  expect(oauthEconomicsSql).toContain("NULLIF($7::numeric, -1)");
   expect(oauthEconomicsSql).toContain("excluded_accounts");
   expect(oauthEconomicsSql).toContain("$3::text");
   expect(oauthEconomicsSql).toContain("FROM usage_logs usage");

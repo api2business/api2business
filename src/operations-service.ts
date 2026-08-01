@@ -1103,7 +1103,7 @@ export class OperationsService {
     return await collectAccountImportEconomics(this.config, this.reads, input, "manual");
   }
 
-  async oauthPoolEconomics(page = 1, pageSize = 10, archivedPage = 1) {
+  async oauthPoolEconomics(page = 1, pageSize = 10, archivedPage = 1, profile: "codex" | "grok" = "codex") {
     const yaml = this.yamlLedger();
     const importEntries = readAccountImportCosts(this.config.operations.accountImportLedgerPath);
     const merged = mergeOAuthAcquisitionCosts(importEntries, yaml.costs);
@@ -1112,17 +1112,21 @@ export class OperationsService {
     const yamlAcquisitionCostCny = yaml.costs
       .filter((entry) => entry.kind === "acquisition")
       .reduce((sum, entry) => sum + money(entry.amountCny), 0);
+    const grok = profile === "grok";
     const result = await collectOAuthPoolEconomics(this.config, this.reads, {
-      costs: merged.costs,
-      refunds,
-      excludedAccountIds: this.config.operations.oauthEconomics.excludedAccountIds,
+      costs: grok ? [] : merged.costs,
+      refunds: grok ? [] : refunds,
+      excludedAccountIds: grok ? [] : this.config.operations.oauthEconomics.excludedAccountIds,
+      profile,
+      syntheticUnitCostCny: grok ? 0.02 : undefined,
       ledger: {
         jsonlEntryCount: merged.jsonlEntryCount,
         jsonlCostCny: money(jsonlCostCny),
         yamlAcquisitionEntryCount: merged.yamlEntryCount,
         yamlAcquisitionCostCny: money(yamlAcquisitionCostCny),
         yamlSuppressedDuplicateCount: merged.yamlSuppressedCount,
-        mergedCostAccountCount: merged.costs.length,
+        mergedCostAccountCount: grok ? 0 : merged.costs.length,
+        syntheticUnitCostCny: grok ? 0.02 : null,
       },
     }, "manual");
     const paginate = (rows: Array<Record<string, unknown>>, currentPage: number) => ({

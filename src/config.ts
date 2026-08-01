@@ -16,6 +16,10 @@ export interface UpstreamManagementConfig {
   capacity: number;
   proxyId: number;
   mutationTimeoutMs: number;
+  usageConcurrency: number;
+  usageTimeoutMs: number;
+  usageDays: number;
+  failoverRules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }>;
 }
 
 export interface SecretRef {
@@ -456,6 +460,18 @@ export function loadConfig(path: string): AppConfig {
   const accountLifecycle = object(operations.accountLifecycle, "operations.accountLifecycle");
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
   const upstreamManagement = object(operations.upstreamManagement, "operations.upstreamManagement");
+  const upstreamFailoverRulesValue = upstreamManagement.failoverRules;
+  if (!Array.isArray(upstreamFailoverRulesValue) || upstreamFailoverRulesValue.length === 0) {
+    throw new Error("operations.upstreamManagement.failoverRules must be a non-empty array");
+  }
+  const upstreamFailoverRules = upstreamFailoverRulesValue.map((value, index) => {
+    const rule = object(value, `operations.upstreamManagement.failoverRules[${index}]`);
+    return {
+      error_code: integerValue(rule, "errorCode", `operations.upstreamManagement.failoverRules[${index}]`, 100, 599),
+      keywords: strings(rule, "keywords", `operations.upstreamManagement.failoverRules[${index}]`),
+      duration_minutes: integerValue(rule, "durationMinutes", `operations.upstreamManagement.failoverRules[${index}]`, 1, 60),
+    };
+  });
   const upstreamGroupIds = integers(upstreamManagement, "groupIds", "operations.upstreamManagement", 1, Number.MAX_SAFE_INTEGER);
   const upstreamPrimaryGroupId = integerValue(upstreamManagement, "primaryGroupId", "operations.upstreamManagement", 1);
   if (!upstreamGroupIds.includes(upstreamPrimaryGroupId)) {
@@ -702,6 +718,10 @@ export function loadConfig(path: string): AppConfig {
         capacity: integerValue(upstreamManagement, "capacity", "operations.upstreamManagement", 1, 100000),
         proxyId: integerValue(upstreamManagement, "proxyId", "operations.upstreamManagement", 1),
         mutationTimeoutMs: integerValue(upstreamManagement, "mutationTimeoutMs", "operations.upstreamManagement", 1000, 120000),
+        usageConcurrency: integerValue(upstreamManagement, "usageConcurrency", "operations.upstreamManagement", 1, 100),
+        usageTimeoutMs: integerValue(upstreamManagement, "usageTimeoutMs", "operations.upstreamManagement", 1000, 120000),
+        usageDays: integerValue(upstreamManagement, "usageDays", "operations.upstreamManagement", 1, 90),
+        failoverRules: upstreamFailoverRules,
       },
       oauthEconomics: {
         excludedAccountIds: integers(oauthEconomics, "excludedAccountIds", "operations.oauthEconomics", 1, Number.MAX_SAFE_INTEGER),
