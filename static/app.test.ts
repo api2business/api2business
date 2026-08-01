@@ -36,7 +36,21 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(html).toContain('id="upstream-edit-usage"');
   expect(app).toContain("requestJson('/api/upstreams/usage'");
   expect(app).toContain("result.databaseQueries");
+  expect(html).toContain('class="query-spinner"');
+  expect(app).toContain("button.classList.add('is-loading')");
   expect(app).not.toContain("apiKey: activeUpstream");
+});
+
+test("score refresh controls expose stable loading animation state", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+  const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
+  expect(html).toContain('id="query-scores" class="query-command"');
+  expect(html).toContain('class="query-spinner"');
+  expect(app).toContain("$('#score-state').dataset.state = 'refreshing'");
+  expect(app).toContain("iconButton.classList.add('is-loading')");
+  expect(css).toContain('.state-badge[data-state="refreshing"]::before');
+  expect(css).toContain('.icon-command.is-loading');
 });
 
 test("automation submit preserves the user's current form values", async () => {
@@ -272,8 +286,8 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
-  expect(html).toContain('/app.js?v=score-auto-refresh-v1');
-  expect(html).toContain('/styles.css?v=score-auto-refresh-v1');
+  expect(html).toContain('/app.js?v=loading-feedback-v2');
+  expect(html).toContain('/styles.css?v=loading-feedback-v2');
 });
 
 test("upstream create and update expose timestamped workflow logs", async () => {

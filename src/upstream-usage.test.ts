@@ -54,6 +54,55 @@ test("falls back to New API and marks recent-log token usage incomplete", async 
   expect(result.warning).toContain("仅覆盖最近日志");
 });
 
+test("does not treat a fieldless unrestricted response as usage data", async () => {
+  const requests: string[] = [];
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/v1/usage?days=30")) return new Response(JSON.stringify({ mode: "unrestricted" }));
+    if (url.endsWith("/api/usage/token/")) {
+      return new Response(JSON.stringify({ data: { total_granted: 200, total_used: 80, total_available: 120, unlimited_quota: false } }));
+    }
+    return new Response(JSON.stringify({ data: [] }));
+  }) as typeof fetch;
+
+  const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 30 });
+  expect(requests).toContain("https://api.example.com/api/usage/token/");
+  expect(result.provider).toBe("new-api");
+  expect(result.quota.remaining).toBe(120);
+});
+
+test("parses current Sub2API unrestricted wallet and nested total usage", async () => {
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    mode: "unrestricted",
+    planName: "钱包余额",
+    remaining: 88.5,
+    balance: 88.5,
+    unit: "USD",
+    usage: { total: { requests: 9, input_tokens: 100, output_tokens: 25, actual_cost: 4.2 } },
+  }))) as unknown as typeof fetch;
+
+  const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 30 });
+  expect(result.provider).toBe("sub2api");
+  expect(result.quota.remaining).toBe(88.5);
+  expect(result.quota.unlimited).toBe(false);
+  expect(result.usage.requestCount).toBe(9);
+  expect(result.usage.totalTokens).toBe(125);
+  expect(result.usage.actualCostUsd).toBe(4.2);
+});
+
+test("parses current Sub2API subscription windows", async () => {
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    mode: "unrestricted",
+    remaining: 70,
+    unit: "USD",
+    subscription: { monthly_limit_usd: 100, monthly_usage_usd: 30 },
+  }))) as unknown as typeof fetch;
+
+  const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 30 });
+  expect(result.quota).toEqual({ limit: 100, used: 30, remaining: 70, unlimited: false, unit: "USD" });
+});
+
 test("redacts API keys from upstream failures", async () => {
   globalThis.fetch = (async () => { throw new Error("failed with sk-live-secret-value"); }) as unknown as typeof fetch;
   const result = await queryUpstreamUsage(target, { timeoutMs: 20, days: 30 });

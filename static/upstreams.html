@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#111412" />
   <title>上游管理 | ApiState</title>
-  <link rel="stylesheet" href="/styles.css?v=upstream-job-logs-v1" />
-  <script src="/app.js?v=upstream-job-logs-v1" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=loading-feedback-v2" />
+  <script src="/app.js?v=loading-feedback-v2" type="module"></script>
 </head>
 <body data-page="upstreams">
   <div data-shell></div>
   <main class="workspace upstream-workspace">
     <header class="page-head">
       <div><p class="eyebrow">UPSTREAMS / RUNTIME API-KEY</p><h1>上游管理</h1></div>
-      <div class="page-actions"><span id="upstream-state" class="state-badge">读取中</span><button id="upstream-usage-refresh" class="query-command" type="button">刷新额度 / 用量</button><button id="upstream-create" class="query-command" type="button">新增上游</button></div>
+      <div class="page-actions"><span id="upstream-state" class="state-badge" data-state="refreshing">读取中</span><button id="upstream-usage-refresh" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>刷新额度 / 用量</span></button><button id="upstream-create" class="query-command" type="button">新增上游</button></div>
     </header>
     <section class="metric-strip upstream-metrics" aria-label="上游概要">
       <div><span>上游账号</span><strong id="upstream-total">—</strong></div>

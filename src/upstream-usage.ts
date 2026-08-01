@@ -109,27 +109,42 @@ function parseSub2Api(target: UpstreamUsageTarget, payload: unknown, startedAt: 
   const root = row(payload);
   if (!root || (!row(root.usage) && !row(root.quota) && typeof root.mode !== "string")) return null;
   const quota = row(root.quota);
-  const usage = row(root.usage) ?? root;
+  const usageRoot = row(root.usage);
+  const usage = row(usageRoot?.total) ?? usageRoot ?? root;
+  const subscription = row(root.subscription);
   const inputTokens = firstNumber(usage, ["input_tokens", "inputTokens"]);
   const outputTokens = firstNumber(usage, ["output_tokens", "outputTokens"]);
   const explicitTotal = firstNumber(usage, ["total_tokens", "totalTokens"]);
+  const quotaLimit = firstNumber(quota, ["limit"])
+    ?? firstNumber(subscription, ["monthly_limit_usd", "weekly_limit_usd", "daily_limit_usd"]);
+  const quotaUsed = firstNumber(quota, ["used"])
+    ?? firstNumber(subscription, ["monthly_usage_usd", "weekly_usage_usd", "daily_usage_usd"]);
+  const quotaRemaining = firstNumber(quota, ["remaining"])
+    ?? firstNumber(root, ["remaining", "balance"]);
+  const costUsd = firstNumber(usage, ["cost", "cost_usd", "costUsd"]);
+  const actualCostUsd = firstNumber(usage, ["actual_cost", "actual_cost_usd", "actualCostUsd"]);
+  const requestCount = firstNumber(usage, ["request_count", "requests", "total_requests"]);
+  const hasQuotaData = quotaLimit !== null || quotaUsed !== null || quotaRemaining !== null;
+  const hasUsageData = inputTokens !== null || outputTokens !== null || explicitTotal !== null
+    || costUsd !== null || actualCostUsd !== null || requestCount !== null;
+  if (!hasQuotaData && !hasUsageData) return null;
   const result = emptyResult(target, startedAt, days);
   result.ok = true;
   result.provider = "sub2api";
   result.quota = {
-    limit: firstNumber(quota, ["limit"]),
-    used: firstNumber(quota, ["used"]),
-    remaining: firstNumber(quota, ["remaining"]),
-    unlimited: root.mode === "unrestricted" ? true : quota ? false : null,
-    unit: typeof quota?.unit === "string" ? quota.unit : "USD",
+    limit: quotaLimit,
+    used: quotaUsed,
+    remaining: quotaRemaining,
+    unlimited: root.mode === "unrestricted" && quotaRemaining === null ? null : false,
+    unit: typeof quota?.unit === "string" ? quota.unit : typeof root.unit === "string" ? root.unit : "USD",
   };
   result.usage = {
     inputTokens,
     outputTokens,
     totalTokens: explicitTotal ?? (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null),
-    costUsd: firstNumber(usage, ["cost", "cost_usd", "costUsd"]),
-    actualCostUsd: firstNumber(usage, ["actual_cost", "actual_cost_usd", "actualCostUsd"]),
-    requestCount: firstNumber(usage, ["request_count", "requests", "total_requests"]),
+    costUsd,
+    actualCostUsd,
+    requestCount,
   };
   result.window.complete = true;
   return result;

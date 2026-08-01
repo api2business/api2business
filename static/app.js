@@ -483,9 +483,14 @@ async function runPriorityStateRefresh() {
   const select = $('#score-call-limit')
   const limit = Number(select.value)
   button.disabled = true
+  button.classList.add('is-loading')
+  button.setAttribute('aria-busy', 'true')
   iconButton.disabled = true
+  iconButton.classList.add('is-loading')
+  iconButton.setAttribute('aria-busy', 'true')
   select.disabled = true
   $('#score-state').textContent = '查询中'
+  $('#score-state').dataset.state = 'refreshing'
   $('#plan-refresh-state').textContent = '正在刷新，保留当前显示数据…'
   try {
     const state = await requestJson('/api/scores/rank', {
@@ -502,7 +507,11 @@ async function runPriorityStateRefresh() {
     throw error
   } finally {
     button.disabled = false
+    button.classList.remove('is-loading')
+    button.removeAttribute('aria-busy')
     iconButton.disabled = false
+    iconButton.classList.remove('is-loading')
+    iconButton.removeAttribute('aria-busy')
     select.disabled = false
   }
 }
@@ -1339,6 +1348,8 @@ async function upstreamsPage() {
   $('#upstream-usage-refresh').addEventListener('click', async () => {
     const button = $('#upstream-usage-refresh')
     button.disabled = true
+    button.classList.add('is-loading')
+    button.setAttribute('aria-busy', 'true')
     $('#upstream-usage-state').textContent = 'worker 正在并发查询当前页上游…'
     try {
       const result = await queryUsage(lastUpstreamRows.map((row) => Number(row.id)))
@@ -1346,7 +1357,11 @@ async function upstreamsPage() {
       $('#upstream-usage-state').textContent = `${number(result.succeeded)} 成功 · ${number(result.failed)} 失败 · ${number(result.databaseQueries)} 次排队 DB 查询`
     } catch (error) {
       $('#upstream-usage-state').textContent = error instanceof Error ? error.message : String(error)
-    } finally { button.disabled = false }
+    } finally {
+      button.disabled = false
+      button.classList.remove('is-loading')
+      button.removeAttribute('aria-busy')
+    }
   })
   $('#upstream-edit-usage').addEventListener('click', async () => {
     if (!activeUpstream) return
