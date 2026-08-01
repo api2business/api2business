@@ -9,6 +9,7 @@
 | 2026-07-31 | self | 把“补算已有 Hubway 成本”误解成新增充值记录，短暂追加了重复账目 | 先跨 YAML、JSONL 和手工账本核对同日来源；“补算”默认改善汇总口径，只有用户明确新增交易时才写新账目 |
 | 2026-07-31 | self | 0 元采购项缺少 YAML 必填的 `accountName`，导致结算后的 runtime 删除在配置预检阶段失败 | 零成本仍是完整采购记录；写入后先跑受控 runtime 配置解析，再执行批量 mutation |
 | 2026-08-01 | self | 在单引号包裹的 `bun -e` 中嵌入 SQL 单引号，shell 截断后造成 `%` 附近语法错误，并一度误判为字段类型问题 | 临时只读 SQL 的字面量也全部参数化；先看受控 API 日志再归因 |
+| 2026-08-01 | self | 把 ApiState L1 聚合生命周期误写为不支持的 `native restart` | ApiState 聚合重载固定使用 `native stop --component all` 后接 `native start --component all`，再查聚合状态 |
 
 ## User Preferences
 - 非 OAuth 上游先按账号评分排序，再把排序归一化到优先级 100 至 300。
