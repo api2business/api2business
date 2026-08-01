@@ -10,7 +10,8 @@ import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { parse } from "yaml";
 
 type PlanType = "k12" | "plus" | "free" | "team" | "all";
-type SelectionMode = "probe" | "database-error";
+type LifecycleScope = "day" | "pool";
+type SelectionMode = "probe" | "database-error" | "database-dead";
 type JobState = "queued" | "running" | "succeeded" | "settling" | "settled" | "failed";
 type Row = Record<string, unknown>;
 
@@ -20,6 +21,7 @@ export interface LifecycleRequest {
   model?: string;
   confirm: boolean;
   selectionMode?: SelectionMode;
+  scope?: LifecycleScope;
 }
 
 export interface LifecycleJob {
@@ -27,7 +29,7 @@ export interface LifecycleJob {
   state: JobState;
   createdAt: string;
   completedAt: string | null;
-  settings: { day: string; planType: PlanType; model: string; confirm: boolean; selectionMode: SelectionMode };
+  settings: { day: string; planType: PlanType; model: string; confirm: boolean; selectionMode: SelectionMode; scope: LifecycleScope };
   fingerprint: string | null;
   logs: Array<{ timestamp: string; stage: string; state: string; message: string }>;
   candidates: Row[];
@@ -106,15 +108,25 @@ function records(value: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
-export function readLifecycleAcquisitionCosts(config: AppConfig, day: string): Array<{ accountId: number; costCny: number }> {
+export function readLifecycleAcquisitionCosts(config: AppConfig, day: string | null): Array<{ accountId: number; costCny: number }> {
   const root = parse(readFileSync(config.operations.ledgerYamlPath, "utf8")) as Record<string, unknown>;
   const profit = root.profit && typeof root.profit === "object" && !Array.isArray(root.profit)
     ? root.profit as Record<string, unknown>
     : {};
   return records(profit.periodCosts)
-    .filter((entry) => entry.kind === "acquisition" && entry.occurredOn === day)
+    .filter((entry) => entry.kind === "acquisition" && (day === null || entry.occurredOn === day))
     .map((entry) => ({ accountId: positiveInteger(entry.accountId), costCny: number(entry.amountCny) }))
     .filter((entry): entry is { accountId: number; costCny: number } => entry.accountId !== null && entry.costCny >= 0);
+}
+
+export function lifecycleRetirementReason(row: Row, selectionMode: SelectionMode): string | null {
+  const state = String(row.stateBucket ?? "error");
+  const planType = String(row.planType ?? "unknown");
+  if (selectionMode === "database-error") return state === "error" ? "database-error" : null;
+  if (selectionMode !== "database-dead") return null;
+  if (state === "error") return "database-error";
+  if (state === "rate_limited" && (planType === "free" || planType === "plus")) return "database-rate-limited";
+  return null;
 }
 
 function mergeLifecycleCosts(
@@ -161,12 +173,14 @@ export class AccountLifecycleService {
     parseAccountEconomicsWindow({ day: input.day }, this.config.monitor.timezone);
     if (!["k12", "plus", "free", "team", "all"].includes(input.planType)) throw new Error("planType is invalid");
     const selectionMode = input.selectionMode ?? "probe";
-    if (selectionMode !== "probe" && selectionMode !== "database-error") throw new Error("selectionMode is invalid");
+    if (selectionMode !== "probe" && selectionMode !== "database-error" && selectionMode !== "database-dead") throw new Error("selectionMode is invalid");
+    const scope = input.scope ?? "day";
+    if (scope !== "day" && scope !== "pool") throw new Error("scope is invalid");
     const model = input.model?.trim() || this.config.operations.accountLifecycle.defaultModel;
     if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(model)) throw new Error("model is invalid");
     const job: LifecycleJob = {
       id: randomUUID(), state: "queued", createdAt: new Date().toISOString(), completedAt: null,
-      settings: { day: input.day, planType: input.planType, model, confirm: input.confirm, selectionMode },
+      settings: { day: input.day, planType: input.planType, model, confirm: input.confirm, selectionMode, scope },
       fingerprint: null, logs: [], candidates: [], result: null, settlement: null, error: null,
     };
     this.jobs.set(job.id, job);
@@ -223,7 +237,11 @@ export class AccountLifecycleService {
     job.state = "settling";
     this.log(job, "settlement", "queued", `开始结算 ${job.candidates.length} 个确定死亡账号`);
     try {
-      job.workflow = await this.temporal.submit({ kind: "account.lifecycle.settle", jobId: job.id });
+      job.workflow = await this.temporal.submit({
+        kind: "account.lifecycle.settle",
+        jobId: job.id,
+        candidateIds: job.candidates.map((row) => number(row.accountId)),
+      });
     } catch (error) {
       job.state = "failed";
       job.error = safeMessage(error instanceof Error ? error.message : String(error));
@@ -243,12 +261,22 @@ export class AccountLifecycleService {
     return job;
   }
 
-  async runSettlementWorker(id: string): Promise<LifecycleJob> {
+  async runSettlementWorker(id: string, candidateIds: number[]): Promise<LifecycleJob> {
     if (!this.workerJobs) throw new Error("OAuth 生命周期 worker job 控制面不可用");
     const job = await this.workerJobs.get(id);
     if (!job) throw new Error("OAuth 生命周期作业不存在");
     if (job.state === "settled" || job.state === "failed") return job;
-    await this.finishSettlement(job);
+    const expectedIds = [...new Set(candidateIds.filter((value) => Number.isSafeInteger(value) && value > 0))]
+      .sort((left, right) => left - right);
+    if (expectedIds.length === 0) throw new Error("OAuth 生命周期结算缺少已确认的候选账号");
+    const snapshotIds = [...new Set(job.candidates.map((row) => number(row.accountId)))]
+      .sort((left, right) => left - right);
+    if (snapshotIds.length > 0 && JSON.stringify(snapshotIds) !== JSON.stringify(expectedIds)) {
+      throw new Error("OAuth 生命周期结算候选与已确认计划不一致");
+    }
+    // Temporal 命令承载不可变结算快照，避免不完整的 worker 回读覆盖 API 侧计划。
+    job.candidates = expectedIds.map((accountId) => ({ accountId }));
+    await this.finishSettlement(job, false);
     return job;
   }
 
@@ -257,27 +285,29 @@ export class AccountLifecycleService {
     job.logs.push({ timestamp: new Date().toISOString(), stage, state, message: safeMessage(message) });
   }
 
-  private async persistWorkerJob(job: LifecycleJob): Promise<void> {
+  private async persistWorkerJob(job: LifecycleJob, includeCandidates = true): Promise<void> {
     if (!this.workerJobs) return;
     await this.workerJobs.patch(job.id, {
       state: job.state,
       completedAt: job.completedAt,
       fingerprint: job.fingerprint,
       logs: job.logs,
-      candidates: job.candidates,
+      ...(includeCandidates ? { candidates: job.candidates } : {}),
       result: job.result,
       settlement: job.settlement,
       error: job.error,
     });
   }
 
-  private async facts(day: string): Promise<Row[]> {
+  private async facts(day: string, scope: LifecycleScope): Promise<Row[]> {
     const automaticCosts = readAccountImportCosts(this.config.operations.accountImportLedgerPath)
-      .filter((entry) => entry.occurredOn === day)
+      .filter((entry) => scope === "pool" || entry.occurredOn === day)
       .map((entry) => ({ accountId: entry.accountId, costCny: entry.amountCny }));
-    const costs = mergeLifecycleCosts(automaticCosts, readLifecycleAcquisitionCosts(this.config, day));
+    const costs = mergeLifecycleCosts(automaticCosts, readLifecycleAcquisitionCosts(this.config, scope === "pool" ? null : day));
     if (costs.length === 0) return [];
-    const window = parseAccountEconomicsWindow({ day }, this.config.monitor.timezone);
+    const window = scope === "pool"
+      ? { startUtc: "1970-01-01T00:00:00.000Z" }
+      : parseAccountEconomicsWindow({ day }, this.config.monitor.timezone);
     const end = new Date().toISOString();
     const query = await this.reads.query<Row>({
       key: JSON.stringify(["accounts.lifecycle", day, costs, end]), kind: "accounts.lifecycle",
@@ -298,24 +328,31 @@ export class AccountLifecycleService {
   private async detect(job: LifecycleJob): Promise<void> {
     try {
       job.state = "running";
-      this.log(job, "candidates", "start", `读取 ${job.settings.day} 的 ${job.settings.planType.toUpperCase()} OAuth 候选`);
+      this.log(job, "candidates", "start", `读取 ${job.settings.scope === "pool" ? "当前号池" : job.settings.day} 的 ${job.settings.planType.toUpperCase()} OAuth 候选`);
       await this.persistWorkerJob(job);
-      const rows = await this.facts(job.settings.day);
+      const rows = await this.facts(job.settings.day, job.settings.scope);
       const eligible = rows.filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth"
         && (job.settings.planType === "all" || row.planType === job.settings.planType));
-      if (job.settings.selectionMode === "database-error") {
+      if (job.settings.selectionMode === "database-error" || job.settings.selectionMode === "database-dead") {
         const rateLimited = eligible.filter((row) => row.stateBucket === "rate_limited");
-        job.candidates = eligible.filter((row) => row.stateBucket === "error");
-        if (job.candidates.length === 0) throw new Error(`没有匹配的错误账号；已排除限流 ${rateLimited.length} 个`);
+        job.candidates = eligible.filter((row) => lifecycleRetirementReason(row, job.settings.selectionMode) !== null);
+        if (job.candidates.length === 0) throw new Error("没有匹配当前退役策略的账号");
         const accountIds = job.candidates.map((row) => number(row.accountId));
-        job.fingerprint = createHash("sha256").update(JSON.stringify({ day: job.settings.day, selectionMode: job.settings.selectionMode, accountIds })).digest("hex");
+        const byPlanType = Object.fromEntries(["free", "k12", "plus", "team"].map((planType) => [planType, {
+          error: job.candidates.filter((row) => row.planType === planType && row.stateBucket === "error").length,
+          rateLimited: job.candidates.filter((row) => row.planType === planType && row.stateBucket === "rate_limited").length,
+        }]));
+        const selectedRateLimited = job.candidates.filter((row) => row.stateBucket === "rate_limited").length;
+        job.fingerprint = createHash("sha256").update(JSON.stringify({ day: job.settings.day, scope: job.settings.scope, selectionMode: job.settings.selectionMode, accountIds })).digest("hex");
         job.result = {
-          tests: job.candidates.map((row) => ({ accountId: row.accountId, classification: "dead", reason: "database-error" })),
-          summary: { alive: 0, dead: job.candidates.length, unknown: 0, excludedRateLimited: rateLimited.length },
-          mode: "database-error", valuesPrinted: false,
+          tests: job.candidates.map((row) => ({ accountId: row.accountId, planType: row.planType, stateBucket: row.stateBucket,
+            classification: "dead", reason: lifecycleRetirementReason(row, job.settings.selectionMode) })),
+          summary: { alive: 0, dead: job.candidates.length, unknown: 0,
+            selectedRateLimited, excludedRateLimited: rateLimited.length - selectedRateLimited, byPlanType },
+          mode: job.settings.selectionMode, valuesPrinted: false,
         };
         job.state = "succeeded";
-        this.log(job, "candidates", "done", `错误候选 ${job.candidates.length} 个，已排除限流 ${rateLimited.length} 个；未发起主动探测`);
+        this.log(job, "candidates", "done", `退役候选 ${job.candidates.length} 个，其中限流 ${selectedRateLimited} 个；未发起主动探测`);
         await this.persistWorkerJob(job);
         return;
       }
@@ -367,16 +404,22 @@ export class AccountLifecycleService {
     }
   }
 
-  private async finishSettlement(job: LifecycleJob): Promise<void> {
+  private async finishSettlement(job: LifecycleJob, includeCandidates = true): Promise<void> {
     try {
-      const currentEligible = (await this.facts(job.settings.day))
+      const currentEligible = (await this.facts(job.settings.day, job.settings.scope))
         .filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth"
           && (job.settings.planType === "all" || row.planType === job.settings.planType));
-      const current = job.settings.selectionMode === "database-error"
-        ? currentEligible.filter((row) => row.stateBucket === "error") : currentEligible;
-      const currentIds = current.map((row) => number(row.accountId));
-      const expectedIds = job.candidates.map((row) => number(row.accountId));
-      if (JSON.stringify(currentIds) !== JSON.stringify(expectedIds)) throw new Error("候选账号范围已变化，请重新检测");
+      const current = job.settings.selectionMode === "database-error" || job.settings.selectionMode === "database-dead"
+        ? currentEligible.filter((row) => lifecycleRetirementReason(row, job.settings.selectionMode) !== null) : currentEligible;
+      const currentIds = [...new Set(current.map((row) => number(row.accountId)))].sort((left, right) => left - right);
+      const expectedIds = [...new Set(job.candidates.map((row) => number(row.accountId)))].sort((left, right) => left - right);
+      const currentSet = new Set(currentIds);
+      const expectedSet = new Set(expectedIds);
+      const addedIds = currentIds.filter((id) => !expectedSet.has(id));
+      const removedIds = expectedIds.filter((id) => !currentSet.has(id));
+      if (addedIds.length > 0 || removedIds.length > 0) {
+        throw new Error(`候选账号范围已变化，请重新检测；新增 ${addedIds.join(",") || "-"}，移除 ${removedIds.join(",") || "-"}`);
+      }
       const gross = current.reduce((sum, row) => sum + number(row.costCny), 0);
       const apiAmountUsd = current.reduce((sum, row) => sum + number(row.apiAmountUsd), 0);
       const accounting = recordLifecycleSettlement(this.config.operations.accountLifecycleLedgerPath, {
@@ -389,7 +432,7 @@ export class AccountLifecycleService {
         detectionJobId: job.id, detectionFingerprint: job.fingerprint!,
       });
       this.log(job, "accounting", accounting.mutation ? "recorded" : "skipped", `批次结算已记账 ${expectedIds.length} 个账号`);
-      await this.persistWorkerJob(job);
+      await this.persistWorkerJob(job, includeCandidates);
       let deletion: Row | null = null;
       let deletionError: string | null = null;
       try {
@@ -403,20 +446,20 @@ export class AccountLifecycleService {
       } catch (error) {
         deletionError = safeMessage(errorMessage(error));
         this.log(job, "deletion", "verify", `删除命令结果回收失败，转入终态回读：${deletionError}`);
-        await this.persistWorkerJob(job);
+        await this.persistWorkerJob(job, includeCandidates);
       }
-      const verified = await this.facts(job.settings.day);
+      const verified = await this.facts(job.settings.day, job.settings.scope);
       const remaining = verified.filter((row) => expectedIds.includes(number(row.accountId)) && row.exists === true).map((row) => row.accountId);
       job.settlement = { accounting, deletion, deletionError, remainingAccountIds: remaining, valuesPrinted: false };
-      await this.persistWorkerJob(job);
+      await this.persistWorkerJob(job, includeCandidates);
       if (remaining.length > 0) throw new Error(`删除回读仍有 ${remaining.length} 个账号存在${deletionError ? `；命令错误：${deletionError}` : ""}`);
       job.state = "settled"; job.error = null; job.completedAt = new Date().toISOString();
       this.log(job, "verification", "done", `结算与删除完成，回读 ${expectedIds.length}/${expectedIds.length} 已删除`);
-      await this.persistWorkerJob(job);
+      await this.persistWorkerJob(job, includeCandidates);
     } catch (error) {
       job.state = "failed"; job.error = safeMessage(errorMessage(error));
       job.completedAt = new Date().toISOString(); this.log(job, "settlement", "failed", job.error);
-      try { await this.persistWorkerJob(job); } catch { /* preserve the original worker failure */ }
+      try { await this.persistWorkerJob(job, includeCandidates); } catch { /* preserve the original worker failure */ }
     }
   }
 }

@@ -22,6 +22,11 @@ export interface DailyProfitLedgerInput {
   upstreamRechargeCny: number;
   upstreamCapitalCny?: number;
   upstreamBalanceCnyPerApiUsd?: number;
+  upstreamCapitalCoverage?: {
+    rechargeWalletCount: number;
+    capitalizedWalletCount: number;
+    missingWallets: string[];
+  };
   deferredCostRateCnyPerApiUsd: number;
   warnings?: string[];
 }
@@ -75,6 +80,11 @@ export function buildDailyProfitReport(facts: Row, ledger: DailyProfitLedgerInpu
     capitalAdjusted: {
       upstreamBalanceCnyPerApiUsd,
       upstreamCapitalCny: money(upstreamCapitalCny),
+      coverage: ledger.upstreamCapitalCoverage ?? {
+        rechargeWalletCount: 0,
+        capitalizedWalletCount: 0,
+        missingWallets: [],
+      },
       treatment: "remaining_upstream_balance_is_capital",
     },
     deferredCost: {

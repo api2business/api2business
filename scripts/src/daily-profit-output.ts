@@ -24,12 +24,13 @@ export function emitDailyProfit(value: Record<string, unknown>, json: boolean): 
   const costs = row(value.directCosts);
   const deferred = row(value.deferredCost);
   const capital = row(value.capitalAdjusted);
+  const coverage = row(capital.coverage);
   const replay = row(value.replay);
   console.log(`APISTATE DAILY PROFIT day=${String(value.selector)} complete=${String(value.dayComplete)} asOf=${String(value.asOf)} databaseQueries=${String(value.databaseQueries)}`);
   console.log(`REVENUE alipay=${cny(revenue.alipayCny)} manual=${cny(revenue.manualCny)} yaml=${cny(revenue.yamlCny)} total=${cny(revenue.totalCny)}`);
   console.log(`DIRECT_COST accountImport=${cny(costs.accountImportCny)} upstreamRecharge=${cny(costs.upstreamRechargeCny)} upstreamCapital=${cny(costs.upstreamCapitalCny)} upstreamConsumed=${cny(costs.upstreamConsumedCny)} manual=${cny(costs.manualExpenseCny)} yaml=${cny(costs.yamlCostCny)} procurementRefund=${cny(costs.procurementRefundCny)} total=${cny(costs.totalCny)}`);
   console.log(`CASH_GROSS_PROFIT ${cny(value.cashGrossProfitCny)}`);
-  console.log(`OPERATING_GROSS_PROFIT ${cny(value.operatingGrossProfitCny)} upstreamBalanceCnyPerApiUsd=${decimal(capital.upstreamBalanceCnyPerApiUsd)}`);
+  console.log(`OPERATING_GROSS_PROFIT ${cny(value.operatingGrossProfitCny)} upstreamBalanceCnyPerApiUsd=${decimal(capital.upstreamBalanceCnyPerApiUsd)} capitalCoverage=${String(coverage.capitalizedWalletCount ?? 0)}/${String(coverage.rechargeWalletCount ?? 0)}`);
   console.log(`DEFERRED_COST openingApiUsd=${decimal(deferred.openingRedeemableBalanceUsd)} closingApiUsd=${decimal(deferred.closingRedeemableBalanceUsd)} changeApiUsd=${decimal(deferred.redeemableChangeUsd)} rateCnyPerApiUsd=${decimal(deferred.costRateCnyPerApiUsd)} changeCny=${cny(deferred.changeCny)} treatment=${String(deferred.treatment)}`);
   console.log(`ADJUSTED_PROFIT ${cny(value.adjustedProfitCny)}`);
   console.log(`REPLAY complete=${String(replay.complete)} rollbackFailedEvents=${String(replay.rollbackFailedEvents ?? 0)}`);

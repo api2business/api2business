@@ -89,7 +89,7 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     return { ok: true, jobId: job.id, state: job.state, valuesPrinted: false };
   }
   if (command.kind === "account.lifecycle.settle") {
-    const job = await accountLifecycle.runSettlementWorker(command.jobId);
+    const job = await accountLifecycle.runSettlementWorker(command.jobId, command.candidateIds);
     return { ok: true, jobId: job.id, state: job.state, valuesPrinted: false };
   }
   if (command.kind === "upstream.operation") {

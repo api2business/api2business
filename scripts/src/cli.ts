@@ -52,6 +52,7 @@ interface Parsed {
   costCny: number | null;
   unitCostCny: number | null;
   planType: string | null;
+  scope: string | null;
   profile: string | null;
   model: string | null;
   day: string | null;
@@ -82,7 +83,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--page", "--search"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--scope", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--page", "--search"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -134,6 +135,7 @@ function parseArgs(args: string[]): Parsed {
     costCny: decimal("--cost-cny"),
     unitCostCny: decimal("--unit-cost-cny"),
     planType: value(args, "--plan-type"),
+    scope: value(args, "--scope"),
     profile: value(args, "--profile"),
     model: value(args, "--model"),
     affectedOnly: args.includes("--affected-only"),
@@ -168,7 +170,7 @@ function help(): Record<string, unknown> {
       "users impact --start <ISO> --end <ISO> [--affected-only]",
       "users balance-liability [--over-api]",
       "profit daily-facts --day YYYY-MM-DD [--over-api]",
-      "profit daily --day YYYY-MM-DD [--over-api]",
+      "profit daily [--day YYYY-MM-DD] [--over-api] (default: today in configured timezone)",
       "lottery status|draw|reset",
       "records list|delete",
       "credit test",
@@ -186,7 +188,7 @@ function help(): Record<string, unknown> {
       "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
       "accounts oauth-economics [--profile codex|grok] [--over-api]",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
-      "accounts lifecycle retire plan --day YYYY-MM-DD --over-api",
+      "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] --over-api",
       "accounts lifecycle retire status --id <plan-id> --over-api",
       "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
       "upstreams list [--page N --search <text>] --over-api",
@@ -287,6 +289,7 @@ export function summarizeLifecycleResponse(value: Record<string, unknown>): Reco
     state: job.state,
     day: record(job.settings)?.day,
     selectionMode: record(job.settings)?.selectionMode,
+    scope: record(job.settings)?.scope,
     candidateCount: Array.isArray(job.candidates) ? job.candidates.length : 0,
     excludedRateLimited: summary?.excludedRateLimited ?? null,
     error: job.error ?? null,
@@ -420,8 +423,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await client.dailyProfitFacts(parsed.day);
   }
   if (group === "profit" && action === "daily") {
-    if (!parsed.day) throw new Error("profit daily requires --day");
-    return await client.dailyProfit(parsed.day);
+    const day = parsed.day ?? new Date().toLocaleDateString("sv-SE", { timeZone: config.monitor.timezone });
+    return await client.dailyProfit(day);
   }
   if (group === "accounts" && action === "economics") {
     if (!parsed.accounts) throw new Error("accounts economics requires --accounts");
@@ -479,9 +482,11 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (verb === "retire") {
       const phase = parsed.command[3];
       if (phase === "plan") {
-        if (!parsed.day) throw new Error("accounts lifecycle retire plan requires --day");
         if (parsed.confirm) throw new Error("retire plan does not accept --confirm; create the plan first");
-        return await client.accountLifecycleDetect({ day: parsed.day, planType: "all", selectionMode: "database-error", confirm: false });
+        const scope = parsed.scope ?? "pool";
+        if (scope !== "pool" && scope !== "day") throw new Error("--scope must be pool or day");
+        const day = parsed.day ?? new Date().toLocaleDateString("sv-SE", { timeZone: config.monitor.timezone });
+        return await client.accountLifecycleDetect({ day, planType: "all", scope, selectionMode: "database-dead", confirm: false });
       }
       if (!parsed.id) throw new Error(`accounts lifecycle retire ${phase ?? ""} requires --id`);
       if (phase === "status") return await client.accountLifecycleStatus(parsed.id);
@@ -491,7 +496,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
         const status = await client.accountLifecycleStatus(parsed.id);
         const job = record(status.job);
         const settings = record(job?.settings);
-        if (!job || settings?.selectionMode !== "database-error") throw new Error("retire confirm requires a database-error retirement plan");
+        if (!job || (settings?.selectionMode !== "database-error" && settings?.selectionMode !== "database-dead")) throw new Error("retire confirm requires a database retirement plan");
         if (job.state !== "succeeded") throw new Error(`retirement plan must be succeeded before confirm; current state is ${String(job.state)}`);
         return await client.accountLifecycleSettle(parsed.id);
       }

@@ -188,12 +188,18 @@ export class OperationsService {
     const usageByAccount = new Map(usageRows.map((row) => [Number(row.account_id), object(row.result)]));
     const rechargeByWallet = new Map<string, number>();
     const walletRemaining = new Map<string, number>();
+    const missingWallets = new Set<string>();
     for (const entry of upstreamEntries) {
       const usage = usageByAccount.get(entry.accountId);
       const baseUrl = String(usage?.baseUrl ?? entry.baseUrl ?? entry.accountName).replace(/\/v1\/?$/u, "").replace(/\/$/u, "");
       rechargeByWallet.set(baseUrl, (rechargeByWallet.get(baseUrl) ?? 0) + entry.amountCny);
       const remaining = Number(object(usage?.quota).remaining);
-      if (Number.isFinite(remaining)) walletRemaining.set(baseUrl, Math.max(walletRemaining.get(baseUrl) ?? 0, remaining));
+      const unit = String(object(usage?.quota).unit ?? "");
+      if (usage?.ok === true && unit === "USD" && Number.isFinite(remaining)) {
+        walletRemaining.set(baseUrl, Math.max(walletRemaining.get(baseUrl) ?? 0, remaining));
+      } else {
+        missingWallets.add(baseUrl);
+      }
     }
     const balanceRate = Number((profit.upstreamBalanceCnyPerApiUsd ?? 1));
     if (!Number.isFinite(balanceRate) || balanceRate <= 0) throw new Error("profit.upstreamBalanceCnyPerApiUsd must be positive");
@@ -207,6 +213,9 @@ export class OperationsService {
     const warnings: string[] = [];
     if (undatedEntries > 0) warnings.push(`${undatedEntries} 条月度 YAML 账目没有 occurredOn，未纳入自然日核算`);
     if (duplicateAcquisitionIds.length > 0) warnings.push(`YAML 采购账号 #${duplicateAcquisitionIds.join(", #")} 已由导入账本计费，本次去重`);
+    if (missingWallets.size > 0) {
+      warnings.push(`上游余额资本缺少 ${missingWallets.size} 个充值钱包的可用 USD 快照，暂按 0 资本：${[...missingWallets].join(", ")}`);
+    }
     return buildDailyProfitReport(facts, {
       manualIncomeCny: Number(cash.income_cny ?? 0),
       manualExpenseCny: Number(cash.expense_cny ?? 0),
@@ -216,6 +225,11 @@ export class OperationsService {
       upstreamRechargeCny: upstreamEntries.reduce((sum, entry) => sum + entry.amountCny, 0),
       upstreamCapitalCny,
       upstreamBalanceCnyPerApiUsd: balanceRate,
+      upstreamCapitalCoverage: {
+        rechargeWalletCount: rechargeByWallet.size,
+        capitalizedWalletCount: walletRemaining.size,
+        missingWallets: [...missingWallets],
+      },
       deferredCostRateCnyPerApiUsd: rate,
       warnings,
     });

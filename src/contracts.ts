@@ -15,7 +15,7 @@ export type AppCommand =
   | { kind: "upstream.operation"; operationId: string }
   | { kind: "account.import"; jobId: string }
   | { kind: "account.lifecycle.detect"; jobId: string }
-  | { kind: "account.lifecycle.settle"; jobId: string }
+  | { kind: "account.lifecycle.settle"; jobId: string; candidateIds: number[] }
   | { kind: "priority.plan.create"; recentCallLimit: number; operator: string }
   | { kind: "priority.plan.confirm"; planId: string; operator: string }
   | { kind: "priority.automation.run" };
