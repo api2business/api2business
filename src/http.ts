@@ -142,7 +142,7 @@ export function createHandler(
         const input = await body(request);
         let accountIds: number[] = [];
         try {
-          if (input.accountIds !== undefined) accountIds = normalizeAccountIds(input.accountIds);
+          if (Array.isArray(input.accountIds) && input.accountIds.length > 0) accountIds = normalizeAccountIds(input.accountIds);
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }
@@ -155,7 +155,7 @@ export function createHandler(
         const input = await body(request);
         let accountIds: number[] = [];
         try {
-          if (input.accountIds !== undefined) accountIds = normalizeAccountIds(input.accountIds);
+          if (Array.isArray(input.accountIds) && input.accountIds.length > 0) accountIds = normalizeAccountIds(input.accountIds);
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }
