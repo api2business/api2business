@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#111412" />
   <title>上游管理 | ApiState</title>
-  <link rel="stylesheet" href="/styles.css?v=oauth-output-v5" />
-  <script src="/app.js?v=oauth-output-v5" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=upstream-job-logs-v1" />
+  <script src="/app.js?v=upstream-job-logs-v1" type="module"></script>
 </head>
 <body data-page="upstreams">
   <div data-shell></div>
@@ -53,6 +53,7 @@
         <label><span>创建时充值（人民币，可选）</span><input id="upstream-create-recharge" type="number" min="0.01" step="0.01" placeholder="不充值" /></label>
       </div>
       <fieldset class="group-picker upstream-group-picker"><legend>目标号池</legend><div id="upstream-create-groups"><span class="upstream-group-loading">正在读取号池选项</span></div></fieldset>
+      <section class="upstream-job-console" aria-label="创建日志"><header><span>创建日志</span><code id="upstream-create-job">JOB —</code></header><ol id="upstream-create-logs" class="upstream-job-logs"><li class="empty">等待提交</li></ol></section>
       <footer><button class="text-command" value="cancel" type="submit">取消</button><button id="upstream-create-submit" class="primary-command" value="default" type="submit">创建上游</button></footer>
     </form>
   </dialog>
@@ -68,6 +69,7 @@
         <label class="wide-field"><span>追加充值（人民币，可选）</span><input id="upstream-edit-recharge" type="number" min="0.01" step="0.01" placeholder="不充值" /></label>
       </div>
       <p id="upstream-edit-state" class="dialog-state"></p>
+      <section class="upstream-job-console" aria-label="调整日志"><header><span>调整日志</span><code id="upstream-edit-job">JOB —</code></header><ol id="upstream-edit-logs" class="upstream-job-logs"><li class="empty">等待提交</li></ol></section>
       <footer><button class="text-command" value="cancel" type="submit">取消</button><button id="upstream-edit-submit" class="primary-command" value="default" type="submit">保存调整</button></footer>
     </form>
   </dialog>

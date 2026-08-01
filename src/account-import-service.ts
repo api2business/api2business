@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppConfig, OAuthPlanType } from "./config";
 import { accountImportPreflight, type AccountImportPreflightPlan } from "./account-import-preflight";
@@ -9,6 +8,7 @@ import { inspectAccounts, verifyImportedAccounts } from "./account-inspection";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { normalizeAccountImportInput } from "./account-import-input";
 import type { TemporalGateway } from "./temporal-client";
+import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 
 export interface AccountImportRequest {
   content: string;
@@ -129,6 +129,7 @@ export class AccountImportService {
     private reads: Sub2ApiReadClient,
     private temporal: TemporalGateway | null = null,
     private workerJobs: ImportJobControl | null = null,
+    private runtime: Sub2ApiRuntimeService | null = null,
   ) {}
 
   options() {
@@ -216,9 +217,8 @@ export class AccountImportService {
   }
 
   private async run(job: ImportJob, content: string): Promise<void> {
-    const dir = mkdtempSync(join(tmpdir(), "apistate-import-"));
-    const file = join(dir, "accounts.json");
     try {
+      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
       job.state = "running"; this.log(job, "job", "start", `开始处理 ${job.accountCount} 个账号`); await this.persistWorkerJob(job);
       const plan = await accountImportPreflight(content, job.settings, this.reads);
       for (const skipped of plan.skipped) {
@@ -235,19 +235,19 @@ export class AccountImportService {
         await this.persistWorkerJob(job);
         return;
       }
-      writeFileSync(file, plan.content, { encoding: "utf8", mode: 0o600 });
-      const args = [this.config.monitor.cli.entrypoint, "platform-infra", "sub2api", "codex-pool", "runtime", "import",
-        "--file", file, "--target", this.config.monitor.target, "--priority", String(job.settings.priority),
-        "--capacity", String(job.settings.capacity), "--groups", job.settings.groupIds.join(","),
-        "--source-proxy-id", String(job.settings.sourceProxyId), "--proxy-id", String(plan.initialProxyId),
-        "--proxy-pool-ids", plan.proxyCandidateIds.join(","), "--existing-account-policy", "create", "--json"];
-      if (job.settings.perAccountProxy === true) args.push("--per-account-proxy");
-      if (job.settings.confirm) args.push("--confirm");
-      const child = Bun.spawn([this.config.monitor.cli.executable, ...args], { cwd: this.config.monitor.cli.workDir, stdout: "pipe", stderr: "pipe", env: process.env });
-      const stderrTask = this.captureProgress(job, child.stderr, plan);
-      const stdout = await new Response(child.stdout).text();
-      const exitCode = await child.exited; await stderrTask;
-      const output = JSON.parse(stdout) as Record<string, unknown>;
+      if (!job.settings.confirm) throw new Error("账号导入 worker 只接受已确认作业");
+      this.log(job, "batch-import", "start", `stage=batch-import state=start accounts=${plan.sourceIndexes.length} initial-proxy=${plan.initialProxyId}`);
+      await this.persistWorkerJob(job);
+      const output = await this.runtime.importAccounts({
+        content: plan.content,
+        priority: job.settings.priority,
+        capacity: job.settings.capacity,
+        groupIds: job.settings.groupIds,
+        proxyId: plan.initialProxyId,
+        proxyCandidateIds: plan.proxyCandidateIds,
+        perAccountProxy: job.settings.perAccountProxy === true,
+      });
+      this.log(job, "batch-import", output.ok === false ? "failed" : "done", `stage=batch-import state=${output.ok === false ? "failed" : "done"} accounts=${plan.sourceIndexes.length}`);
       mergePreflightResult(output, job, plan);
       job.result = output;
       const result = output.result && typeof output.result === "object" && !Array.isArray(output.result)
@@ -284,7 +284,7 @@ export class AccountImportService {
         await this.persistWorkerJob(job);
       }
       const verification = output.verification as Record<string, unknown> | undefined;
-      if (exitCode !== 0 || output.ok === false || verification?.ok === false) {
+      if (output.ok === false || verification?.ok === false) {
         job.state = "failed";
         job.error = verification?.ok === false ? "导入后的账号配置未全部对齐，请查看 verification.accounts" : importFailure(output);
         this.log(job, "job", "failed", job.error);
@@ -297,7 +297,7 @@ export class AccountImportService {
       this.log(job, "job", "failed", job.error);
       try { await this.persistWorkerJob(job); } catch { /* preserve the original worker failure */ }
     } finally {
-      rmSync(dir, { recursive: true, force: true }); job.completedAt = new Date().toISOString();
+      job.completedAt = new Date().toISOString();
       try { await this.persistWorkerJob(job); } catch { /* API may be restarting; Temporal retains the bounded result */ }
     }
   }
@@ -333,7 +333,7 @@ export class AccountImportService {
 function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan): Record<string, unknown> {
   return {
     ok: true,
-    action: "platform-infra-sub2api-codex-pool-runtime-import",
+    action: "apistate-sub2api-runtime-import",
     mode: "confirmed",
     mutation: false,
     file: { fingerprint: job.fingerprint, accountCount: job.accountCount, valuesPrinted: false },

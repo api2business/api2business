@@ -218,6 +218,18 @@ test("score toolbar refresh uses the queue-backed manual ranking path", async ()
   expect(handler).not.toContain("/api/scores/refresh");
 });
 
+test("score page refreshes once on open and keeps periodic refresh disabled by default", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+
+  expect(html).toContain('<option value="0" selected>关闭</option>');
+  expect(html).toContain('id="score-refresh-countdown"');
+  expect(app).toContain("void refreshPriorityState().catch(() => undefined).finally(scheduleScoreRefresh)");
+  expect(app).toContain("const scoreRefreshIntervals = new Set([0, 300, 900, 1800])");
+  expect(app).toContain("if (scoreRefreshInFlight !== null) return await scoreRefreshInFlight");
+  expect(app).toContain("scheduleScoreRefresh()");
+});
+
 test("zero-change priority history is labelled as converged", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
 
@@ -232,6 +244,21 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
-  expect(html).toContain('/app.js?v=oauth-output-v5');
-  expect(html).toContain('/styles.css?v=oauth-output-v5');
+  expect(html).toContain('/app.js?v=score-auto-refresh-v1');
+  expect(html).toContain('/styles.css?v=score-auto-refresh-v1');
+});
+
+test("upstream create and update expose timestamped workflow logs", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./upstreams.html", import.meta.url)).text();
+
+  expect(html).toContain('id="upstream-create-logs"');
+  expect(html).toContain('id="upstream-edit-logs"');
+  expect(html).toContain('id="upstream-create-job"');
+  expect(html).toContain('id="upstream-edit-job"');
+  expect(app).toContain("const appendJobLog = (scope, stage, message");
+  expect(app).toContain("if (state !== previousState)");
+  expect(app).toContain("jobStatusLogger('create')");
+  expect(app).toContain("jobStatusLogger('edit')");
+  expect(app).toContain("API key 不会写入日志");
 });

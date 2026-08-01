@@ -67,6 +67,28 @@ export class AdminHttpClient {
   workflowStatus(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/admin/workflows/${encodeURIComponent(id)}`);
   }
+  upstreams(page: number, search: string | null): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ page: String(page) });
+    if (search) query.set("search", search);
+    return this.request(`/api/upstreams?${query}`);
+  }
+  upstreamCreate(input: Record<string, unknown>, operationId: string): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams", {
+      method: "POST",
+      headers: { "Idempotency-Key": operationId },
+      body: JSON.stringify({ ...input, operationId }),
+    }, 30000);
+  }
+  upstreamUpdate(id: number, input: Record<string, unknown>, operationId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/upstreams/${id}`, {
+      method: "PATCH",
+      headers: { "Idempotency-Key": operationId },
+      body: JSON.stringify({ ...input, operationId }),
+    }, 30000);
+  }
+  upstreamJob(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/upstreams/jobs/${encodeURIComponent(id)}`);
+  }
   priorityAutomation(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-automation"); }
   priorityHistory(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-history"); }
   accountImport(input: Record<string, unknown>): Promise<Record<string, unknown>> {

@@ -56,6 +56,13 @@ interface Parsed {
   day: string | null;
   period: string | null;
   externalCostsJson: string | null;
+  baseUrl: string | null;
+  suffix: string | null;
+  rate: number | null;
+  rechargeCny: number | null;
+  page: number | null;
+  search: string | null;
+  apiKeyStdin: boolean;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -73,8 +80,8 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json"]);
-  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--page", "--search"]);
+  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index]!;
@@ -135,6 +142,9 @@ function parseArgs(args: string[]): Parsed {
     file: value(args, "--file"), priority: integer("--priority"), capacity: integer("--capacity"),
     groups: value(args, "--groups"), proxyId: integer("--proxy-id"),
     externalCostsJson: value(args, "--external-costs-json"),
+    baseUrl: value(args, "--base-url"), suffix: value(args, "--suffix"),
+    rate: decimal("--rate"), rechargeCny: decimal("--recharge-cny"),
+    page: integer("--page"), search: value(args, "--search"), apiKeyStdin: args.includes("--api-key-stdin"),
   };
 }
 
@@ -174,6 +184,10 @@ function help(): Record<string, unknown> {
       "accounts lifecycle retire plan --day YYYY-MM-DD --over-api",
       "accounts lifecycle retire status --id <plan-id> --over-api",
       "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
+      "upstreams list [--page N --search <text>] --over-api",
+      "upstreams create --base-url <https-url> --suffix <name> --rate <CNY/API_USD> [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
+      "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--confirm] --over-api",
+      "upstreams status --id <workflow-id> --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
@@ -355,6 +369,30 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
 async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: HttpCliTarget): Promise<unknown> {
   const client = new AdminHttpClient(config, target);
   const [group, action] = parsed.command;
+  if (group === "upstreams" && action === "list") return await client.upstreams(parsed.page ?? 1, parsed.search);
+  if (group === "upstreams" && action === "status") {
+    if (!parsed.id) throw new Error("upstreams status requires --id");
+    return await client.upstreamJob(parsed.id);
+  }
+  if (group === "upstreams" && action === "create") {
+    if (!parsed.baseUrl || !parsed.suffix || parsed.rate === null) throw new Error("upstreams create requires --base-url, --suffix, and --rate");
+    if (!parsed.apiKeyStdin) throw new Error("upstreams create requires --api-key-stdin; API keys are never accepted in argv");
+    const input = { baseUrl: parsed.baseUrl, suffix: parsed.suffix, rateCnyPerApiUsd: parsed.rate,
+      priority: parsed.priority ?? 1, capacity: parsed.capacity ?? 16,
+      groupIds: (parsed.groups ?? "2,3").split(",").map(Number), rechargeCny: parsed.rechargeCny };
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-create", plan: { ...input, apiKey: "stdin:redacted" }, hint: "add --confirm to execute" };
+    const apiKey = (await Bun.stdin.text()).trim();
+    if (!apiKey) throw new Error("--api-key-stdin received empty stdin");
+    return await client.upstreamCreate({ ...input, apiKey }, `upstream-create-${crypto.randomUUID()}`);
+  }
+  if (group === "upstreams" && action === "update") {
+    const id = Number(parsed.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error("upstreams update requires a positive --id");
+    if (parsed.suffix === null && parsed.rate === null) throw new Error("upstreams update requires --suffix or --rate");
+    const input = { ...(parsed.suffix === null ? {} : { suffix: parsed.suffix }), ...(parsed.rate === null ? {} : { rateCnyPerApiUsd: parsed.rate }) };
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-update", accountId: id, plan: input, hint: "add --confirm to execute" };
+    return await client.upstreamUpdate(id, input, `upstream-update-${id}-${crypto.randomUUID()}`);
+  }
   if (group === "payments" && action === "alipay-revenue") {
     return await client.alipayRevenue({ day: parsed.day, period: parsed.period });
   }
@@ -498,36 +536,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     );
   }
   if (group === "errors" && action === "diagnose") {
-    const eventProcess = await runBoundedProcess([
-      config.monitor.cli.executable,
-      config.monitor.cli.entrypoint,
-      "platform-infra", "sub2api", "codex-pool", "runtime", "events",
-      "--target", config.monitor.target,
-      "--since", "8h",
-      "--tail", "200000",
-      "--json",
-    ], {
-      cwd: config.monitor.cli.workDir,
-      env: { ...Bun.env, UNIDESK_MAIN_SERVER_IP: config.monitor.cli.mainServerHost },
-      timeoutMs: config.monitor.cli.timeoutMs,
-    });
-    let eventEnvelope: Row = {};
-    try { eventEnvelope = JSON.parse(eventProcess.stdout) as Row; } catch {}
-    const eventData = record(eventEnvelope.data);
-    const runtime = record(eventData?.runtime);
-    const failoverEvents = (Array.isArray(runtime?.events) ? runtime.events : [])
-      .map(record)
-      .filter((row): row is Row => row !== null
-        && row.marker === "openai.upstream_failover_switching"
-        && typeof row.clientRequestId === "string"
-        && /^[0-9a-f-]{36}$/iu.test(row.clientRequestId));
-    const failoverRequestIds = [...new Set(failoverEvents.map((row) => String(row.clientRequestId)))];
     const diagnosis = await client.errorDiagnose(
       parsed.limit ?? config.monitor.errorAggregateLimit,
       parsed.top ?? config.monitor.errorAggregateTop,
       parsed.account,
       parsed.group,
-      failoverRequestIds,
+      null,
     );
     const byClientRequestId = new Map<string, Row[]>();
     for (const event of failoverEvents) {

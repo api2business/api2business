@@ -1,7 +1,7 @@
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { TemporalGateway } from "./temporal-client";
-import { runBoundedProcess } from "./bounded-process";
 import {
   readUpstreamRechargeCosts,
   rechargeTotalsByAccount,
@@ -68,36 +68,6 @@ export type UpstreamWorkerOperation =
   | { action: "create"; input: UpstreamCreateInput }
   | { action: "update"; input: { id: number; suffix?: string; rateCnyPerApiUsd?: number } }
   | { action: "recharge"; input: { id: number; amountCny: number; operationId: string; description?: string } };
-
-export function buildRuntimeCreateArgs(
-  target: string,
-  settings: AppConfig["operations"]["upstreamManagement"],
-  name: string,
-  baseUrl: string,
-  overrides: {
-    priority?: number;
-    capacity?: number;
-    groupIds?: number[];
-  } = {},
-): string[] {
-  const groupIds = overrides.groupIds ?? settings.groupIds;
-  const initialGroupId = groupIds.includes(settings.primaryGroupId) ? settings.primaryGroupId : groupIds[0];
-  if (initialGroupId === undefined) throw new Error("至少选择一个有效号池");
-  return [
-    "platform-infra", "sub2api", "codex-pool", "runtime", "create",
-    "--target", target,
-    "--name", name,
-    "--base-url", baseUrl,
-    "--group", String(initialGroupId),
-    "--platform", "openai",
-    "--kind", "temp-unschedulable",
-    "--priority", String(overrides.priority ?? settings.priority),
-    "--capacity", String(overrides.capacity ?? settings.capacity),
-    "--proxy-id", String(settings.proxyId),
-    "--template", settings.defaultTemplate,
-    "--confirm", "--json",
-  ];
-}
 
 const accountSelect = `
   SELECT
@@ -358,14 +328,6 @@ function isAlreadyExistsError(error: unknown): boolean {
     && /account-name-already-exists|账号名称已存在|already exists/iu.test(error.message);
 }
 
-interface RuntimeCliResult {
-  ok: boolean;
-  exitCode: number;
-  parsed: Row | null;
-  error: string | null;
-  outputTruncated: boolean;
-}
-
 export class UpstreamManagementService {
   private ledgerWriteChain: Promise<void> = Promise.resolve();
   private readonly pendingOperations = new Map<string, {
@@ -378,6 +340,7 @@ export class UpstreamManagementService {
     private readonly config: AppConfig,
     private readonly reads: Sub2ApiReadClient,
     private readonly temporal: TemporalGateway | null = null,
+    private readonly runtime: Sub2ApiRuntimeService | null = null,
   ) {}
 
   private readLedger(): UpstreamRechargeCostEntry[] {
@@ -552,41 +515,29 @@ export class UpstreamManagementService {
 
   async workflowStatus(id: string): Promise<Record<string, unknown>> {
     if (!this.temporal) throw new UpstreamManagementError("Temporal worker 当前不可用", 503, { operation: "status" });
-    return await this.temporal.status(id);
-  }
-
-  private async runtime(args: string[], apiKey: string | null = null): Promise<RuntimeCliResult> {
-    const command = [this.config.monitor.cli.executable, this.config.monitor.cli.entrypoint, ...args];
-    const result = await runBoundedProcess(command, {
-      cwd: this.config.monitor.cli.workDir,
-      stdin: apiKey ?? undefined,
-      env: process.env,
-      timeoutMs: this.config.monitor.cli.timeoutMs,
-    });
-    const { stdout, stderr, exitCode, timedOut, stdoutTruncated, stderrTruncated } = result;
-    const parsed = parseJsonObject(stdout);
-    const error = stdoutTruncated || stderrTruncated
-      ? "runtime CLI 输出超过上限"
-      : timedOut
-      ? `runtime CLI 超时（${this.config.monitor.cli.timeoutMs}ms）`
-      : nestedError(parsed) ?? (stderr.trim() ? safeMessage(stderr.trim()) : null);
+    const status = await this.temporal.status(id);
+    if (status.terminal !== true || status.state === "completed") return status;
+    const pending = [...this.pendingOperations.entries()].find(([, entry]) => entry.submitted.workflowId === id);
+    if (!pending || pending[1].operation.action !== "create") return status;
+    const input = pending[1].operation.input;
+    if (input.rechargeCny !== null) return status;
+    const name = formatUpstreamName(normalizeBaseUrl(input.baseUrl), validateSuffix(input.suffix), validateRate(input.rateCnyPerApiUsd));
+    const account = await this.accountQueryByIdentity(name, input.baseUrl);
+    const desiredGroups = [...input.groupIds].sort((left, right) => left - right);
+    const actualGroups = [...(account?.groupIds ?? [])].sort((left, right) => left - right);
+    if (!account || account.priority !== input.priority || account.capacity !== input.capacity
+      || account.proxyId !== this.config.operations.upstreamManagement.proxyId
+      || JSON.stringify(actualGroups) !== JSON.stringify(desiredGroups)) return status;
+    this.pendingOperations.delete(pending[0]);
     return {
-      ok: !timedOut && !stdoutTruncated && !stderrTruncated && exitCode === 0 && parsed?.ok === true,
-      exitCode,
-      parsed,
-      error,
-      outputTruncated: stdoutTruncated || stderrTruncated,
+      ...status,
+      ok: true,
+      state: "completed",
+      terminal: true,
+      error: null,
+      recoveredFrom: status.state,
+      result: { ok: true, operation: "create-recovered", recovered: true, account, accounting: null },
     };
-  }
-
-  private async requireRuntime(args: string[], apiKey: string | null, operation: string): Promise<RuntimeCliResult> {
-    const result = await this.runtime(args, apiKey);
-    if (!result.ok) throw new UpstreamManagementError(
-      `${operation}失败：${result.error ?? `runtime CLI exited ${result.exitCode}`}`,
-      502,
-      { operation },
-    );
-    return result;
   }
 
   private async accountQuery(id: number): Promise<UpstreamAccount | null> {
@@ -728,24 +679,29 @@ export class UpstreamManagementService {
     const groupIds = input.groupIds === undefined || input.groupIds === null
       ? [...settings.groupIds] : validateGroupIds(input.groupIds);
     const target = this.config.monitor.target;
-    let createResult: RuntimeCliResult | null = null;
+    let createResult: Row | null = null;
+    let createError: unknown = null;
     let account = await this.accountQueryByIdentity(name, baseUrl);
     let recovered = account !== null;
     if (!account) {
+      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
       try {
-        createResult = await this.requireRuntime(
-          buildRuntimeCreateArgs(target, settings, name, baseUrl, { priority, capacity, groupIds }),
-          input.apiKey.trim(),
-          "runtime create",
-        );
+        const result = await this.runtime.createApiKeyAccount({
+          name, platform: "openai", type: "apikey",
+          credentials: { base_url: baseUrl, api_key: input.apiKey.trim() },
+          extra: {}, priority, concurrency: capacity, proxy_id: settings.proxyId,
+          group_ids: groupIds, auto_pause_on_expired: true, schedulable: true,
+        }, operationId(input.operationId, `upstream-create-${name.replace(/[^A-Za-z0-9]+/gu, "-").slice(0, 48)}`));
+        createResult = result;
       } catch (error) {
-        if (!isAlreadyExistsError(error)) throw error;
-        recovered = true;
+        if (isAlreadyExistsError(error)) recovered = true;
+        else createError = error;
       }
     }
-    const accountId = findAccountId(createResult?.parsed) ?? account?.id ?? null;
+    const accountId = findAccountId(createResult) ?? account?.id ?? null;
     account = await this.resolveCreatedAccount(accountId, name, baseUrl);
     if (!account) {
+      if (createError !== null) throw createError;
       throw new UpstreamManagementError(
         recovered || createResult !== null
           ? "runtime 已创建或已存在账号，但排队回读未找到稳定账号 ID；请勿重复创建，稍后从上游列表重试"
@@ -754,25 +710,19 @@ export class UpstreamManagementService {
         { operation: "create", partial: recovered || createResult !== null },
       );
     }
+    if (createError !== null) recovered = true;
     const resolvedAccountId = account.id;
-    try {
-      await this.requireRuntime([
-        "platform-infra", "sub2api", "codex-pool", "runtime", "apply",
-        "--target", target,
-        "--account", String(resolvedAccountId),
-        "--kind", "groups",
-        "--groups", groupIds.join(","),
-        "--confirm", "--json",
-      ], null, "上游分组绑定");
-    } catch (error) {
-      if (error instanceof UpstreamManagementError) {
-        throw new UpstreamManagementError("账号已创建，但默认分组绑定失败", 502, {
-          operation: "groups",
-          partial: true,
-          accountId: resolvedAccountId,
-        });
-      }
-      throw error;
+    const desiredGroupIds = [...groupIds].sort((left, right) => left - right);
+    const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
+    if (account.priority !== priority || account.capacity !== capacity || account.proxyId !== settings.proxyId
+      || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds)) {
+      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+      await this.runtime.updateAccount(resolvedAccountId, { priority, concurrency: capacity, group_ids: groupIds, proxy_id: settings.proxyId });
+      const configured = await this.accountQuery(resolvedAccountId);
+      if (!configured) throw new UpstreamManagementError("运行设置已提交但排队查询未找到账号", 502, {
+        operation: "settings", partial: true, accountId: resolvedAccountId,
+      });
+      account = configured;
     }
     let accounting: Record<string, unknown> | null = null;
     if (recharge !== null) {
@@ -810,14 +760,8 @@ export class UpstreamManagementService {
     if (!suffix || rate === null) throw new Error("当前账号缺少可解析的后缀或费率，请同时填写后缀和费率");
     const name = formatUpstreamName(account.baseUrl, suffix, rate);
     if (name !== account.name) {
-      await this.requireRuntime([
-        "platform-infra", "sub2api", "codex-pool", "runtime", "apply",
-        "--target", this.config.monitor.target,
-        "--account", String(id),
-        "--kind", "account-name",
-        "--name", name,
-        "--confirm", "--json",
-      ], null, "runtime 改名");
+      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+      await this.runtime.updateAccount(id, { name });
     }
     const updated = await this.accountQuery(id);
     if (!updated) throw new UpstreamManagementError("runtime 改名完成但排队查询未找到账号", 502, { operation: "update", accountId: id });
@@ -841,13 +785,8 @@ export class UpstreamManagementService {
     let recovered = false;
     if (account.status !== "active" || !account.schedulable) {
       try {
-        await this.requireRuntime([
-          "platform-infra", "sub2api", "codex-pool", "runtime", "apply",
-          "--target", this.config.monitor.target,
-          "--account", String(id),
-          "--kind", "account-recovery",
-          "--confirm", "--json",
-        ], null, "充值后恢复调度");
+        if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+        await this.runtime.recoverAccount(id);
       } catch (error) {
         throw new UpstreamManagementError(
           `充值已记账，但恢复调度失败：${error instanceof Error ? error.message : String(error)}`,

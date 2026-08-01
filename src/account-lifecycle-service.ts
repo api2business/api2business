@@ -4,9 +4,9 @@ import type { AppConfig } from "./config";
 import { readAccountImportCosts } from "./account-import-cost-ledger";
 import { parseAccountEconomicsWindow } from "./account-batch-economics";
 import { recordLifecycleSettlement } from "./account-lifecycle-ledger";
-import { runBoundedProcess } from "./bounded-process";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import type { TemporalGateway } from "./temporal-client";
+import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { parse } from "yaml";
 
 type PlanType = "k12" | "plus" | "free" | "team" | "all";
@@ -146,22 +146,6 @@ function errorMessage(error: unknown): string {
   catch { return String(error); }
 }
 
-export function lifecycleRuntimeResult(output: Row): Row {
-  const queue: Array<{ value: Row; depth: number }> = [{ value: output, depth: 0 }];
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (current.value.operation === "test" && Array.isArray(current.value.tests)) return current.value;
-    if (current.depth >= 4) continue;
-    for (const key of ["runtime", "data", "result"]) {
-      const nested = current.value[key];
-      if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-        queue.push({ value: nested as Row, depth: current.depth + 1 });
-      }
-    }
-  }
-  throw new Error("UniDesk runtime CLI response is missing account test results");
-}
-
 export class AccountLifecycleService {
   private jobs = new Map<string, LifecycleJob>();
 
@@ -170,6 +154,7 @@ export class AccountLifecycleService {
     private reads: Sub2ApiReadClient,
     private temporal: TemporalGateway | null = null,
     private workerJobs: LifecycleJobControl | null = null,
+    private runtime: Sub2ApiRuntimeService | null = null,
   ) {}
 
   async submit(input: LifecycleRequest): Promise<LifecycleJob> {
@@ -310,26 +295,6 @@ export class AccountLifecycleService {
     }));
   }
 
-  private async runCli(args: string[], timeoutMs: number): Promise<Row> {
-    const result = await runBoundedProcess([this.config.monitor.cli.executable, this.config.monitor.cli.entrypoint, ...args], {
-      cwd: this.config.monitor.cli.workDir,
-      env: process.env,
-      timeoutMs,
-    });
-    const { stdout, stderr, exitCode } = result;
-    if (result.timedOut) throw new Error("UniDesk runtime CLI timed out");
-    if (result.stdoutTruncated || result.stderrTruncated) throw new Error("UniDesk runtime CLI output exceeded the bounded limit");
-    let output: Row;
-    try { output = JSON.parse(stdout) as Row; }
-    catch { throw new Error(`UniDesk runtime CLI returned invalid JSON: ${safeMessage(stderr || stdout)}`); }
-    if (exitCode !== 0 || output.ok === false) {
-      const data = output.data && typeof output.data === "object" ? output.data as Row : null;
-      const detail = output.error || data?.error || stderr.trim() || "runtime CLI failed";
-      throw new Error(safeMessage(typeof detail === "string" ? detail : errorMessage(detail)));
-    }
-    return output;
-  }
-
   private async detect(job: LifecycleJob): Promise<void> {
     try {
       job.state = "running";
@@ -361,6 +326,7 @@ export class AccountLifecycleService {
       this.log(job, "candidates", "done", `候选 ${accountIds.length} 个，开始原生连接检测`);
       await this.persistWorkerJob(job);
       const tests: unknown[] = [];
+      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
       const batchSize = this.config.operations.accountLifecycle.testBatchSize;
       for (let offset = 0; offset < accountIds.length; offset += batchSize) {
         const batch = accountIds.slice(offset, offset + batchSize);
@@ -368,12 +334,8 @@ export class AccountLifecycleService {
         const batchCount = Math.ceil(accountIds.length / batchSize);
         this.log(job, "test", "start", `检测批次 ${batchIndex}/${batchCount}，账号 ${batch.length} 个`);
         await this.persistWorkerJob(job);
-        const output = await this.runCli([
-          "platform-infra", "sub2api", "codex-pool", "runtime", "test", "--target", this.config.monitor.target,
-          "--accounts", batch.join(","), "--model", job.settings.model, "--json", ...(job.settings.confirm ? ["--confirm"] : []),
-        ], this.config.operations.accountLifecycle.testTimeoutMs);
-        const runtime = lifecycleRuntimeResult(output);
-        const batchTests = Array.isArray(runtime.tests) ? runtime.tests : [];
+        if (!job.settings.confirm) throw new Error("OAuth 主动检测 worker 只接受已确认作业");
+        const batchTests = await Promise.all(batch.map((accountId) => this.runtime!.testAccount(accountId, job.settings.model)));
         if (batchTests.length !== batch.length) {
           throw new Error(`OAuth 检测批次 ${batchIndex}/${batchCount} 结果不完整：候选 ${batch.length}，结果 ${batchTests.length}`);
         }
@@ -431,10 +393,13 @@ export class AccountLifecycleService {
       let deletion: Row | null = null;
       let deletionError: string | null = null;
       try {
-        deletion = await this.runCli([
-          "platform-infra", "sub2api", "codex-pool", "runtime", "delete", "--target", this.config.monitor.target,
-          "--kind", "account-delete", "--accounts", expectedIds.join(","), "--confirm", "--json",
-        ], this.config.operations.accountLifecycle.deleteTimeoutMs);
+        if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+        const deleted = [];
+        for (const accountId of expectedIds) {
+          await this.runtime.deleteAccount(accountId);
+          deleted.push(accountId);
+        }
+        deletion = { ok: true, operation: "account-delete", deletedIds: deleted, valuesPrinted: false };
       } catch (error) {
         deletionError = safeMessage(errorMessage(error));
         this.log(job, "deletion", "verify", `删除命令结果回收失败，转入终态回读：${deletionError}`);

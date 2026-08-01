@@ -51,7 +51,7 @@ function resolveTemporalAddress(config: AppConfig): string {
   const args = ref.executionPlane === "local-k3s"
     ? ["--kubeconfig", ref.kubeconfig, ...kubectlArgs]
     : [ref.route, "kubectl", ...kubectlArgs];
-  const result = spawnSync(command, args, { encoding: "utf8", timeout: 10_000 });
+  const result = spawnSync(command, args, { encoding: "utf8", timeout: ref.resolutionTimeoutMs });
   const address = result.stdout.trim();
   if (result.status !== 0 || !/^[0-9a-f:.]+:[1-9][0-9]*$/iu.test(address)) {
     throw new Error(`native temporal service resolution failed for ${ref.namespace}/${ref.service}`);

@@ -15,6 +15,7 @@ export interface UpstreamManagementConfig {
   priority: number;
   capacity: number;
   proxyId: number;
+  mutationTimeoutMs: number;
 }
 
 export interface SecretRef {
@@ -208,6 +209,7 @@ export interface AppConfig {
         namespace: string;
         service: string;
         portName: string;
+        resolutionTimeoutMs: number;
       };
       services: Record<NativeServiceId, NativeServiceConfig>;
     };
@@ -699,6 +701,7 @@ export function loadConfig(path: string): AppConfig {
         priority: integerValue(upstreamManagement, "priority", "operations.upstreamManagement", 1, 1000),
         capacity: integerValue(upstreamManagement, "capacity", "operations.upstreamManagement", 1, 100000),
         proxyId: integerValue(upstreamManagement, "proxyId", "operations.upstreamManagement", 1),
+        mutationTimeoutMs: integerValue(upstreamManagement, "mutationTimeoutMs", "operations.upstreamManagement", 1000, 120000),
       },
       oauthEconomics: {
         excludedAccountIds: integers(oauthEconomics, "excludedAccountIds", "operations.oauthEconomics", 1, Number.MAX_SAFE_INTEGER),
@@ -794,6 +797,7 @@ export function loadConfig(path: string): AppConfig {
           namespace: stringValue(nativeTemporalServiceRef, "namespace", "runtime.native.temporalServiceRef"),
           service: stringValue(nativeTemporalServiceRef, "service", "runtime.native.temporalServiceRef"),
           portName: stringValue(nativeTemporalServiceRef, "portName", "runtime.native.temporalServiceRef"),
+          resolutionTimeoutMs: integerValue(nativeTemporalServiceRef, "resolutionTimeoutMs", "runtime.native.temporalServiceRef", 1000, 120000),
         },
         services: nativeServices,
       },

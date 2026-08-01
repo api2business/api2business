@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#111412" />
   <title>账号评分 | ApiState</title>
-  <link rel="stylesheet" href="/styles.css?v=oauth-output-v5" />
-  <script src="/app.js?v=oauth-output-v5" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=score-auto-refresh-v1" />
+  <script src="/app.js?v=score-auto-refresh-v1" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -14,6 +14,7 @@
     <header class="page-head">
       <div><p class="eyebrow">ACCOUNT QUALITY / ALL GROUPS</p><h1>上游账号评分</h1></div>
       <div class="page-actions">
+        <label class="score-auto-refresh"><span>自动刷新</span><select id="score-refresh-interval" aria-label="账号评分自动刷新间隔"><option value="0" selected>关闭</option><option value="300">5 分钟</option><option value="900">15 分钟</option><option value="1800">30 分钟</option></select></label>
         <span id="score-state" class="state-badge">读取中</span>
         <button id="refresh-scores" class="icon-command" type="button" title="立即刷新" aria-label="立即刷新">↻</button>
       </div>
@@ -37,7 +38,7 @@
         <div id="score-updated" class="refresh-clock">
           <span>上次更新时间</span>
           <strong id="score-updated-time">尚无成功快照</strong>
-          <small>距离下次更新 <b id="score-countdown">--:--</b></small>
+          <small id="score-refresh-countdown">自动刷新已关闭</small>
         </div>
       </div>
       <div class="profile-tabs" role="tablist" aria-label="评分账号类型">

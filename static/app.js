@@ -116,6 +116,12 @@ let priorityPlanVisible = false
 let activeScoreProfile = 'codex'
 let scorePage = 1
 const scorePageSize = 10
+const scoreRefreshIntervals = new Set([0, 300, 900, 1800])
+const scoreRefreshIntervalStorageKey = 'apistate.scoreRefreshIntervalSeconds'
+let scoreRefreshTimer = null
+let scoreRefreshCountdownTimer = null
+let scoreRefreshDueAt = null
+let scoreRefreshInFlight = null
 
 function scoreProfile(row) {
   return String(row.platform ?? '').toLowerCase() === 'grok' ? 'grok' : 'codex'
@@ -149,7 +155,57 @@ function countdown(value) {
 
 function renderRefreshClock() {
   $('#score-updated-time').textContent = scoreRefreshedAt ? `北京时间 ${time(scoreRefreshedAt)}` : '尚无成功快照'
-  $('#score-countdown').textContent = countdown(scoreNextRefreshAt)
+  renderScoreRefreshCountdown()
+}
+
+function renderScoreRefreshCountdown() {
+  const target = $('#score-refresh-countdown')
+  if (!target) return
+  const interval = Number($('#score-refresh-interval')?.value)
+  if (!scoreRefreshIntervals.has(interval) || interval <= 0) {
+    target.textContent = '自动刷新已关闭'
+    return
+  }
+  if (scoreRefreshDueAt === null) {
+    target.textContent = '下次刷新 --:--'
+    return
+  }
+  target.textContent = `距离下次更新 ${countdown(scoreRefreshDueAt)}`
+}
+
+function clearScoreRefreshTimer() {
+  if (scoreRefreshTimer !== null) clearTimeout(scoreRefreshTimer)
+  if (scoreRefreshCountdownTimer !== null) clearInterval(scoreRefreshCountdownTimer)
+  scoreRefreshTimer = null
+  scoreRefreshCountdownTimer = null
+  scoreRefreshDueAt = null
+  renderScoreRefreshCountdown()
+}
+
+function scheduleScoreRefresh() {
+  clearScoreRefreshTimer()
+  const interval = Number($('#score-refresh-interval')?.value)
+  if (!scoreRefreshIntervals.has(interval) || interval <= 0) return
+  scoreRefreshDueAt = Date.now() + interval * 1000
+  renderScoreRefreshCountdown()
+  scoreRefreshCountdownTimer = setInterval(renderScoreRefreshCountdown, 1000)
+  scoreRefreshTimer = setTimeout(async () => {
+    scoreRefreshDueAt = null
+    renderScoreRefreshCountdown()
+    await refreshPriorityState().catch(() => null)
+    scheduleScoreRefresh()
+  }, interval * 1000)
+}
+
+function readScoreRefreshInterval() {
+  try {
+    const value = Number(localStorage.getItem(scoreRefreshIntervalStorageKey))
+    return scoreRefreshIntervals.has(value) ? value : 0
+  } catch { return 0 }
+}
+
+function writeScoreRefreshInterval(value) {
+  try { localStorage.setItem(scoreRefreshIntervalStorageKey, String(value)) } catch { /* 当前页面仍按选择运行。 */ }
 }
 
 function renderScoreRows() {
@@ -226,6 +282,12 @@ function renderScores(data) {
 
 async function scoresPage() {
   const select = $('#score-call-limit')
+  const refreshInterval = $('#score-refresh-interval')
+  refreshInterval.value = String(readScoreRefreshInterval())
+  refreshInterval.addEventListener('change', () => {
+    writeScoreRefreshInterval(refreshInterval.value)
+    scheduleScoreRefresh()
+  })
   $('#score-filter').addEventListener('input', () => {
     scorePage = 1
     renderScoreRows()
@@ -267,7 +329,7 @@ async function scoresPage() {
   select.innerHTML = options.map((value) => `<option value="${value}"${value === preferredLimit ? ' selected' : ''}>最近 ${number(value)} 次</option>`).join('')
   renderScores(initial)
   await setupPriorityPanel(options)
-  setInterval(renderRefreshClock, 1000)
+  void refreshPriorityState().catch(() => undefined).finally(scheduleScoreRefresh)
   setInterval(async () => {
     if (!document.hidden) {
       const data = await requestJson('/api/scores').catch(() => null)
@@ -405,10 +467,18 @@ function planProgress(message, reset = false) {
 }
 
 async function refreshPriorityState() {
+  if (scoreRefreshInFlight !== null) return await scoreRefreshInFlight
+  scoreRefreshInFlight = runPriorityStateRefresh()
+  try { return await scoreRefreshInFlight } finally { scoreRefreshInFlight = null }
+}
+
+async function runPriorityStateRefresh() {
   const button = $('#query-scores')
+  const iconButton = $('#refresh-scores')
   const select = $('#score-call-limit')
   const limit = Number(select.value)
   button.disabled = true
+  iconButton.disabled = true
   select.disabled = true
   $('#score-state').textContent = '查询中'
   $('#plan-refresh-state').textContent = '正在刷新，保留当前显示数据…'
@@ -427,6 +497,7 @@ async function refreshPriorityState() {
     throw error
   } finally {
     button.disabled = false
+    iconButton.disabled = false
     select.disabled = false
   }
 }
@@ -1054,10 +1125,16 @@ function upstreamOperationId(prefix) {
   return `${prefix}-${typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
 }
 
-async function waitUpstreamJob(workflowId, timeoutMs = 600000) {
+async function waitUpstreamJob(workflowId, onStatus = () => {}, timeoutMs = 600000) {
   const deadline = Date.now() + timeoutMs
+  let previousState = ''
   for (;;) {
     const status = await requestJson(`/api/upstreams/jobs/${encodeURIComponent(workflowId)}`, {}, 20000)
+    const state = String(status.state ?? 'unknown')
+    if (state !== previousState) {
+      previousState = state
+      onStatus(status)
+    }
     if (status.terminal) {
       if (status.state !== 'completed') throw new Error(status.error ?? `上游作业${status.state ?? '失败'}`)
       if (!status.result?.ok) throw new Error(status.result?.error ?? '上游作业未成功完成')
@@ -1093,6 +1170,24 @@ async function upstreamsPage() {
   let createOperationId = null
   let editRechargeOperationId = null
   let upstreamGroupOptions = []
+  const resetJobLog = (scope) => {
+    $(`#upstream-${scope}-job`).textContent = 'JOB —'
+    $(`#upstream-${scope}-logs`).innerHTML = '<li class="empty">等待提交</li>'
+  }
+  const appendJobLog = (scope, stage, message, state = 'running') => {
+    const logs = $(`#upstream-${scope}-logs`)
+    if (logs.querySelector('.empty')) logs.innerHTML = ''
+    const item = document.createElement('li')
+    item.dataset.state = state
+    item.innerHTML = `<time>${escapeHtml(new Date().toLocaleTimeString('zh-CN', { hour12: false }))}</time><b>${escapeHtml(stage)}</b><span>${escapeHtml(message)}</span>`
+    logs.append(item)
+    logs.scrollTop = logs.scrollHeight
+  }
+  const jobStatusLogger = (scope) => (status) => {
+    const state = String(status.state ?? 'unknown')
+    const labels = { running: 'worker 正在执行运行面操作', completed: '作业完成，正在校验终态', failed: '作业执行失败', cancelled: '作业已取消', terminated: '作业已终止', timed_out: '作业执行超时' }
+    appendJobLog(scope, 'workflow', labels[state] ?? `状态更新：${state}`, state === 'completed' ? 'done' : state === 'running' ? 'running' : 'failed')
+  }
   try {
     const options = await requestJson('/api/upstreams/options')
     upstreamGroupOptions = Array.isArray(options.groups) ? options.groups : []
@@ -1155,6 +1250,7 @@ async function upstreamsPage() {
     $('#upstream-edit-recharge').value = ''
     $('#upstream-edit-state').textContent = ''
     $('#upstream-edit-state').removeAttribute('data-state')
+    resetJobLog('edit')
     editDialog.showModal()
   }
   $('#upstream-search-form').addEventListener('submit', async (event) => {
@@ -1190,6 +1286,7 @@ async function upstreamsPage() {
     $('#upstream-create-state').textContent = '创建时将使用当前优先级、并发容量、号池、Proxy #3 和切号模板。'
     $('#upstream-create-state').removeAttribute('data-state')
     createOperationId = upstreamOperationId('upstream-create')
+    resetJobLog('create')
     createDialog.showModal()
   })
   createDialog.addEventListener('close', () => {
@@ -1202,6 +1299,7 @@ async function upstreamsPage() {
     const button = $('#upstream-create-submit')
     button.disabled = true
     $('#upstream-create-state').textContent = '作业已提交，Temporal worker 正在创建并绑定分组，API key 不会回显…'
+    appendJobLog('create', 'request', '正在提交创建请求，API key 不会写入日志')
     try {
       const operation = createOperationId ?? (createOperationId = upstreamOperationId('upstream-create'))
       const rechargeValue = $('#upstream-create-recharge').value.trim()
@@ -1222,7 +1320,12 @@ async function upstreamsPage() {
           operationId: operation,
         }),
       }, 20000)
-      const result = await waitUpstreamJob(submitted.workflowId)
+      $('#upstream-create-job').textContent = `JOB ${submitted.workflowId}`
+      appendJobLog('create', 'accepted', `Temporal 已接受作业 ${submitted.workflowId}`)
+      const result = await waitUpstreamJob(submitted.workflowId, jobStatusLogger('create'))
+      appendJobLog('create', 'verify', `运行面回读账号 #${result.account?.id ?? '—'}，费率 ${result.account?.rateCnyPerApiUsd ?? '—'}`, 'done')
+      if (result.accounting?.mutation) appendJobLog('create', 'accounting', `人民币采购成本已记账 ${cny(result.accounting.amountCny)}`, 'done')
+      appendJobLog('create', 'done', '创建、分组绑定和终态校验完成', 'done')
       $('#upstream-create-state').textContent = `创建成功：账号 #${result.account?.id ?? '—'}${result.accounting?.mutation ? `，已记账 ${cny(result.accounting.amountCny)}` : ''}`
       $('#upstream-create-state').dataset.state = 'success'
       $('#upstream-create-api-key').value = ''
@@ -1232,6 +1335,7 @@ async function upstreamsPage() {
     } catch (error) {
       $('#upstream-create-state').textContent = error instanceof Error ? error.message : String(error)
       $('#upstream-create-state').dataset.state = 'error'
+      appendJobLog('create', 'failed', error instanceof Error ? error.message : String(error), 'failed')
     } finally { button.disabled = false }
   })
   $('#upstream-edit-form').addEventListener('submit', async (event) => {
@@ -1242,6 +1346,8 @@ async function upstreamsPage() {
     button.disabled = true
     $('#upstream-edit-state').textContent = '正在保存调整…'
     $('#upstream-edit-state').removeAttribute('data-state')
+    resetJobLog('edit')
+    appendJobLog('edit', 'request', `正在提交账号 #${activeUpstream.id} 调整`)
     try {
       const id = Number(activeUpstream.id)
       const submittedUpdate = await requestJson(`/api/upstreams/${id}`, {
@@ -1249,7 +1355,10 @@ async function upstreamsPage() {
         headers: { 'Idempotency-Key': upstreamOperationId(`upstream-update-${id}`) },
         body: JSON.stringify({ suffix: $('#upstream-edit-suffix').value, rateCnyPerApiUsd: Number($('#upstream-edit-rate').value) }),
       })
-      await waitUpstreamJob(submittedUpdate.workflowId)
+      $('#upstream-edit-job').textContent = `JOB ${submittedUpdate.workflowId}`
+      appendJobLog('edit', 'accepted', `Temporal 已接受调整作业 ${submittedUpdate.workflowId}`)
+      const updated = await waitUpstreamJob(submittedUpdate.workflowId, jobStatusLogger('edit'))
+      appendJobLog('edit', 'verify', `运行面回读费率 ${updated.account?.rateCnyPerApiUsd ?? '—'}，后缀 ${updated.account?.suffix ?? '—'}`, 'done')
       const rechargeValue = $('#upstream-edit-recharge').value.trim()
       let recharge = null
       if (rechargeValue) {
@@ -1259,7 +1368,9 @@ async function upstreamsPage() {
           body: JSON.stringify({ amountCny: Number(rechargeValue) }),
         }, 20000)
         recharge = await waitUpstreamJob(submittedRecharge.workflowId)
+        appendJobLog('edit', 'accounting', `追加充值已记账 ${cny(recharge.accounting?.amountCny ?? recharge.amountCny)}`, 'done')
       }
+      appendJobLog('edit', 'done', '调整和终态校验完成', 'done')
       $('#upstream-edit-state').textContent = recharge?.recovered ? '调整与充值完成，已恢复调度。' : '调整完成。'
       $('#upstream-edit-state').dataset.state = 'success'
       editRechargeOperationId = null
@@ -1268,6 +1379,7 @@ async function upstreamsPage() {
     } catch (error) {
       $('#upstream-edit-state').textContent = error instanceof Error ? error.message : String(error)
       $('#upstream-edit-state').dataset.state = 'error'
+      appendJobLog('edit', 'failed', error instanceof Error ? error.message : String(error), 'failed')
     } finally { button.disabled = false }
   })
   await load()

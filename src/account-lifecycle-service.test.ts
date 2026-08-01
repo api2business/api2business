@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AccountLifecycleService, accountLifecycleCandidateQuery, lifecycleRuntimeResult, readLifecycleAcquisitionCosts } from "./account-lifecycle-service";
+import { AccountLifecycleService, accountLifecycleCandidateQuery, readLifecycleAcquisitionCosts } from "./account-lifecycle-service";
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -41,12 +41,4 @@ test("includes YAML acquisition entries so manually recorded OAuth accounts ente
   ].join("\n"));
   const config = { operations: { ledgerYamlPath: ledger } } as AppConfig;
   expect(readLifecycleAcquisitionCosts(config, "2026-07-30")).toEqual([{ accountId: 104, costCny: 3.3 }]);
-});
-
-test("unwraps the production UniDesk CLI data.runtime envelope", () => {
-  const runtime = { operation: "test", tests: [{ accountId: 99, classification: "dead" }], summary: { alive: 0, dead: 1, unknown: 0 } };
-  expect(lifecycleRuntimeResult({ ok: true, data: { runtime } })).toEqual(runtime);
-  expect(lifecycleRuntimeResult({ ok: true, runtime })).toEqual(runtime);
-  expect(lifecycleRuntimeResult({ ok: true, data: { data: { runtime } } })).toEqual(runtime);
-  expect(() => lifecycleRuntimeResult({ ok: true, data: {} })).toThrow("missing account test results");
 });

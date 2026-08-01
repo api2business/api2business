@@ -5,7 +5,6 @@ import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { isOAuthAccount } from "./account-score-eligibility";
 import type { AppConfig } from "./config";
 import type { Sub2ApiClient } from "./sub2api-client";
-import type { RuntimePolicyEventSource } from "./runtime-policy-events";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 interface ScoreSnapshot {
@@ -42,7 +41,6 @@ export class AccountScoreService {
     private readonly config: AppConfig,
     private readonly cachePath: string,
     private readonly sub2api: Sub2ApiClient,
-    private readonly policyEvents: RuntimePolicyEventSource,
     private readonly reads: Sub2ApiReadClient | null = null,
   ) {
     this.snapshot = this.readCache();

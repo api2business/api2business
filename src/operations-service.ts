@@ -24,6 +24,7 @@ import type {
   Sub2ApiReadClient,
   Sub2ApiReadPriority,
 } from "./sub2api-read-executor";
+import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { collectUserImpactFromDatabase } from "./user-impact-database";
 import {
   collectAccountBatchEconomics,
@@ -102,6 +103,7 @@ export class OperationsService {
     private readonly config: AppConfig,
     private readonly store: OperationsStore,
     private readonly reads: Sub2ApiReadClient,
+    private readonly runtime: Sub2ApiRuntimeService | null = null,
   ) {}
 
   async initialize(): Promise<void> {
@@ -400,25 +402,15 @@ export class OperationsService {
   }
 
   private async writePriorityBatch(priorities: Record<string, number>) {
-    const args = [
-      this.config.monitor.cli.entrypoint, "platform-infra", "sub2api", "codex-pool", "runtime", "apply",
-      "--target", this.config.monitor.target, "--kind", "priority",
-      "--priorities-json", JSON.stringify(priorities), "--write-only", "--confirm",
-    ];
+    if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
     const startedAt = Date.now();
-    const processResult = await runBoundedProcess([this.config.monitor.cli.executable, ...args], {
-      cwd: this.config.monitor.cli.workDir,
-      env: { ...Bun.env, UNIDESK_MAIN_SERVER_IP: this.config.monitor.cli.mainServerHost },
-      timeoutMs: this.config.monitor.cli.timeoutMs,
-    });
-    return {
-      ok: !processResult.timedOut && !processResult.stdoutTruncated && !processResult.stderrTruncated && processResult.exitCode === 0,
-      exitCode: processResult.exitCode,
-      timedOut: processResult.timedOut,
-      writeDurationMs: Date.now() - startedAt,
-      outputAvailable: processResult.stdout.length > 0,
-      error: processResult.stderr.slice(-1000),
-    };
+    try {
+      await this.runtime.updatePriorities(priorities);
+      return { ok: true, exitCode: 0, timedOut: false, writeDurationMs: Date.now() - startedAt, outputAvailable: true, error: "" };
+    } catch (error) {
+      return { ok: false, exitCode: 1, timedOut: false, writeDurationMs: Date.now() - startedAt, outputAvailable: false,
+        error: (error instanceof Error ? error.message : String(error)).slice(-1000) };
+    }
   }
 
   private async applyPriorityBatch(

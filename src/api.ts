@@ -36,11 +36,12 @@ const operations = new OperationsService(
   config,
   new OperationsStore(operationsDatabaseUrl),
   reads,
+  context.runtime,
 );
 await operations.initialize();
-const imports = new AccountImportService(config, reads, temporal);
-const lifecycle = new AccountLifecycleService(config, reads, temporal);
-const upstreams = new UpstreamManagementService(config, reads, temporal);
+const imports = new AccountImportService(config, reads, temporal, null, context.runtime);
+const lifecycle = new AccountLifecycleService(config, reads, temporal, null, context.runtime);
+const upstreams = new UpstreamManagementService(config, reads, temporal, context.runtime);
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,

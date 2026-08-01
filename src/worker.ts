@@ -12,10 +12,10 @@ import { OperationsStore } from "./operations-store";
 import { OperationsService } from "./operations-service";
 import { AccountScoreService } from "./account-score-service";
 import { Sub2ApiClient } from "./sub2api-client";
-import { UniDeskRuntimePolicyEventSource } from "./runtime-policy-events";
 import { resolveDataPath } from "./config";
 import { AccountImportService, type ImportJob } from "./account-import-service";
 import { AccountLifecycleService, type LifecycleJob } from "./account-lifecycle-service";
+import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -35,6 +35,11 @@ const connection = workflowEnabled
   ? await NativeConnection.connect({ address: temporalAddress(config) })
   : null;
 const remoteReads = new RemoteSub2ApiReadClient(internal);
+const email = process.env[target.sub2apiAdminEmailEnv];
+const password = process.env[target.sub2apiAdminPasswordEnv];
+if (!email || !password) throw new Error("worker requires Sub2API admin credentials");
+const sub2apiClient = new Sub2ApiClient(config, { email, password });
+const runtime = new Sub2ApiRuntimeService(sub2apiClient);
 const accountImports = new AccountImportService(config, remoteReads, null, {
   get: async (id): Promise<ImportJob | null> => {
     const response = await internal.accountImportWorkerJob(id);
@@ -43,7 +48,7 @@ const accountImports = new AccountImportService(config, remoteReads, null, {
   patch: async (id, patch): Promise<void> => {
     await internal.updateAccountImportWorkerJob(id, patch as Record<string, unknown>);
   },
-});
+}, runtime);
 const accountLifecycle = new AccountLifecycleService(config, remoteReads, null, {
   get: async (id): Promise<LifecycleJob | null> => {
     const response = await internal.accountLifecycleWorkerJob(id);
@@ -52,20 +57,16 @@ const accountLifecycle = new AccountLifecycleService(config, remoteReads, null, 
   patch: async (id, patch): Promise<void> => {
     await internal.updateAccountLifecycleWorkerJob(id, patch as Record<string, unknown>);
   },
-});
+}, runtime);
 const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
 if (!operationsDatabaseUrl) throw new Error(`worker requires env ${config.operations.databaseUrlEnv}`);
-const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), remoteReads);
+const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), remoteReads, runtime);
 await operations.initialize();
-const upstreams = new UpstreamManagementService(config, remoteReads);
-const email = process.env[target.sub2apiAdminEmailEnv];
-const password = process.env[target.sub2apiAdminPasswordEnv];
-if (!email || !password) throw new Error("worker requires Sub2API admin credentials");
+const upstreams = new UpstreamManagementService(config, remoteReads, null, runtime);
 const scores = new AccountScoreService(
   config,
   resolveDataPath(config, target.scoreCachePath),
-  new Sub2ApiClient(config, { email, password }),
-  new UniDeskRuntimePolicyEventSource(config, target.monitorWorkDir),
+  sub2apiClient,
   remoteReads,
 );
 

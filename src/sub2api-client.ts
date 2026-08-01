@@ -74,7 +74,7 @@ export class Sub2ApiClient {
     private readonly credentials: { email: string; password: string },
   ) {}
 
-  private async request<T>(path: string, init: RequestInit = {}, authenticate = true): Promise<T> {
+  async request<T>(path: string, init: RequestInit = {}, authenticate = true): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("accept", "application/json");
     if (init.body) headers.set("content-type", "application/json");
@@ -87,6 +87,28 @@ export class Sub2ApiClient {
     const payload = (await response.json().catch(() => null)) as Envelope<T> | null;
     if (!response.ok || !payload || payload.code !== 0) throw new Error(`Sub2API ${init.method ?? "GET"} ${path} failed: HTTP ${response.status} ${payload?.message ?? "invalid response"}`);
     return payload.data;
+  }
+
+  async mutate<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown, idempotencyKey?: string): Promise<T> {
+    const headers = new Headers();
+    if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+    return await this.request<T>(path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  }
+
+  async requestRaw(method: "GET" | "POST", path: string, body?: unknown): Promise<{ httpStatus: number; body: string }> {
+    const headers = new Headers({ accept: "application/json", authorization: `Bearer ${await this.accessToken()}` });
+    if (body !== undefined) headers.set("content-type", "application/json");
+    const response = await fetch(`${this.config.sub2api.baseUrl}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(this.config.sub2api.requestTimeoutMs),
+    });
+    return { httpStatus: response.status, body: await response.text() };
   }
 
   private async accessToken(): Promise<string> {
