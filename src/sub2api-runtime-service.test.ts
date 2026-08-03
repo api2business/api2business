@@ -10,6 +10,8 @@ test("imports Grok OAuth through native batch create and preserves Grok fields",
   } } as unknown as Sub2ApiClient;
   const runtime = new Sub2ApiRuntimeService(client);
   const output = await runtime.importAccounts({
+    operationKey: "grok-import-test",
+    importTimeoutMs: 120000,
     content: JSON.stringify({ accounts: [{ name: "grok-a", platform: "grok", type: "oauth", credentials: { account_id: "grok-a", access_token: "token" } }] }),
     priority: 1, capacity: 16, groupIds: [6], proxyId: 14, proxyCandidateIds: [14], perAccountProxy: false,
   });
@@ -19,18 +21,21 @@ test("imports Grok OAuth through native batch create and preserves Grok fields",
 });
 
 test("keeps OpenAI OAuth on the codex-session import endpoint", async () => {
-  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
-  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {
-    calls.push({ path, body });
+  const calls: Array<{ path: string; body: Record<string, unknown>; timeoutMs?: number }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>, _key?: string, timeoutMs?: number) => {
+    calls.push({ path, body, timeoutMs });
     return { failed: 0, items: [{ index: 1, account_id: 452, action: "created" }] };
   } } as unknown as Sub2ApiClient;
   const runtime = new Sub2ApiRuntimeService(client);
   await runtime.importAccounts({
+    operationKey: "openai-import-test",
+    importTimeoutMs: 120000,
     content: JSON.stringify({ accounts: [{ name: "codex-a", platform: "openai", type: "oauth", credentials: { access_token: "token" } }] }),
     priority: 1, capacity: 16, groupIds: [2, 3], proxyId: 14, proxyCandidateIds: [14], perAccountProxy: false,
   });
   expect(calls).toEqual([expect.objectContaining({
     path: "/admin/accounts/import/codex-session",
     body: expect.objectContaining({ update_existing: true }),
+    timeoutMs: 120000,
   })]);
 });

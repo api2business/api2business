@@ -19,6 +19,8 @@ export interface UpstreamManagementConfig {
   usageConcurrency: number;
   usageTimeoutMs: number;
   usageDays: number;
+  quotaSampleIntervalSeconds: number;
+  quotaSampleTimeoutSeconds: number;
   failoverRules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }>;
 }
 
@@ -50,6 +52,14 @@ export interface PriorityPlanPolicy {
   requireCurrentAvailable: boolean;
   qualityWeight: number;
   costWeight: number;
+  explorationWeight: number;
+  explorationTargetAttempts: number;
+  explorationQualityPrior: number;
+  balanceWeight: number;
+  dynamicQualityFeedback: {
+    targetQualityScore: number;
+    coefficient: number;
+  };
   referenceScore: number;
   pointsPerScore: number;
   minimumChange: number;
@@ -107,6 +117,22 @@ export interface AppConfig {
     };
     scorePolicy: ScorePolicy;
     grokScorePolicy: ScorePolicy;
+    scoreSamplePolicy: {
+      retentionHours: number;
+      decayBucketSize: number;
+      decayStep: number;
+      minimumWeight: number;
+    };
+    idleProbe: {
+      enabled: boolean;
+      intervalSeconds: number;
+      idleSeconds: number;
+      model: string;
+      candidateLimit: number;
+      concurrency: number;
+      accountTimeoutMs: number;
+      roundTimeoutSeconds: number;
+    };
     priorityPlan: PriorityPlanPolicy;
     grokPriorityPlan: PriorityPlanPolicy;
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
@@ -149,6 +175,7 @@ export interface AppConfig {
     accountImportDefaults: {
       priority: number;
       capacity: number;
+      importTimeoutMs: number;
       groupIds: number[];
       sourceProxyId: number;
       perAccountProxy: boolean;
@@ -189,6 +216,7 @@ export interface AppConfig {
     namespace: string;
     taskQueue: string;
     scoreScheduleWorkflowId: string;
+    submissionTimeoutMs: number;
     workflowExecutionTimeout: string;
     activityStartToCloseTimeout: string;
     retry: { maximumAttempts: number };
@@ -378,6 +406,7 @@ function readScorePolicy(raw: unknown, path: string): ScorePolicy {
 
 function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy {
   const policy = object(raw, path);
+  const dynamicQualityFeedback = object(policy.dynamicQualityFeedback, `${path}.dynamicQualityFeedback`);
   const fixedRaw = object(policy.fixedPriorities, `${path}.fixedPriorities`);
   const fixedPriorities = Object.fromEntries(Object.keys(fixedRaw).map((accountId) => {
     if (!/^[1-9][0-9]*$/u.test(accountId)) throw new Error(`${path}.fixedPriorities keys must be positive account IDs`);
@@ -412,6 +441,14 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
     requireCurrentAvailable: booleanValue(policy, "requireCurrentAvailable", path),
     qualityWeight: numberValue(policy, "qualityWeight", path, 0, 100),
     costWeight: numberValue(policy, "costWeight", path, 0, 100),
+    explorationWeight: numberValue(policy, "explorationWeight", path, 0, 100),
+    explorationTargetAttempts: integerValue(policy, "explorationTargetAttempts", path, 1, 10000),
+    explorationQualityPrior: numberValue(policy, "explorationQualityPrior", path, 0, 100),
+    balanceWeight: numberValue(policy, "balanceWeight", path, 0, 100),
+    dynamicQualityFeedback: {
+      targetQualityScore: numberValue(dynamicQualityFeedback, "targetQualityScore", `${path}.dynamicQualityFeedback`, 0, 100),
+      coefficient: numberValue(dynamicQualityFeedback, "coefficient", `${path}.dynamicQualityFeedback`, 0, 10),
+    },
     referenceScore: numberValue(policy, "referenceScore", path, 0, 100),
     pointsPerScore: numberValue(policy, "pointsPerScore", path, 0.01, 1000),
     minimumChange: integerValue(policy, "minimumChange", path, 1, 1000),
@@ -442,6 +479,8 @@ export function loadConfig(path: string): AppConfig {
   const raw = object(parse(readFileSync(configPath, "utf8")), "config");
   const metadata = object(raw.metadata, "metadata");
   const sub2api = object(raw.sub2api, "sub2api");
+  const scoreSamplePolicy = object(sub2api.scoreSamplePolicy, "sub2api.scoreSamplePolicy");
+  const idleProbe = object(sub2api.idleProbe, "sub2api.idleProbe");
   const monitor = object(raw.monitor, "monitor");
   const automaticRefresh = object(monitor.automaticRefresh, "monitor.automaticRefresh");
   const monitorCli = object(monitor.cli, "monitor.cli");
@@ -476,6 +515,15 @@ export function loadConfig(path: string): AppConfig {
   const upstreamPrimaryGroupId = integerValue(upstreamManagement, "primaryGroupId", "operations.upstreamManagement", 1);
   if (!upstreamGroupIds.includes(upstreamPrimaryGroupId)) {
     throw new Error("operations.upstreamManagement.primaryGroupId must be included in groupIds");
+  }
+  const quotaSampleIntervalSeconds = integerValue(
+    upstreamManagement, "quotaSampleIntervalSeconds", "operations.upstreamManagement", 60, 86400,
+  );
+  const quotaSampleTimeoutSeconds = integerValue(
+    upstreamManagement, "quotaSampleTimeoutSeconds", "operations.upstreamManagement", 30, 3600,
+  );
+  if (quotaSampleTimeoutSeconds >= quotaSampleIntervalSeconds) {
+    throw new Error("operations.upstreamManagement.quotaSampleTimeoutSeconds must be less than quotaSampleIntervalSeconds");
   }
   const oauthEconomics = object(operations.oauthEconomics, "operations.oauthEconomics");
   const idealApiUsdPerAccount = object(
@@ -637,6 +685,22 @@ export function loadConfig(path: string): AppConfig {
       },
       scorePolicy: readScorePolicy(sub2api.scorePolicy, "sub2api.scorePolicy"),
       grokScorePolicy: readScorePolicy(sub2api.grokScorePolicy, "sub2api.grokScorePolicy"),
+      scoreSamplePolicy: {
+        retentionHours: integerValue(scoreSamplePolicy, "retentionHours", "sub2api.scoreSamplePolicy", 1, 168),
+        decayBucketSize: integerValue(scoreSamplePolicy, "decayBucketSize", "sub2api.scoreSamplePolicy", 1, 1000),
+        decayStep: numberValue(scoreSamplePolicy, "decayStep", "sub2api.scoreSamplePolicy", 0.000001, 1),
+        minimumWeight: numberValue(scoreSamplePolicy, "minimumWeight", "sub2api.scoreSamplePolicy", 0.000001, 1),
+      },
+      idleProbe: {
+        enabled: booleanValue(idleProbe, "enabled", "sub2api.idleProbe"),
+        intervalSeconds: integerValue(idleProbe, "intervalSeconds", "sub2api.idleProbe", 10, 3600),
+        idleSeconds: integerValue(idleProbe, "idleSeconds", "sub2api.idleProbe", 10, 86400),
+        model: stringValue(idleProbe, "model", "sub2api.idleProbe"),
+        candidateLimit: integerValue(idleProbe, "candidateLimit", "sub2api.idleProbe", 1, 100),
+        concurrency: integerValue(idleProbe, "concurrency", "sub2api.idleProbe", 1, 20),
+        accountTimeoutMs: integerValue(idleProbe, "accountTimeoutMs", "sub2api.idleProbe", 1000, 120000),
+        roundTimeoutSeconds: integerValue(idleProbe, "roundTimeoutSeconds", "sub2api.idleProbe", 5, 300),
+      },
       priorityPlan: readPriorityPlanPolicy(sub2api.priorityPlan, "sub2api.priorityPlan"),
       grokPriorityPlan: readPriorityPlanPolicy(sub2api.grokPriorityPlan, "sub2api.grokPriorityPlan"),
       adminCredentials: {
@@ -696,6 +760,7 @@ export function loadConfig(path: string): AppConfig {
       accountImportDefaults: {
         priority: integerValue(accountImportDefaults, "priority", "operations.accountImportDefaults", 1, 1000),
         capacity: integerValue(accountImportDefaults, "capacity", "operations.accountImportDefaults", 1, 100000),
+        importTimeoutMs: integerValue(accountImportDefaults, "importTimeoutMs", "operations.accountImportDefaults", 1000, 600000),
         groupIds: integers(accountImportDefaults, "groupIds", "operations.accountImportDefaults", 1, Number.MAX_SAFE_INTEGER),
         sourceProxyId: integerValue(accountImportDefaults, "sourceProxyId", "operations.accountImportDefaults", 3),
         perAccountProxy: booleanValue(accountImportDefaults, "perAccountProxy", "operations.accountImportDefaults"),
@@ -721,6 +786,8 @@ export function loadConfig(path: string): AppConfig {
         usageConcurrency: integerValue(upstreamManagement, "usageConcurrency", "operations.upstreamManagement", 1, 100),
         usageTimeoutMs: integerValue(upstreamManagement, "usageTimeoutMs", "operations.upstreamManagement", 1000, 120000),
         usageDays: integerValue(upstreamManagement, "usageDays", "operations.upstreamManagement", 1, 90),
+        quotaSampleIntervalSeconds,
+        quotaSampleTimeoutSeconds,
         failoverRules: upstreamFailoverRules,
       },
       oauthEconomics: {
@@ -790,6 +857,7 @@ export function loadConfig(path: string): AppConfig {
       namespace: stringValue(temporal, "namespace", "temporal"),
       taskQueue: stringValue(temporal, "taskQueue", "temporal"),
       scoreScheduleWorkflowId: stringValue(temporal, "scoreScheduleWorkflowId", "temporal"),
+      submissionTimeoutMs: integerValue(temporal, "submissionTimeoutMs", "temporal", 1000, 60000),
       workflowExecutionTimeout: stringValue(temporal, "workflowExecutionTimeout", "temporal"),
       activityStartToCloseTimeout: stringValue(temporal, "activityStartToCloseTimeout", "temporal"),
       retry: { maximumAttempts: integerValue(temporalRetry, "maximumAttempts", "temporal.retry", 1) },

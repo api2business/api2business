@@ -35,6 +35,7 @@ export interface AccountImportPreflightPlan {
   content: string;
   sourceIndexes: number[];
   skipped: Array<{ index: number; accountId: number }>;
+  pendingExisting: Array<{ index: number; accountId: number }>;
   initialProxyId: number;
   proxyCandidateIds: number[];
 }
@@ -170,6 +171,7 @@ export async function accountImportPreflight(
     if (accessHash) byAccess.set(accessHash, [...(byAccess.get(accessHash) ?? []), row]);
   }
   const skipped: AccountImportPreflightPlan["skipped"] = [];
+  const pendingExisting: AccountImportPreflightPlan["pendingExisting"] = [];
   const sourceIndexes: number[] = [];
   const remaining: unknown[] = [];
   for (let offset = 0; offset < accounts.length; offset += 1) {
@@ -183,6 +185,10 @@ export async function accountImportPreflight(
       continue;
     }
     const account = record(accounts[offset]);
+    if (matches.length === 1) {
+      const accountId = integer(matches[0]!.id);
+      if (accountId !== null) pendingExisting.push({ index: offset + 1, accountId });
+    }
     const credentials = record(account?.credentials);
     remaining.push({ ...account, platform: settings.platform, credentials: { ...credentials, plan_type: settings.planType } });
     sourceIndexes.push(offset + 1);
@@ -200,6 +206,7 @@ export async function accountImportPreflight(
     content: filteredContent,
     sourceIndexes,
     skipped,
+    pendingExisting,
     initialProxyId: deterministicProxyId(requestIdentity, proxyCandidateIds),
     proxyCandidateIds,
   };

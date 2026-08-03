@@ -136,7 +136,7 @@ export class AccountImportService {
   ) {}
 
   options() {
-    return { ok: true, currency: "CNY", inputFormats: ["json", "zip"], planTypes: [{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }, { id: "team", name: "Team" }, { id: "free", name: "Free" }], defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null }, groups: [
+    return { ok: true, currency: "CNY", inputFormats: ["json", "zip"], planTypes: [{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }, { id: "team", name: "Team" }, { id: "free", name: "Free" }], initialExpectedApiUsdPerAccount: { ...this.config.operations.oauthEconomics.idealApiUsdPerAccount }, defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null }, groups: [
       { id: 2, name: "混池（unidesk-codex-pool）" }, { id: 3, name: "自用" }, { id: 6, name: "Grok" },
     ] };
   }
@@ -250,15 +250,33 @@ export class AccountImportService {
       if (!job.settings.confirm) throw new Error("账号导入 worker 只接受已确认作业");
       this.log(job, "batch-import", "start", `stage=batch-import state=start accounts=${plan.sourceIndexes.length} initial-proxy=${plan.initialProxyId}`);
       await this.persistWorkerJob(job);
-      const output = await this.runtime.importAccounts({
-        content: plan.content,
-        priority: job.settings.priority,
-        capacity: job.settings.capacity,
-        groupIds: job.settings.groupIds,
-        proxyId: plan.initialProxyId,
-        proxyCandidateIds: plan.proxyCandidateIds,
-        perAccountProxy: job.settings.perAccountProxy === true,
-      });
+      let output: Record<string, unknown>;
+      try {
+        output = await this.runtime.importAccounts({
+          operationKey: job.id,
+          content: plan.content,
+          importTimeoutMs: this.config.operations.accountImportDefaults.importTimeoutMs,
+          priority: job.settings.priority,
+          capacity: job.settings.capacity,
+          groupIds: job.settings.groupIds,
+          proxyId: plan.initialProxyId,
+          proxyCandidateIds: plan.proxyCandidateIds,
+          perAccountProxy: job.settings.perAccountProxy === true,
+        });
+      } catch (error) {
+        if (!isTimeoutError(error)) throw error;
+        this.log(job, "reconciliation", "start", "导入请求超时，正在通过排队数据库核对账号终态");
+        await this.persistWorkerJob(job);
+        const reconciled = await accountImportPreflight(content, {
+          ...job.settings,
+          platform: job.settings.platform ?? job.source.platform,
+        }, this.reads);
+        if (reconciled.sourceIndexes.length > 0) {
+          throw new Error(`Sub2API 批量导入在 ${this.config.operations.accountImportDefaults.importTimeoutMs}ms 后超时；终态对账仍缺少 ${reconciled.sourceIndexes.length}/${job.accountCount} 个账号`);
+        }
+        output = recoveredImportOutput(job, plan, reconciled);
+        this.log(job, "reconciliation", "done", "导入响应超时，但排队数据库终态已全部对齐");
+      }
       this.log(job, "batch-import", output.ok === false ? "failed" : "done", `stage=batch-import state=${output.ok === false ? "failed" : "done"} accounts=${plan.sourceIndexes.length}`);
       mergePreflightResult(output, job, plan);
       job.result = output;
@@ -362,6 +380,47 @@ function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan
       proxyCandidateCount: plan.proxyCandidateIds.length,
     },
     result: { createdIds: [], updatedIds: [], skippedIds: plan.skipped.map((item) => item.accountId), skipped: plan.skipped.length, failed: 0, failures: [], isolated: 0 },
+    valuesPrinted: false,
+  };
+}
+
+export function isTimeoutError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "TimeoutError") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /timed?\s*out|timeout/iu.test(message);
+}
+
+export function recoveredImportOutput(
+  job: ImportJob,
+  plan: AccountImportPreflightPlan,
+  reconciled: AccountImportPreflightPlan,
+): Record<string, unknown> {
+  const initiallySkipped = new Set(plan.skipped.map((item) => item.accountId));
+  const existingByIndex = new Map(plan.pendingExisting.map((item) => [item.index, item.accountId]));
+  const updatedIds: number[] = [];
+  const createdIds: number[] = [];
+  for (const item of reconciled.skipped) {
+    if (initiallySkipped.has(item.accountId)) continue;
+    if (existingByIndex.get(item.index) === item.accountId) updatedIds.push(item.accountId);
+    else createdIds.push(item.accountId);
+  }
+  return {
+    ok: true,
+    action: "apistate-sub2api-runtime-import",
+    mode: "confirmed",
+    mutation: createdIds.length + updatedIds.length > 0,
+    recoveredAfterTimeout: true,
+    file: { fingerprint: job.fingerprint, accountCount: job.accountCount, valuesPrinted: false },
+    result: {
+      createdIds,
+      updatedIds,
+      skippedIds: plan.skipped.map((item) => item.accountId),
+      skipped: plan.skipped.length,
+      failed: 0,
+      failures: [],
+      proxyAssignments: [],
+      sharedProxyId: job.settings.perAccountProxy === true ? null : plan.initialProxyId,
+    },
     valuesPrinted: false,
   };
 }

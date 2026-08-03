@@ -34,6 +34,11 @@ function identity(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 24);
 }
 
+export function runtimeImportIdempotencyKey(operationKey: string, value: unknown): string {
+  if (!operationKey.trim()) throw new Error("runtime import operation key is required");
+  return `apistate-runtime-import-${identity({ operationKey, value })}`;
+}
+
 export class Sub2ApiRuntimeService {
   constructor(
     private readonly client: Sub2ApiClient,
@@ -50,7 +55,9 @@ export class Sub2ApiRuntimeService {
   }
 
   async importAccounts(input: {
+    operationKey: string;
     content: string;
+    importTimeoutMs: number;
     priority: number;
     capacity: number;
     groupIds: number[];
@@ -68,7 +75,7 @@ export class Sub2ApiRuntimeService {
       throw new Error("runtime import requires exactly one supported account platform");
     }
     const platform = [...platforms][0]!;
-    const requestKey = `apistate-runtime-import-${identity({ payload, ...input, content: undefined })}`;
+    const requestKey = runtimeImportIdempotencyKey(input.operationKey, { payload, ...input, content: undefined, operationKey: undefined });
     const createdIds: number[] = [];
     const updatedIds: number[] = [];
     const skippedIds: number[] = [];
@@ -88,7 +95,7 @@ export class Sub2ApiRuntimeService {
       }));
       const result = await this.client.mutate<BatchCreateResult>("POST", "/admin/accounts/batch", {
         accounts: prepared,
-      }, requestKey);
+      }, requestKey, input.importTimeoutMs);
       const items = Array.isArray(result.results) ? result.results : [];
       for (let offset = 0; offset < items.length; offset += 1) {
         const item = record(items[offset]);
@@ -114,7 +121,7 @@ export class Sub2ApiRuntimeService {
       const result = await this.client.mutate<Row>("POST", "/admin/accounts/data", {
         data: { accounts: prepared, proxies: [] },
         skip_default_group_bind: true,
-      }, requestKey);
+      }, requestKey, input.importTimeoutMs);
       createdCount = Number(result.account_created ?? 0);
       const failed = Number(result.account_failed ?? 0);
       if (failed > 0 || createdCount !== accounts.length) {
@@ -132,7 +139,7 @@ export class Sub2ApiRuntimeService {
         update_existing: true,
         skip_default_group_bind: true,
         confirm_mixed_channel_risk: true,
-      }, requestKey);
+      }, requestKey, input.importTimeoutMs);
       const items = Array.isArray(result.items) ? result.items as ImportItem[] : [];
       for (let offset = 0; offset < items.length; offset += 1) {
         const item = items[offset]!;
@@ -215,9 +222,9 @@ export class Sub2ApiRuntimeService {
     return { updated: items.length, items };
   }
 
-  async testAccount(accountId: number, model: string): Promise<unknown> {
+  async testAccount(accountId: number, model: string, timeoutMs?: number): Promise<unknown> {
     const startedAt = Date.now();
-    const response = await this.client.requestRaw("POST", `/admin/accounts/${accountId}/test`, { model_id: model });
+    const response = await this.client.requestRaw("POST", `/admin/accounts/${accountId}/test`, { model_id: model }, timeoutMs);
     const events = response.body.split(/\r?\n/u).flatMap((line) => {
       if (!line.startsWith("data:")) return [];
       try { return [JSON.parse(line.slice(5).trim()) as Row]; } catch { return []; }
