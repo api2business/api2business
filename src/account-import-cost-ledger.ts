@@ -19,6 +19,19 @@ export interface AccountImportCostEntry {
   amountCny: number;
 }
 
+interface AccountImportPlanTypeCorrectionEntry {
+  version: 1;
+  id: string;
+  source: "account-import-plan-type-correction";
+  occurredAt: string;
+  accountId: number;
+  originalEntryId: string;
+  previousPlanType: OAuthPlanType | null;
+  planType: OAuthPlanType;
+}
+
+type AccountImportLedgerEntry = AccountImportCostEntry | AccountImportPlanTypeCorrectionEntry;
+
 function money(value: number): number {
   return Math.round(value * 100) / 100;
 }
@@ -27,15 +40,34 @@ function entryId(accountId: number): string {
   return `account-import-${createHash("sha256").update(String(accountId)).digest("hex").slice(0, 16)}`;
 }
 
+function correctionEntryId(accountId: number, planType: OAuthPlanType): string {
+  return `account-import-plan-type-correction-${createHash("sha256").update(`${accountId}:${planType}`).digest("hex").slice(0, 16)}`;
+}
+
+function isPlanType(value: unknown): value is OAuthPlanType {
+  return value === "k12" || value === "plus" || value === "team" || value === "free";
+}
+
 export function accountImportBatchId(fingerprint: string): string {
   return `account-import-batch-${fingerprint.slice(0, 24)}`;
 }
 
-function parseEntry(value: unknown, line: number): AccountImportCostEntry {
+function parseEntry(value: unknown, line: number): AccountImportLedgerEntry {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`账号导入成本账本第 ${line} 行不是对象`);
   }
   const row = value as Record<string, unknown>;
+  if (row.version === 1 && row.source === "account-import-plan-type-correction") {
+    if (typeof row.id !== "string" || !row.id
+      || typeof row.occurredAt !== "string"
+      || !Number.isSafeInteger(row.accountId) || Number(row.accountId) < 1
+      || typeof row.originalEntryId !== "string" || !row.originalEntryId
+      || (row.previousPlanType !== null && !isPlanType(row.previousPlanType))
+      || !isPlanType(row.planType)) {
+      throw new Error(`账号导入成本账本第 ${line} 行类型更正字段无效`);
+    }
+    return row as unknown as AccountImportPlanTypeCorrectionEntry;
+  }
   if (row.version !== 1 || row.source !== "account-import" || row.currency !== "CNY"
     || typeof row.id !== "string" || !row.id
     || typeof row.occurredAt !== "string" || typeof row.occurredOn !== "string" || typeof row.period !== "string"
@@ -46,7 +78,7 @@ function parseEntry(value: unknown, line: number): AccountImportCostEntry {
     throw new Error(`账号导入成本账本第 ${line} 行字段无效`);
   }
   const fingerprint = row.fingerprint as string;
-  const planType = row.planType === "k12" || row.planType === "plus" || row.planType === "team" || row.planType === "free" ? row.planType : null;
+  const planType = isPlanType(row.planType) ? row.planType : null;
   return {
     ...row,
     batchId: typeof row.batchId === "string" && row.batchId ? row.batchId : accountImportBatchId(fingerprint),
@@ -58,7 +90,7 @@ export function readAccountImportCosts(path: string): AccountImportCostEntry[] {
   if (!existsSync(path)) return [];
   const content = readFileSync(path, "utf8");
   if (!content.trim()) return [];
-  return content.trimEnd().split("\n").map((line, index) => {
+  const ledger = content.trimEnd().split("\n").map((line, index) => {
     try {
       return parseEntry(JSON.parse(line), index + 1);
     } catch (error) {
@@ -66,6 +98,57 @@ export function readAccountImportCosts(path: string): AccountImportCostEntry[] {
       throw error;
     }
   });
+  const costs = ledger.filter((entry): entry is AccountImportCostEntry => entry.source === "account-import")
+    .map((entry) => ({ ...entry }));
+  const byAccount = new Map(costs.map((entry) => [entry.accountId, entry]));
+  for (const correction of ledger.filter((entry): entry is AccountImportPlanTypeCorrectionEntry => entry.source === "account-import-plan-type-correction")) {
+    const cost = byAccount.get(correction.accountId);
+    if (!cost || cost.id !== correction.originalEntryId) {
+      throw new Error(`账号 ${correction.accountId} 的类型更正找不到原采购记录`);
+    }
+    if (cost.planType !== correction.previousPlanType) {
+      throw new Error(`账号 ${correction.accountId} 的类型更正前置类型不一致`);
+    }
+    cost.planType = correction.planType;
+  }
+  return costs;
+}
+
+export function recordAccountImportPlanTypeCorrections(input: {
+  path: string;
+  accountIds: number[];
+  planType: OAuthPlanType;
+  occurredAt?: string;
+}) {
+  const accountIds = [...new Set(input.accountIds)].sort((left, right) => left - right);
+  if (accountIds.some((id) => !Number.isSafeInteger(id) || id < 1)) throw new Error("类型更正账号 ID 必须为正整数");
+  const costs = readAccountImportCosts(input.path);
+  const byAccount = new Map(costs.map((entry) => [entry.accountId, entry]));
+  const occurredAt = input.occurredAt ?? new Date().toISOString();
+  const entries: AccountImportPlanTypeCorrectionEntry[] = accountIds.flatMap((accountId) => {
+    const cost = byAccount.get(accountId);
+    if (!cost || cost.planType === input.planType) return [];
+    return [{
+      version: 1,
+      id: correctionEntryId(accountId, input.planType),
+      source: "account-import-plan-type-correction",
+      occurredAt,
+      accountId,
+      originalEntryId: cost.id,
+      previousPlanType: cost.planType,
+      planType: input.planType,
+    }];
+  });
+  if (entries.length > 0) {
+    mkdirSync(dirname(input.path), { recursive: true, mode: 0o700 });
+    appendFileSync(input.path, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+  }
+  return {
+    requestedAccountIds: accountIds,
+    correctedAccountIds: entries.map((entry) => entry.accountId),
+    skippedAccountIds: accountIds.filter((accountId) => !entries.some((entry) => entry.accountId === accountId)),
+    correctedCount: entries.length,
+  };
 }
 
 export function summarizeAccountImportCosts(path: string, input: { day?: string; period?: string }) {

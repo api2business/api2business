@@ -129,7 +129,7 @@ export class Sub2ApiRuntimeService {
         concurrency: input.capacity,
         priority: input.priority,
         auto_pause_on_expired: accounts.every((account) => account.auto_pause_on_expired !== false),
-        update_existing: false,
+        update_existing: true,
         skip_default_group_bind: true,
         confirm_mixed_channel_risk: true,
       }, requestKey);

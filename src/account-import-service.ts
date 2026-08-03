@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppConfig, OAuthPlanType } from "./config";
 import { accountImportPreflight, type AccountImportPreflightPlan } from "./account-import-preflight";
-import { recordAccountImportCosts } from "./account-import-cost-ledger";
+import { recordAccountImportCosts, recordAccountImportPlanTypeCorrections } from "./account-import-cost-ledger";
 import { inspectAccounts, verifyImportedAccounts } from "./account-inspection";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { normalizeAccountImportInput } from "./account-import-input";
@@ -281,8 +281,8 @@ export class AccountImportService {
           `账号终态校验 ${verification.aligned}/${verification.selected} 对齐`);
         await this.persistWorkerJob(job);
       }
-      if (job.settings.confirm && createdIds.length > 0) {
-        job.accounting = recordAccountImportCosts({
+      if (job.settings.confirm && (createdIds.length > 0 || updatedIds.length > 0)) {
+        const acquisition = recordAccountImportCosts({
           path: this.config.operations.accountImportLedgerPath,
           fingerprint: job.fingerprint,
           accountIds: createdIds,
@@ -290,8 +290,14 @@ export class AccountImportService {
           planType: job.settings.planType,
           occurredOn: new Date().toLocaleDateString("sv-SE", { timeZone: this.config.monitor.timezone }),
         });
+        const planTypeCorrections = recordAccountImportPlanTypeCorrections({
+          path: this.config.operations.accountImportLedgerPath,
+          accountIds: updatedIds,
+          planType: job.settings.planType,
+        });
+        job.accounting = { ...acquisition, planTypeCorrections };
         const accounting = job.accounting;
-        this.log(job, "accounting", "recorded", `人民币采购成本已记账 ${accounting.recordedCount} 个账号，共 ¥${Number(accounting.totalCostCny).toFixed(2)}`);
+        this.log(job, "accounting", "recorded", `人民币采购成本已记账 ${accounting.recordedCount} 个账号，共 ¥${Number(accounting.totalCostCny).toFixed(2)}；类型更正 ${planTypeCorrections.correctedCount} 个`);
         output.accounting = accounting;
         await this.persistWorkerJob(job);
       }

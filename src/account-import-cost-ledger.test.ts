@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { accountImportBatchId, readAccountImportCosts, recordAccountImportCosts } from "./account-import-cost-ledger";
+import { accountImportBatchId, readAccountImportCosts, recordAccountImportCosts, recordAccountImportPlanTypeCorrections } from "./account-import-cost-ledger";
 
 test("records CNY account costs once per stable account id", () => {
   const directory = mkdtempSync(join(tmpdir(), "apistate-cost-ledger-"));
@@ -70,6 +70,38 @@ test("preserves Team as an import label in the CNY ledger", () => {
     });
     expect(readAccountImportCosts(path)).toEqual([
       expect.objectContaining({ accountId: 104, planType: "team", unitCostCny: 20, amountCny: 20 }),
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("corrects an imported plan type without changing acquisition cost", () => {
+  const directory = mkdtempSync(join(tmpdir(), "apistate-cost-ledger-correction-"));
+  const path = join(directory, "costs.jsonl");
+  try {
+    recordAccountImportCosts({
+      path,
+      fingerprint: "mistyped-free-batch",
+      accountIds: [377, 378, 379],
+      unitCostCny: 0.01,
+      planType: "free",
+      occurredOn: "2026-08-03",
+    });
+    const correction = recordAccountImportPlanTypeCorrections({
+      path,
+      accountIds: [377, 378, 379],
+      planType: "k12",
+      occurredAt: "2026-08-03T12:00:00.000Z",
+    });
+    const repeated = recordAccountImportPlanTypeCorrections({ path, accountIds: [377, 378, 379], planType: "k12" });
+
+    expect(correction).toMatchObject({ correctedAccountIds: [377, 378, 379], correctedCount: 3 });
+    expect(repeated).toMatchObject({ correctedCount: 0, skippedAccountIds: [377, 378, 379] });
+    expect(readAccountImportCosts(path)).toEqual([
+      expect.objectContaining({ accountId: 377, planType: "k12", amountCny: 0.01 }),
+      expect.objectContaining({ accountId: 378, planType: "k12", amountCny: 0.01 }),
+      expect.objectContaining({ accountId: 379, planType: "k12", amountCny: 0.01 }),
     ]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
