@@ -240,9 +240,7 @@ export class IdleAccountProbeService {
             continue;
           }
         }
-        for (let offset = 0; offset < candidates.length; offset += policy.concurrency) {
-          const batch = candidates.slice(offset, offset + policy.concurrency);
-          const settled = await Promise.all(batch.map(async (candidate) => {
+        const settled = await Promise.all(candidates.map(async (candidate) => {
             try {
               const response = await this.isolation!.probe(candidate.accountId, policy.model, policy.accountTimeoutMs);
               return {
@@ -266,10 +264,8 @@ export class IdleAccountProbeService {
                 error: error instanceof Error ? error.message : String(error),
               };
             }
-          }));
-          results.push(...settled.map((result) => ({ round, ...result })));
-          if (Date.now() - startedAt >= policy.roundTimeoutSeconds * 1000) break;
-        }
+        }));
+        results.push(...settled.map((result) => ({ round, ...result })));
       }
       const succeeded = results.filter((result) => result.ok === true).length;
       const failed = results.filter((result) => result.ok === false).length;
@@ -290,6 +286,7 @@ export class IdleAccountProbeService {
         planned,
         ready,
         unreadyAccountIds: [...unreadyAccountIds].sort((left, right) => left - right),
+        probeConcurrency: "all-ready-candidates",
         durationMs: Date.now() - startedAt,
         results,
         evidence: "isolated-user-api-key-responses-request",

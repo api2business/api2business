@@ -129,3 +129,31 @@ test("idle probe does not send requests when planned bulk recovery fails", async
   });
   expect(probes).toBe(0);
 });
+
+test("idle probe sends every ready planned request concurrently", async () => {
+  let active = 0;
+  let peak = 0;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const rows = Array.from({ length: 8 }, (_, index) => ({
+    account_id: index + 1, account_name: `upstream-${index + 1}`, platform: "openai", priority: 300,
+    account_status: "active", schedulable: true,
+  }));
+  const runtime = { recoverAccounts: async () => {} };
+  const isolation = {
+    get: (accountId: number) => ({ accountId, groupId: accountId + 100, keyCreated: false }),
+    probe: async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await gate;
+      active -= 1;
+      return { classification: "alive", ordinaryLogRecorded: true };
+    },
+  };
+  const service = new IdleAccountProbeService(config, reads(rows), runtime as never, isolation as never);
+  const running = service.run([], 1);
+  await Bun.sleep(5);
+  expect(peak).toBe(8);
+  release();
+  expect(await running).toMatchObject({ attempted: 8, succeeded: 8, probeConcurrency: "all-ready-candidates" });
+});
