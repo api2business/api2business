@@ -15,6 +15,7 @@ export interface UpstreamQuotaSample {
   remainingCny: number | null;
   sourceQueriedAt: string | null;
   apiAmountUsdTotal?: number | null;
+  walletApiAmountUsdTotal?: number | null;
 }
 
 function object(value: unknown): Row {
@@ -24,6 +25,55 @@ function object(value: unknown): Row {
 function finite(value: unknown): number | null {
   const number = Number(value);
   return value !== null && value !== undefined && Number.isFinite(number) ? number : null;
+}
+
+interface WalletCostObservation {
+  walletKey: string;
+  endedAt: number;
+  consumedCny: number;
+  apiAmountUsd: number;
+}
+
+function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObservation[] {
+  const byWallet = new Map<string, UpstreamQuotaSample[]>();
+  for (const sample of samples) {
+    if (sample.remainingCny === null || sample.walletApiAmountUsdTotal === null
+      || sample.walletApiAmountUsdTotal === undefined) continue;
+    const rows = byWallet.get(sample.walletKey) ?? [];
+    rows.push(sample);
+    byWallet.set(sample.walletKey, rows);
+  }
+  const observations: WalletCostObservation[] = [];
+  for (const [walletKey, rows] of byWallet) {
+    rows.sort((left, right) => Date.parse(left.sampledAt) - Date.parse(right.sampledAt));
+    let anchor = rows[0];
+    for (const current of rows.slice(1)) {
+      if (!anchor) {
+        anchor = current;
+        continue;
+      }
+      const anchorBalance = anchor.remainingCny!;
+      const currentBalance = current.remainingCny!;
+      const anchorOutput = anchor.walletApiAmountUsdTotal!;
+      const currentOutput = current.walletApiAmountUsdTotal!;
+      if (currentOutput < anchorOutput || currentBalance > anchorBalance) {
+        anchor = current;
+        continue;
+      }
+      if (currentBalance >= anchorBalance) continue;
+      const apiAmountUsd = currentOutput - anchorOutput;
+      if (apiAmountUsd > 0) {
+        observations.push({
+          walletKey,
+          endedAt: Date.parse(current.sampledAt),
+          consumedCny: anchorBalance - currentBalance,
+          apiAmountUsd,
+        });
+      }
+      anchor = current;
+    }
+  }
+  return observations;
 }
 
 export function buildQuotaSamples(
@@ -51,11 +101,18 @@ export function buildQuotaSamples(
       cnyPerUsd,
       remainingCny: remainingUsd === null ? null : remainingUsd * cnyPerUsd,
       sourceQueriedAt: typeof result.queriedAt === "string" ? result.queriedAt : null,
+      walletApiAmountUsdTotal: finite(result.apiAmountUsdTotal),
     };
     const current = wallets.get(walletKey);
     if (!current) wallets.set(walletKey, candidate);
     else {
       current.schedulable ||= candidate.schedulable;
+      current.walletApiAmountUsdTotal = current.walletApiAmountUsdTotal === null
+        || current.walletApiAmountUsdTotal === undefined
+        || candidate.walletApiAmountUsdTotal === null
+        || candidate.walletApiAmountUsdTotal === undefined
+        ? null
+        : current.walletApiAmountUsdTotal + candidate.walletApiAmountUsdTotal;
       if (current.remainingCny === null && candidate.remainingCny !== null) {
         current.accountId = candidate.accountId;
         current.remainingUsd = candidate.remainingUsd;
@@ -74,8 +131,11 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
   if (!latestAt) return {
     sampledAt: null, totalRemainingCny: null, schedulableRemainingCny: null,
     unschedulableRemainingCny: null, knownWallets: 0, unknownWallets: 0,
-    consumedCny: null, estimatedAvailableHours: null, burnCoverageWallets: 0,
-    insufficientBurnWallets: 0, warning: "尚无额度采样",
+    consumedCny: null, apiAmountUsd: null, realtimeCostCnyPerApiUsd: null,
+    sampleRealtimeCostCnyPerApiUsd: null, costConsumedCny: 0, costApiAmountUsd: 0,
+    costCoverageWallets: 0, burnWindowHours: 0, estimatedAvailableHours: null,
+    burnCoverageWallets: 0, insufficientBurnWallets: 0, warning: "尚无额度采样",
+    walletDistribution: [],
   };
   const latestRows = samples.filter((row) => Date.parse(row.sampledAt) === latestAt);
   const known = latestRows.filter((row) => row.remainingCny !== null);
@@ -116,6 +176,22 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
   const burnWindowHours = productionPoints.length >= 2
     ? Math.max(0, (Date.parse(productionPoints.at(-1)![0]) - Date.parse(productionPoints[0]![0])) / 3_600_000)
     : 0;
+  const cutoffAt = latestAt - windowHours * 3_600_000;
+  const costObservations = walletCostObservations(samples)
+    .filter((observation) => observation.endedAt >= cutoffAt && observation.endedAt <= latestAt);
+  const currentCostObservations = costObservations.filter((observation) => observation.endedAt === latestAt);
+  const costConsumedCny = costObservations.reduce((sum, observation) => sum + observation.consumedCny, 0);
+  const costApiAmountUsd = costObservations.reduce((sum, observation) => sum + observation.apiAmountUsd, 0);
+  const sampleCostConsumedCny = currentCostObservations.reduce((sum, observation) => sum + observation.consumedCny, 0);
+  const sampleCostApiAmountUsd = currentCostObservations.reduce((sum, observation) => sum + observation.apiAmountUsd, 0);
+  const costCoverageWallets = new Set(costObservations.map((observation) => observation.walletKey)).size;
+  const latestWalletOutputMissing = known.filter((row) => row.walletApiAmountUsdTotal === null
+    || row.walletApiAmountUsdTotal === undefined).length;
+  const warnings = [
+    latestRows.length > known.length ? `${latestRows.length - known.length} 个 wallet 余额未知` : null,
+    latestWalletOutputMissing > 0 ? `${latestWalletOutputMissing} 个 wallet 缺少归属产出样本` : null,
+    costCoverageWallets === 0 ? "最近一小时缺少可配对的 wallet 消耗与产出" : null,
+  ].filter(Boolean);
   return {
     sampledAt: new Date(latestAt).toISOString(),
     totalRemainingCny: total,
@@ -125,15 +201,19 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
     unknownWallets: latestRows.length - known.length,
     consumedCny: burnKnown ? consumed : null,
     apiAmountUsd,
-    realtimeCostCnyPerApiUsd: burnKnown && consumed > 0 && apiAmountUsd !== null && apiAmountUsd > 0
-      ? consumed / apiAmountUsd : null,
+    realtimeCostCnyPerApiUsd: costConsumedCny > 0 && costApiAmountUsd > 0
+      ? costConsumedCny / costApiAmountUsd : null,
+    sampleRealtimeCostCnyPerApiUsd: sampleCostConsumedCny > 0 && sampleCostApiAmountUsd > 0
+      ? sampleCostConsumedCny / sampleCostApiAmountUsd : null,
+    costConsumedCny,
+    costApiAmountUsd,
+    costCoverageWallets,
     burnWindowHours,
     estimatedAvailableHours: burnKnown && consumed > 0 && burnWindowHours > 0
       ? schedulable / (consumed / burnWindowHours) : null,
     burnCoverageWallets: coverage,
     insufficientBurnWallets: Math.max(0, insufficient),
-    warning: latestRows.length > known.length
-      ? `${latestRows.length - known.length} 个 wallet 余额未知`
+    warning: warnings.length > 0 ? warnings.join("；")
       : !burnKnown ? "最近一小时有效样本不足，暂不可估算消耗" : null,
     walletDistribution,
   };
@@ -153,13 +233,11 @@ export function quotaHistory(samples: UpstreamQuotaSample[], windowHours = 1, di
     const sampleApiAmountUsdPerHour = apiAmountUsdTotal !== null && previousApiAmountUsdTotal !== null && sampleElapsedHours > 0
       ? Math.max(0, apiAmountUsdTotal - previousApiAmountUsdTotal) / sampleElapsedHours
       : null;
-    const sampleWindow = previousAt === undefined ? [] : samples.filter((row) => row.sampledAt === previousAt || row.sampledAt === sampledAt);
-    const sampleSummary = summarizeQuotaSamples(sampleWindow, sampleElapsedHours);
-    const window = samples.filter((row) => {
+    const historical = samples.filter((row) => {
       const at = Date.parse(row.sampledAt);
-      return at <= end && at >= end - windowHours * 3_600_000;
+      return at <= end;
     });
-    const summary = summarizeQuotaSamples(window, windowHours);
+    const summary = summarizeQuotaSamples(historical, windowHours);
     return {
       sampledAt,
       totalRemainingCny: summary.totalRemainingCny,
@@ -167,7 +245,7 @@ export function quotaHistory(samples: UpstreamQuotaSample[], windowHours = 1, di
       consumedCny: summary.consumedCny,
       apiAmountUsd: summary.apiAmountUsd,
       sampleApiAmountUsdPerHour,
-      sampleRealtimeCostCnyPerApiUsd: sampleSummary.realtimeCostCnyPerApiUsd,
+      sampleRealtimeCostCnyPerApiUsd: summary.sampleRealtimeCostCnyPerApiUsd,
       rollingApiAmountUsdPerHour: summary.apiAmountUsd !== null && summary.burnWindowHours > 0
         ? summary.apiAmountUsd / summary.burnWindowHours
         : null,

@@ -123,10 +123,13 @@ export class OperationsStore {
         remaining_cny numeric,
         source_queried_at timestamptz,
         api_amount_usd_total numeric,
+        wallet_api_amount_usd_total numeric,
         PRIMARY KEY (sampled_at, wallet_key)
       );
       ALTER TABLE apistate_upstream_quota_samples
         ADD COLUMN IF NOT EXISTS api_amount_usd_total numeric;
+      ALTER TABLE apistate_upstream_quota_samples
+        ADD COLUMN IF NOT EXISTS wallet_api_amount_usd_total numeric;
       CREATE INDEX IF NOT EXISTS apistate_upstream_quota_samples_wallet_time_idx
         ON apistate_upstream_quota_samples(wallet_key, sampled_at DESC);
       CREATE TABLE IF NOT EXISTS apistate_oauth_runtime_samples (
@@ -230,10 +233,12 @@ export class OperationsStore {
         await tx`
           INSERT INTO apistate_upstream_quota_samples (
             sampled_at, wallet_key, account_id, schedulable, status, provider,
-            probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at, api_amount_usd_total
+            probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at,
+            api_amount_usd_total, wallet_api_amount_usd_total
           ) VALUES (${sample.sampledAt}, ${sample.walletKey}, ${sample.accountId},
             ${sample.schedulable}, ${sample.status}, ${sample.provider}, ${sample.probeOk},
-            ${sample.remainingUsd}, ${sample.cnyPerUsd}, ${sample.remainingCny}, ${sample.sourceQueriedAt}, ${apiAmountUsdTotal})
+            ${sample.remainingUsd}, ${sample.cnyPerUsd}, ${sample.remainingCny}, ${sample.sourceQueriedAt},
+            ${apiAmountUsdTotal}, ${sample.walletApiAmountUsdTotal ?? null})
           ON CONFLICT (sampled_at, wallet_key) DO NOTHING
         `;
       }
@@ -243,7 +248,8 @@ export class OperationsStore {
   async getUpstreamQuotaSamples(hours: number) {
     return await this.sql`
       SELECT sampled_at, wallet_key, account_id, schedulable, status, provider,
-        probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at, api_amount_usd_total
+        probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at,
+        api_amount_usd_total, wallet_api_amount_usd_total
       FROM apistate_upstream_quota_samples
       WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
          OR sampled_at IN (

@@ -216,6 +216,7 @@ export class OperationsService {
       cnyPerUsd: Number(row.cny_per_usd), remainingCny: row.remaining_cny == null ? null : Number(row.remaining_cny),
       sourceQueriedAt: row.source_queried_at == null ? null : String(row.source_queried_at),
       apiAmountUsdTotal: row.api_amount_usd_total == null ? null : Number(row.api_amount_usd_total),
+      walletApiAmountUsdTotal: row.wallet_api_amount_usd_total == null ? null : Number(row.wallet_api_amount_usd_total),
     }));
     return {
       ok: true,

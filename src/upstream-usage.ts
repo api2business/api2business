@@ -5,6 +5,7 @@ export interface UpstreamUsageTarget {
   apiKey: string;
   status: string;
   schedulable: boolean;
+  apiAmountUsdTotal?: number;
 }
 
 export interface UpstreamUsageResult {
@@ -13,6 +14,7 @@ export interface UpstreamUsageResult {
   baseUrl: string;
   status: string;
   schedulable: boolean;
+  apiAmountUsdTotal: number;
   ok: boolean;
   provider: "sub2api" | "new-api" | "unknown";
   quota: {
@@ -105,6 +107,7 @@ function emptyResult(target: UpstreamUsageTarget, startedAt: number, days: numbe
     baseUrl: target.baseUrl,
     status: target.status,
     schedulable: target.schedulable,
+    apiAmountUsdTotal: finite(target.apiAmountUsdTotal) ?? 0,
     ok: false,
     provider: "unknown",
     quota: { limit: null, used: null, remaining: null, unlimited: null, unit: null },

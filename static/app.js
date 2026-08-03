@@ -386,13 +386,14 @@ function renderUnifiedQuotaSummary(summary) {
   $('#quota-schedulable').textContent = summary.schedulableRemainingCny == null ? '—' : cny(schedulable)
   $('#quota-consumed').textContent = summary.consumedCny == null ? '暂不可计算' : cny(summary.consumedCny)
   $('#quota-output').textContent = summary.apiAmountUsd == null ? '暂不可计算' : usdText(summary.apiAmountUsd, 3)
-  const rollingCost = finiteChartValue(summary.realtimeCostCnyPerApiUsd) ?? lastFiniteChartValue(points, 'realtimeCostCnyPerApiUsd')
+  const rollingCost = finiteChartValue(summary.realtimeCostCnyPerApiUsd)
   $('#quota-realtime-cost').textContent = rollingCost === null ? '暂不可计算' : `¥${number(rollingCost, 4)}/刀`
   const hours = summary.estimatedAvailableHours == null ? null : Number(summary.estimatedAvailableHours)
   $('#quota-estimated-hours').textContent = hours !== null && Number.isFinite(hours) ? (hours >= 24 ? `${number(hours / 24, 1)} 天` : `${number(hours, 1)} 小时`) : '暂不可估算'
-  const sampleSpeed = lastFiniteChartValue(points, 'sampleApiAmountUsdPerHour')
-  const rollingSpeed = lastFiniteChartValue(points, 'rollingApiAmountUsdPerHour')
-  const sampleCost = lastFiniteChartValue(points, 'sampleRealtimeCostCnyPerApiUsd')
+  const latestPoint = points.at(-1) ?? {}
+  const sampleSpeed = finiteChartValue(latestPoint.sampleApiAmountUsdPerHour)
+  const rollingSpeed = finiteChartValue(latestPoint.rollingApiAmountUsdPerHour)
+  const sampleCost = finiteChartValue(summary.sampleRealtimeCostCnyPerApiUsd)
   $('#quota-sample-speed').textContent = sampleSpeed === null ? '暂不可计算' : usdText(sampleSpeed, 2)
   $('#quota-rolling-speed').textContent = rollingSpeed === null ? '暂不可计算' : usdText(rollingSpeed, 2)
   $('#quota-sample-cost').textContent = sampleCost === null ? '暂不可计算' : `¥${number(sampleCost, 4)}/刀`
@@ -1168,35 +1169,10 @@ function finiteChartValue(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function carryForwardChartPoints(points, series) {
-  const latest = new Map()
-  return points.map((point) => {
-    const normalized = { ...point }
-    series.forEach(({ key }) => {
-      const value = finiteChartValue(point[key])
-      if (value === null) {
-        if (latest.has(key)) normalized[key] = latest.get(key)
-      } else {
-        latest.set(key, value)
-        normalized[key] = value
-      }
-    })
-    return normalized
-  })
-}
-
-function lastFiniteChartValue(points, key) {
-  for (let index = points.length - 1; index >= 0; index -= 1) {
-    const value = finiteChartValue(points[index]?.[key])
-    if (value !== null) return value
-  }
-  return null
-}
-
 function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null }) {
   const chartWidth = 1000
   if (points.length < 2) return `<text x="${chartWidth / 2}" y="78" text-anchor="middle" class="chart-empty">至少需要两个采样点</text>`
-  const chartPoints = carryForwardChartPoints(points, series)
+  const chartPoints = points
   const values = series.flatMap(({ key }) => chartPoints
     .filter((point) => point[key] !== null && point[key] !== undefined)
     .map((point) => Number(point[key])).filter(Number.isFinite))
@@ -1219,13 +1195,27 @@ function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLab
     return `<text x="56" y="${row + 3}" text-anchor="end" class="chart-axis chart-axis-y">${escapeHtml(formatValue(value))}</text><line x1="${plotLeft}" y1="${row}" x2="${plotRight}" y2="${row}" class="chart-grid"/>`
   }).join('')
   const lines = series.map(({ key, className, label }) => {
-    const valid = chartPoints.map((point, index) => ({ index, raw: point[key], value: Number(point[key]) }))
-      .filter(({ raw, value }) => raw !== null && raw !== undefined && Number.isFinite(value))
+    const valuesByPoint = chartPoints.map((point, index) => {
+      const value = finiteChartValue(point[key])
+      return value === null ? null : { index, value }
+    })
+    const valid = valuesByPoint.filter((value) => value !== null)
     if (valid.length < 2) return ''
-    const latest = valid.at(-1)
+    const segments = []
+    let segment = []
+    for (const value of valuesByPoint) {
+      if (value === null) {
+        if (segment.length > 1) segments.push(segment)
+        segment = []
+      } else segment.push(value)
+    }
+    if (segment.length > 1) segments.push(segment)
+    const current = valuesByPoint.at(-1)
     const clippedHigh = upperBound === null ? '' : valid.filter(({ value }) => value > upperBound).map(({ index, value }) => `<path class="${className} chart-clipped-point" d="M ${x(index) - 4} ${plotTop + 7} L ${x(index)} ${plotTop + 1} L ${x(index) + 4} ${plotTop + 7} Z"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(value))}${unit ? ` ${escapeHtml(unit)}` : ''}（超出图表上限 ${escapeHtml(formatValue(upperBound))}）</title></path>`).join('')
     const clippedLow = lowerBound === null ? '' : valid.filter(({ value }) => value < lowerBound).map(({ index, value }) => `<path class="${className} chart-clipped-point" d="M ${x(index) - 4} ${plotBottom - 7} L ${x(index)} ${plotBottom - 1} L ${x(index) + 4} ${plotBottom - 7} Z"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(value))}${unit ? ` ${escapeHtml(unit)}` : ''}（低于图表下限 ${escapeHtml(formatValue(lowerBound))}）</title></path>`).join('')
-    return `<polyline class="${className}" points="${valid.map(({ index, value }) => `${x(index)},${y(value)}`).join(' ')}"/><circle class="${className} chart-latest-point" cx="${x(latest.index)}" cy="${y(latest.value)}" r="3"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(latest.value))}${unit ? ` ${escapeHtml(unit)}` : ''}</title></circle>${clippedHigh}${clippedLow}`
+    const polylines = segments.map((values) => `<polyline class="${className}" points="${values.map(({ index, value }) => `${x(index)},${y(value)}`).join(' ')}"/>`).join('')
+    const currentPoint = current === null || current === undefined ? '' : `<circle class="${className} chart-latest-point" cx="${x(current.index)}" cy="${y(current.value)}" r="3"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(current.value))}${unit ? ` ${escapeHtml(unit)}` : ''}</title></circle>`
+    return `${polylines}${currentPoint}${clippedHigh}${clippedLow}`
   }).join('')
   const first = new Date(chartPoints[0].sampledAt), last = new Date(chartPoints.at(-1).sampledAt)
   const label = (date) => date.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false })
@@ -2144,13 +2134,14 @@ async function upstreamsPage() {
       $('#quota-schedulable').textContent = summary.schedulableRemainingCny == null ? '—' : cny(schedulable)
       $('#quota-consumed').textContent = summary.consumedCny == null ? '暂不可计算' : cny(summary.consumedCny)
       $('#quota-output').textContent = summary.apiAmountUsd == null ? '暂不可计算' : usdText(summary.apiAmountUsd, 3)
-      const rollingCost = finiteChartValue(summary.realtimeCostCnyPerApiUsd) ?? lastFiniteChartValue(points, 'realtimeCostCnyPerApiUsd')
+      const rollingCost = finiteChartValue(summary.realtimeCostCnyPerApiUsd)
       $('#quota-realtime-cost').textContent = rollingCost === null ? '暂不可计算' : `¥${number(rollingCost, 4)}/刀`
       const hours = summary.estimatedAvailableHours == null ? null : Number(summary.estimatedAvailableHours)
       $('#quota-estimated-hours').textContent = hours !== null && Number.isFinite(hours) ? (hours >= 24 ? `${number(hours / 24, 1)} 天` : `${number(hours, 1)} 小时`) : '暂不可估算'
-      const sampleSpeed = lastFiniteChartValue(points, 'sampleApiAmountUsdPerHour')
-      const rollingSpeed = lastFiniteChartValue(points, 'rollingApiAmountUsdPerHour')
-      const sampleCost = lastFiniteChartValue(points, 'sampleRealtimeCostCnyPerApiUsd')
+      const latestPoint = points.at(-1) ?? {}
+      const sampleSpeed = finiteChartValue(latestPoint.sampleApiAmountUsdPerHour)
+      const rollingSpeed = finiteChartValue(latestPoint.rollingApiAmountUsdPerHour)
+      const sampleCost = finiteChartValue(summary.sampleRealtimeCostCnyPerApiUsd)
       $('#quota-sample-speed').textContent = sampleSpeed === null ? '暂不可计算' : usdText(sampleSpeed, 2)
       $('#quota-rolling-speed').textContent = rollingSpeed === null ? '暂不可计算' : usdText(rollingSpeed, 2)
       $('#quota-sample-cost').textContent = sampleCost === null ? '暂不可计算' : `¥${number(sampleCost, 4)}/刀`

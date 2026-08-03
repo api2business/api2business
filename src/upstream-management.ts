@@ -714,27 +714,28 @@ export class UpstreamManagementService {
       kind: "upstream-usage-targets",
       priority: "manual",
       cacheMode: "bypass-cache",
-      sql: `SELECT
+      sql: `WITH targets AS (
+        SELECT
           a.id,
           a.name,
           RTRIM(COALESCE(a.credentials->>'base_url', ''), '/') AS base_url,
-          COALESCE(a.credentials->>'api_key', '') AS api_key
-          ,a.status
-          ,COALESCE(a.schedulable, false) AS schedulable
-          ,(SELECT COALESCE(SUM(usage.actual_cost), 0)::numeric
-            FROM usage_logs usage
-            JOIN accounts usage_account ON usage_account.id = usage.account_id
-            WHERE usage_account.deleted_at IS NULL
-              AND LOWER(usage_account.type) = 'apikey'
-              AND NULLIF(usage_account.credentials->>'base_url', '') IS NOT NULL
-          ) AS api_amount_usd_total
+          COALESCE(a.credentials->>'api_key', '') AS api_key,
+          a.status,
+          COALESCE(a.schedulable, false) AS schedulable,
+          COALESCE(SUM(usage.actual_cost), 0)::numeric AS account_api_amount_usd_total
         FROM accounts a
+        LEFT JOIN usage_logs usage ON usage.account_id = a.id
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
           AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
           AND NULLIF(a.credentials->>'api_key', '') IS NOT NULL
           AND ($1::text = '' OR a.id = ANY(string_to_array($1::text, $2::text)::bigint[]))
-        ORDER BY a.id`,
+        GROUP BY a.id
+      )
+      SELECT targets.*,
+        SUM(account_api_amount_usd_total) OVER()::numeric AS api_amount_usd_total
+      FROM targets
+      ORDER BY id`,
       parameters: [accountIds.join(","), ","],
     });
     const targets = query.rows.map((item): UpstreamUsageTarget => ({
@@ -744,6 +745,7 @@ export class UpstreamManagementService {
       apiKey: String(item.api_key ?? ""),
       status: String(item.status ?? "unknown"),
       schedulable: item.schedulable === true,
+      apiAmountUsdTotal: Number(item.account_api_amount_usd_total ?? 0),
     }));
     const results = await queryUpstreamUsageConcurrently(targets, {
       concurrency: settings.usageConcurrency,

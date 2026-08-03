@@ -66,7 +66,7 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(app).toContain("requestJson('/api/upstreams/usage'");
   expect(app).toContain("result.databaseQueries");
   expect(app).toContain("queryUsage([], (status)");
-  expect(html).toContain('/app.js?v=upstream-isolation-v1');
+  expect(html).toContain('/app.js?v=cost-recovery-v1');
   expect(html).toContain('class="page-head upstream-slim-head"');
   expect(html).toContain('class="metric-strip upstream-metrics"');
   expect(html).toContain('id="upstream-quota-refresh-interval"');
@@ -84,8 +84,6 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(html).toContain('id="quota-cost-chart"');
   expect(app).toContain("requestJson('/api/upstreams/quota-summary')");
   expect(app).toContain("usdText(summary.apiAmountUsd, 3)");
-  expect(app).toContain('carryForwardChartPoints(points, series)');
-  expect(app).toContain("lastFiniteChartValue(points, 'sampleRealtimeCostCnyPerApiUsd')");
   expect(html).toContain('/styles.css?v=live-layout-v15');
   expect(html).toContain('最近 8 小时');
   expect(html).toContain('<th>账号余额（人民币）</th>');
@@ -322,7 +320,7 @@ test("OAuth runtime monitoring reuses the upstream history chart component", asy
   expect(html).toContain('id="oauth-runtime-speed"');
   expect(html).toContain('id="oauth-runtime-sample-speed"');
   expect(html).toContain('id="oauth-runtime-exhaustion"');
-  expect(html).toContain('/app.js?v=live-layout-v14');
+  expect(html).toContain('/app.js?v=cost-recovery-v1');
   expect(html).toContain('class="page-head live-compact-head oauth-compact-head"');
   expect(html).toContain('class="table-toolbar live-section-toolbar"');
   expect(app).toContain("apistate.operations.oauth-refresh-interval.v2");
@@ -410,7 +408,7 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
-  expect(html).toContain('/app.js?v=upstream-isolation-v1');
+  expect(html).toContain('/app.js?v=cost-recovery-v1');
   expect(html).toContain('/styles.css?v=refresh-latency-v1');
   expect(app).toContain("key: 'rollingScore'");
   expect(html).toContain('id="score-create-upstream"');

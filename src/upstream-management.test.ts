@@ -86,8 +86,8 @@ test("usage target discovery uses one queued database read", async () => {
 
 test("rolling upstream output excludes OAuth usage", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
-  expect(source).toContain("LOWER(usage_account.type) = 'apikey'");
-  expect(source).toContain("usage_account.id = usage.account_id");
+  expect(source).toMatch(/LOWER\(a\.type\)\s*=\s*'apikey'/u);
+  expect(source).toContain("SUM(usage.actual_cost)");
 });
 
 test("template application verifies persisted runtime fields through the queued reader", async () => {
