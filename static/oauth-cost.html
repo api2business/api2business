@@ -5,25 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#111412" />
   <title>OAuth 实时成本 | ApiState</title>
-  <link rel="stylesheet" href="/styles.css?v=oauth-cost-pools-v1" />
-  <script src="/app.js?v=oauth-cost-pools-v1" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=live-layout-v14" />
+  <script src="/app.js?v=live-layout-v14" type="module"></script>
 </head>
 <body data-page="oauth-cost">
   <div data-shell></div>
-  <main class="workspace">
-    <header class="page-head"><div><p class="eyebrow">OAUTH / LIVE ECONOMICS</p><h1>OAuth 实时成本</h1></div></header>
-    <div class="profile-tabs oauth-pool-tabs" role="tablist" aria-label="号池选择">
-      <button class="profile-tab is-active" type="button" role="tab" aria-selected="true" data-oauth-profile="codex">Codex</button>
-      <button class="profile-tab" type="button" role="tab" aria-selected="false" data-oauth-profile="grok">Grok</button>
-    </div>
+  <main class="workspace oauth-workspace">
+    <header class="page-head live-compact-head oauth-compact-head"><div class="live-head-title oauth-head-title"><p class="eyebrow">OAUTH / LIVE ECONOMICS</p><h1>OAuth 实时成本</h1><p id="oauth-runtime-state" class="live-head-sample oauth-head-sample">等待读取五分钟采样</p></div><div class="live-head-kpis oauth-runtime-kpis" aria-live="polite"><div class="live-rate-kpi"><span>当前采样速率</span><strong id="oauth-runtime-sample-speed">—</strong><small>API 美元 / 小时</small></div><div class="live-rate-kpi"><span>一小时滚动速率</span><strong id="oauth-runtime-speed">—</strong><small>API 美元 / 小时</small></div><div><span>最近一小时消耗</span><strong id="oauth-runtime-consumed">—</strong></div><div><span>实时剩余预期</span><strong id="oauth-runtime-remaining">—</strong></div><div><span>预计剩余时间</span><strong id="oauth-runtime-hours">—</strong></div><div class="oauth-runtime-exhaustion"><span>预计耗尽时间</span><strong id="oauth-runtime-exhaustion">—</strong><small>北京时间</small></div></div></header>
     <section class="table-section oauth-cost-section">
-      <div class="table-toolbar">
+      <div class="table-toolbar live-section-toolbar">
         <div><h2 id="oauth-cost-pool-title">Codex 当前号池实时成本</h2><p id="oauth-cost-state" class="section-state">等待查询当前池实时成本</p></div>
-        <form id="oauth-cost-form" class="score-query-controls">
-          <label class="select-field"><span>自动刷新</span><select id="oauth-cost-refresh-interval" aria-label="OAuth 成本自动刷新间隔"><option value="30" selected>30 秒</option><option value="60">60 秒</option><option value="120">2 分钟</option><option value="300">5 分钟</option><option value="0">关闭</option></select></label>
-          <small id="oauth-cost-refresh-countdown" class="oauth-refresh-countdown">下次刷新 --:--</small>
-          <button id="oauth-cost-refresh" class="query-command" type="submit"><span class="query-spinner" aria-hidden="true"></span><span>刷新号池核算</span></button>
-        </form>
+        <div class="oauth-head-controls"><div class="profile-tabs oauth-pool-tabs" role="tablist" aria-label="号池选择"><button class="profile-tab is-active" type="button" role="tab" aria-selected="true" data-oauth-profile="codex">Codex</button><button class="profile-tab" type="button" role="tab" aria-selected="false" data-oauth-profile="grok">Grok</button></div><form id="oauth-cost-form" class="score-query-controls"><label class="select-field"><span>自动刷新</span><select id="oauth-cost-refresh-interval" aria-label="OAuth 成本自动刷新间隔"><option value="30" selected>30 秒</option><option value="60">60 秒</option><option value="120">2 分钟</option><option value="300">5 分钟</option><option value="0">关闭</option></select></label><small id="oauth-cost-refresh-countdown" class="oauth-refresh-countdown">下次刷新 --:--</small><button id="oauth-cost-refresh" class="query-command" type="submit"><span class="query-spinner" aria-hidden="true"></span><span>刷新号池核算</span></button></form></div>
       </div>
       <div class="oauth-cost-metrics" aria-live="polite">
         <div><span>OAuth 账号</span><strong id="oauth-cost-accounts">—</strong><small id="oauth-cost-active">—</small></div>
@@ -32,6 +24,12 @@
         <div class="oauth-cost-health-metric"><span>号池状态</span><div class="oauth-health-summary"><strong id="oauth-cost-health">—</strong><div id="oauth-cost-health-chart" class="oauth-health-chart"></div></div><small id="oauth-cost-health-detail">—</small></div>
         <div class="oauth-cost-output-metric"><span>API 美元产出</span><strong id="oauth-cost-output">—</strong><div id="oauth-cost-output-progress" class="oauth-output-progress oauth-output-total-progress is-empty" role="progressbar" aria-label="总已产出占预期产出" aria-valuemin="0" aria-valuemax="100" aria-valuetext="缺少预期产出配置"><span></span></div><div class="oauth-cost-output-meta"><small id="oauth-cost-output-progress-label">已产出 / 预期 —</small><small id="oauth-cost-requests">—</small></div></div>
       </div>
+      <section class="oauth-runtime-monitor" aria-label="OAuth 八小时滚动产出趋势">
+        <div class="quota-charts oauth-runtime-charts">
+          <figure><figcaption><span>API 产出速度</span><small>最近 8 小时</small></figcaption><svg id="oauth-runtime-consumption-chart" viewBox="0 0 1000 150" role="img" aria-label="OAuth 最近八小时当前采样与一小时滚动 API 产出速度"></svg></figure>
+          <figure><figcaption><span>实时剩余预期</span><small>最近 8 小时</small></figcaption><svg id="oauth-runtime-remaining-chart" viewBox="0 0 1000 150" role="img" aria-label="OAuth 最近八小时实时剩余预期趋势"></svg></figure>
+        </div>
+      </section>
       <div class="table-wrap"><table class="data-table oauth-cost-table"><thead><tr><th>核算范围</th><th>账号类型</th><th>账号数</th><th>有产出</th><th>状态分布</th><th>采购成本</th><th>平均单价</th><th>当前产出 / 实时预期 / 初始预期</th><th>成本计算</th><th>请求</th><th>Token</th></tr></thead><tbody id="oauth-cost-body"><tr><td colspan="11" class="empty">正在读取当前号池 OAuth 成本</td></tr></tbody></table></div>
       <div class="table-pager"><button id="oauth-prev" class="text-command" type="button">上一页</button><span id="oauth-page">1 / 1</span><button id="oauth-next" class="text-command" type="button">下一页</button></div>
     </section>

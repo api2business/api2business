@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { recentAccountAggregateQuery, scoreRecentDatabaseRow } from "./account-score-database";
+import { recentAccountAggregateQuery, scoreRecentDatabaseRow, weightedPercentile } from "./account-score-database";
 
 const scorePolicy = {
   reliabilityWeight: 45,
@@ -198,4 +198,17 @@ test("short-window upstream burst cannot be diluted by long-window success", () 
   expect(row.effectiveFailureRate).toBe(0.1);
   expect(row.score).toBeLessThan(80);
   expect(row.grade).toBe("C");
+});
+
+test("database score window expires old samples and applies 100-call decay buckets", () => {
+  expect(recentAccountAggregateQuery).toContain("created_at >= NOW() - ($5::int * INTERVAL '1 hour')");
+  expect(recentAccountAggregateQuery).toContain("FLOOR((ranked.recent_rank - 1)::numeric / $6::numeric)");
+  const weights = Array.from({ length: 1000 }, (_, index) => Math.max(0.1, 1 - Math.floor(index / 100) * 0.1));
+  expect(Math.round(weights.reduce((sum, weight) => sum + weight, 0) * 10) / 10).toBe(550);
+});
+
+test("weighted percentile gives newer samples their declared influence", () => {
+  expect(weightedPercentile([100, 200, 300], [1, 1, 8], 0.5)).toBe(300);
+  expect(weightedPercentile([100, 200, 300], [8, 1, 1], 0.5)).toBe(100);
+  expect(weightedPercentile([], [], 0.95)).toBeNull();
 });

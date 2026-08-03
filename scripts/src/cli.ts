@@ -62,7 +62,12 @@ interface Parsed {
   suffix: string | null;
   rate: number | null;
   rechargeCny: number | null;
+  amountCny: number | null;
+  direction: string | null;
+  category: string | null;
+  description: string | null;
   remainingUsd: number | null;
+  rounds: number | null;
   page: number | null;
   search: string | null;
   apiKeyStdin: boolean;
@@ -84,7 +89,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--plan-type", "--scope", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--page", "--search"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -157,7 +162,10 @@ function parseArgs(args: string[]): Parsed {
     externalCostsJson: value(args, "--external-costs-json"),
     baseUrl: value(args, "--base-url"), suffix: value(args, "--suffix"),
     rate: decimal("--rate"), rechargeCny: decimal("--recharge-cny"),
+    amountCny: decimal("--amount-cny"), direction: value(args, "--direction"),
+    category: value(args, "--category"), description: value(args, "--description"),
     remainingUsd: nonNegativeDecimal("--remaining-usd"),
+    rounds: integer("--rounds"),
     page: integer("--page"), search: value(args, "--search"), apiKeyStdin: args.includes("--api-key-stdin"),
     templateOnly: args.includes("--template-only"),
   };
@@ -196,6 +204,9 @@ function help(): Record<string, unknown> {
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
       "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
       "accounts oauth-economics [--profile codex|grok] [--over-api]",
+      "accounts oauth-runtime [--profile codex|grok] [--over-api]",
+      "accounts idle-probe plan [--accounts <id-or-range,...>] --over-api",
+      "accounts idle-probe run [--accounts <id-or-range,...>] [--rounds 1..10] [--confirm] --over-api",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
       "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] --over-api",
       "accounts lifecycle retire status --id <plan-id> --over-api",
@@ -203,12 +214,15 @@ function help(): Record<string, unknown> {
       "upstreams list [--page N --search <text>] --over-api",
       "upstreams usage [--accounts <id-or-range,...>] --over-api",
       "upstreams usage-cache [--accounts <id-or-range,...>] --over-api",
+      "upstreams quota-summary --over-api",
       "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams create --base-url <https-url> --suffix <name> --rate <CNY/API_USD> [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
       "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--template-only] [--confirm] --over-api",
+      "upstreams recharge --id <account-id> --recharge-cny <CNY> [--confirm] --over-api",
       "upstreams status --id <workflow-id> --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
+      "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
@@ -408,6 +422,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     return await client.upstreamUsageCacheRead(accountIds);
   }
+  if (group === "upstreams" && action === "quota-summary") return await client.upstreamQuotaSummary();
   if (group === "upstreams" && action === "template") {
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-template", accountIds, scope: accountIds.length ? "selected" : "all-api-key", hint: "add --confirm to execute" };
@@ -436,8 +451,38 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-update", accountId: id, plan: input, hint: "add --confirm to execute" };
     return await client.upstreamUpdate(id, input, `upstream-update-${id}-${crypto.randomUUID()}`);
   }
+  if (group === "upstreams" && action === "recharge") {
+    const id = Number(parsed.id);
+    if (!Number.isSafeInteger(id) || id <= 0 || parsed.rechargeCny === null) {
+      throw new Error("upstreams recharge requires a positive --id and --recharge-cny");
+    }
+    if (!parsed.confirm) return {
+      ok: true, mutation: false, action: "upstream-recharge", accountId: id,
+      plan: { amountCny: parsed.rechargeCny }, hint: "add --confirm to execute",
+    };
+    return await client.upstreamRecharge(id, parsed.rechargeCny, `upstream-recharge-${id}-${crypto.randomUUID()}`);
+  }
   if (group === "payments" && action === "alipay-revenue") {
     return await client.alipayRevenue({ day: parsed.day, period: parsed.period });
+  }
+  if (group === "cash" && action === "add") {
+    if (!parsed.day || !/^\d{4}-\d{2}-\d{2}$/u.test(parsed.day)
+      || (parsed.direction !== "income" && parsed.direction !== "expense")
+      || !parsed.category?.trim() || parsed.amountCny === null || !parsed.description?.trim()) {
+      throw new Error("cash add requires --day, --direction income|expense, --category, --amount-cny, and --description");
+    }
+    if (!parsed.confirm) return {
+      ok: true, mutation: false, action: "cash-add",
+      plan: { occurredOn: parsed.day, direction: parsed.direction, category: parsed.category, amountCny: parsed.amountCny, description: parsed.description },
+      hint: "add --confirm to execute",
+    };
+    return await client.addCash({
+      occurredOn: parsed.day,
+      direction: parsed.direction,
+      category: parsed.category.trim(),
+      amountCny: parsed.amountCny,
+      description: parsed.description.trim(),
+    });
   }
   if (group === "users" && action === "balance-liability") {
     return await client.userBalanceLiability();
@@ -474,6 +519,30 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const profile = parsed.profile ?? "codex";
     if (profile !== "codex" && profile !== "grok") throw new Error("--profile must be codex or grok");
     return await client.oauthPoolEconomics(profile);
+  }
+  if (group === "accounts" && action === "oauth-runtime") {
+    const profile = parsed.profile ?? "codex";
+    if (profile !== "codex" && profile !== "grok") throw new Error("--profile must be codex or grok");
+    return await client.oauthRuntimeSummary(profile);
+  }
+  if (group === "accounts" && action === "idle-probe") {
+    const verb = parsed.command[2];
+    const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
+    if (verb === "plan") return await client.idleProbePlan(accountIds);
+    if (verb === "run") {
+      const rounds = parsed.rounds ?? 1;
+      if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10) throw new Error("--rounds must be an integer from 1 to 10");
+      if (!parsed.confirm) return {
+        ok: true,
+        mutation: false,
+        action: "account-idle-probe",
+        accountIds,
+        rounds,
+        hint: "add --confirm to execute",
+      };
+      return await client.idleProbeRun(accountIds, rounds);
+    }
+    throw new Error("accounts idle-probe requires plan or run");
   }
   if (group === "accounts" && action === "delete") {
     if (!parsed.accounts) throw new Error("accounts delete requires --accounts");

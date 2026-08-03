@@ -22,6 +22,8 @@ function rankingMeasurement(ranking: Record<string, unknown>): Record<string, un
 }
 
 function costRate(row: ScoreRow): number | null {
+  const detected = number(row.detectedCostRateCnyPerApiUsd);
+  if (detected !== null && detected > 0) return detected;
   if (typeof row.usage !== "object" || row.usage === null || Array.isArray(row.usage)) return null;
   return number((row.usage as ScoreRow).costRateCnyPerApiUsd);
 }
@@ -125,8 +127,10 @@ function buildPriorityProfile(
   if (policy.maximumPriority < policy.minimumPriority) {
     throw new Error("sub2api.priorityPlan.maximumPriority must be >= minimumPriority");
   }
-  const totalWeight = policy.qualityWeight + policy.costWeight;
-  if (totalWeight <= 0) throw new Error("sub2api.priorityPlan qualityWeight + costWeight must be positive");
+  const totalWeight = policy.qualityWeight + policy.costWeight + policy.explorationWeight + policy.balanceWeight;
+  if (totalWeight <= 0) {
+    throw new Error("sub2api.priorityPlan qualityWeight + costWeight + explorationWeight + balanceWeight must be positive");
+  }
   const rows = Array.isArray(ranking.accounts)
     ? ranking.accounts.filter((row): row is ScoreRow => typeof row === "object" && row !== null && !Array.isArray(row))
     : [];
@@ -171,12 +175,14 @@ function buildPriorityProfile(
   );
   const eligible = rows.filter((row) => {
     const accountId = number(row.accountId);
+    const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
+    const hasExplorationEvidence = policy.explorationWeight > 0
+      && attempts < policy.explorationTargetAttempts;
     return profileRow(row)
       && accountId !== null
       && !fixedAccountIds.has(String(accountId))
-      && row.confidence === policy.requiredConfidence
       && (!policy.requireCurrentAvailable || row.currentAvailable === true)
-      && number(row.score) !== null
+      && (number(row.score) !== null || hasExplorationEvidence)
       && costRate(row) !== null;
   });
   const costs = eligible.map((row) => costRate(row)!);
@@ -217,12 +223,35 @@ function buildPriorityProfile(
   }
   const minimumCost = Math.min(...costEvidence);
   const maximumCost = Math.max(...costEvidence);
-  const economicScore = (row: ScoreRow): number => {
-    const quality = number(row.score)!;
+  const knownBalances = eligible.map((row) => number(row.accountBalanceCny)).filter((value): value is number => value !== null);
+  const minimumBalance = knownBalances.length ? Math.min(...knownBalances) : null;
+  const maximumBalance = knownBalances.length ? Math.max(...knownBalances) : null;
+  const balanceScore = (row: ScoreRow): number => {
+    const balance = number(row.accountBalanceCny);
+    if (balance === null || minimumBalance === null || maximumBalance === null) return 50;
+    return maximumBalance === minimumBalance ? 100 : 100 * (balance - minimumBalance) / (maximumBalance - minimumBalance);
+  };
+  const baseEconomicScore = (row: ScoreRow): number => {
+    const quality = number(row.score) ?? policy.explorationQualityPrior;
     const cost = costRate(row)!;
     const costScore = maximumCost === minimumCost ? 100 : 100 * (maximumCost - cost) / (maximumCost - minimumCost);
-    return (quality * policy.qualityWeight + costScore * policy.costWeight) / totalWeight;
+    const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
+    const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
+    return (quality * policy.qualityWeight
+      + costScore * policy.costWeight
+      + explorationScore * policy.explorationWeight
+      + balanceScore(row) * policy.balanceWeight) / totalWeight;
   };
+  const currentPoolQualityScore = number(ranking.poolQualityScore);
+  const dynamicQualityExtraScore = (row: ScoreRow): number => {
+    if (currentPoolQualityScore === null || policy.dynamicQualityFeedback.coefficient === 0) return 0;
+    const quality = number(row.score) ?? policy.explorationQualityPrior;
+    return (policy.dynamicQualityFeedback.targetQualityScore - currentPoolQualityScore)
+      * policy.dynamicQualityFeedback.coefficient * quality / 100;
+  };
+  const economicScore = (row: ScoreRow): number => Math.max(0, Math.min(100,
+    baseEconomicScore(row) + dynamicQualityExtraScore(row),
+  ));
   const observedAnchorScore = eligible.length === 0
     ? null
     : eligible.reduce((best, row) => Math.max(best, economicScore(row)), -Infinity);
@@ -239,9 +268,12 @@ function buildPriorityProfile(
   let previousRank = 0;
   const dynamicChanges = ranked.map(({ row, combinedScore }, index) => {
     const accountId = number(row.accountId);
-    const score = number(row.score)!;
+    const score = number(row.score);
     const cost = costRate(row)!;
     const costScore = maximumCost === minimumCost ? 100 : 100 * (maximumCost - cost) / (maximumCost - minimumCost);
+    const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
+    const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
+    const weightedBalanceScore = balanceScore(row);
     const before = number(row.priority);
     if (accountId === null || before === null) throw new Error("eligible score row is missing accountId or priority");
     const rank = previousScore === combinedScore ? previousRank : index + 1;
@@ -281,6 +313,15 @@ function buildPriorityProfile(
       score,
       costRateCnyPerApiUsd: cost,
       costScore,
+      explorationScore,
+      balanceScore: weightedBalanceScore,
+      baseCombinedScore: baseEconomicScore(row),
+      dynamicQualityExtraScore: dynamicQualityExtraScore(row),
+      currentPoolQualityScore,
+      targetPoolQualityScore: policy.dynamicQualityFeedback.targetQualityScore,
+      qualityFeedbackCoefficient: policy.dynamicQualityFeedback.coefficient,
+      accountBalanceCny: number(row.accountBalanceCny),
+      costSource: number(row.detectedCostRateCnyPerApiUsd) !== null ? "detected" : "manual",
       combinedScore,
       rank,
       rankCount: ranked.length,
@@ -355,6 +396,7 @@ function buildPriorityProfile(
     ...rankingMeasurement(ranking),
     anchorScore: eligible.length === 0 ? null : priorityReferenceScore,
     observedAnchorScore,
+    currentPoolQualityScore,
     priorityReferenceScore,
     costRange: { minimumCostRateCnyPerApiUsd: minimumCost, maximumCostRateCnyPerApiUsd: maximumCost },
     eligibleCount: eligible.length,

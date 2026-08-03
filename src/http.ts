@@ -8,6 +8,7 @@ import { UpstreamManagementError, type UpstreamManagementService } from "./upstr
 import type { AppCommand, OperationRequest } from "./contracts";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
+import { TemporalSubmissionError } from "./temporal-client";
 import {
   normalizeAccountIds,
   parseAccountEconomicsWindow,
@@ -39,7 +40,7 @@ async function body(request: Request): Promise<Record<string, unknown>> {
   return await request.json().catch(() => ({})) as Record<string, unknown>;
 }
 
-function errorResponse(error: unknown): Response {
+function errorResponse(error: unknown, request?: Request): Response {
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof UpstreamManagementError) {
     return json({ ok: false, error: message, ...error.details }, error.status);
@@ -49,7 +50,14 @@ function errorResponse(error: unknown): Response {
     : /base_url|API key|后缀|费率|充值金额|幂等键|字段不能为空|当前账号缺少|JSON|ZIP|去重后的账号数量|账号数量/u.test(message)
     ? 400
     : 500;
-  if (status >= 500) console.error(JSON.stringify({ ok: false, component: "http", error: message }));
+  if (status >= 500) console.error(JSON.stringify({
+    ok: false,
+    component: "http",
+    method: request?.method ?? null,
+    path: request ? new URL(request.url).pathname : null,
+    error: message,
+    details: error instanceof TemporalSubmissionError ? error.details : undefined,
+  }));
   return json({ ok: false, error: status >= 500 ? "服务暂时不可用，请稍后重试" : message }, status);
 }
 
@@ -155,6 +163,19 @@ export function createHandler(
           lastSuccessfulResults: rows.map((row) => row.last_success_result),
           lastSuccessfulAt: rows.map((row) => row.last_success_at),
         });
+      }
+      if (request.method === "GET" && url.pathname === "/api/upstreams/quota-summary") {
+        return json(await operations.upstreamQuotaSummary());
+      }
+      if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality") {
+        return json(await operations.poolQualitySummary());
+      }
+      if (request.method === "GET" && url.pathname === "/api/oauth/runtime-summary") {
+        const profile = url.searchParams.get("profile") ?? "codex";
+        if (profile !== "codex" && profile !== "grok") {
+          return json({ ok: false, error: "profile must be codex or grok" }, 400);
+        }
+        return json(await operations.oauthRuntimeSummary(profile));
       }
       if (request.method === "POST" && url.pathname === "/api/upstreams/usage-cache/restore") {
         try { return json(await operations.restoreUpstreamUsageSuccess(await body(request))); }
@@ -307,7 +328,11 @@ export function createHandler(
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
         const input = await body(request);
         if (!Array.isArray(input.results)) return json({ ok: false, error: "results must be an array" }, 400);
-        await operations.setUpstreamUsageCache(input.results as Array<Record<string, unknown>>);
+        await operations.setUpstreamUsageCache(
+          input.results as Array<Record<string, unknown>>,
+          Number.isFinite(Number(input.apiAmountUsdTotal)) ? Number(input.apiAmountUsdTotal) : null,
+          input.recordSample === true,
+        );
         return json({ ok: true, cached: input.results.length, valuesPrinted: false });
       }
       if (request.method === "GET" && /^\/api\/internal\/account-import-jobs\/[^/]+$/u.test(url.pathname)) {
@@ -371,6 +396,20 @@ export function createHandler(
             : null,
         }) as Record<string, unknown>;
         return json({ ...state, ok: true });
+      }
+      if (request.method === "GET" && url.pathname === "/api/operations/idle-probe") {
+        const selector = url.searchParams.get("accountIds");
+        const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
+        return json(await operations.idleProbePlan(accountIds));
+      }
+      if (request.method === "POST" && url.pathname === "/api/operations/idle-probe") {
+        const input = await body(request);
+        const accountIds = Array.isArray(input.accountIds) ? normalizeAccountIds(input.accountIds) : [];
+        const rounds = Number(input.rounds ?? 1);
+        if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10) {
+          return json({ ok: false, error: "rounds must be an integer from 1 to 10" }, 400);
+        }
+        return json(await dispatcher.submit({ kind: "account.idle-probe.run", accountIds, rounds }), 202);
       }
       if (request.method === "GET" && url.pathname === "/api/ranking") return json({ ok: true, ranking: await dispatcher.dispatch({ kind: "ranking.get" }) });
       if (request.method === "GET" && url.pathname === "/api/lottery") return json(await dispatcher.dispatch({ kind: "lottery.publicState" }));
@@ -676,7 +715,7 @@ export function createHandler(
       }
       return json({ ok: false, error: "not found" }, 404);
     } catch (error) {
-      return errorResponse(error);
+      return errorResponse(error, request);
     }
   };
   return async (request) => {

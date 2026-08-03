@@ -19,6 +19,9 @@ export function automationPollDelayMs(
     throw new Error("cooldownMs must be an integer greater than or equal to maximumMs");
   }
   if (consecutiveFailures === 0) return pollMs;
-  if (consecutiveFailures > retryLimit) return cooldownMs;
+  // A failed cycle must not suppress future scheduled cycles. The database
+  // lease already advances next_run_at; polling may back off briefly, but it
+  // must keep observing the next due cycle instead of entering a long cooldown.
+  if (consecutiveFailures > retryLimit) return maximumMs;
   return Math.min(maximumMs, pollMs * (2 ** Math.min(consecutiveFailures - 1, 30)));
 }

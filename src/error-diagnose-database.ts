@@ -77,6 +77,10 @@ classified AS (
         AND system_log.message LIKE '%failover_aborted_client_disconnected'
     ) AS failover_aborted,
     CASE
+      WHEN COALESCE(e.upstream_status_code, e.status_code) = 429 THEN 'rate_limited'
+      WHEN COALESCE(e.upstream_status_code, e.status_code) = 502 THEN 'upstream_502'
+      WHEN COALESCE(e.upstream_status_code, e.status_code) = 503 THEN 'upstream_503'
+      WHEN COALESCE(e.upstream_status_code, e.status_code) = 504 THEN 'upstream_504'
       WHEN message_text LIKE '%invalid_encrypted_content%' THEN 'invalid_encrypted_content'
       WHEN message_text LIKE '%bad_response_status_code%' THEN 'bad_response_status_code'
       WHEN message_text LIKE '%selected model is at capacity%' THEN 'selected_model_at_capacity'
@@ -104,6 +108,10 @@ classified AS (
       COALESCE(e.error_type, 'unknown'),
       COALESCE(e.provider_error_code, e.provider_error_type, '-'),
       CASE
+        WHEN COALESCE(e.upstream_status_code, e.status_code) = 429 THEN 'rate_limited'
+        WHEN COALESCE(e.upstream_status_code, e.status_code) = 502 THEN 'upstream_502'
+        WHEN COALESCE(e.upstream_status_code, e.status_code) = 503 THEN 'upstream_503'
+        WHEN COALESCE(e.upstream_status_code, e.status_code) = 504 THEN 'upstream_504'
         WHEN message_text LIKE '%invalid_encrypted_content%' THEN 'invalid_encrypted_content'
         WHEN message_text LIKE '%bad_response_status_code%' THEN 'bad_response_status_code'
         WHEN message_text LIKE '%selected model is at capacity%' THEN 'selected_model_at_capacity'

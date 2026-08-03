@@ -140,8 +140,13 @@ test("deduplicates identical queued or active queries", async () => {
 });
 
 test("returns a queue timeout without opening a waiting transaction", async () => {
+  let blockerStarted!: () => void;
+  const started = new Promise<void>((resolve) => { blockerStarted = resolve; });
   const database = new FakeDatabase(async (sql) => {
-    if (sql.includes("blocker")) await Bun.sleep(40);
+    if (sql.includes("blocker")) {
+      blockerStarted();
+      await Bun.sleep(40);
+    }
     return [];
   });
   const executor = new SingleConnectionSub2ApiReadExecutor(
@@ -151,7 +156,7 @@ test("returns a queue timeout without opening a waiting transaction", async () =
   );
 
   const blocker = executor.query(request("blocker"));
-  await Bun.sleep(1);
+  await started;
   const waiting = executor.query(request("waiting"));
   await expect(waiting).rejects.toMatchObject({
     name: "sub2api_read_queue_timeout",
@@ -177,6 +182,21 @@ test("maps PostgreSQL statement timeout to a stable query timeout", async () => 
     name: "sub2api_read_query_timeout",
   });
   expect(executor.status().queryTimeouts).toBe(1);
+  await executor.close();
+});
+
+test("bounds a transaction that hangs before PostgreSQL statement timeout can start", async () => {
+  const database = new FakeDatabase(async () => await new Promise<Array<Record<string, unknown>>>(() => undefined));
+  const executor = new SingleConnectionSub2ApiReadExecutor(
+    "postgres://fixture",
+    options({ statementTimeoutMs: 5 }),
+    database,
+  );
+
+  await expect(executor.query(request("hung-transaction"))).rejects.toMatchObject({
+    name: "sub2api_read_query_timeout",
+  });
+  expect(executor.status()).toMatchObject({ active: false, activeKind: null, queryTimeouts: 1 });
   await executor.close();
 });
 

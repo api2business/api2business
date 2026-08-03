@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AppConfig } from "./config";
-import { applyPlanTypeRefunds, latestSuccessfulUsageByWallet, normalizeUpstreamWallet, OperationsService } from "./operations-service";
+import { applyPlanTypeRefunds, latestSuccessfulUsageByWallet, normalizeUpstreamWallet, OperationsService, upstreamBalanceRateByWallet } from "./operations-service";
 import type { OperationsStore } from "./operations-store";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -14,8 +14,16 @@ test("selects the latest successful USD snapshot by normalized upstream wallet",
       last_success_at: "2026-08-01T09:30:00Z", last_success_result: { ok: true, baseUrl: "https://wallet.example.com/v1", quota: { unit: "USD", remaining: 13.95879651 } } },
     { account_id: 50, queried_at: "2026-08-01T09:00:00Z", result: { ok: true, baseUrl: "https://wallet.example.com", quota: { unit: "USD", remaining: 13.95879651 } } },
     { account_id: 51, queried_at: "2026-08-01T08:00:00Z", result: { ok: true, baseUrl: "https://wallet.example.com/v1/", quota: { unit: "USD", remaining: 12 } } },
+    { account_id: 52, queried_at: "2026-08-01T11:00:00Z", result: { ok: true, baseUrl: "https://unknown.example", quota: { unit: "USD", remaining: null } } },
   ]);
   expect(selected.get("https://wallet.example.com")).toMatchObject({ quota: { remaining: 13.95879651 } });
+  expect(selected.has("https://unknown.example")).toBe(false);
+});
+
+test("uses a wallet-specific upstream balance conversion rate", () => {
+  const overrides = { "https://billing.example.com/v1": 0.1 };
+  expect(upstreamBalanceRateByWallet("https://billing.example.com", 1, overrides)).toBe(0.1);
+  expect(upstreamBalanceRateByWallet("https://other.example", 1, overrides)).toBe(1);
 });
 
 test("restores one operator-confirmed historical successful wallet snapshot", async () => {

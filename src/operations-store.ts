@@ -110,6 +110,55 @@ export class OperationsStore {
       SET last_success_result=result, last_success_at=queried_at
       WHERE last_success_result IS NULL
         AND COALESCE((result->>'ok')::boolean, false);
+      CREATE TABLE IF NOT EXISTS apistate_upstream_quota_samples (
+        sampled_at timestamptz NOT NULL,
+        wallet_key text NOT NULL,
+        account_id bigint NOT NULL,
+        schedulable boolean NOT NULL,
+        status text NOT NULL,
+        provider text NOT NULL,
+        probe_ok boolean NOT NULL,
+        remaining_usd numeric,
+        cny_per_usd numeric NOT NULL,
+        remaining_cny numeric,
+        source_queried_at timestamptz,
+        api_amount_usd_total numeric,
+        PRIMARY KEY (sampled_at, wallet_key)
+      );
+      ALTER TABLE apistate_upstream_quota_samples
+        ADD COLUMN IF NOT EXISTS api_amount_usd_total numeric;
+      CREATE INDEX IF NOT EXISTS apistate_upstream_quota_samples_wallet_time_idx
+        ON apistate_upstream_quota_samples(wallet_key, sampled_at DESC);
+      CREATE TABLE IF NOT EXISTS apistate_oauth_runtime_samples (
+        sampled_at timestamptz NOT NULL,
+        profile text NOT NULL CHECK (profile IN ('codex','grok')),
+        api_amount_usd_total numeric NOT NULL,
+        expected_api_amount_usd numeric,
+        remaining_expected_api_amount_usd numeric,
+        account_count integer NOT NULL,
+        normal_count integer NOT NULL,
+        rate_limited_count integer NOT NULL,
+        error_count integer NOT NULL,
+        PRIMARY KEY (sampled_at, profile)
+      );
+      CREATE INDEX IF NOT EXISTS apistate_oauth_runtime_samples_profile_time_idx
+        ON apistate_oauth_runtime_samples(profile, sampled_at DESC);
+      CREATE TABLE IF NOT EXISTS apistate_pool_quality_samples (
+        sampled_at timestamptz PRIMARY KEY,
+        score numeric,
+        grade text NOT NULL,
+        observed_attempts integer NOT NULL,
+        success_requests integer NOT NULL,
+        failure_requests integer NOT NULL,
+        failure_rate numeric,
+        failover_requests integer NOT NULL,
+        failover_recovered integer NOT NULL,
+        ttft_p95_ms integer,
+        first_token_samples integer NOT NULL,
+        participation jsonb NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS apistate_pool_quality_samples_time_idx
+        ON apistate_pool_quality_samples(sampled_at DESC);
       CREATE INDEX IF NOT EXISTS apistate_cash_entries_occurred_on_idx
         ON apistate_cash_entries(occurred_on DESC, created_at DESC);
       CREATE INDEX IF NOT EXISTS apistate_operation_audit_created_at_idx
@@ -151,7 +200,7 @@ export class OperationsStore {
     `;
   }
 
-  async setUpstreamUsageCache(results: Array<Record<string, unknown>>) {
+  async setUpstreamUsageCache(results: Array<Record<string, unknown>>, samples: import("./upstream-quota-monitor").UpstreamQuotaSample[] = [], apiAmountUsdTotal: number | null = null) {
     await this.sql.begin(async (tx) => {
       for (const result of results) {
         const accountId = Number(result.accountId);
@@ -177,7 +226,96 @@ export class OperationsStore {
             END
         `;
       }
+      for (const sample of samples) {
+        await tx`
+          INSERT INTO apistate_upstream_quota_samples (
+            sampled_at, wallet_key, account_id, schedulable, status, provider,
+            probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at, api_amount_usd_total
+          ) VALUES (${sample.sampledAt}, ${sample.walletKey}, ${sample.accountId},
+            ${sample.schedulable}, ${sample.status}, ${sample.provider}, ${sample.probeOk},
+            ${sample.remainingUsd}, ${sample.cnyPerUsd}, ${sample.remainingCny}, ${sample.sourceQueriedAt}, ${apiAmountUsdTotal})
+          ON CONFLICT (sampled_at, wallet_key) DO NOTHING
+        `;
+      }
     });
+  }
+
+  async getUpstreamQuotaSamples(hours: number) {
+    return await this.sql`
+      SELECT sampled_at, wallet_key, account_id, schedulable, status, provider,
+        probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at, api_amount_usd_total
+      FROM apistate_upstream_quota_samples
+      WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
+         OR sampled_at IN (
+           SELECT sampled_at FROM (
+             SELECT DISTINCT sampled_at FROM apistate_upstream_quota_samples
+             ORDER BY sampled_at DESC LIMIT 13
+           ) recent
+         )
+      ORDER BY sampled_at, wallet_key
+    `;
+  }
+
+  async addOAuthRuntimeSamples(samples: import("./oauth-runtime-monitor").OAuthRuntimeSample[]) {
+    await this.sql.begin(async (tx) => {
+      for (const sample of samples) {
+        await tx`
+          INSERT INTO apistate_oauth_runtime_samples (
+            sampled_at, profile, api_amount_usd_total, expected_api_amount_usd,
+            remaining_expected_api_amount_usd, account_count, normal_count,
+            rate_limited_count, error_count
+          ) VALUES (${sample.sampledAt}, ${sample.profile}, ${sample.apiAmountUsdTotal},
+            ${sample.expectedApiAmountUsd}, ${sample.remainingExpectedApiAmountUsd},
+            ${sample.accountCount}, ${sample.normalCount}, ${sample.rateLimitedCount}, ${sample.errorCount})
+          ON CONFLICT (sampled_at, profile) DO NOTHING
+        `;
+      }
+    });
+  }
+
+  async getOAuthRuntimeSamples(profile: "codex" | "grok", hours: number) {
+    return await this.sql`
+      SELECT sampled_at, profile, api_amount_usd_total, expected_api_amount_usd,
+        remaining_expected_api_amount_usd, account_count, normal_count,
+        rate_limited_count, error_count
+      FROM apistate_oauth_runtime_samples
+      WHERE profile=${profile}
+        AND (sampled_at >= now() - (${hours}::text || ' hours')::interval
+          OR sampled_at IN (
+            SELECT sampled_at FROM apistate_oauth_runtime_samples
+            WHERE profile=${profile} ORDER BY sampled_at DESC LIMIT 13
+          ))
+      ORDER BY sampled_at
+    `;
+  }
+
+  async addPoolQualitySample(sample: import("./pool-quality-monitor").PoolQualitySample) {
+    await this.sql`
+      INSERT INTO apistate_pool_quality_samples (
+        sampled_at, score, grade, observed_attempts, success_requests, failure_requests,
+        failure_rate, failover_requests, failover_recovered, ttft_p95_ms,
+        first_token_samples, participation
+      ) VALUES (${sample.sampledAt}, ${sample.score}, ${sample.grade}, ${sample.observedAttempts},
+        ${sample.successRequests}, ${sample.failureRequests}, ${sample.failureRate},
+        ${sample.failoverRequests}, ${sample.failoverRecovered}, ${sample.ttftP95Ms},
+        ${sample.firstTokenSamples}, ${sample.participation}::jsonb)
+      ON CONFLICT (sampled_at) DO NOTHING
+    `;
+  }
+
+  async getPoolQualitySamples(hours: number) {
+    return await this.sql`
+      SELECT sampled_at, score, grade, observed_attempts, success_requests,
+        failure_requests, failure_rate, failover_requests, failover_recovered,
+        ttft_p95_ms, first_token_samples, participation
+      FROM apistate_pool_quality_samples
+      WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
+         OR sampled_at IN (
+           SELECT sampled_at FROM apistate_pool_quality_samples
+           ORDER BY sampled_at DESC LIMIT 13
+         )
+      ORDER BY sampled_at
+    `;
   }
 
   async restoreUpstreamUsageSuccess(accountId: number, result: Record<string, unknown>) {

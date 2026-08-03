@@ -54,7 +54,7 @@ export function createServerContext(
     reads,
   );
   return {
-    service: new LotteryService(config, store, client),
+    service: new LotteryService(config, store, client, reads),
     store,
     monitor,
     auth: { password: webPassword, apiKey, sessionSecret },

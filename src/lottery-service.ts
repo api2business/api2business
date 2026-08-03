@@ -4,6 +4,8 @@ import type { AppConfig, IdentityField } from "./config";
 import { LotteryStore } from "./store";
 import { Sub2ApiClient } from "./sub2api-client";
 import type { DrawRecord, PublicDrawRecord, PublicRankingRow, Sub2ApiUser } from "./types";
+import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import { collectUserRanking } from "./user-ranking-database";
 
 class Mutex {
   private tail = Promise.resolve();
@@ -44,6 +46,10 @@ function displayName(user: Sub2ApiUser): string {
   return user.username.trim() || maskEmail(user.email);
 }
 
+export function rankingDisplayName(user: Sub2ApiUser): string {
+  return user.email.trim() || user.username.trim() || "匿名用户";
+}
+
 export class LotteryService {
   private readonly mutex = new Mutex();
 
@@ -51,6 +57,7 @@ export class LotteryService {
     readonly config: AppConfig,
     private readonly store: LotteryStore,
     private readonly sub2api: Sub2ApiClient,
+    private readonly reads: Sub2ApiReadClient | null = null,
   ) {}
 
   private excluded(user: Sub2ApiUser): boolean {
@@ -70,11 +77,40 @@ export class LotteryService {
     });
   }
 
-  async ranking(now = new Date()): Promise<{ rows: PublicRankingRow[]; totals: { actualCost: number; requests: number; tokens: number }; startDate: string; endDate: string }> {
+  async ranking(now = new Date()): Promise<{ rows: PublicRankingRow[]; totals: { actualCost: number; requests: number; tokens: number; balanceUsd: number; rechargeCny: number }; startDate: string; endDate: string; queryCompletedAt?: string; databaseQueries?: number }> {
     const local = DateTime.fromJSDate(now, { zone: this.config.ranking.timezone });
     const startDate = local.minus({ days: this.config.ranking.windowDays - 1 }).toISODate();
     const endDate = local.toISODate();
     if (!startDate || !endDate) throw new Error("failed to calculate ranking date range");
+    if (this.reads) {
+      const start = local.minus({ days: this.config.ranking.windowDays - 1 }).startOf("day").toUTC().toISO()!;
+      const end = local.plus({ days: 1 }).startOf("day").toUTC().toISO()!;
+      const todayStart = local.startOf("day").toUTC().toISO()!;
+      const query = await collectUserRanking(this.reads, start, end, todayStart, this.config.ranking.sourceLimit);
+      const sourceRows = query.rows.map((row) => ({
+        user: {
+          id: Number(row.user_id), username: String(row.username ?? ""), email: String(row.email ?? ""),
+          role: String(row.role ?? ""), status: String(row.status ?? ""), balance: Number(row.balance ?? 0),
+        },
+        actualCost: Number(row.actual_cost ?? 0), requests: Number(row.requests ?? 0),
+        tokens: Number(row.tokens ?? 0), rechargeCny: Number(row.recharge_cny ?? 0),
+      })).filter(({ user }) => !this.excluded(user));
+      const rows = sourceRows.slice(0, this.config.ranking.displayLimit).map((row, index) => ({
+        rank: index + 1, displayName: rankingDisplayName(row.user), actualCost: row.actualCost,
+        requests: row.requests, tokens: row.tokens, balanceUsd: row.user.balance, rechargeCny: row.rechargeCny,
+      }));
+      return {
+        rows,
+        totals: sourceRows.reduce((totals, row) => ({
+          actualCost: totals.actualCost + row.actualCost,
+          requests: totals.requests + row.requests,
+          tokens: totals.tokens + row.tokens,
+          balanceUsd: totals.balanceUsd + Math.max(0, row.user.balance),
+          rechargeCny: totals.rechargeCny + row.rechargeCny,
+        }), { actualCost: 0, requests: 0, tokens: 0, balanceUsd: 0, rechargeCny: 0 }),
+        startDate, endDate, queryCompletedAt: query.queryCompletedAt, databaseQueries: query.cached ? 0 : 1,
+      };
+    }
     const [source, users] = await Promise.all([this.sub2api.getUsageRanking(startDate, endDate), this.sub2api.listUsers()]);
     const userMap = new Map(users.map((user) => [user.id, user]));
     const filtered = source.ranking
@@ -84,18 +120,22 @@ export class LotteryService {
       .slice(0, this.config.ranking.displayLimit)
       .map(({ row, user }, index) => ({
         rank: index + 1,
-        displayName: displayName(user),
+        displayName: rankingDisplayName(user),
         actualCost: row.actual_cost,
         requests: row.requests,
         tokens: row.tokens,
+        balanceUsd: user.balance,
+        rechargeCny: 0,
       }));
     return {
       rows,
-      totals: filtered.reduce((totals, { row }) => ({
+      totals: filtered.reduce((totals, { row, user }) => ({
         actualCost: totals.actualCost + row.actual_cost,
         requests: totals.requests + row.requests,
         tokens: totals.tokens + row.tokens,
-      }), { actualCost: 0, requests: 0, tokens: 0 }),
+        balanceUsd: totals.balanceUsd + Math.max(0, user.balance),
+        rechargeCny: totals.rechargeCny,
+      }), { actualCost: 0, requests: 0, tokens: 0, balanceUsd: 0, rechargeCny: 0 }),
       startDate,
       endDate,
     };

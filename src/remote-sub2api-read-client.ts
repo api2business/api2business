@@ -27,6 +27,7 @@ export class RemoteSub2ApiReadClient implements Sub2ApiReadClient {
     cacheHits: 0,
     queueTimeouts: 0,
     queryTimeouts: 0,
+    connectionRecycles: 0,
     failedQueries: 0,
     maximumObservedDatabaseConcurrency: 1,
     lastCompletedAt: null,

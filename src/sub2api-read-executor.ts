@@ -39,6 +39,7 @@ export interface Sub2ApiReadStatus {
   cacheHits: number;
   queueTimeouts: number;
   queryTimeouts: number;
+  connectionRecycles: number;
   failedQueries: number;
   maximumObservedDatabaseConcurrency: number;
   lastCompletedAt: string | null;
@@ -58,7 +59,7 @@ interface TransactionLike {
 
 export interface ScoreDatabaseLike {
   begin<T>(callback: (transaction: TransactionLike) => Promise<T>): Promise<T>;
-  close(): Promise<void>;
+  close(options?: { timeout?: number }): Promise<void>;
 }
 
 interface ExecutorOptions {
@@ -103,7 +104,8 @@ function codedError(code: string, message: string): Error {
 }
 
 export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
-  private readonly database: ScoreDatabaseLike;
+  private database: ScoreDatabaseLike;
+  private readonly databaseOverride: boolean;
   private readonly manualQueue: Array<QueueTask<Record<string, unknown>>> = [];
   private readonly automaticQueue: Array<QueueTask<Record<string, unknown>>> = [];
   private readonly inFlight = new Map<string, Promise<Sub2ApiReadResult<Record<string, unknown>>>>();
@@ -129,6 +131,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
     cacheHits: 0,
     queueTimeouts: 0,
     queryTimeouts: 0,
+    connectionRecycles: 0,
     failedQueries: 0,
     maximumObservedDatabaseConcurrency: 0,
     lastCompletedAt: null,
@@ -137,16 +140,14 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
   private activeStartedAt: string | null = null;
 
   constructor(
-    databaseUrl: string,
+    private readonly databaseUrl: string,
     private readonly options: ExecutorOptions,
     databaseOverride?: ScoreDatabaseLike,
   ) {
-    if (!databaseUrl.trim()) throw new Error("Sub2API read executor requires a database URL");
+    if (!this.databaseUrl.trim()) throw new Error("Sub2API read executor requires a database URL");
+    this.databaseOverride = databaseOverride !== undefined;
     this.database = databaseOverride
-      ?? new SQL(databaseUrl, {
-        max: 1,
-        connection: { application_name: "apistate-read-broker" },
-      }) as unknown as ScoreDatabaseLike;
+      ?? this.createDatabase(this.databaseUrl);
   }
 
   query<Row extends Record<string, unknown>>(
@@ -326,7 +327,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
     let queryCompletedAt = queryStartedAt;
     let queryDurationMs = 0;
     try {
-      const rows = await this.database.begin(async (transaction) => {
+      const databaseOperation = this.database.begin(async (transaction) => {
         await transaction.unsafe("SET TRANSACTION READ ONLY");
         await transaction.unsafe(
           `SET LOCAL statement_timeout = '${this.options.statementTimeoutMs}ms'`,
@@ -352,6 +353,25 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
           this.activeDatabaseQueries -= 1;
         }
       });
+      let watchdog: ReturnType<typeof setTimeout> | null = null;
+      const watchdogTimeout = new Promise<never>((_, reject) => {
+        watchdog = setTimeout(() => reject(codedError(
+          "sub2api_read_query_timeout",
+          `query ${task.request.kind} exceeded ${this.options.statementTimeoutMs}ms before the connection was released`,
+        )), this.options.statementTimeoutMs + 1000);
+      });
+      let rows: Record<string, unknown>[];
+      try {
+        rows = await Promise.race([databaseOperation, watchdogTimeout]);
+      } catch (error) {
+        if (error instanceof Error && error.name === "sub2api_read_query_timeout") {
+          void databaseOperation.catch(() => undefined);
+          await this.recycleDatabase();
+        }
+        throw error;
+      } finally {
+        if (watchdog !== null) clearTimeout(watchdog);
+      }
       const result: Sub2ApiReadResult<Record<string, unknown>> = {
         rows,
         queueDurationMs,
@@ -369,7 +389,8 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
       task.resolve(result);
     } catch (error) {
       const message = errorMessage(error);
-      const timedOut = /statement timeout|canceling statement due to statement timeout/iu.test(message);
+      const timedOut = (error instanceof Error && error.name === "sub2api_read_query_timeout")
+        || /statement timeout|canceling statement due to statement timeout/iu.test(message);
       if (timedOut) this.metrics.queryTimeouts += 1;
       else this.metrics.failedQueries += 1;
       this.metrics.totalQueries += 1;
@@ -385,5 +406,23 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
       this.activeTask = null;
       this.activeStartedAt = null;
     }
+  }
+
+  private createDatabase(databaseUrl: string): ScoreDatabaseLike {
+    return new SQL(databaseUrl, {
+      max: 1,
+      connection: { application_name: "apistate-read-broker" },
+    }) as unknown as ScoreDatabaseLike;
+  }
+
+  private async recycleDatabase(): Promise<void> {
+    if (this.databaseOverride) return;
+    const expired = this.database;
+    this.database = this.createDatabase(this.databaseUrl);
+    this.metrics.connectionRecycles += 1;
+    await Promise.race([
+      expired.close({ timeout: 1 }).catch(() => undefined),
+      Bun.sleep(1500),
+    ]);
   }
 }

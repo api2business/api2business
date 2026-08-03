@@ -19,6 +19,11 @@ const config = {
       requireCurrentAvailable: true,
       qualityWeight: 80,
       costWeight: 20,
+      explorationWeight: 0,
+      explorationTargetAttempts: 50,
+      explorationQualityPrior: 0,
+      balanceWeight: 0,
+      dynamicQualityFeedback: { targetQualityScore: 85, coefficient: 0 },
       referenceScore: 92,
       pointsPerScore: 10,
       minimumChange: 5,
@@ -48,6 +53,11 @@ const config = {
       requireCurrentAvailable: true,
       qualityWeight: 85,
       costWeight: 15,
+      explorationWeight: 0,
+      explorationTargetAttempts: 50,
+      explorationQualityPrior: 0,
+      balanceWeight: 0,
+      dynamicQualityFeedback: { targetQualityScore: 85, coefficient: 0 },
       referenceScore: 80,
       pointsPerScore: 8,
       minimumChange: 5,
@@ -121,6 +131,28 @@ test("OAuth accounts are excluded from scoring-derived priority changes", () => 
     expect.objectContaining({ accountId: 3 }),
   ]));
   expect(plan.priorities).not.toHaveProperty("3");
+});
+
+test("Codex economic ranking keeps the highest-cost quality leader below better-value accounts", () => {
+  const weightedConfig = structuredClone(config);
+  weightedConfig.sub2api.priorityPlan.qualityWeight = 70;
+  weightedConfig.sub2api.priorityPlan.costWeight = 30;
+  const economicAccount = (id: number, name: string, score: number, cost: number) => ({
+    ...account(id, name, score),
+    usage: { costRateCnyPerApiUsd: cost },
+  });
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    economicAccount(1, "https://expensive.example pro 0.18", 82.9, 0.18),
+    economicAccount(2, "https://balanced-a.example pro 0.08", 69.1, 0.08),
+    economicAccount(3, "https://balanced-b.example plus 0.05", 60.4, 0.05),
+    economicAccount(4, "https://economy.example plus 0.04", 45.9, 0.04),
+    economicAccount(5, "https://balanced-c.example plus 0.08", 54.3, 0.08),
+  ] }, weightedConfig);
+  const ranked = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.priorityMode !== "topk-tail")
+    .sort((left, right) => Number(left.rank) - Number(right.rank));
+  expect(ranked.map((row) => row.accountId)).toEqual([3, 2, 4, 5, 1]);
+  expect(ranked.at(-1)).toMatchObject({ accountId: 1, rank: 5, costRateCnyPerApiUsd: 0.18 });
 });
 
 test("reserve policy dynamically lowers priority as weekly quota is depleted", () => {
@@ -318,7 +350,7 @@ test("accounts beyond top-k converge to the lower scheduling boundary", () => {
   expect(changes.find((row) => row.accountId === 22)).toMatchObject({ rank: 22, calculatedPriority: 300, desiredPriority: 300 });
 });
 
-test("non-OAuth accounts excluded from ranking converge to the top-k tail", () => {
+test("available low-confidence accounts receive weighted exploration while unavailable accounts stay at the tail", () => {
   const lowConfidence = account(31, "low-confidence", 80);
   lowConfidence.priority = 800;
   lowConfidence.confidence = "low";
@@ -332,10 +364,56 @@ test("non-OAuth accounts excluded from ranking converge to the top-k tail", () =
   const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [lowConfidence, unavailable, oauth] }, config);
   const changes = plan.changes as Array<Record<string, unknown>>;
 
-  expect(plan.priorities).toMatchObject({ "31": 300, "32": 300 });
+  expect(plan.priorities).toHaveProperty("32", 300);
   expect(plan.priorities).not.toHaveProperty("33");
-  expect(changes.find((row) => row.accountId === 31)).toMatchObject({ priorityMode: "topk-tail", desiredPriority: 300 });
+  expect(changes.find((row) => row.accountId === 31)).toMatchObject({ priorityMode: "stable-rank", rank: 1 });
   expect(changes.find((row) => row.accountId === 32)).toMatchObject({ priorityMode: "topk-tail", desiredPriority: 300 });
+});
+
+test("small samples use a decaying exploration weight and enter the top exploration band", () => {
+  const explorationConfig = structuredClone(config);
+  explorationConfig.sub2api.priorityPlan.qualityWeight = 25;
+  explorationConfig.sub2api.priorityPlan.costWeight = 20;
+  explorationConfig.sub2api.priorityPlan.explorationWeight = 30;
+  explorationConfig.sub2api.priorityPlan.explorationTargetAttempts = 50;
+  explorationConfig.sub2api.priorityPlan.explorationQualityPrior = 25;
+  explorationConfig.sub2api.priorityPlan.balanceWeight = 25;
+  const matureScores = [92, 86, 78, 70, 62, 54].map((score, index) => account(index + 1, `mature-${index + 1}`, score));
+  [38, 24, 22, 18, 5, 0].forEach((balance, index) => { matureScores[index]!.accountBalanceCny = balance; });
+  const newcomer = account(20, "newcomer", 24);
+  newcomer.accountBalanceCny = 20;
+  newcomer.confidence = "low";
+  newcomer.observedAttempts = 1;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [...matureScores, newcomer] }, explorationConfig);
+  const change = (plan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 20)!;
+
+  expect(change.rank).toBeGreaterThanOrEqual(1);
+  expect(change.rank).toBeLessThanOrEqual(5);
+  expect(Number(change.explorationScore)).toBeGreaterThan(95);
+});
+
+test("a schedulable zero-sample account enters exploration before it has a quality score", () => {
+  const explorationConfig = structuredClone(config);
+  explorationConfig.sub2api.priorityPlan.qualityWeight = 25;
+  explorationConfig.sub2api.priorityPlan.costWeight = 20;
+  explorationConfig.sub2api.priorityPlan.explorationWeight = 30;
+  explorationConfig.sub2api.priorityPlan.explorationTargetAttempts = 50;
+  explorationConfig.sub2api.priorityPlan.explorationQualityPrior = 25;
+  explorationConfig.sub2api.priorityPlan.balanceWeight = 25;
+  const matureScores = [92, 86, 78, 70, 62, 54].map((score, index) => account(index + 1, `mature-${index + 1}`, score));
+  [38, 24, 22, 18, 5, 0].forEach((balance, index) => { matureScores[index]!.accountBalanceCny = balance; });
+  const newcomer = account(20, "zero-sample", 0);
+  newcomer.accountBalanceCny = 20;
+  newcomer.score = null;
+  newcomer.confidence = "low";
+  newcomer.observedAttempts = 0;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [...matureScores, newcomer] }, explorationConfig);
+  const change = (plan.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 20)!;
+
+  expect(change.priorityMode).not.toBe("topk-tail");
+  expect(change.rank).toBeGreaterThanOrEqual(1);
+  expect(change.rank).toBeLessThanOrEqual(5);
+  expect(change.explorationScore).toBe(100);
 });
 
 test("stable ranking remains distributed and ordered through repeated local moves", () => {
@@ -461,4 +539,22 @@ test("codex and grok use independent anchors and merge into one adjustment plan"
   expect((plan.changes as Array<Record<string, unknown>>).filter((row) => row.profile === "grok")).toHaveLength(2);
   expect(plan.priorities).not.toHaveProperty("10");
   expect(plan.priorities).not.toHaveProperty("11");
+});
+
+test("dynamic pool-quality feedback is positive below target and negative above target", () => {
+  const feedbackConfig = structuredClone(config);
+  feedbackConfig.sub2api.priorityPlan.dynamicQualityFeedback = {
+    targetQualityScore: 85,
+    coefficient: 2,
+  };
+  const rows = [account(1, "quality-leader 0.08", 90), account(2, "quality-follower 0.08", 60)];
+  const below = buildAccountPriorityPlan({ recentCallLimit: 1000, poolQualityScore: 75, accounts: rows }, feedbackConfig);
+  const above = buildAccountPriorityPlan({ recentCallLimit: 1000, poolQualityScore: 95, accounts: rows }, feedbackConfig);
+  const belowLeader = (below.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 1)!;
+  const aboveLeader = (above.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 1)!;
+
+  expect(Number(belowLeader.dynamicQualityExtraScore)).toBeCloseTo(18);
+  expect(Number(aboveLeader.dynamicQualityExtraScore)).toBeCloseTo(-18);
+  expect(Number(belowLeader.combinedScore)).toBeGreaterThan(Number(belowLeader.baseCombinedScore));
+  expect(Number(aboveLeader.combinedScore)).toBeLessThan(Number(aboveLeader.baseCombinedScore));
 });

@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#111412" />
   <title>用户用量 | ApiState</title>
-  <link rel="stylesheet" href="/styles.css?v=oauth-output-v5" />
-  <script src="/app.js?v=oauth-output-v5" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=user-ranking-v2" />
+  <script src="/app.js?v=user-ranking-v2" type="module"></script>
 </head>
 <body data-page="ranking">
   <div data-shell></div>
   <main class="workspace">
-    <header class="page-head"><div><p class="eyebrow">USER FLOW / DAILY</p><h1>用户用量</h1></div><span id="ranking-range" class="state-badge">读取中</span></header>
-    <section class="metric-strip"><div><span>标准 API 用量</span><strong id="ranking-cost">—</strong></div><div><span>请求</span><strong id="ranking-requests">—</strong></div><div><span>Token</span><strong id="ranking-tokens">—</strong></div></section>
-    <section class="table-section"><div class="table-wrap"><table class="data-table"><thead><tr><th>名次</th><th>用户</th><th class="usd-cell">API USD</th><th>请求</th><th>Token</th></tr></thead><tbody id="ranking-body"><tr><td colspan="5" class="empty">正在读取用量...</td></tr></tbody></table></div></section>
+    <header class="page-head ranking-head"><div><p class="eyebrow">USER FLOW / DAILY</p><h1>用户用量</h1><p id="ranking-state" class="section-state">通过单连接队列读取今日用量</p></div><div class="ranking-controls"><label class="select-field"><span>自动刷新</span><select id="ranking-refresh-interval"><option value="30">30 秒</option><option value="60" selected>60 秒</option><option value="120">2 分钟</option><option value="300">5 分钟</option><option value="0">关闭</option></select></label><small id="ranking-refresh-countdown" class="oauth-refresh-countdown">下次刷新 --:--</small><button id="ranking-refresh" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>手动刷新</span></button><span id="ranking-range" class="state-badge">读取中</span></div></header>
+    <section class="metric-strip ranking-metrics"><div><span>标准 API 用量</span><strong id="ranking-cost">—</strong></div><div><span>剩余余额</span><strong id="ranking-balance">—</strong></div><div><span>今日充值</span><strong id="ranking-recharge">—</strong></div><div><span>请求</span><strong id="ranking-requests">—</strong></div><div><span>Token</span><strong id="ranking-tokens">—</strong></div></section>
+    <section class="table-section"><div class="table-wrap"><table class="data-table ranking-table"><colgroup><col class="ranking-col-rank"><col class="ranking-col-user"><col class="ranking-col-cost"><col class="ranking-col-balance"><col class="ranking-col-recharge"><col class="ranking-col-requests"><col class="ranking-col-tokens"></colgroup><thead><tr><th>名次</th><th>用户邮箱</th><th class="usd-cell">API USD</th><th class="usd-cell">剩余余额</th><th class="usd-cell">今日充值</th><th class="usd-cell">请求</th><th class="usd-cell">Token</th></tr></thead><tbody id="ranking-body"><tr><td colspan="7" class="empty">正在读取用量...</td></tr></tbody></table></div></section>
   </main>
 </body>
 </html>

@@ -8,6 +8,7 @@ import { requiredOption } from "./runtime-args";
 import { temporalAddress, TemporalGateway } from "./temporal-client";
 import { RemoteSub2ApiReadClient } from "./remote-sub2api-read-client";
 import { UpstreamManagementService, type UpstreamWorkerOperation } from "./upstream-management";
+import type { UpstreamUsageResult } from "./upstream-usage";
 import { OperationsStore } from "./operations-store";
 import { OperationsService } from "./operations-service";
 import { AccountScoreService } from "./account-score-service";
@@ -16,6 +17,7 @@ import { resolveDataPath } from "./config";
 import { AccountImportService, type ImportJob } from "./account-import-service";
 import { AccountLifecycleService, type LifecycleJob } from "./account-lifecycle-service";
 import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
+import { ProbeIsolationService } from "./probe-isolation";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -40,6 +42,7 @@ const password = process.env[target.sub2apiAdminPasswordEnv];
 if (!email || !password) throw new Error("worker requires Sub2API admin credentials");
 const sub2apiClient = new Sub2ApiClient(config, { email, password });
 const runtime = new Sub2ApiRuntimeService(sub2apiClient, config.operations.upstreamManagement.failoverRules);
+const probeIsolation = new ProbeIsolationService(config, sub2apiClient, runtime);
 const accountImports = new AccountImportService(config, remoteReads, null, {
   get: async (id): Promise<ImportJob | null> => {
     const response = await internal.accountImportWorkerJob(id);
@@ -60,9 +63,9 @@ const accountLifecycle = new AccountLifecycleService(config, remoteReads, null, 
 }, runtime);
 const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
 if (!operationsDatabaseUrl) throw new Error(`worker requires env ${config.operations.databaseUrlEnv}`);
-const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), remoteReads, runtime);
+const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), remoteReads, runtime, probeIsolation);
 await operations.initialize();
-const upstreams = new UpstreamManagementService(config, remoteReads, null, runtime);
+const upstreams = new UpstreamManagementService(config, remoteReads, null, runtime, probeIsolation);
 const scores = new AccountScoreService(
   config,
   resolveDataPath(config, target.scoreCachePath),
@@ -73,6 +76,19 @@ const scores = new AccountScoreService(
 async function executeWorkerOperation(operation: OperationRequest): Promise<unknown> {
   const command = operation.command;
   if (command.kind === "scores.refresh") return await scores.refresh();
+  if (command.kind === "upstream.quota.sample") {
+    const result = await upstreams.usage([]);
+    if (Array.isArray(result.results)) await internal.upstreamUsageCache(
+      result.results as Array<Record<string, unknown>>, Number(result.apiAmountUsdTotal),
+      true,
+    );
+    const oauth = await operations.sampleOAuthRuntime();
+    const quality = await operations.samplePoolQuality();
+    return { ok: true, sampled: result.targetCount, succeeded: result.succeeded, failed: result.failed, oauth, quality };
+  }
+  if (command.kind === "account.idle-probe.run") {
+    return await operations.runIdleProbe(command.accountIds, command.rounds);
+  }
   if (command.kind === "priority.plan.create") {
     return await operations.generatePriorityPlan(command.recentCallLimit, command.operator);
   }
@@ -103,7 +119,18 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     else if (pending.action === "template") result = await upstreams.applyTemplate(pending.input.accountIds);
     else {
       result = await upstreams.usage(pending.input.accountIds);
-      if (Array.isArray(result.results)) await internal.upstreamUsageCache(result.results as Array<Record<string, unknown>>);
+      if (Array.isArray(result.results)) {
+        result.rateSynchronization = await upstreams.synchronizeDetectedRates(result.results as UpstreamUsageResult[]);
+        await internal.upstreamUsageCache(
+        result.results as Array<Record<string, unknown>>,
+        Number.isFinite(Number(result.apiAmountUsdTotal)) ? Number(result.apiAmountUsdTotal) : null,
+        pending.input.accountIds.length === 0,
+        );
+        if (pending.input.accountIds.length === 0) {
+          result.oauth = await operations.sampleOAuthRuntime();
+          result.quality = await operations.samplePoolQuality();
+        }
+      }
     }
     await internal.completeUpstreamOperation(command.operationId);
     return result;
@@ -135,6 +162,10 @@ const schedule = temporal
     started: false,
     workflowId: target.scoreScheduleWorkflowId,
   };
+const quotaSchedule = temporal ? await temporal.ensureUpstreamQuotaSchedule() : { started: false, workflowId: null };
+const idleProbeSchedule = temporal && config.sub2api.idleProbe.enabled
+  ? await temporal.ensureIdleProbeSchedule()
+  : { started: false, workflowId: null };
 let state: "ready" | "stopping" = "ready";
 const health = Bun.serve({
   hostname: target.workerHealthHost,
@@ -147,6 +178,8 @@ const health = Bun.serve({
     namespace: workflowEnabled ? config.temporal.namespace : null,
     taskQueue: workflowEnabled ? target.temporalTaskQueue : null,
     schedule,
+    quotaSchedule,
+    idleProbeSchedule,
   }, { status: state === "ready" ? 200 : 503 }),
 });
 
@@ -159,6 +192,8 @@ console.log(JSON.stringify({
   temporalNamespace: workflowEnabled ? config.temporal.namespace : null,
   temporalTaskQueue: workflowEnabled ? target.temporalTaskQueue : null,
   schedule,
+  quotaSchedule,
+  idleProbeSchedule,
   valuesPrinted: false,
 }));
 

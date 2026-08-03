@@ -49,6 +49,23 @@ import {
   mergeOAuthAcquisitionCosts,
   normalizeOAuthRefunds,
 } from "./oauth-economics";
+import {
+  normalizeUpstreamWallet,
+  readUpstreamValuationPolicy,
+  upstreamBalanceRateByWallet,
+} from "./upstream-valuation";
+import { buildQuotaSamples, quotaHistory, summarizeQuotaSamples } from "./upstream-quota-monitor";
+import {
+  buildOAuthRuntimeSample,
+  oauthRuntimeHistory,
+  summarizeOAuthRuntimeSamples,
+  type OAuthRuntimeProfile,
+} from "./oauth-runtime-monitor";
+import { collectPoolQualitySample, poolQualityHistory } from "./pool-quality-monitor";
+import { IdleAccountProbeService } from "./idle-account-probe";
+import type { ProbeIsolationService } from "./probe-isolation";
+
+export { normalizeUpstreamWallet, upstreamBalanceRateByWallet } from "./upstream-valuation";
 
 const prioritiesByIdSql = `
 SELECT id::text AS id, priority::int AS priority, type AS account_type
@@ -62,17 +79,13 @@ function records(value: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
-export function normalizeUpstreamWallet(value: unknown): string {
-  const url = String(value ?? "").trim().split(/\s+/u)[0] ?? "";
-  return url.replace(/\/v1\/?$/u, "").replace(/\/$/u, "");
-}
-
 export function latestSuccessfulUsageByWallet(rows: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
   const selected = new Map<string, { result: Record<string, unknown>; queriedAt: number }>();
   for (const row of rows) {
     const result = object(row.last_success_result ?? row.result);
     const wallet = normalizeUpstreamWallet(result.baseUrl);
-    const remaining = Number(object(result.quota).remaining);
+    const rawRemaining = object(result.quota).remaining;
+    const remaining = rawRemaining === null || rawRemaining === undefined ? Number.NaN : Number(rawRemaining);
     const unit = String(object(result.quota).unit ?? "");
     if (!wallet || result.ok !== true || unit !== "USD" || !Number.isFinite(remaining)) continue;
     const queriedAt = Date.parse(String(row.last_success_at ?? row.queried_at ?? result.queriedAt ?? ""));
@@ -120,12 +133,25 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 export class OperationsService {
+  private readonly idleProbe: IdleAccountProbeService;
+
   constructor(
     private readonly config: AppConfig,
     private readonly store: OperationsStore,
     private readonly reads: Sub2ApiReadClient,
     private readonly runtime: Sub2ApiRuntimeService | null = null,
-  ) {}
+    private readonly probeIsolation: ProbeIsolationService | null = null,
+  ) {
+    this.idleProbe = new IdleAccountProbeService(config, reads, runtime, probeIsolation);
+  }
+
+  async idleProbePlan(accountIds: number[] = []) {
+    return await this.idleProbe.plan(accountIds, "manual");
+  }
+
+  async runIdleProbe(accountIds: number[] = [], rounds = 1) {
+    return await this.idleProbe.run(accountIds, rounds);
+  }
 
   async initialize(): Promise<void> {
     await this.store.migrate();
@@ -169,8 +195,125 @@ export class OperationsService {
     return { ok: true, mutation: true, accountId, baseUrl, remainingUsd, valuesPrinted: false };
   }
 
-  async setUpstreamUsageCache(results: Array<Record<string, unknown>>): Promise<void> {
-    await this.store.setUpstreamUsageCache(results);
+  async setUpstreamUsageCache(results: Array<Record<string, unknown>>, apiAmountUsdTotal: number | null = null, recordSample = false): Promise<void> {
+    const policy = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
+    const sampledAt = new Date().toISOString();
+    const samples = recordSample ? buildQuotaSamples(
+      results, sampledAt,
+      (wallet) => upstreamBalanceRateByWallet(wallet, policy.defaultCnyPerApiUsd, policy.walletCnyPerApiUsd),
+    ) : [];
+    await this.store.setUpstreamUsageCache(results, samples, apiAmountUsdTotal);
+  }
+
+  async upstreamQuotaSummary() {
+    const displayHours = 8;
+    const calculationWindowHours = 1;
+    const rows = await this.store.getUpstreamQuotaSamples(displayHours + calculationWindowHours) as Array<Record<string, unknown>>;
+    const samples = rows.map((row) => ({
+      sampledAt: new Date(String(row.sampled_at)).toISOString(), walletKey: String(row.wallet_key), accountId: Number(row.account_id),
+      schedulable: row.schedulable === true, status: String(row.status), provider: String(row.provider),
+      probeOk: row.probe_ok === true, remainingUsd: row.remaining_usd == null ? null : Number(row.remaining_usd),
+      cnyPerUsd: Number(row.cny_per_usd), remainingCny: row.remaining_cny == null ? null : Number(row.remaining_cny),
+      sourceQueriedAt: row.source_queried_at == null ? null : String(row.source_queried_at),
+      apiAmountUsdTotal: row.api_amount_usd_total == null ? null : Number(row.api_amount_usd_total),
+    }));
+    return {
+      ok: true,
+      windowHours: calculationWindowHours,
+      displayHours,
+      ...summarizeQuotaSamples(samples, calculationWindowHours),
+      history: quotaHistory(samples, calculationWindowHours, displayHours),
+      valuesPrinted: false,
+    };
+  }
+
+  async sampleOAuthRuntime(): Promise<Record<string, unknown>> {
+    const sampledAt = new Date().toISOString();
+    const samples = [];
+    for (const profile of ["codex", "grok"] as const) {
+      const result = await this.oauthPoolEconomics(1, 10, 1, profile, "automatic");
+      samples.push(buildOAuthRuntimeSample(result, profile, sampledAt));
+    }
+    await this.store.addOAuthRuntimeSamples(samples);
+    return { ok: true, sampledAt, profiles: samples.map((sample) => sample.profile), valuesPrinted: false };
+  }
+
+  async samplePoolQuality(): Promise<Record<string, unknown>> {
+    const sample = await collectPoolQualitySample(this.config, this.reads);
+    const usageRows = records(await this.store.getUpstreamUsageCache([]));
+    const usageById = new Map(usageRows.map((row) => [Number(row.account_id), object(row.last_success_result ?? row.result)]));
+    const valuation = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
+    sample.participation = sample.participation.map((item) => {
+      const usage = usageById.get(item.accountId);
+      const multiplier = Number(object(usage?.billingMultiplier).value);
+      const walletRate = upstreamBalanceRateByWallet(
+        normalizeUpstreamWallet(usage?.baseUrl ?? item.baseUrl),
+        valuation.defaultCnyPerApiUsd,
+        valuation.walletCnyPerApiUsd,
+      );
+      const detected = Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null;
+      return detected === null ? item : {
+        ...item,
+        costRateCnyPerApiUsd: detected,
+        costSource: "detected" as const,
+      };
+    });
+    await this.store.addPoolQualitySample(sample);
+    return { ok: true, ...sample, valuesPrinted: false };
+  }
+
+  async poolQualitySummary() {
+    const rows = await this.store.getPoolQualitySamples(8) as Array<Record<string, unknown>>;
+    const latest = rows.at(-1) ?? null;
+    return {
+      ok: true,
+      recentCallLimit: 1000,
+      groupIds: this.config.sub2api.priorityPlan.eligibleGroupIds,
+      sampledAt: latest ? new Date(String(latest.sampled_at)).toISOString() : null,
+      score: latest?.score == null ? null : Number(latest.score),
+      rollingScore: poolQualityHistory(rows).at(-1)?.rollingScore ?? null,
+      grade: latest?.grade ?? "insufficient",
+      observedAttempts: Number(latest?.observed_attempts ?? 0),
+      participationAttempts: Array.isArray(latest?.participation)
+        ? (latest.participation as Array<{ attempts?: unknown }>).reduce((total, item) => total + Number(item.attempts ?? 0), 0)
+        : 0,
+      successRequests: Number(latest?.success_requests ?? 0),
+      failureRequests: Number(latest?.failure_requests ?? 0),
+      failureRate: latest?.failure_rate == null ? null : Number(latest.failure_rate),
+      failoverRequests: Number(latest?.failover_requests ?? 0),
+      failoverRecovered: Number(latest?.failover_recovered ?? 0),
+      ttftP95Ms: latest?.ttft_p95_ms == null ? null : Number(latest.ttft_p95_ms),
+      firstTokenSamples: Number(latest?.first_token_samples ?? 0),
+      participation: Array.isArray(latest?.participation) ? latest.participation : [],
+      history: poolQualityHistory(rows),
+      valuesPrinted: false,
+    };
+  }
+
+  async oauthRuntimeSummary(profile: OAuthRuntimeProfile) {
+    const displayHours = 8;
+    const calculationWindowHours = 1;
+    const rows = await this.store.getOAuthRuntimeSamples(profile, displayHours + calculationWindowHours) as Array<Record<string, unknown>>;
+    const samples = rows.map((row) => ({
+      sampledAt: new Date(String(row.sampled_at)).toISOString(),
+      profile,
+      apiAmountUsdTotal: Number(row.api_amount_usd_total),
+      expectedApiAmountUsd: row.expected_api_amount_usd == null ? null : Number(row.expected_api_amount_usd),
+      remainingExpectedApiAmountUsd: row.remaining_expected_api_amount_usd == null ? null : Number(row.remaining_expected_api_amount_usd),
+      accountCount: Number(row.account_count),
+      normalCount: Number(row.normal_count),
+      rateLimitedCount: Number(row.rate_limited_count),
+      errorCount: Number(row.error_count),
+    }));
+    return {
+      ok: true,
+      profile,
+      windowHours: calculationWindowHours,
+      displayHours,
+      ...summarizeOAuthRuntimeSamples(samples, calculationWindowHours),
+      history: oauthRuntimeHistory(samples, calculationWindowHours, displayHours),
+      valuesPrinted: false,
+    };
   }
 
   private yamlLedger() {
@@ -250,7 +393,8 @@ export class OperationsService {
       const baseUrl = normalizeUpstreamWallet(entry.baseUrl ?? entry.accountName);
       const usage = usageByWallet.get(baseUrl);
       rechargeByWallet.set(baseUrl, (rechargeByWallet.get(baseUrl) ?? 0) + entry.amountCny);
-      const remaining = Number(object(usage?.quota).remaining);
+      const rawRemaining = object(usage?.quota).remaining;
+      const remaining = rawRemaining === null || rawRemaining === undefined ? Number.NaN : Number(rawRemaining);
       const unit = String(object(usage?.quota).unit ?? "");
       if (usage?.ok === true && unit === "USD" && Number.isFinite(remaining)) {
         walletRemaining.set(baseUrl, Math.max(walletRemaining.get(baseUrl) ?? 0, remaining));
@@ -258,10 +402,14 @@ export class OperationsService {
         missingWallets.add(baseUrl);
       }
     }
-    const balanceRate = Number((profit.upstreamBalanceCnyPerApiUsd ?? 1));
-    if (!Number.isFinite(balanceRate) || balanceRate <= 0) throw new Error("profit.upstreamBalanceCnyPerApiUsd must be positive");
+    const valuation = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
+    const balanceRate = valuation.defaultCnyPerApiUsd;
+    const balanceRateByWallet = valuation.walletCnyPerApiUsd;
     const upstreamCapitalCny = [...rechargeByWallet].reduce((sum, [wallet, recharge]) =>
-      sum + Math.min(recharge, (walletRemaining.get(wallet) ?? 0) * balanceRate), 0);
+      sum + Math.min(
+        recharge,
+        (walletRemaining.get(wallet) ?? 0) * upstreamBalanceRateByWallet(wallet, balanceRate, balanceRateByWallet),
+      ), 0);
     const rate = Number(profit.deferredCostRateCnyPerApiUsd);
     if (!Number.isFinite(rate) || rate <= 0) throw new Error("profit.deferredCostRateCnyPerApiUsd must be a positive number");
     const period = day.slice(0, 7);
@@ -444,7 +592,30 @@ export class OperationsService {
       groupSelector,
       priority,
     );
-    const result = buildAccountPriorityPlan(ranking, this.config);
+    const usageRows = records(await this.store.getUpstreamUsageCache([]));
+    const usageById = new Map(usageRows.map((row) => [Number(row.account_id), object(row.last_success_result ?? row.result)]));
+    const valuation = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
+    const accounts = records(ranking.accounts).map((row) => {
+      const usage = usageById.get(Number(row.accountId));
+      if (!usage || usage.ok !== true) return row;
+      const quota = object(usage.quota);
+      const remaining = quota.unit === "USD" ? Number(quota.remaining) : Number.NaN;
+      const walletRate = upstreamBalanceRateByWallet(
+        normalizeUpstreamWallet(usage.baseUrl ?? row.accountName),
+        valuation.defaultCnyPerApiUsd,
+        valuation.walletCnyPerApiUsd,
+      );
+      const multiplier = Number(object(usage.billingMultiplier).value);
+      return {
+        ...row,
+        accountBalanceCny: Number.isFinite(remaining) ? Math.max(0, remaining) * walletRate : null,
+        detectedCostRateCnyPerApiUsd: Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null,
+      };
+    });
+    const poolQualityRows = await this.store.getPoolQualitySamples(8) as Array<Record<string, unknown>>;
+    const latestPoolQuality = poolQualityRows.at(-1);
+    const poolQualityScore = latestPoolQuality?.score == null ? null : Number(latestPoolQuality.score);
+    const result = buildAccountPriorityPlan({ ...ranking, accounts, poolQualityScore }, this.config);
     return { ...result, refreshedAt: new Date().toISOString() };
   }
 
@@ -1207,7 +1378,13 @@ export class OperationsService {
     return await collectAccountImportEconomics(this.config, this.reads, input, "manual");
   }
 
-  async oauthPoolEconomics(page = 1, pageSize = 10, archivedPage = 1, profile: "codex" | "grok" = "codex") {
+  async oauthPoolEconomics(
+    page = 1,
+    pageSize = 10,
+    archivedPage = 1,
+    profile: "codex" | "grok" = "codex",
+    priority: Sub2ApiReadPriority = "manual",
+  ) {
     const yaml = this.yamlLedger();
     const importEntries = readAccountImportCosts(this.config.operations.accountImportLedgerPath);
     const merged = mergeOAuthAcquisitionCosts(importEntries, yaml.costs);
@@ -1232,7 +1409,7 @@ export class OperationsService {
         mergedCostAccountCount: grok ? 0 : merged.costs.length,
         syntheticUnitCostCny: grok ? 0.02 : null,
       },
-    }, "manual");
+    }, priority);
     const paginate = (rows: Array<Record<string, unknown>>, currentPage: number) => ({
       rows: rows.slice((currentPage - 1) * pageSize, currentPage * pageSize),
       pagination: {

@@ -22,6 +22,8 @@ export interface PublicRankingRow {
   actualCost: number;
   requests: number;
   tokens: number;
+  balanceUsd: number;
+  rechargeCny: number;
 }
 
 export interface PublicDrawRecord {

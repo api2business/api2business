@@ -74,6 +74,10 @@ export class Sub2ApiClient {
     private readonly credentials: { email: string; password: string },
   ) {}
 
+  fork(credentials: { email: string; password: string }): Sub2ApiClient {
+    return new Sub2ApiClient(this.config, credentials);
+  }
+
   async request<T>(path: string, init: RequestInit = {}, authenticate = true, timeoutMs?: number): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("accept", "application/json");

@@ -4,32 +4,44 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#111412" />
-  <title>账号评分 | ApiState</title>
-  <link rel="stylesheet" href="/styles.css?v=loading-feedback-v2" />
-  <script src="/app.js?v=loading-feedback-v2" type="module"></script>
+  <title>上游资产与实时成本 | ApiState</title>
+  <link rel="stylesheet" href="/styles.css?v=refresh-latency-v1" />
+  <script src="/app.js?v=refresh-latency-v1" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
   <main class="workspace">
-    <header class="page-head">
-      <div><p class="eyebrow">ACCOUNT QUALITY / ALL GROUPS</p><h1>上游账号评分</h1></div>
+    <header class="page-head upstream-slim-head">
+      <div><p class="eyebrow">UPSTREAM ASSETS / LIVE COST</p><h1>上游资产与实时成本</h1><p class="live-head-sample">评分、调度、额度与成本统一运营视图</p></div>
+      <section class="pool-quality-head" aria-labelledby="pool-quality-title">
+        <header class="pool-quality-copy"><p class="eyebrow">POOL QUALITY / LAST 1,000 CALLS</p><h2 id="pool-quality-title">混池 + 自用池综合质量</h2><p id="pool-quality-state">等待读取五分钟采样</p></header>
+        <div class="pool-quality-score" data-grade="insufficient"><span>综合评分</span><strong id="pool-quality-score">—</strong><small id="pool-quality-grade">证据不足</small></div>
+        <dl class="pool-quality-metrics"><div><dt>成功 / 失败</dt><dd id="pool-quality-outcomes">—</dd><small id="pool-quality-failure-rate">失败率 —</small></div><div><dt>切号恢复</dt><dd id="pool-quality-failover">—</dd><small>恢复 / 触发</small></div><div><dt>TTFT P95</dt><dd id="pool-quality-ttft">—</dd><small id="pool-quality-ttft-samples">首 token 样本 —</small></div></dl>
+      </section>
       <div class="page-actions">
         <label class="score-auto-refresh"><span>自动刷新</span><select id="score-refresh-interval" aria-label="账号评分自动刷新间隔"><option value="0" selected>关闭</option><option value="300">5 分钟</option><option value="900">15 分钟</option><option value="1800">30 分钟</option></select></label>
         <span id="score-state" class="state-badge" data-state="refreshing">读取中</span>
+        <button id="score-create-upstream" class="query-command" type="button">新增上游</button>
         <button id="refresh-scores" class="icon-command" type="button" title="立即刷新" aria-label="立即刷新">↻</button>
       </div>
     </header>
-    <section class="metric-strip" aria-label="评分概要">
-      <div><span>账号</span><strong id="metric-accounts">—</strong></div>
-      <div><span>分组</span><strong id="metric-groups">—</strong></div>
-      <div><span>优质</span><strong id="metric-good">—</strong></div>
-      <div><span>需关注</span><strong id="metric-risk">—</strong></div>
-      <div><span>评分窗口</span><strong id="metric-window">—</strong></div>
+    <section class="quota-monitor unified-quota-monitor" aria-label="上游资产与实时成本">
+      <div class="quota-monitor-copy"><p class="eyebrow">LIVE QUOTA / 1H ROLLING</p><h2>资产与成本总览</h2><p id="quota-monitor-state">正在读取持久化采样</p></div>
+      <div class="donut-stack"><div class="quota-ring" id="quota-ring"><span id="quota-ring-ratio">—</span><small>总余额</small></div><p id="quota-ring-detail" class="donut-hover-detail">悬停查看上游余额</p></div>
+      <dl class="quota-monitor-values"><div class="quota-rate-metric"><dt>当前采样速率</dt><dd id="quota-sample-speed">—</dd><small>API 美元 / 小时</small></div><div class="quota-rate-metric"><dt>一小时滚动速率</dt><dd id="quota-rolling-speed">—</dd><small>API 美元 / 小时</small></div><div class="quota-cost-metric"><dt>当前采样成本</dt><dd id="quota-sample-cost">—</dd><small>人民币 / API 美元</small></div><div class="quota-cost-metric"><dt>一小时滚动成本</dt><dd id="quota-realtime-cost">—</dd><small>人民币 / API 美元</small></div><div><dt>总剩余额度</dt><dd id="quota-total">—</dd></div><div><dt>可调度剩余额度</dt><dd id="quota-schedulable">—</dd></div><div><dt>最近 1 小时消耗</dt><dd id="quota-consumed">—</dd></div><div><dt>最近 1 小时 API 产出</dt><dd id="quota-output">—</dd></div><div><dt>预计可用时间</dt><dd id="quota-estimated-hours">—</dd></div></dl>
+      <div class="quota-charts">
+        <figure><figcaption><span>API 消耗速率</span><small>最近 8 小时</small></figcaption><svg id="quota-balance-chart" viewBox="0 0 1000 150" role="img" aria-label="上游最近八小时消耗速率"></svg></figure>
+        <figure><figcaption><span>实时成本</span><small>最近 8 小时</small></figcaption><svg id="quota-cost-chart" viewBox="0 0 1000 150" role="img" aria-label="上游最近八小时实时成本"></svg></figure>
+      </div>
+    </section>
+    <section class="pool-quality-band" aria-label="综合质量趋势与上游参与比例">
+      <figure class="pool-quality-trend"><figcaption><span>综合评分趋势</span><small>最近 8 小时 · 5 分钟采样</small></figcaption><svg id="pool-quality-chart" viewBox="0 0 1000 150" role="img" aria-label="混池和自用池最近八小时综合质量评分"></svg></figure>
+      <figure class="pool-participation"><figcaption><span>上游参与比例</span><small>最近 1000 次调用</small></figcaption><div class="pool-participation-body"><div class="donut-stack"><div id="pool-participation-ring" class="pool-participation-ring" role="img" aria-label="各上游参与比例"><strong>—</strong><small>调用</small></div><p id="pool-participation-detail" class="donut-hover-detail">悬停查看账号详情</p></div><ol id="pool-participation-legend" class="pool-participation-legend"><li class="empty">暂无参与样本</li></ol></div></figure>
     </section>
     <section class="table-section">
       <div class="table-toolbar">
         <div class="score-query-controls">
-          <div class="filter-field"><span>筛选</span><input id="score-filter" type="search" placeholder="账号或分组" /></div>
+          <div class="filter-field"><span>筛选</span><input id="score-filter" type="search" placeholder="账号、URL、分组或状态" /></div>
           <label class="select-field"><span>评分/计划样本</span><select id="score-call-limit"></select></label>
           <button id="query-scores" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>刷新当前状态</span></button>
           <button id="generate-plan" class="query-command" type="button">生成调整计划</button>
@@ -48,9 +60,9 @@
       <p id="plan-refresh-state" class="section-state">尚未生成调整计划</p>
       <div id="plan-progress" class="operation-progress" aria-live="polite"></div>
       <div class="table-wrap">
-        <table class="data-table" aria-label="当前账号类型评分">
-          <thead><tr><th>账号</th><th>分组</th><th>当前优先级</th><th>计划优先级</th><th>变化</th><th>评分</th><th>成本</th><th>等级</th><th>置信度</th><th>尝试</th><th>失败率</th><th>TTFT P95</th><th>请求</th><th>Token</th><th class="usd-cell">API USD</th><th>失败 / 切号 / 恢复</th><th>可用</th></tr></thead>
-          <tbody id="score-body"><tr><td colspan="17" class="empty">正在读取评分快照...</td></tr></tbody>
+        <table class="data-table unified-upstream-table" aria-label="上游账号资产、评分与实时成本总表">
+          <thead><tr><th data-score-sort="accountName">账号</th><th data-score-sort="available">状态</th><th data-score-sort="score" aria-sort="descending">评分</th><th data-score-sort="priority">优先级</th><th data-score-sort="balance">账号余额</th><th data-score-sort="rate">手工费率</th><th data-score-sort="probeCost">探测成本</th><th data-score-sort="apiAmountUsd">API 产出</th><th data-score-sort="failureRate">失败率</th><th data-score-sort="ttftP95Ms">TTFT P95</th><th>失败 / 切号 / 恢复</th><th>分组</th><th>操作</th></tr></thead>
+          <tbody id="score-body"><tr><td colspan="13" class="empty">正在合并评分与资产数据...</td></tr></tbody>
         </table>
       </div>
       <div class="table-pager score-pager" aria-label="评分结果分页">
@@ -58,16 +70,6 @@
         <span id="score-page" aria-live="polite">正在读取…</span>
         <button id="score-next" class="text-command" type="button" disabled>下一页</button>
       </div>
-    </section>
-    <section class="table-section">
-      <div class="table-toolbar"><h2>定时自动调整</h2></div>
-      <form id="automation-form" class="score-query-controls">
-        <label class="select-field"><span>状态</span><select id="automation-enabled"><option value="true">启用</option><option value="false">停用</option></select></label>
-        <label class="filter-field"><span>周期（秒）</span><input id="automation-interval" type="number" min="5" max="86400" required /></label>
-        <label class="select-field"><span>样本</span><select id="automation-limit"></select></label>
-        <button class="query-command" type="submit">保存运行时配置</button>
-      </form>
-      <p id="automation-state" class="section-state">正在读取配置…</p>
     </section>
     <section class="table-section">
       <div class="table-toolbar">
@@ -81,6 +83,50 @@
       </div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>调优池</th><th>开始时间</th><th>方式</th><th>状态</th><th>操作者</th><th>样本</th><th>调整数</th><th>完成时间</th><th>耗时</th></tr></thead><tbody id="priority-history-body"><tr><td colspan="9" class="empty">正在读取调整记录</td></tr></tbody></table></div>
     </section>
+    <section class="table-section automation-section">
+      <div class="table-toolbar"><h2>定时自动调整</h2></div>
+      <form id="automation-form" class="score-query-controls">
+        <label class="select-field"><span>状态</span><select id="automation-enabled"><option value="true">启用</option><option value="false">停用</option></select></label>
+        <label class="filter-field"><span>周期（秒）</span><input id="automation-interval" type="number" min="5" max="86400" required /></label>
+        <label class="select-field"><span>样本</span><select id="automation-limit"></select></label>
+        <button class="query-command" type="submit">保存运行时配置</button>
+      </form>
+      <p id="automation-state" class="section-state">正在读取配置…</p>
+    </section>
   </main>
+  <dialog id="score-upstream-edit-dialog" class="upstream-dialog">
+    <form id="score-upstream-edit-form" method="dialog">
+      <header><div><p class="eyebrow">RUNTIME ACCOUNT <span id="score-upstream-edit-id">#—</span></p><h2>调整上游</h2></div><button class="icon-command" data-dialog-close type="button" title="关闭" aria-label="关闭">×</button></header>
+      <p id="score-upstream-edit-summary" class="dialog-state">—</p>
+      <div class="upstream-edit-meta"><span id="score-upstream-edit-base-url">—</span><span id="score-upstream-edit-key-prefix">Key —</span></div>
+      <div class="upstream-form-grid">
+        <label><span>后缀</span><input id="score-upstream-edit-suffix" required /></label>
+        <label><span>费率（人民币 / API 美元）</span><input id="score-upstream-edit-rate" type="number" min="0.000001" max="1000" step="0.000001" required /></label>
+        <label class="wide-field"><span>追加充值（人民币，可选）</span><input id="score-upstream-edit-recharge" type="number" min="0.01" step="0.01" placeholder="不充值" /></label>
+      </div>
+      <p id="score-upstream-edit-state" class="dialog-state"></p>
+      <section class="upstream-edit-usage"><header><strong>额度与用量</strong><button id="score-upstream-edit-usage" class="text-command" type="button">查询</button></header><div id="score-upstream-edit-usage-result" class="upstream-usage-results"><p class="empty">尚未查询</p></div></section>
+      <section class="upstream-job-console" aria-label="调整日志"><header><span>调整日志</span><code id="score-upstream-edit-job">JOB —</code></header><ol id="score-upstream-edit-logs" class="upstream-job-logs"><li class="empty">等待提交</li></ol></section>
+      <footer><button class="text-command" data-dialog-close type="button">取消</button><button id="score-upstream-edit-submit" class="primary-command" type="submit">保存调整</button></footer>
+    </form>
+  </dialog>
+  <dialog id="score-upstream-create-dialog" class="upstream-dialog">
+    <form id="score-upstream-create-form" method="dialog">
+      <header><div><p class="eyebrow">RUNTIME CREATE</p><h2>新增 API-key 上游</h2></div><button class="icon-command" data-dialog-close type="button" title="关闭" aria-label="关闭">×</button></header>
+      <p id="score-upstream-create-state" class="dialog-state">默认优先级 1、并发容量 16，号池选择混池 #2 和自用 #3。</p>
+      <div class="upstream-form-grid">
+        <label class="wide-field"><span>Base URL</span><input id="score-upstream-create-base-url" type="url" required autocomplete="url" /></label>
+        <label class="wide-field"><span>API key</span><input id="score-upstream-create-api-key" type="password" required autocomplete="new-password" /></label>
+        <label><span>后缀</span><input id="score-upstream-create-suffix" value="plus" required /></label>
+        <label><span>费率（人民币 / API 美元）</span><input id="score-upstream-create-rate" type="number" min="0.000001" step="0.000001" required /></label>
+        <label><span>初始优先级</span><input id="score-upstream-create-priority" type="number" min="1" max="1000" value="1" required /></label>
+        <label><span>并发容量</span><input id="score-upstream-create-capacity" type="number" min="1" max="100000" value="16" required /></label>
+        <label><span>创建时充值（人民币，可选）</span><input id="score-upstream-create-recharge" type="number" min="0.01" step="0.01" /></label>
+      </div>
+      <fieldset class="group-picker upstream-group-picker"><legend>目标号池</legend><div id="score-upstream-create-groups"><span class="upstream-group-loading">正在读取号池选项</span></div></fieldset>
+      <section class="upstream-job-console" aria-label="创建日志"><header><span>创建日志</span><code id="score-upstream-create-job">JOB —</code></header><ol id="score-upstream-create-logs" class="upstream-job-logs"><li class="empty">等待提交</li></ol></section>
+      <footer><button class="text-command" data-dialog-close type="button">取消</button><button id="score-upstream-create-submit" class="primary-command" type="submit">创建上游</button></footer>
+    </form>
+  </dialog>
 </body>
 </html>

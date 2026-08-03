@@ -63,13 +63,12 @@ function shell() {
   const mount = $('[data-shell]')
   if (!mount) return
   const links = [
-    ['scores', '/scores', '账号评分'],
+    ['scores', '/scores', '上游资产与成本'],
     ['ranking', '/ranking', '用户用量'],
     ['lottery', '/lottery', '额度抽奖'],
     ['operations', '/operations', '经营管理'],
     ['oauth-cost', '/oauth-cost', 'OAuth 实时成本'],
     ['account-import', '/account-import', '账号导入'],
-    ['upstreams', '/upstreams', '上游管理'],
   ]
   mount.innerHTML = `<header class="topbar">
     <a class="brand" href="/scores"><span class="brand-mark">AS</span><span><b>ApiState</b><small>Sub2API Operations</small></span></a>
@@ -110,6 +109,9 @@ async function loginPage() {
 }
 
 let scoreRows = []
+let scoreUpstreamsById = new Map()
+let scoreUsageById = new Map()
+let scoreSort = { key: 'score', direction: 'desc' }
 let scoreRefreshedAt = null
 let scoreNextRefreshAt = null
 let priorityPlanRows = new Map()
@@ -123,6 +125,9 @@ let scoreRefreshTimer = null
 let scoreRefreshCountdownTimer = null
 let scoreRefreshDueAt = null
 let scoreRefreshInFlight = null
+let upstreamAssetsInFlight = null
+let quotaSummaryInFlight = null
+let poolQualityInFlight = null
 
 function scoreProfile(row) {
   return String(row.platform ?? '').toLowerCase() === 'grok' ? 'grok' : 'codex'
@@ -193,7 +198,12 @@ function scheduleScoreRefresh() {
   scoreRefreshTimer = setTimeout(async () => {
     scoreRefreshDueAt = null
     renderScoreRefreshCountdown()
-    await refreshPriorityState().catch(() => null)
+    await Promise.allSettled([
+      refreshPriorityState(),
+      loadUnifiedUpstreamAssets(),
+      loadUnifiedQuotaSummary(),
+      loadPoolQuality(),
+    ])
     scheduleScoreRefresh()
   }, interval * 1000)
 }
@@ -209,10 +219,56 @@ function writeScoreRefreshInterval(value) {
   try { localStorage.setItem(scoreRefreshIntervalStorageKey, String(value)) } catch { /* 当前页面仍按选择运行。 */ }
 }
 
+function scoreAsset(row) {
+  const upstream = scoreUpstreamsById.get(Number(row.accountId)) ?? null
+  const usageResult = scoreUsageById.get(Number(row.accountId)) ?? null
+  const quota = usageResult?.quota ?? {}
+  const remainingUsd = quota.unit === 'USD' && quota.remaining != null ? Number(quota.remaining) : null
+  const walletRate = upstream ? upstreamWalletCnyRate(upstream.baseUrl) : 1
+  const balanceCny = remainingUsd !== null && Number.isFinite(remainingUsd) ? Math.max(0, remainingUsd) * walletRate : null
+  const probe = usageResult?.billingMultiplier ?? {}
+  const probeCost = probe.value != null && Number.isFinite(Number(probe.value)) && Number(probe.value) > 0
+    ? Number(probe.value) * walletRate
+    : null
+  return { upstream, usageResult, balanceCny, probeCost }
+}
+
+function scoreSortValue(row, key) {
+  const { upstream, balanceCny, probeCost } = scoreAsset(row)
+  const usage = row.usage ?? {}
+  const values = {
+    accountName: String(row.accountName ?? '').toLowerCase(),
+    available: (row.currentAvailable ?? row.currentlyAvailable) ? 1 : 0,
+    score: Number(row.score),
+    priority: Number(row.priority),
+    balance: balanceCny,
+    rate: upstream?.rateCnyPerApiUsd ?? usage.costRateCnyPerApiUsd,
+    probeCost,
+    apiAmountUsd: Number(usage.apiAmountUsd),
+    failureRate: Number(row.failureRate),
+    ttftP95Ms: Number(row.ttftP95Ms),
+  }
+  return values[key]
+}
+
+function compareScoreRows(left, right) {
+  const a = scoreSortValue(left, scoreSort.key)
+  const b = scoreSortValue(right, scoreSort.key)
+  const missingA = a == null || (typeof a === 'number' && !Number.isFinite(a))
+  const missingB = b == null || (typeof b === 'number' && !Number.isFinite(b))
+  if (missingA !== missingB) return missingA ? 1 : -1
+  const result = typeof a === 'string' ? a.localeCompare(String(b), 'zh-CN') : Number(a) - Number(b)
+  return (scoreSort.direction === 'asc' ? result : -result) || Number(left.accountId) - Number(right.accountId)
+}
+
 function renderScoreRows() {
   const term = ($('#score-filter')?.value ?? '').trim().toLowerCase()
   const filteredRows = scoreRowsForActiveProfile()
-    .filter((row) => `${row.accountName ?? ''} ${row.groupName ?? ''} ${(row.groupNames ?? []).join(' ')}`.toLowerCase().includes(term))
+    .filter((row) => {
+      const upstream = scoreUpstreamsById.get(Number(row.accountId))
+      return `${row.accountName ?? ''} ${upstream?.baseUrl ?? ''} ${upstream?.status ?? ''} ${row.groupName ?? ''} ${(row.groupNames ?? []).join(' ')}`.toLowerCase().includes(term)
+    })
+    .sort(compareScoreRows)
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / scorePageSize))
   scorePage = Math.min(Math.max(scorePage, 1), totalPages)
   const start = (scorePage - 1) * scorePageSize
@@ -226,33 +282,36 @@ function renderScoreRows() {
     const available = row.currentAvailable ?? row.currentlyAvailable
     const reason = row.availabilityReason ?? {}
     const reasonDetail = reason.resetAt ? `${reason.detail ?? reason.label}，${time(reason.resetAt)} 恢复` : (reason.detail ?? reason.label ?? '原因未记录')
+    const { upstream, usageResult, balanceCny, probeCost } = scoreAsset(row)
+    const desiredLabel = desiredPriority === null ? number(row.priority) : `${number(row.priority)} → ${number(desiredPriority)}`
+    const status = upstream ? upstreamStatus(upstream) : { label: available ? '可调度' : '不可用', className: available ? 'is-available' : 'is-error' }
     return `<tr class="${available ? '' : 'score-row-unavailable'}">
-      <td class="account-cell"><b>${escapeHtml(row.accountName)}</b><small>#${escapeHtml(row.accountId)}</small></td>
-      <td>${groupLabels(row)}</td>
-      <td>${number(row.priority)}</td>
-      <td>${desiredPriority === null ? '—' : number(desiredPriority)}</td>
-      <td>${priorityDelta === null ? '—' : signed(priorityDelta)}</td>
-      <td><span class="score-value ${gradeClass(row.grade)}">${number(row.score, 1)}</span></td>
-      <td>${costRate == null ? '—' : number(costRate, 4)}</td>
-      <td>${escapeHtml(row.grade ?? '—')}</td>
-      <td>${escapeHtml(row.confidence ?? '—')}</td>
-      <td>${number(row.observedAttempts)}</td>
-      <td>${percent(row.failureRate)}</td>
+      <td class="account-cell"><b>${escapeHtml(row.accountName)}</b><small>#${escapeHtml(row.accountId)}${upstream?.baseUrl ? ` · ${escapeHtml(upstream.baseUrl)}` : ''}</small></td>
+      <td><span class="upstream-status ${status.className}">${status.label}</span><small class="upstream-muted">${escapeHtml(reason.label ?? upstream?.status ?? '—')}</small></td>
+      <td><span class="score-value ${gradeClass(row.grade)}">${number(row.score, 1)}</span><small class="upstream-muted">${escapeHtml(row.grade ?? '—')} · ${escapeHtml(row.confidence ?? '—')}</small></td>
+      <td>${desiredLabel}<small class="upstream-muted">${priorityDelta === null ? '当前' : `变化 ${signed(priorityDelta)}`}</small></td>
+      <td class="upstream-balance" data-known="${balanceCny !== null}"><strong>${balanceCny === null ? '未查询' : cny(balanceCny)}</strong><small>${usageResult?.queriedAt ? time(usageResult.queriedAt) : '无额度样本'}</small></td>
+      <td class="upstream-rate">${upstream?.rateCnyPerApiUsd == null ? costRate == null ? '—' : `¥${number(costRate, 4)}` : `¥${number(upstream.rateCnyPerApiUsd, 4)}`}</td>
+      <td class="upstream-multiplier"><strong>${probeCost === null ? '未知' : `¥${number(probeCost, 4)}`}</strong><small>${escapeHtml(usageResult?.billingMultiplier?.source ?? '无探测')}</small></td>
+      <td class="usd-cell">${usd(usage.apiAmountUsd)}<small class="upstream-muted">${compact(usage.requestCount)} 请求</small></td>
+      <td>${percent(row.failureRate)}<small class="upstream-muted">${number(row.observedAttempts)} 次尝试</small></td>
       <td>${row.ttftP95Ms == null ? '—' : `${number(row.ttftP95Ms)} ms`}</td>
-      <td>${compact(usage.requestCount)}</td>
-      <td>${compact(usage.tokenCount)}</td>
-      <td class="usd-cell">${usd(usage.apiAmountUsd)}</td>
       <td class="failover-cell" title="失败 ${number(row.failureRequests)} 次；触发切号 ${number(row.failoverRequests)} 次，其中恢复 ${number(row.failoverRecovered)} 次；未触发切号 ${number(row.failoverNotTriggered)} 次">
         <span>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}</span>
         <small>未触发 ${number(row.failoverNotTriggered)}</small>
       </td>
-      <td class="availability-cell"><span class="availability ${available ? 'is-up' : 'is-down'}">${available ? '可用' : '不可用'}</span>${available ? '' : `<small title="${escapeHtml(reasonDetail)}">${escapeHtml(reason.label ?? '原因未记录')}</small>`}</td>
+      <td>${groupLabels(row)}</td>
+      <td>${upstream ? `<button class="text-command table-action" type="button" data-score-upstream-edit="${escapeHtml(row.accountId)}">调整</button>` : '—'}</td>
     </tr>`
-  }).join('') : '<tr><td colspan="17" class="empty">没有匹配的账号</td></tr>'
+  }).join('') : '<tr><td colspan="13" class="empty">没有匹配的账号</td></tr>'
   const range = filteredRows.length === 0 ? '0 条' : `${start + 1}-${Math.min(start + scorePageSize, filteredRows.length)} / ${number(filteredRows.length)} 条`
   $('#score-page').textContent = `${scorePage} / ${totalPages} · ${range}`
   $('#score-prev').disabled = scorePage <= 1
   $('#score-next').disabled = scorePage >= totalPages
+  document.querySelectorAll('[data-score-sort]').forEach((header) => {
+    const selected = header.dataset.scoreSort === scoreSort.key
+    header.setAttribute('aria-sort', selected ? (scoreSort.direction === 'asc' ? 'ascending' : 'descending') : 'none')
+  })
 }
 
 function renderScoreMetrics(data = {}) {
@@ -260,12 +319,16 @@ function renderScoreMetrics(data = {}) {
   const groups = [...new Set(rows.flatMap((row) =>
     Array.isArray(row.groupNames) ? row.groupNames : [row.groupName].filter(Boolean)
   ))]
-  $('#metric-accounts').textContent = number(rows.length)
-  $('#metric-groups').textContent = number(groups.length)
-  $('#metric-good').textContent = number(rows.filter((row) => Number(row.score) >= 80).length)
-  $('#metric-risk').textContent = number(rows.filter((row) => Number(row.score) < 60).length)
-  if (data.window || data.recentCallLimit) {
-    $('#metric-window').textContent = data.window ?? `最近 ${number(data.recentCallLimit)} 次`
+  const values = {
+    'metric-accounts': number(rows.length),
+    'metric-groups': number(groups.length),
+    'metric-good': number(rows.filter((row) => Number(row.score) >= 80).length),
+    'metric-risk': number(rows.filter((row) => Number(row.score) < 60).length),
+    'metric-window': data.window ?? (data.recentCallLimit ? `最近 ${number(data.recentCallLimit)} 次` : null),
+  }
+  for (const [id, value] of Object.entries(values)) {
+    const target = document.getElementById(id)
+    if (target && value !== null) target.textContent = value
   }
 }
 
@@ -282,6 +345,165 @@ function renderScores(data) {
   renderRefreshClock()
   renderScoreRows()
   return true
+}
+
+async function loadUnifiedUpstreamAssets() {
+  if (upstreamAssetsInFlight !== null) return await upstreamAssetsInFlight
+  upstreamAssetsInFlight = (async () => {
+    const [first, options] = await Promise.all([
+      requestJson('/api/upstreams?page=1'),
+      requestJson('/api/upstreams/options'),
+    ])
+    upstreamValuationPolicy = options.valuation ?? upstreamValuationPolicy
+    const pageCount = Math.max(1, Number(first.totalPages ?? 1))
+    const rest = pageCount > 1
+      ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => requestJson(`/api/upstreams?page=${index + 2}`)))
+      : []
+    const accounts = [first, ...rest].flatMap((pageData) => pageData.accounts ?? [])
+    scoreUpstreamsById = new Map(accounts.map((row) => [Number(row.id), row]))
+    const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
+    const batches = []
+    for (let offset = 0; offset < ids.length; offset += 40) batches.push(ids.slice(offset, offset + 40))
+    const cachedPages = await Promise.all(batches.map((batch) => requestJson(`/api/upstreams/usage-cache?accountIds=${batch.join(',')}`)))
+    scoreUsageById = new Map(cachedPages.flatMap((cached) => cached.results ?? []).map((result) => [Number(result.accountId), result]))
+    renderScoreRows()
+  })()
+  try { return await upstreamAssetsInFlight } finally { upstreamAssetsInFlight = null }
+}
+
+async function loadUnifiedQuotaSummary() {
+  if (quotaSummaryInFlight !== null) return await quotaSummaryInFlight
+  quotaSummaryInFlight = requestJson('/api/upstreams/quota-summary').then(renderUnifiedQuotaSummary)
+  try { return await quotaSummaryInFlight } finally { quotaSummaryInFlight = null }
+}
+
+function renderUnifiedQuotaSummary(summary) {
+  const total = Number(summary.totalRemainingCny)
+  const schedulable = Number(summary.schedulableRemainingCny)
+  const known = summary.totalRemainingCny != null && Number.isFinite(total)
+  $('#quota-total').textContent = known ? cny(total) : '—'
+  $('#quota-schedulable').textContent = summary.schedulableRemainingCny == null ? '—' : cny(schedulable)
+  $('#quota-consumed').textContent = summary.consumedCny == null ? '暂不可计算' : cny(summary.consumedCny)
+  $('#quota-output').textContent = summary.apiAmountUsd == null ? '暂不可计算' : usdText(summary.apiAmountUsd, 3)
+  $('#quota-realtime-cost').textContent = summary.realtimeCostCnyPerApiUsd == null ? '暂不可计算' : `¥${number(summary.realtimeCostCnyPerApiUsd, 4)}/刀`
+  const hours = summary.estimatedAvailableHours == null ? null : Number(summary.estimatedAvailableHours)
+  $('#quota-estimated-hours').textContent = hours !== null && Number.isFinite(hours) ? (hours >= 24 ? `${number(hours / 24, 1)} 天` : `${number(hours, 1)} 小时`) : '暂不可估算'
+  const points = Array.isArray(summary.history) ? summary.history : []
+  const latest = points.at(-1)
+  $('#quota-sample-speed').textContent = latest?.sampleApiAmountUsdPerHour == null ? '暂不可计算' : usdText(latest.sampleApiAmountUsdPerHour, 2)
+  $('#quota-rolling-speed').textContent = latest?.rollingApiAmountUsdPerHour == null ? '暂不可计算' : usdText(latest.rollingApiAmountUsdPerHour, 2)
+  $('#quota-sample-cost').textContent = latest?.sampleRealtimeCostCnyPerApiUsd == null ? '暂不可计算' : `¥${number(latest.sampleRealtimeCostCnyPerApiUsd, 4)}/刀`
+  const walletDistribution = Array.isArray(summary.walletDistribution) ? summary.walletDistribution : []
+  renderDonut({
+    ring: $('#quota-ring'), detail: $('#quota-ring-detail'), items: walletDistribution,
+    center: known ? cny(total) : '—', centerLabel: '总余额', emptyDetail: '暂无可用余额明细',
+    itemLabel: (item) => item.wallet,
+    itemDetail: (item) => `${percent(item.ratio)} · ${cny(item.remainingCny)}${item.remainingUsd == null ? '' : ` · $${number(item.remainingUsd, 2)}`}${item.schedulable ? '' : ' · 不可调度'}`,
+  })
+  $('#quota-monitor-state').textContent = `${summary.sampledAt ? time(summary.sampledAt) : '尚无采样'} · ${number(summary.knownWallets)} 个已知 wallet${summary.warning ? ` · ${summary.warning}` : ''}`
+  $('#quota-balance-chart').innerHTML = historyChartMarkup(points, {
+    series: [
+      { key: 'sampleApiAmountUsdPerHour', className: 'chart-sample-speed', label: '当前采样' },
+      { key: 'rollingApiAmountUsdPerHour', className: 'chart-rolling-speed', label: '一小时滚动' },
+    ],
+    valueFormatter: (value) => usdText(value, value < 10 ? 2 : 1), unit: 'API 美元 / 小时', ariaLabel: '上游 API 消耗速率',
+  })
+  $('#quota-cost-chart').innerHTML = historyChartMarkup(points, {
+    series: [
+      { key: 'sampleRealtimeCostCnyPerApiUsd', className: 'chart-cost', label: '当前采样' },
+      { key: 'realtimeCostCnyPerApiUsd', className: 'chart-rolling-cost', label: '一小时滚动' },
+    ],
+    valueFormatter: (value) => `¥${number(value, 4)}`, unit: '人民币 / API 美元', ariaLabel: '上游实时成本', yMax: 0.3,
+  })
+  bindHistoryChartTooltip($('#quota-balance-chart'))
+  bindHistoryChartTooltip($('#quota-cost-chart'))
+}
+
+const poolParticipationColors = ['#afdd4a', '#78b8de', '#d6a94d', '#d77b70', '#9ba7d7', '#74c7a1', '#d49ad2', '#b6a37c']
+
+function renderDonut({ ring, detail, items, center, centerLabel, emptyDetail, itemLabel, itemDetail }) {
+  const normalized = items.filter((item) => Number(item.ratio) > 0)
+  let angle = 0
+  const stops = normalized.map((item, index) => {
+    const start = angle
+    angle += Number(item.ratio) * 360
+    return `${poolParticipationColors[index % poolParticipationColors.length]} ${start}deg ${angle}deg`
+  })
+  ring.style.background = stops.length ? `radial-gradient(circle, var(--surface) 0 56%, transparent 57%), conic-gradient(${stops.join(',')})` : ''
+  ring.innerHTML = `<strong>${center}</strong><small>${centerLabel}</small>`
+  detail.textContent = ''
+  detail.style.display = 'none'
+  const hideDetail = () => { detail.style.display = 'none' }
+  const showDetail = (event, text) => {
+    detail.textContent = text
+    detail.style.display = 'block'
+    const parent = detail.parentElement
+    const parentBounds = parent.getBoundingClientRect()
+    const bounds = detail.getBoundingClientRect()
+    const left = Math.max(6, Math.min(event.clientX - parentBounds.left + 12, parentBounds.width - bounds.width - 6))
+    const top = Math.max(6, Math.min(event.clientY - parentBounds.top + 12, parentBounds.height - bounds.height - 6))
+    detail.style.left = `${left}px`
+    detail.style.top = `${top}px`
+  }
+  ring.onpointermove = (event) => {
+    const bounds = ring.getBoundingClientRect()
+    const x = event.clientX - bounds.left - bounds.width / 2
+    const y = event.clientY - bounds.top - bounds.height / 2
+    const distance = Math.hypot(x, y)
+    if (distance < bounds.width * .28 || distance > bounds.width * .52) { hideDetail(); return }
+    const ratio = ((Math.atan2(x, -y) * 180 / Math.PI + 360) % 360) / 360
+    let cursor = 0
+    const item = normalized.find((candidate) => {
+      cursor += Number(candidate.ratio)
+      return ratio <= cursor
+    }) ?? normalized.at(-1)
+    if (item) showDetail(event, `${itemLabel(item)}\n${itemDetail(item)}`)
+  }
+  ring.onpointerleave = hideDetail
+}
+
+function renderPoolQuality(data) {
+  const score = data.score == null ? null : Number(data.score)
+  const grade = String(data.grade ?? 'insufficient')
+  document.querySelector('.pool-quality-score').dataset.grade = grade
+  $('#pool-quality-score').textContent = score === null ? '—' : number(score, 1)
+  $('#pool-quality-grade').textContent = grade === 'insufficient' ? '证据不足' : `${grade} 级`
+  $('#pool-quality-state').textContent = data.sampledAt
+    ? `${time(data.sampledAt)} 采样 · 最近 ${number(data.recentCallLimit)} 次 · 混池 #2 + 自用 #3`
+    : '尚无质量采样，等待下一轮五分钟任务'
+  $('#pool-quality-outcomes').textContent = `${number(data.successRequests)} / ${number(data.failureRequests)}`
+  $('#pool-quality-failure-rate').textContent = `失败率 ${data.failureRate == null ? '—' : percent(data.failureRate)}`
+  $('#pool-quality-failover').textContent = `${number(data.failoverRecovered)} / ${number(data.failoverRequests)}`
+  $('#pool-quality-ttft').textContent = data.ttftP95Ms == null ? '—' : `${number(data.ttftP95Ms)} ms`
+  $('#pool-quality-ttft-samples').textContent = `首 token 样本 ${number(data.firstTokenSamples)}`
+  $('#pool-quality-chart').innerHTML = historyChartMarkup(data.history ?? [], {
+    series: [
+      { key: 'score', className: 'chart-pool-quality', label: '当前采样' },
+      { key: 'rollingScore', className: 'chart-pool-quality-rolling', label: '一小时滚动' },
+    ],
+    valueFormatter: (value) => number(value, 1), unit: '质量分 / 100', ariaLabel: '混池和自用池综合质量评分', yMin: 0, yMax: 100,
+  })
+  bindHistoryChartTooltip($('#pool-quality-chart'))
+  const participation = Array.isArray(data.participation) ? data.participation : []
+  const ring = $('#pool-participation-ring')
+  renderDonut({
+    ring, detail: $('#pool-participation-detail'), items: participation,
+    center: number(data.participationAttempts ?? data.observedAttempts), centerLabel: '调用', emptyDetail: '暂无参与样本',
+    itemLabel: (item) => item.accountName ?? item.wallet ?? `账号 #${item.accountId}`,
+    itemDetail: (item) => `${percent(item.ratio)} · ${number(item.attempts)} 次 · ${item.costRateCnyPerApiUsd == null ? '成本未知' : `¥${number(item.costRateCnyPerApiUsd, 4)}/刀 ${item.costSource === 'detected' ? '探测' : '手工'}`}`,
+  })
+  $('#pool-participation-legend').innerHTML = participation.length ? participation.map((item, index) => {
+    const label = item.accountName ?? item.wallet ?? `账号 #${item.accountId}`
+    const cost = item.costRateCnyPerApiUsd == null ? '成本未知' : `¥${number(item.costRateCnyPerApiUsd, 4)}/刀`
+    const source = item.costSource === 'detected' ? '探测' : item.costSource === 'manual' ? '手工' : ''
+    return `<li><i style="--participation-color:${poolParticipationColors[index % poolParticipationColors.length]}"></i><span title="${escapeHtml(label)}"><b>${escapeHtml(label)}</b><em>${escapeHtml(cost)}${source ? ` · ${source}` : ''}</em></span><strong>${percent(item.ratio)}</strong><small>${number(item.attempts)} 次</small></li>`
+  }).join('') : '<li class="empty">暂无参与样本</li>'
+}
+
+async function loadPoolQuality() {
+  if (poolQualityInFlight !== null) return await poolQualityInFlight
+  poolQualityInFlight = requestJson('/api/upstreams/pool-quality').then(renderPoolQuality)
+  try { return await poolQualityInFlight } finally { poolQualityInFlight = null }
 }
 
 async function scoresPage() {
@@ -304,6 +526,155 @@ async function scoresPage() {
     scorePage += 1
     renderScoreRows()
   })
+  const editDialog = $('#score-upstream-edit-dialog')
+  const createDialog = $('#score-upstream-create-dialog')
+  let createOperationId = null
+  const createLog = (stage, message, state = '') => {
+    const logs = $('#score-upstream-create-logs')
+    if (logs.querySelector('.empty')) logs.innerHTML = ''
+    const item = document.createElement('li')
+    if (state) item.dataset.state = state
+    item.innerHTML = `<time>${escapeHtml(new Date().toLocaleTimeString('zh-CN', { hour12: false }))}</time><b>${escapeHtml(stage)}</b><span>${escapeHtml(message)}</span>`
+    logs.append(item)
+    logs.scrollTop = logs.scrollHeight
+  }
+  createDialog.querySelectorAll('[data-dialog-close]').forEach((button) => button.addEventListener('click', () => createDialog.close()))
+  createDialog.addEventListener('click', (event) => { if (event.target === createDialog) createDialog.close() })
+  $('#score-create-upstream').addEventListener('click', async () => {
+    $('#score-upstream-create-state').textContent = '正在读取号池选项…'
+    const options = await requestJson('/api/upstreams/options')
+    const defaults = options.defaults ?? {}
+    $('#score-upstream-create-priority').value = String(defaults.priority ?? 1)
+    $('#score-upstream-create-capacity').value = String(defaults.capacity ?? 16)
+    const defaultIds = (defaults.groupIds ?? [2, 3]).map(Number)
+    $('#score-upstream-create-groups').innerHTML = (options.groups ?? []).map((group) => `<label><input type="checkbox" value="${escapeHtml(group.id)}" ${defaultIds.includes(Number(group.id)) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${escapeHtml(group.id)}</b></span></label>`).join('')
+    $('#score-upstream-create-state').textContent = '创建时将使用当前优先级、并发容量、号池、Proxy #3 和切号模板。'
+    $('#score-upstream-create-state').removeAttribute('data-state')
+    $('#score-upstream-create-logs').innerHTML = '<li class="empty">等待提交</li>'
+    createOperationId = upstreamOperationId('score-upstream-create')
+    createDialog.showModal()
+  })
+  $('#score-upstream-create-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const button = $('#score-upstream-create-submit')
+    button.disabled = true
+    const operation = createOperationId ?? (createOperationId = upstreamOperationId('score-upstream-create'))
+    try {
+      const groups = [...document.querySelectorAll('#score-upstream-create-groups input:checked')].map((input) => Number(input.value))
+      if (!groups.length) throw new Error('至少选择一个号池')
+      createLog('request', '正在提交创建请求，API key 不会写入日志')
+      const recharge = $('#score-upstream-create-recharge').value.trim()
+      const submitted = await requestJson('/api/upstreams', { method: 'POST', headers: { 'Idempotency-Key': operation }, body: JSON.stringify({ baseUrl: $('#score-upstream-create-base-url').value, apiKey: $('#score-upstream-create-api-key').value, suffix: $('#score-upstream-create-suffix').value, rateCnyPerApiUsd: Number($('#score-upstream-create-rate').value), priority: Number($('#score-upstream-create-priority').value), capacity: Number($('#score-upstream-create-capacity').value), groupIds: groups, rechargeCny: recharge ? Number(recharge) : undefined, operationId: operation }) })
+      $('#score-upstream-create-job').textContent = `JOB ${submitted.workflowId}`
+      createLog('accepted', `Temporal 已接受作业 ${submitted.workflowId}`)
+      const result = await waitUpstreamJob(submitted.workflowId, (status) => createLog('workflow', String(status.state ?? '处理中')))
+      createLog('done', `创建、分组绑定和终态校验完成${result.accounting?.mutation ? `，已记账 ${cny(result.accounting.amountCny)}` : ''}`, 'done')
+      $('#score-upstream-create-state').textContent = `创建成功：账号 #${result.account?.id ?? '—'}`
+      $('#score-upstream-create-state').dataset.state = 'success'
+      $('#score-upstream-create-api-key').value = ''
+      createOperationId = null
+      await loadUnifiedUpstreamAssets()
+      setTimeout(() => { if (createDialog.open) createDialog.close() }, 350)
+    } catch (error) {
+      $('#score-upstream-create-state').textContent = error instanceof Error ? error.message : String(error)
+      $('#score-upstream-create-state').dataset.state = 'error'
+      createLog('failed', error instanceof Error ? error.message : String(error), 'failed')
+    } finally { button.disabled = false }
+  })
+  let activeScoreUpstream = null
+  const closeEditDialog = () => editDialog.close()
+  editDialog.querySelectorAll('[data-dialog-close]').forEach((button) => button.addEventListener('click', closeEditDialog))
+  editDialog.addEventListener('click', (event) => { if (event.target === editDialog) closeEditDialog() })
+  const scoreEditLog = (stage, message, state = '') => {
+    const logs = $('#score-upstream-edit-logs')
+    if (logs.querySelector('.empty')) logs.innerHTML = ''
+    const item = document.createElement('li')
+    if (state) item.dataset.state = state
+    item.innerHTML = `<time>${escapeHtml(new Date().toLocaleTimeString('zh-CN', { hour12: false }))}</time><b>${escapeHtml(stage)}</b><span>${escapeHtml(message)}</span>`
+    logs.append(item)
+    logs.scrollTop = logs.scrollHeight
+  }
+  const openScoreEdit = (row) => {
+    activeScoreUpstream = row
+    $('#score-upstream-edit-id').textContent = `#${row.id}`
+    $('#score-upstream-edit-summary').textContent = `${row.name} · ${row.status === 'active' && row.schedulable ? '当前可调度' : '当前不可调度'} · 已充值 ${cny(row.rechargeCny)}`
+    $('#score-upstream-edit-base-url').textContent = row.baseUrl
+    $('#score-upstream-edit-key-prefix').textContent = `Key ${row.keyPrefix ?? '—'}`
+    $('#score-upstream-edit-suffix').value = row.suffix ?? ''
+    $('#score-upstream-edit-rate').value = row.rateCnyPerApiUsd ?? ''
+    $('#score-upstream-edit-recharge').value = ''
+    $('#score-upstream-edit-state').textContent = ''
+    $('#score-upstream-edit-job').textContent = 'JOB —'
+    $('#score-upstream-edit-logs').innerHTML = '<li class="empty">等待提交</li>'
+    const usage = scoreUsageById.get(Number(row.id))
+    $('#score-upstream-edit-usage-result').innerHTML = usage ? upstreamUsageMarkup(usage, row.rateCnyPerApiUsd) : '<p class="empty">尚未查询</p>'
+    editDialog.showModal()
+  }
+  $('#score-body').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-score-upstream-edit]')
+    if (!button) return
+    const row = scoreUpstreamsById.get(Number(button.dataset.scoreUpstreamEdit))
+    if (row) openScoreEdit(row)
+  })
+  $('#score-upstream-edit-usage').addEventListener('click', async () => {
+    if (!activeScoreUpstream) return
+    const button = $('#score-upstream-edit-usage')
+    button.disabled = true
+    try {
+      const result = await requestJson('/api/upstreams/usage', { method: 'POST', headers: { 'Idempotency-Key': upstreamOperationId(`upstream-usage-${activeScoreUpstream.id}`) }, body: JSON.stringify({ accountIds: [Number(activeScoreUpstream.id)] }) })
+      const completed = await waitUpstreamJob(result.workflowId)
+      const usage = completed.results?.[0]
+      if (usage) scoreUsageById.set(Number(usage.accountId), usage)
+      $('#score-upstream-edit-usage-result').innerHTML = usage ? upstreamUsageMarkup(usage, activeScoreUpstream.rateCnyPerApiUsd) : '<p class="empty">未找到可查询账号</p>'
+    } catch (error) {
+      $('#score-upstream-edit-usage-result').innerHTML = `<p class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`
+    } finally { button.disabled = false }
+  })
+  $('#score-upstream-edit-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    if (!activeScoreUpstream) return
+    const button = $('#score-upstream-edit-submit')
+    button.disabled = true
+    const id = Number(activeScoreUpstream.id)
+    try {
+      scoreEditLog('request', `提交账号 #${id} 调整`)
+      const submitted = await requestJson(`/api/upstreams/${id}`, { method: 'PATCH', headers: { 'Idempotency-Key': upstreamOperationId(`upstream-update-${id}`) }, body: JSON.stringify({ suffix: $('#score-upstream-edit-suffix').value, rateCnyPerApiUsd: Number($('#score-upstream-edit-rate').value) }) })
+      $('#score-upstream-edit-job').textContent = `JOB ${submitted.workflowId}`
+      await waitUpstreamJob(submitted.workflowId)
+      scoreEditLog('verify', '后缀与费率已生效', 'done')
+      const recharge = $('#score-upstream-edit-recharge').value.trim()
+      if (recharge) {
+        const rechargeJob = await requestJson(`/api/upstreams/${id}/recharge`, { method: 'POST', headers: { 'Idempotency-Key': upstreamOperationId(`upstream-recharge-${id}`) }, body: JSON.stringify({ amountCny: Number(recharge) }) })
+        const result = await waitUpstreamJob(rechargeJob.workflowId)
+        scoreEditLog('accounting', `已记账 ${cny(result.accounting?.amountCny)}，恢复同源账号 ${number(result.recoveredAccountIds?.length ?? 0)} 个`, 'done')
+      }
+      $('#score-upstream-edit-state').textContent = '调整完成。'
+      $('#score-upstream-edit-state').dataset.state = 'success'
+      await loadUnifiedUpstreamAssets()
+      setTimeout(() => { if (editDialog.open) editDialog.close() }, 350)
+    } catch (error) {
+      $('#score-upstream-edit-state').textContent = error instanceof Error ? error.message : String(error)
+      $('#score-upstream-edit-state').dataset.state = 'error'
+      scoreEditLog('failed', error instanceof Error ? error.message : String(error), 'failed')
+    } finally { button.disabled = false }
+  })
+  document.querySelectorAll('[data-score-sort]').forEach((header) => {
+    header.tabIndex = 0
+    header.addEventListener('click', () => {
+      const key = header.dataset.scoreSort
+      scoreSort = scoreSort.key === key
+        ? { key, direction: scoreSort.direction === 'desc' ? 'asc' : 'desc' }
+        : { key, direction: key === 'accountName' ? 'asc' : 'desc' }
+      scorePage = 1
+      renderScoreRows()
+    })
+    header.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        header.click()
+      }
+    })
+  })
   document.querySelectorAll('[data-score-profile]').forEach((button) => {
     button.addEventListener('click', () => {
       activeScoreProfile = button.dataset.scoreProfile
@@ -317,17 +688,33 @@ async function scoresPage() {
       renderScoreRows()
     })
   })
-  $('#query-scores').addEventListener('click', () => void refreshPriorityState().catch(() => undefined))
+  $('#query-scores').addEventListener('click', () => void Promise.allSettled([
+    refreshPriorityState(),
+    loadUnifiedUpstreamAssets(),
+    loadUnifiedQuotaSummary(),
+    loadPoolQuality(),
+  ]))
   $('#refresh-scores').addEventListener('click', async () => {
     const button = $('#refresh-scores')
     button.disabled = true
     try {
-      await refreshPriorityState()
+      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality()])
     }
     catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }
   })
-  const initial = await requestJson('/api/scores')
+  const [initial] = await Promise.all([
+    requestJson('/api/scores'),
+    loadUnifiedUpstreamAssets().catch((error) => {
+      $('#score-updated-time').textContent = `资产读取失败：${error instanceof Error ? error.message : String(error)}`
+    }),
+    loadUnifiedQuotaSummary().catch((error) => {
+      $('#quota-monitor-state').textContent = `额度读取失败：${error instanceof Error ? error.message : String(error)}`
+    }),
+    loadPoolQuality().catch((error) => {
+      $('#pool-quality-state').textContent = `质量采样读取失败：${error instanceof Error ? error.message : String(error)}`
+    }),
+  ])
   const options = initial.availableCallOptions ?? []
   const preferredLimit = options.includes(1000) ? 1000 : options[0]
   select.innerHTML = options.map((value) => `<option value="${value}"${value === preferredLimit ? ' selected' : ''}>最近 ${number(value)} 次</option>`).join('')
@@ -336,20 +723,90 @@ async function scoresPage() {
   void refreshPriorityState().catch(() => undefined).finally(scheduleScoreRefresh)
   setInterval(async () => {
     if (!document.hidden) {
-      const data = await requestJson('/api/scores').catch(() => null)
-      if (data) renderScores(data)
+      const [scores] = await Promise.allSettled([
+        requestJson('/api/scores'),
+        loadUnifiedQuotaSummary(),
+        loadPoolQuality(),
+      ])
+      if (scores.status === 'fulfilled') renderScores(scores.value)
     }
   }, 30000)
 }
 
-async function rankingPage() {
-  const data = await requestJson('/api/ranking')
+const rankingRefreshIntervals = new Set([0, 30, 60, 120, 300])
+const rankingRefreshStorageKey = 'apistate.rankingRefreshIntervalSeconds.v1'
+let rankingRefreshTimer = null
+let rankingRefreshCountdownTimer = null
+let rankingRefreshDueAt = null
+let rankingLoading = false
+
+function renderRanking(data) {
   const ranking = data.ranking
   $('#ranking-range').textContent = `${ranking.startDate} 至 ${ranking.endDate}`
   $('#ranking-cost').innerHTML = usd(ranking.totals.actualCost)
+  $('#ranking-balance').innerHTML = usd(ranking.totals.balanceUsd)
+  $('#ranking-recharge').textContent = cny(ranking.totals.rechargeCny)
   $('#ranking-requests').textContent = compact(ranking.totals.requests)
   $('#ranking-tokens').textContent = compact(ranking.totals.tokens)
-  $('#ranking-body').innerHTML = ranking.rows.length ? ranking.rows.map((row) => `<tr><td>${String(row.rank).padStart(2, '0')}</td><td class="account-cell"><b>${escapeHtml(row.displayName)}</b></td><td class="usd-cell">${usd(row.actualCost)}</td><td>${compact(row.requests)}</td><td>${compact(row.tokens)}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">当前窗口暂无用量</td></tr>'
+  $('#ranking-state').textContent = `${ranking.queryCompletedAt ? `更新 ${time(ranking.queryCompletedAt)}` : '已更新'} · DB 查询 ${number(ranking.databaseQueries ?? 0)} 次`
+  $('#ranking-body').innerHTML = ranking.rows.length ? ranking.rows.map((row) => `<tr><td class="ranking-rank">${String(row.rank).padStart(2, '0')}</td><td class="account-cell ranking-user"><b>${escapeHtml(row.displayName)}</b></td><td class="usd-cell">${usd(row.actualCost)}</td><td class="usd-cell">${usd(row.balanceUsd)}</td><td class="ranking-recharge usd-cell">${cny(row.rechargeCny)}</td><td class="ranking-number">${compact(row.requests)}</td><td class="ranking-number">${compact(row.tokens)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">当前窗口暂无用量</td></tr>'
+}
+
+function renderRankingRefreshCountdown() {
+  const target = $('#ranking-refresh-countdown')
+  const interval = Number($('#ranking-refresh-interval')?.value)
+  if (!target) return
+  if (!rankingRefreshIntervals.has(interval) || interval <= 0) return void (target.textContent = '自动刷新已关闭')
+  if (rankingRefreshDueAt === null) return void (target.textContent = '下次刷新 --:--')
+  const remaining = Math.max(0, Math.ceil((rankingRefreshDueAt - Date.now()) / 1000))
+  target.textContent = remaining > 0
+    ? `下次刷新 ${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`
+    : '自动刷新中…'
+}
+
+function clearRankingRefresh() {
+  if (rankingRefreshTimer !== null) clearTimeout(rankingRefreshTimer)
+  if (rankingRefreshCountdownTimer !== null) clearInterval(rankingRefreshCountdownTimer)
+  rankingRefreshTimer = null; rankingRefreshCountdownTimer = null; rankingRefreshDueAt = null
+}
+
+function scheduleRankingRefresh() {
+  clearRankingRefresh()
+  const interval = Number($('#ranking-refresh-interval')?.value)
+  if (!rankingRefreshIntervals.has(interval) || interval <= 0) return renderRankingRefreshCountdown()
+  rankingRefreshDueAt = Date.now() + interval * 1000
+  renderRankingRefreshCountdown()
+  rankingRefreshCountdownTimer = setInterval(renderRankingRefreshCountdown, 1000)
+  rankingRefreshTimer = setTimeout(async () => {
+    await loadRanking(true).catch(() => null)
+    scheduleRankingRefresh()
+  }, interval * 1000)
+}
+
+async function loadRanking(automatic = false) {
+  if (rankingLoading) return
+  rankingLoading = true
+  const button = $('#ranking-refresh')
+  button.disabled = true; button.classList.add('is-loading'); button.setAttribute('aria-busy', 'true')
+  $('#ranking-state').textContent = automatic ? '自动刷新中，正在排队读取…' : '正在排队读取用户用量…'
+  try { renderRanking(await requestJson('/api/ranking', {}, 60000)) }
+  catch (error) { $('#ranking-state').textContent = `刷新失败：${error instanceof Error ? error.message : String(error)}`; throw error }
+  finally { rankingLoading = false; button.disabled = false; button.classList.remove('is-loading'); button.removeAttribute('aria-busy') }
+}
+
+async function rankingPage() {
+  const select = $('#ranking-refresh-interval')
+  try {
+    const stored = Number(localStorage.getItem(rankingRefreshStorageKey))
+    if (rankingRefreshIntervals.has(stored)) select.value = String(stored)
+  } catch { /* 当前页仍使用默认 60 秒。 */ }
+  select.addEventListener('change', () => {
+    try { localStorage.setItem(rankingRefreshStorageKey, select.value) } catch { /* 不影响当前刷新。 */ }
+    scheduleRankingRefresh()
+  })
+  $('#ranking-refresh').addEventListener('click', async () => { await loadRanking(); scheduleRankingRefresh() })
+  await loadRanking()
+  scheduleRankingRefresh()
 }
 
 function creditLabel(status) {
@@ -409,13 +866,15 @@ let auditPage = 1
 let oauthPage = 1
 let oauthArchivedPage = 1
 let oauthProfile = 'codex'
+let oauthRuntimeSnapshot = null
+let oauthCurrentRemainingExpected = null
 let oauthRefreshTimer = null
 let oauthRefreshCountdownTimer = null
 let oauthRefreshDueAt = null
 let oauthCostLoading = false
 let procurementPage = 1
 let procurementBudget = null
-const oauthRefreshIntervalStorageKey = 'apistate.operations.oauth-refresh-interval.v1'
+const oauthRefreshIntervalStorageKey = 'apistate.operations.oauth-refresh-interval.v2'
 const oauthRefreshIntervals = new Set([0, 30, 60, 120, 300])
 
 function renderPager(prefix, pagination) {
@@ -479,15 +938,11 @@ async function refreshPriorityState() {
 
 async function runPriorityStateRefresh() {
   const button = $('#query-scores')
-  const iconButton = $('#refresh-scores')
   const select = $('#score-call-limit')
   const limit = Number(select.value)
   button.disabled = true
   button.classList.add('is-loading')
   button.setAttribute('aria-busy', 'true')
-  iconButton.disabled = true
-  iconButton.classList.add('is-loading')
-  iconButton.setAttribute('aria-busy', 'true')
   select.disabled = true
   $('#score-state').textContent = '查询中'
   $('#score-state').dataset.state = 'refreshing'
@@ -509,9 +964,6 @@ async function runPriorityStateRefresh() {
     button.disabled = false
     button.classList.remove('is-loading')
     button.removeAttribute('aria-busy')
-    iconButton.disabled = false
-    iconButton.classList.remove('is-loading')
-    iconButton.removeAttribute('aria-busy')
     select.disabled = false
   }
 }
@@ -707,11 +1159,137 @@ async function loadOperations({ showCached = false } = {}) {
   writeOperationsSnapshot(ledger, audits)
 }
 
+function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null }) {
+  const chartWidth = 1000
+  if (points.length < 2) return `<text x="${chartWidth / 2}" y="78" text-anchor="middle" class="chart-empty">至少需要两个采样点</text>`
+  const values = series.flatMap(({ key }) => points
+    .filter((point) => point[key] !== null && point[key] !== undefined)
+    .map((point) => Number(point[key])).filter(Number.isFinite))
+  if (values.length < 2) return `<text x="${chartWidth / 2}" y="78" text-anchor="middle" class="chart-empty">当前指标暂无有效曲线</text>`
+  const rawMin = Math.min(...values), rawMax = Math.max(...values)
+  const configuredMin = Number(yMin), configuredMax = Number(yMax)
+  const lowerBound = yMin !== null && Number.isFinite(configuredMin) && rawMin <= configuredMin ? configuredMin : null
+  const upperBound = yMax !== null && Number.isFinite(configuredMax) && rawMax >= configuredMax ? configuredMax : null
+  const padding = Math.max((rawMax - rawMin) * 0.08, Math.abs(rawMax) * 0.02, 0.001)
+  const min = lowerBound ?? Math.max(0, rawMin - padding)
+  const max = upperBound ?? rawMax + padding
+  const span = Math.max(max - min, 0.001)
+  const plotLeft = 64, plotRight = chartWidth - 14, plotTop = 18, plotBottom = 126
+  const x = (index) => plotLeft + index * (plotRight - plotLeft) / Math.max(1, points.length - 1)
+  const y = (value) => plotBottom - (Math.min(max, Math.max(min, value)) - min) / span * (plotBottom - plotTop)
+  const formatValue = typeof valueFormatter === 'function' ? valueFormatter : (value) => number(value, 2)
+  const ticks = [max, (max + min) / 2, min]
+  const grid = ticks.map((value) => {
+    const row = y(value)
+    return `<text x="56" y="${row + 3}" text-anchor="end" class="chart-axis chart-axis-y">${escapeHtml(formatValue(value))}</text><line x1="${plotLeft}" y1="${row}" x2="${plotRight}" y2="${row}" class="chart-grid"/>`
+  }).join('')
+  const lines = series.map(({ key, className, label }) => {
+    const valid = points.map((point, index) => ({ index, raw: point[key], value: Number(point[key]) }))
+      .filter(({ raw, value }) => raw !== null && raw !== undefined && Number.isFinite(value))
+    if (valid.length < 2) return ''
+    const latest = valid.at(-1)
+    const clippedHigh = upperBound === null ? '' : valid.filter(({ value }) => value > upperBound).map(({ index, value }) => `<path class="${className} chart-clipped-point" d="M ${x(index) - 4} ${plotTop + 7} L ${x(index)} ${plotTop + 1} L ${x(index) + 4} ${plotTop + 7} Z"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(value))}${unit ? ` ${escapeHtml(unit)}` : ''}（超出图表上限 ${escapeHtml(formatValue(upperBound))}）</title></path>`).join('')
+    const clippedLow = lowerBound === null ? '' : valid.filter(({ value }) => value < lowerBound).map(({ index, value }) => `<path class="${className} chart-clipped-point" d="M ${x(index) - 4} ${plotBottom - 7} L ${x(index)} ${plotBottom - 1} L ${x(index) + 4} ${plotBottom - 7} Z"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(value))}${unit ? ` ${escapeHtml(unit)}` : ''}（低于图表下限 ${escapeHtml(formatValue(lowerBound))}）</title></path>`).join('')
+    return `<polyline class="${className}" points="${valid.map(({ index, value }) => `${x(index)},${y(value)}`).join(' ')}"/><circle class="${className} chart-latest-point" cx="${x(latest.index)}" cy="${y(latest.value)}" r="3"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(latest.value))}${unit ? ` ${escapeHtml(unit)}` : ''}</title></circle>${clippedHigh}${clippedLow}`
+  }).join('')
+  const first = new Date(points[0].sampledAt), last = new Date(points.at(-1).sampledAt)
+  const label = (date) => date.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false })
+  const legend = series.map(({ className, label: seriesLabel }) => `<span class="history-chart-legend-item ${className}">${escapeHtml(seriesLabel ?? '')}</span>`).join('')
+  const hoverWidth = (plotRight - plotLeft) / Math.max(1, points.length - 1)
+  const hoverTargets = points.map((point, index) => {
+    const at = new Date(point.sampledAt)
+    const details = series.map(({ key, label: seriesLabel }) => {
+      const value = Number(point[key])
+      return `${seriesLabel ?? key}：${point[key] == null || !Number.isFinite(value) ? '无数据' : `${formatValue(value)}${unit ? ` ${unit}` : ''}`}`
+    }).join('\n')
+    const left = Math.max(plotLeft, x(index) - hoverWidth / 2)
+    const right = Math.min(plotRight, x(index) + hoverWidth / 2)
+    return `<g class="chart-hover-column" data-tooltip="${escapeHtml(`${label(at)}\n${details}`)}"><line x1="${x(index)}" y1="${plotTop}" x2="${x(index)}" y2="${plotBottom}"/><rect x="${left}" y="${plotTop}" width="${Math.max(8, right - left)}" height="${plotBottom - plotTop}"/></g>`
+  }).join('')
+  const capLabels = `${upperBound === null ? '' : `<text x="${plotRight}" y="${plotTop + 10}" text-anchor="end" class="chart-cap-label">展示上限 ${escapeHtml(formatValue(upperBound))}</text>`}${lowerBound === null ? '' : `<text x="${plotRight}" y="${plotBottom - 5}" text-anchor="end" class="chart-cap-label">展示下限 ${escapeHtml(formatValue(lowerBound))}</text>`}`
+  return `<title>${escapeHtml(ariaLabel)}</title>${grid}${lines}${hoverTargets}${capLabels}<text x="${plotLeft}" y="147" class="chart-axis">${label(first)}</text><text x="${plotRight}" y="147" text-anchor="end" class="chart-axis">${label(last)}</text><foreignObject x="${plotLeft}" y="1" width="${plotRight - plotLeft}" height="16"><div xmlns="http://www.w3.org/1999/xhtml" class="history-chart-meta"><span>${escapeHtml(unit)}</span><span class="history-chart-legend">${legend}</span></div></foreignObject>`
+}
+
+function bindHistoryChartTooltip(svg) {
+  if (!svg) return
+  const host = svg.parentElement
+  if (!host) return
+  let tooltip = host.querySelector('.history-chart-tooltip')
+  if (!tooltip) {
+    tooltip = document.createElement('div')
+    tooltip.className = 'history-chart-tooltip'
+    host.append(tooltip)
+  }
+  tooltip.style.display = 'none'
+  svg.querySelectorAll('.chart-hover-column').forEach((column) => {
+    column.addEventListener('pointerenter', (event) => {
+      tooltip.textContent = column.dataset.tooltip ?? ''
+      tooltip.style.display = 'block'
+      const hostBounds = host.getBoundingClientRect()
+      const bounds = tooltip.getBoundingClientRect()
+      const left = Math.max(8, Math.min(event.clientX - hostBounds.left + 12, hostBounds.width - bounds.width - 8))
+      const top = Math.max(8, Math.min(event.clientY - hostBounds.top + 12, hostBounds.height - bounds.height - 8))
+      tooltip.style.left = `${left}px`
+      tooltip.style.top = `${top}px`
+    })
+    column.addEventListener('pointermove', (event) => {
+      if (tooltip.style.display !== 'block') return
+      const hostBounds = host.getBoundingClientRect()
+      const bounds = tooltip.getBoundingClientRect()
+      tooltip.style.left = `${Math.max(8, Math.min(event.clientX - hostBounds.left + 12, hostBounds.width - bounds.width - 8))}px`
+      tooltip.style.top = `${Math.max(8, Math.min(event.clientY - hostBounds.top + 12, hostBounds.height - bounds.height - 8))}px`
+    })
+    column.addEventListener('pointerleave', () => { tooltip.style.display = 'none' })
+  })
+}
+
+function renderOauthForecast() {
+  const speed = oauthRuntimeSnapshot?.apiAmountUsdPerHour == null ? null : Number(oauthRuntimeSnapshot.apiAmountUsdPerHour)
+  const remaining = oauthCurrentRemainingExpected == null ? null : Number(oauthCurrentRemainingExpected)
+  $('#oauth-runtime-speed').textContent = speed !== null && Number.isFinite(speed) && speed > 0 ? `${usdText(speed, 2)}/小时` : '暂不可计算'
+  $('#oauth-runtime-remaining').textContent = remaining !== null && Number.isFinite(remaining) ? usdText(remaining, 2) : '暂不可计算'
+  const hours = remaining !== null && Number.isFinite(remaining) && remaining <= 0
+    ? 0
+    : speed !== null && Number.isFinite(speed) && speed > 0 && remaining !== null && Number.isFinite(remaining)
+      ? remaining / speed
+      : null
+  $('#oauth-runtime-hours').textContent = hours !== null ? (hours >= 24 ? `${number(hours / 24, 1)} 天` : `${number(hours, 1)} 小时`) : '暂不可估算'
+  const exhaustionAt = hours === null ? null : new Date(Date.now() + hours * 60 * 60 * 1000)
+  $('#oauth-runtime-exhaustion').textContent = exhaustionAt === null ? '暂不可估算' : new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(exhaustionAt)
+}
+
+function renderOauthRuntimeSummary(summary) {
+  oauthRuntimeSnapshot = summary
+  $('#oauth-runtime-consumed').textContent = summary.consumedApiAmountUsd == null ? '暂不可计算' : usdText(summary.consumedApiAmountUsd, 3)
+  $('#oauth-runtime-state').textContent = `${summary.sampledAt ? time(summary.sampledAt) : '尚无采样'}${summary.warning ? ` · ${summary.warning}` : ''}`
+  const points = Array.isArray(summary.history) ? summary.history : []
+  const latestSampleSpeed = points.at(-1)?.sampleApiAmountUsdPerHour
+  $('#oauth-runtime-sample-speed').textContent = latestSampleSpeed == null || !Number.isFinite(Number(latestSampleSpeed)) ? '暂不可计算' : usdText(latestSampleSpeed, 2)
+  $('#oauth-runtime-consumption-chart').innerHTML = historyChartMarkup(points, {
+    series: [
+      { key: 'sampleApiAmountUsdPerHour', className: 'chart-sample-speed', label: '当前采样' },
+      { key: 'rollingApiAmountUsdPerHour', className: 'chart-rolling-speed', label: '一小时滚动' },
+    ],
+    valueFormatter: (value) => usdText(value, value < 10 ? 2 : 1), unit: 'API 美元 / 小时', ariaLabel: 'OAuth API 产出速度',
+  })
+  $('#oauth-runtime-remaining-chart').innerHTML = historyChartMarkup(points, {
+    series: [{ key: 'remainingExpectedApiAmountUsd', className: 'chart-schedulable', label: '实时剩余预期' }],
+    valueFormatter: (value) => usdText(value, 1), unit: 'API 美元', ariaLabel: 'OAuth 实时剩余预期',
+  })
+  bindHistoryChartTooltip($('#oauth-runtime-consumption-chart'))
+  bindHistoryChartTooltip($('#oauth-runtime-remaining-chart'))
+  renderOauthForecast()
+}
+
 function renderOauthCost(data) {
   const profileLabel = data.profile === 'grok' ? 'Grok' : 'Codex'
   $('#oauth-cost-pool-title').textContent = `${profileLabel} 当前号池实时成本`
   const pool = data.pool ?? { total: data.total ?? {}, groups: data.groups ?? [] }
   const total = pool.total ?? {}
+  oauthCurrentRemainingExpected = total.remainingExpectedApiAmountUsd ?? total.remainingIdealApiAmountUsd ?? null
+  renderOauthForecast()
   const health = data.health ?? {}
   const statusCount = (value) => {
     const parsed = Number(value)
@@ -934,8 +1512,14 @@ async function loadOauthCost({ automatic = false } = {}) {
   button.setAttribute('aria-busy', 'true')
   $('#oauth-cost-state').textContent = automatic ? '自动刷新中，正在通过单连接队列核算…' : '正在通过单连接队列核算…'
   try {
+    const runtimeRequest = requestJson(`/api/oauth/runtime-summary?profile=${oauthProfile}`)
+      .then(renderOauthRuntimeSummary)
+      .catch((error) => {
+        $('#oauth-runtime-state').textContent = `采样读取失败：${error instanceof Error ? error.message : String(error)}`
+      })
     const data = await requestJson(`/api/operations/oauth-cost?profile=${oauthProfile}&page=${oauthPage}&archivedPage=${oauthArchivedPage}`, {}, 60000)
     renderOauthCost(data)
+    await runtimeRequest
   } catch (error) {
     $('#oauth-cost-state').textContent = `核算失败：${error instanceof Error ? error.message : String(error)}`
     throw error
@@ -983,6 +1567,9 @@ async function oauthCostPage() {
       const selected = button.dataset.oauthProfile
       if (selected !== 'codex' && selected !== 'grok' || selected === oauthProfile) return
       oauthProfile = selected
+      oauthRuntimeSnapshot = null
+      oauthCurrentRemainingExpected = null
+      renderOauthForecast()
       oauthPage = 1
       oauthArchivedPage = 1
       document.querySelectorAll('[data-oauth-profile]').forEach((candidate) => {
@@ -1182,6 +1769,20 @@ async function accountImportPage() {
     const source = job.source?.format === 'zip' ? `ZIP ${job.source.jsonFileCount} 个 JSON · 包内去重 ${job.source.duplicateAccountCount}` : 'JSON'
     const platform = job.source?.platform === 'grok' ? 'Grok' : 'GPT'
     $('#import-summary').textContent = `${source} · ${platform} · ${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
+    const recordedCount = Number(job.accounting?.recordedCount)
+    const acquisitionCost = Number(job.accounting?.totalCostCny)
+    const expectedPerAccount = Number(options.initialExpectedApiUsdPerAccount?.[job.settings.planType])
+    const economicsReady = job.state === 'succeeded' && Number.isFinite(recordedCount) && recordedCount >= 0
+      && Number.isFinite(acquisitionCost) && acquisitionCost >= 0 && Number.isFinite(expectedPerAccount) && expectedPerAccount > 0
+    const expectedOutput = economicsReady ? recordedCount * expectedPerAccount : null
+    const initialExpectedCost = expectedOutput > 0 ? acquisitionCost / expectedOutput : null
+    $('#import-economics').classList.toggle('is-pending', !economicsReady)
+    $('#import-economics').classList.toggle('is-ready', economicsReady)
+    $('#import-acquisition-cost').textContent = economicsReady ? cny(acquisitionCost) : '—'
+    $('#import-accounted-count').textContent = economicsReady ? `新增并记账 ${recordedCount} 个账号` : '作业完成后按新增账号核算'
+    $('#import-expected-output').textContent = economicsReady ? usdText(expectedOutput, 2) : '—'
+    $('#import-expected-basis').textContent = economicsReady ? `${job.settings.planType.toUpperCase()} · ${usdText(expectedPerAccount, 1)} / 号` : '复用 OAuth 初始预期口径'
+    $('#import-expected-cost').textContent = initialExpectedCost === null ? (economicsReady ? '无新增成本' : '—') : `¥${number(initialExpectedCost, 4)}`
     $('#import-logs').innerHTML = job.logs.length ? job.logs.map((log) => `<li data-state="${escapeHtml(log.state)}"><time>${time(log.timestamp)}</time><b>${escapeHtml(log.stage)}</b><span>${escapeHtml(log.message)}</span></li>`).join('') : '<li class="empty">等待作业启动</li>'
     $('#import-logs').scrollTop = $('#import-logs').scrollHeight
   }
@@ -1215,6 +1816,35 @@ async function accountImportPage() {
 let upstreamPage = 1
 let upstreamSearch = ''
 let activeUpstream = null
+let upstreamValuationPolicy = { defaultCnyPerApiUsd: 1, walletCnyPerApiUsd: {} }
+
+function normalizedUpstreamWallet(value) {
+  return String(value ?? '').trim().split(/\s+/u)[0].replace(/\/v1\/?$/u, '').replace(/\/$/u, '')
+}
+
+function upstreamWalletCnyRate(baseUrl) {
+  const wallet = normalizedUpstreamWallet(baseUrl)
+  const configuredRate = Number(upstreamValuationPolicy.walletCnyPerApiUsd?.[wallet])
+  const defaultRate = Number(upstreamValuationPolicy.defaultCnyPerApiUsd)
+  return Number.isFinite(configuredRate) && configuredRate > 0 ? configuredRate : defaultRate
+}
+
+function upstreamBalancePresentation(result) {
+  if (!result) return { primary: '未查询', secondary: '—', known: false }
+  if (result.ok !== true) return { primary: '查询失败', secondary: result.error ?? '—', known: false }
+  const quota = result.quota ?? {}
+  const remaining = Number(quota.remaining)
+  if (quota.unit !== 'USD' || quota.remaining == null || !Number.isFinite(remaining)) {
+    return { primary: '账号余额未知', secondary: '未取得账号级 USD 余额', known: false }
+  }
+  const rate = upstreamWalletCnyRate(result.baseUrl)
+  const safeRemaining = Math.max(0, remaining)
+  return {
+    primary: cny(safeRemaining * rate),
+    secondary: `$${number(safeRemaining, 2)} · ${number(rate, 2)} 元/$`,
+    known: true,
+  }
+}
 
 function upstreamStatus(row) {
   if (row.status === 'active' && row.schedulable) return { label: '可调度', className: 'is-available' }
@@ -1226,24 +1856,62 @@ function upstreamGroupMarkup(row) {
   const ids = Array.isArray(row.groupIds) ? row.groupIds : []
   const names = Array.isArray(row.groupNames) ? row.groupNames : []
   if (!ids.length && !names.length) return '<span>未分组</span>'
-  return `<span>${escapeHtml(names.join('、') || '分组')} · ${escapeHtml(ids.map((id) => `#${id}`).join('、'))}</span>`
+  const compactNames = (names.length ? names : ['分组']).map((name) => {
+    const value = String(name)
+    return value.length > 3 ? `${value.slice(0, 3)}…` : value
+  })
+  return `<span title="${escapeHtml(names.join('、') || '分组')} · ${escapeHtml(ids.map((id) => `#${id}`).join('、'))}">${escapeHtml(compactNames.join('、'))} · ${escapeHtml(ids.map((id) => `#${id}`).join('、'))}</span>`
 }
 
 function upstreamOperationId(prefix) {
   return `${prefix}-${typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
 }
 
-function upstreamUsageMarkup(result) {
+function upstreamUsageMarkup(result, manualRate = null) {
   const quota = result.quota ?? {}
   const usage = result.usage ?? {}
-  const quotaValue = quota.unlimited === true ? '无限额' : quota.remaining == null ? '—' : number(quota.remaining, 2)
-  const quotaUnit = quota.unit ? ` ${quota.unit}` : ''
+  const balance = upstreamBalancePresentation(result)
+  const multiplier = upstreamMultiplierPresentation(result, manualRate)
   const warning = result.warning ? `<p>${escapeHtml(result.warning)}</p>` : ''
   const error = result.error ? `<p>${escapeHtml(result.error)}</p>` : ''
   return `<article class="upstream-usage-result" data-ok="${result.ok === true}">
     <header><div><b>${escapeHtml(result.accountName ?? `账号 #${result.accountId}`)}</b><small>#${escapeHtml(result.accountId)} · ${escapeHtml(result.provider ?? 'unknown')}</small></div><small>${number(result.durationMs)} ms</small></header>
-    <dl><dt>剩余额度</dt><dd>${escapeHtml(quotaValue)}${escapeHtml(quotaUnit)}</dd><dt>已用额度</dt><dd>${quota.used == null ? '—' : escapeHtml(number(quota.used, 2))}</dd><dt>Token</dt><dd>${usage.totalTokens == null ? '—' : compact(usage.totalTokens)}</dd><dt>请求</dt><dd>${usage.requestCount == null ? '—' : number(usage.requestCount)}</dd><dt>API 费用</dt><dd>${usage.actualCostUsd == null ? usage.costUsd == null ? '—' : usd(usage.costUsd) : usd(usage.actualCostUsd)}</dd><dt>查询时间</dt><dd>${time(result.queriedAt)}</dd></dl>${warning}${error}
+    <dl><dt>账号余额</dt><dd><b>${escapeHtml(balance.primary)}</b><small>${escapeHtml(balance.secondary)}</small></dd><dt>探测成本</dt><dd><b>${escapeHtml(multiplier.primary)}</b><small>${escapeHtml(multiplier.secondary)}</small><small>${escapeHtml(multiplier.comparison)}</small></dd><dt>已用额度</dt><dd>${quota.used == null ? '—' : `${escapeHtml(number(quota.used, 2))} USD`}</dd><dt>Token</dt><dd>${usage.totalTokens == null ? '—' : compact(usage.totalTokens)}</dd><dt>请求</dt><dd>${usage.requestCount == null ? '—' : number(usage.requestCount)}</dd><dt>API 费用</dt><dd>${usage.actualCostUsd == null ? usage.costUsd == null ? '—' : usd(usage.costUsd) : usd(usage.actualCostUsd)}</dd><dt>查询时间</dt><dd>${time(result.queriedAt)}</dd></dl>${warning}${error}
   </article>`
+}
+
+function upstreamMultiplierPresentation(result, manualRate = null) {
+  const probe = result?.billingMultiplier ?? {}
+  if (probe.value == null || !Number.isFinite(Number(probe.value)) || Number(probe.value) <= 0) {
+    const retained = probe.syncStatus === 'retained-manual' ? ' · 已保留手工费率' : ''
+    return { primary: '未知', secondary: `暂无可信正倍率证据${retained}`, comparison: probe.syncMessage ?? '—', mismatch: false }
+  }
+  const rawMultiplier = Number(probe.value)
+  const walletRate = upstreamWalletCnyRate(result?.baseUrl)
+  const detectedCost = rawMultiplier * walletRate
+  const source = probe.source === 'sub2api-live' ? 'Sub2API 实时有效' : 'New API 最近消费'
+  const safeManualRate = Number(manualRate)
+  const hasManualRate = manualRate != null && Number.isFinite(safeManualRate) && safeManualRate > 0
+  const difference = hasManualRate ? (detectedCost - safeManualRate) / safeManualRate : null
+  const mismatch = difference !== null && Math.abs(difference) > 0.005
+  const comparison = difference === null
+    ? '未登记结构化手工费率'
+    : mismatch
+      ? `较手工 ${difference > 0 ? '+' : ''}${number(difference * 100, 1)}%`
+      : '与手工一致'
+  const syncLabels = {
+    synchronized: '已按探测同步',
+    'already-synchronized': '手工费率已一致',
+    'retained-manual': '已保留手工费率',
+    failed: '费率同步失败',
+  }
+  const syncLabel = syncLabels[probe.syncStatus]
+  return {
+    primary: `¥${number(detectedCost, 4)}/刀`,
+    secondary: `${number(rawMultiplier, 4)}× × ${number(walletRate, 2)} 元/$ · ${source}`,
+    comparison: syncLabel ? `${comparison} · ${syncLabel}` : comparison,
+    mismatch,
+  }
 }
 
 async function waitUpstreamJob(workflowId, onStatus = () => {}, timeoutMs = 600000) {
@@ -1283,6 +1951,14 @@ async function waitWorkflow(workflowId, timeoutMs = 600000) {
 async function upstreamsPage() {
   const createDialog = $('#upstream-create-dialog')
   const editDialog = $('#upstream-edit-dialog')
+  for (const dialog of [createDialog, editDialog]) {
+    dialog.querySelectorAll('[data-dialog-close]').forEach((button) => {
+      button.addEventListener('click', () => dialog.close())
+    })
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close()
+    })
+  }
   const setState = (message, state = '') => {
     $('#upstream-state').textContent = message
     $('#upstream-state').dataset.state = state
@@ -1293,6 +1969,100 @@ async function upstreamsPage() {
   let createOperationId = null
   let editRechargeOperationId = null
   let upstreamGroupOptions = []
+  let quotaRefreshTimer = null
+  let quotaRefreshCountdownTimer = null
+  let quotaRefreshDueAt = null
+  const quotaRefreshStorageKey = 'apistate.operations.upstream-quota-refresh-interval.v1'
+  const renderQuotaRefreshCountdown = () => {
+    const target = $('#upstream-quota-refresh-countdown')
+    const interval = Number($('#upstream-quota-refresh-interval')?.value)
+    if (!target) return
+    if (!oauthRefreshIntervals.has(interval) || interval <= 0) {
+      target.textContent = '自动刷新已关闭'
+      return
+    }
+    if (quotaRefreshDueAt === null) {
+      target.textContent = '下次刷新 --:--'
+      return
+    }
+    const remainingSeconds = Math.max(0, Math.ceil((quotaRefreshDueAt - Date.now()) / 1000))
+    target.textContent = remainingSeconds > 0
+      ? `下次刷新 ${String(Math.floor(remainingSeconds / 60)).padStart(2, '0')}:${String(remainingSeconds % 60).padStart(2, '0')}`
+      : '自动刷新中…'
+  }
+  const clearQuotaRefresh = () => {
+    if (quotaRefreshTimer !== null) clearTimeout(quotaRefreshTimer)
+    if (quotaRefreshCountdownTimer !== null) clearInterval(quotaRefreshCountdownTimer)
+    quotaRefreshTimer = null
+    quotaRefreshCountdownTimer = null
+    quotaRefreshDueAt = null
+  }
+  const scheduleQuotaRefresh = () => {
+    clearQuotaRefresh()
+    const interval = Number($('#upstream-quota-refresh-interval')?.value)
+    if (!oauthRefreshIntervals.has(interval) || interval <= 0) {
+      renderQuotaRefreshCountdown()
+      return
+    }
+    quotaRefreshDueAt = Date.now() + interval * 1000
+    renderQuotaRefreshCountdown()
+    quotaRefreshCountdownTimer = setInterval(renderQuotaRefreshCountdown, 1000)
+    quotaRefreshTimer = setTimeout(async () => {
+      quotaRefreshDueAt = null
+      renderQuotaRefreshCountdown()
+      await loadQuotaSummary()
+      scheduleQuotaRefresh()
+    }, interval * 1000)
+  }
+  const renderQuotaCharts = (history) => {
+    const points = Array.isArray(history) ? history : []
+    $('#quota-balance-chart').innerHTML = historyChartMarkup(points, {
+      series: [
+        { key: 'sampleApiAmountUsdPerHour', className: 'chart-sample-speed', label: '当前采样' },
+        { key: 'rollingApiAmountUsdPerHour', className: 'chart-rolling-speed', label: '一小时滚动' },
+      ],
+      valueFormatter: (value) => usdText(value, value < 10 ? 2 : 1), unit: 'API 美元 / 小时', ariaLabel: '上游 API 消耗速率',
+    })
+    $('#quota-cost-chart').innerHTML = historyChartMarkup(points, {
+      series: [
+        { key: 'sampleRealtimeCostCnyPerApiUsd', className: 'chart-cost', label: '当前采样' },
+        { key: 'realtimeCostCnyPerApiUsd', className: 'chart-rolling-cost', label: '一小时滚动' },
+      ],
+      valueFormatter: (value) => `¥${number(value, 4)}`, unit: '人民币 / API 美元', ariaLabel: '上游当前采样与一小时滚动实时成本', yMax: 0.3,
+    })
+    bindHistoryChartTooltip($('#quota-balance-chart'))
+    bindHistoryChartTooltip($('#quota-cost-chart'))
+  }
+  const loadQuotaSummary = async () => {
+    try {
+      const summary = await requestJson('/api/upstreams/quota-summary')
+      const total = Number(summary.totalRemainingCny), schedulable = Number(summary.schedulableRemainingCny)
+      const known = summary.totalRemainingCny != null && Number.isFinite(total)
+      $('#quota-total').textContent = known ? cny(total) : '—'
+      $('#quota-schedulable').textContent = summary.schedulableRemainingCny == null ? '—' : cny(schedulable)
+      $('#quota-consumed').textContent = summary.consumedCny == null ? '暂不可计算' : cny(summary.consumedCny)
+      $('#quota-output').textContent = summary.apiAmountUsd == null ? '暂不可计算' : usdText(summary.apiAmountUsd, 3)
+      $('#quota-realtime-cost').textContent = summary.realtimeCostCnyPerApiUsd == null ? '暂不可计算' : `¥${number(summary.realtimeCostCnyPerApiUsd, 4)}/刀`
+      const hours = summary.estimatedAvailableHours == null ? null : Number(summary.estimatedAvailableHours)
+      $('#quota-estimated-hours').textContent = hours !== null && Number.isFinite(hours) ? (hours >= 24 ? `${number(hours / 24, 1)} 天` : `${number(hours, 1)} 小时`) : '暂不可估算'
+      const latestPoint = Array.isArray(summary.history) ? summary.history.at(-1) : null
+      const sampleSpeed = latestPoint?.sampleApiAmountUsdPerHour
+      const rollingSpeed = latestPoint?.rollingApiAmountUsdPerHour
+      $('#quota-sample-speed').textContent = sampleSpeed == null || !Number.isFinite(Number(sampleSpeed)) ? '暂不可计算' : usdText(sampleSpeed, 2)
+      $('#quota-rolling-speed').textContent = rollingSpeed == null || !Number.isFinite(Number(rollingSpeed)) ? '暂不可计算' : usdText(rollingSpeed, 2)
+      const sampleCost = latestPoint?.sampleRealtimeCostCnyPerApiUsd
+      $('#quota-sample-cost').textContent = sampleCost == null || !Number.isFinite(Number(sampleCost)) ? '暂不可计算' : `¥${number(sampleCost, 4)}/刀`
+      const walletDistribution = Array.isArray(summary.walletDistribution) ? summary.walletDistribution : []
+      renderDonut({
+        ring: $('#quota-ring'), detail: $('#quota-ring-detail'), items: walletDistribution,
+        center: known ? cny(total) : '—', centerLabel: '总余额', emptyDetail: '暂无可用余额明细',
+        itemLabel: (item) => item.wallet,
+        itemDetail: (item) => `${percent(item.ratio)} · ${cny(item.remainingCny)}${item.remainingUsd == null ? '' : ` · $${number(item.remainingUsd, 2)}`}${item.schedulable ? '' : ' · 不可调度'}`,
+      })
+      $('#quota-monitor-state').textContent = `${summary.sampledAt ? time(summary.sampledAt) : '尚无采样'} · ${number(summary.knownWallets)} 个已知 wallet${summary.warning ? ` · ${summary.warning}` : ''}`
+      renderQuotaCharts(summary.history)
+    } catch (error) { $('#quota-monitor-state').textContent = `额度摘要读取失败：${error instanceof Error ? error.message : String(error)}` }
+  }
   const queryUsage = async (accountIds, onStatus = () => {}) => {
     const submitted = await requestJson('/api/upstreams/usage', {
       method: 'POST',
@@ -1321,8 +2091,10 @@ async function upstreamsPage() {
     appendJobLog(scope, 'workflow', labels[state] ?? `状态更新：${state}`, state === 'completed' ? 'done' : state === 'running' ? 'running' : 'failed')
   }
   try {
+    await loadQuotaSummary()
     const options = await requestJson('/api/upstreams/options')
     upstreamGroupOptions = Array.isArray(options.groups) ? options.groups : []
+    upstreamValuationPolicy = options.valuation ?? upstreamValuationPolicy
     const defaults = options.defaults ?? {}
     $('#upstream-create-priority').value = String(defaults.priority ?? 1)
     $('#upstream-create-capacity').value = String(defaults.capacity ?? 16)
@@ -1343,18 +2115,18 @@ async function upstreamsPage() {
     $('#upstream-body').innerHTML = rows.length ? rows.map((row) => {
       const status = upstreamStatus(row)
       const usageResult = upstreamUsageById.get(Number(row.id))
-      const quota = usageResult?.quota ?? {}
       const usage = usageResult?.usage ?? {}
-      const balance = usageResult ? usageResult.ok === true
-        ? quota.unlimited === true ? '无限额' : quota.remaining == null ? '—' : `${number(quota.remaining, 2)} ${quota.unit ?? ''}`
-        : '查询失败' : '未查询'
+      const balance = upstreamBalancePresentation(usageResult)
+      const multiplier = upstreamMultiplierPresentation(usageResult, row.rateCnyPerApiUsd)
+      const manualRate = row.rateCnyPerApiUsd == null ? '—' : `¥${number(row.rateCnyPerApiUsd, 6)}`
+      const detectedRate = multiplier.primary === '未知' ? '探测 —' : `探测 ${multiplier.primary}`
       return `<tr class="upstream-row" data-id="${escapeHtml(row.id)}" tabindex="0" role="button" aria-label="编辑 ${escapeHtml(row.name)}">
-        <td class="upstream-id-cell"><b>${escapeHtml(row.name)}</b><a class="upstream-url-link" href="${escapeHtml(row.baseUrl)}" target="_blank" rel="noreferrer">${escapeHtml(row.baseUrl)}</a><small>#${escapeHtml(row.id)}</small></td>
+        <td class="upstream-id-cell"><b><a class="upstream-url-link" href="${escapeHtml(row.baseUrl)}" target="_blank" rel="noreferrer">${escapeHtml(row.name)}</a></b><small>#${escapeHtml(row.id)} · ${escapeHtml(row.baseUrl)}</small></td>
         <td class="upstream-muted">${escapeHtml(row.keyPrefix ?? '—')}</td>
         <td>${escapeHtml(row.suffix ?? '—')}</td>
-        <td class="upstream-rate">${row.rateCnyPerApiUsd == null ? '—' : `¥${number(row.rateCnyPerApiUsd, 6)}`}</td>
+        <td class="upstream-rate upstream-cost-cell" data-mismatch="${multiplier.mismatch}"><strong>${manualRate}</strong><small>${escapeHtml(detectedRate)}</small><small>${escapeHtml(multiplier.comparison)}</small></td>
         <td><span class="upstream-status ${status.className}">${status.label}</span><small class="upstream-muted">${escapeHtml(row.status || '—')}</small></td>
-        <td class="upstream-balance" data-ok="${usageResult?.ok === true}">${escapeHtml(balance)}<small>${usageResult?.queriedAt ? time(usageResult.queriedAt) : '—'}</small></td>
+        <td class="upstream-balance" data-ok="${usageResult?.ok === true}" data-known="${balance.known}"><strong>${escapeHtml(balance.primary)}</strong><small>${escapeHtml(balance.secondary)}</small><small>${usageResult?.queriedAt ? time(usageResult.queriedAt) : '—'}</small></td>
         <td>${usage.totalTokens == null ? '—' : compact(usage.totalTokens)}<small class="upstream-muted">${usage.requestCount == null ? '—' : `${number(usage.requestCount)} 次`}</small></td>
         <td>${usage.actualCostUsd == null ? usage.costUsd == null ? '—' : usd(usage.costUsd) : usd(usage.actualCostUsd)}</td>
         <td><div class="upstream-groups">${upstreamGroupMarkup(row)}</div><small class="upstream-muted">Proxy #${escapeHtml(row.proxyId ?? '—')}</small></td>
@@ -1379,6 +2151,7 @@ async function upstreamsPage() {
         render(data)
       }
       setState('已更新', 'ready')
+      await loadQuotaSummary()
     } catch (error) {
       setState('读取失败', 'unavailable')
       $('#upstream-query-state').textContent = error instanceof Error ? error.message : String(error)
@@ -1399,57 +2172,30 @@ async function upstreamsPage() {
     $('#upstream-edit-state').removeAttribute('data-state')
     resetJobLog('edit')
     const usageResult = upstreamUsageById.get(Number(row.id))
-    $('#upstream-edit-usage-result').innerHTML = usageResult ? upstreamUsageMarkup(usageResult) : '<p class="empty">尚未查询</p>'
+    $('#upstream-edit-usage-result').innerHTML = usageResult ? upstreamUsageMarkup(usageResult, row.rateCnyPerApiUsd) : '<p class="empty">尚未查询</p>'
     editDialog.showModal()
   }
-  $('#upstream-usage-refresh').addEventListener('click', async () => {
-    const button = $('#upstream-usage-refresh')
-    button.disabled = true
-    button.classList.add('is-loading')
-    button.setAttribute('aria-busy', 'true')
-    $('#upstream-usage-state').textContent = '正在提交异步查询…'
-    try {
-      const result = await queryUsage(lastUpstreamRows.map((row) => Number(row.id)), (status) => {
-        const state = String(status.state ?? 'unknown')
-        if (state === 'submitted') {
-          $('#upstream-usage-state').textContent = `已受理 ${status.workflowId} · 等待 worker`
-        } else if (!status.terminal) {
-          $('#upstream-usage-state').textContent = `worker ${state} · 后台查询中…`
-        } else {
-          $('#upstream-usage-state').textContent = state === 'completed' ? '查询完成，正在更新结果…' : `查询${state}`
-        }
-      })
-      for (const item of result.results ?? []) upstreamUsageById.set(Number(item.accountId), item)
-      if (lastUpstreamData) render(lastUpstreamData)
-      $('#upstream-usage-state').textContent = `${number(result.succeeded)} 成功 · ${number(result.failed)} 失败 · ${number(result.databaseQueries)} 次排队 DB 查询`
-    } catch (error) {
-      $('#upstream-usage-state').textContent = error instanceof Error ? error.message : String(error)
-    } finally {
-      button.disabled = false
-      button.classList.remove('is-loading')
-      button.removeAttribute('aria-busy')
-    }
-  })
   $('#upstream-usage-refresh-all').addEventListener('click', async () => {
     const button = $('#upstream-usage-refresh-all')
     button.disabled = true
     button.classList.add('is-loading')
     button.setAttribute('aria-busy', 'true')
-    $('#upstream-usage-state').textContent = '正在提交全量异步查询…'
+    $('#upstream-usage-state').textContent = '正在提交全量刷新…'
     try {
       const result = await queryUsage([], (status) => {
         const state = String(status.state ?? 'unknown')
         if (state === 'submitted') {
           $('#upstream-usage-state').textContent = `已受理 ${status.workflowId} · 等待 worker`
         } else if (!status.terminal) {
-          $('#upstream-usage-state').textContent = `worker ${state} · 全量后台查询中…`
+          $('#upstream-usage-state').textContent = `worker ${state} · 后台刷新中…`
         } else {
-          $('#upstream-usage-state').textContent = state === 'completed' ? '全量查询完成，正在更新结果…' : `全量查询${state}`
+          $('#upstream-usage-state').textContent = state === 'completed' ? '刷新完成，正在更新结果…' : `刷新${state}`
         }
       })
       for (const item of result.results ?? []) upstreamUsageById.set(Number(item.accountId), item)
       if (lastUpstreamData) render(lastUpstreamData)
       $('#upstream-usage-state').textContent = `全量 ${number(result.succeeded)} 成功 · ${number(result.failed)} 失败 · ${number(result.databaseQueries)} 次排队 DB 查询`
+      await loadQuotaSummary()
     } catch (error) {
       $('#upstream-usage-state').textContent = error instanceof Error ? error.message : String(error)
     } finally {
@@ -1467,11 +2213,23 @@ async function upstreamsPage() {
       const result = await queryUsage([Number(activeUpstream.id)])
       for (const item of result.results ?? []) upstreamUsageById.set(Number(item.accountId), item)
       if (lastUpstreamData) render(lastUpstreamData)
-      $('#upstream-edit-usage-result').innerHTML = result.results?.length ? upstreamUsageMarkup(result.results[0]) : '<p class="empty">未找到可查询账号</p>'
+      $('#upstream-edit-usage-result').innerHTML = result.results?.length ? upstreamUsageMarkup(result.results[0], activeUpstream.rateCnyPerApiUsd) : '<p class="empty">未找到可查询账号</p>'
     } catch (error) {
       $('#upstream-edit-usage-result').innerHTML = `<p class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`
     } finally { button.disabled = false }
   })
+  const quotaRefreshInterval = $('#upstream-quota-refresh-interval')
+  try {
+    const stored = Number(localStorage.getItem(quotaRefreshStorageKey))
+    if (oauthRefreshIntervals.has(stored)) quotaRefreshInterval.value = String(stored)
+  } catch {
+    // 隐私模式可能禁用存储，当前页面仍按默认间隔刷新。
+  }
+  quotaRefreshInterval.addEventListener('change', () => {
+    try { localStorage.setItem(quotaRefreshStorageKey, quotaRefreshInterval.value) } catch { /* 当前页面继续生效。 */ }
+    scheduleQuotaRefresh()
+  })
+  scheduleQuotaRefresh()
   $('#upstream-search-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     upstreamSearch = $('#upstream-search').value.trim()
@@ -1514,7 +2272,6 @@ async function upstreamsPage() {
     createOperationId = null
   })
   $('#upstream-create-form').addEventListener('submit', async (event) => {
-    if (event.submitter?.value === 'cancel') return
     event.preventDefault()
     const button = $('#upstream-create-submit')
     button.disabled = true
@@ -1559,7 +2316,6 @@ async function upstreamsPage() {
     } finally { button.disabled = false }
   })
   $('#upstream-edit-form').addEventListener('submit', async (event) => {
-    if (event.submitter?.value === 'cancel') return
     event.preventDefault()
     if (!activeUpstream) return
     const button = $('#upstream-edit-submit')
@@ -1603,6 +2359,9 @@ async function upstreamsPage() {
     } finally { button.disabled = false }
   })
   await load()
+  if (route.get('action') === 'create') {
+    $('#upstream-create').click()
+  }
 }
 
 async function boot() {

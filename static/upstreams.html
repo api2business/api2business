@@ -5,26 +5,39 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#111412" />
   <title>上游管理 | ApiState</title>
-  <link rel="stylesheet" href="/styles.css?v=usage-table-v1" />
-  <script src="/app.js?v=usage-table-v1" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=live-layout-v15" />
+  <script src="/app.js?v=live-layout-v15" type="module"></script>
 </head>
 <body data-page="upstreams">
   <div data-shell></div>
   <main class="workspace upstream-workspace">
-    <header class="page-head">
-      <div><p class="eyebrow">UPSTREAMS / RUNTIME API-KEY</p><h1>上游管理</h1></div>
-      <div class="page-actions"><span id="upstream-state" class="state-badge" data-state="refreshing">读取中</span><button id="upstream-usage-refresh" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>查询当前页</span></button><button id="upstream-create" class="query-command" type="button">新增上游</button></div>
+    <header class="page-head upstream-slim-head">
+      <div class="live-head-title"><p class="eyebrow">UPSTREAMS / RUNTIME API-KEY</p><h1>上游管理</h1><p class="live-head-sample">API-key 资产、额度与调度状态</p></div>
+      <div class="upstream-head-controls">
+        <form class="score-query-controls" aria-label="上游资产自动刷新"><label class="select-field"><span>自动刷新</span><select id="upstream-quota-refresh-interval"><option value="30">30 秒</option><option value="60" selected>60 秒</option><option value="120">2 分钟</option><option value="300">5 分钟</option><option value="0">关闭</option></select></label><small id="upstream-quota-refresh-countdown" class="oauth-refresh-countdown">下次刷新 --:--</small></form>
+        <span id="upstream-state" class="state-badge" data-state="refreshing">读取中</span>
+        <div class="page-actions"><button id="upstream-usage-refresh-all" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>手动刷新</span></button><button id="upstream-create" class="query-command" type="button">新增上游</button></div>
+      </div>
     </header>
-    <section class="metric-strip upstream-metrics" aria-label="上游概要">
-      <div><span>上游账号</span><strong id="upstream-total">—</strong></div>
-      <div><span>可调度（筛选结果）</span><strong id="upstream-available">—</strong></div>
-      <div><span>全局充值成本</span><strong id="upstream-recharged">—</strong></div>
-      <div><span>当前页</span><strong id="upstream-page-metric">—</strong></div>
+    <section class="quota-monitor" aria-label="上游额度监控">
+      <div class="quota-monitor-copy"><p class="eyebrow">LIVE QUOTA / 1H ROLLING</p><h2>上游资产与实时成本</h2><p id="quota-monitor-state">正在读取持久化采样</p></div>
+      <div class="donut-stack"><div class="quota-ring" id="quota-ring"><span id="quota-ring-ratio">—</span><small>总余额</small></div><p id="quota-ring-detail" class="donut-hover-detail">悬停查看上游余额</p></div>
+      <dl class="quota-monitor-values"><div class="quota-rate-metric"><dt>当前采样速率</dt><dd id="quota-sample-speed">—</dd><small>API 美元 / 小时</small></div><div class="quota-rate-metric"><dt>一小时滚动速率</dt><dd id="quota-rolling-speed">—</dd><small>API 美元 / 小时</small></div><div class="quota-cost-metric"><dt>当前采样成本</dt><dd id="quota-sample-cost">—</dd><small>人民币 / API 美元</small></div><div class="quota-cost-metric"><dt>一小时滚动成本</dt><dd id="quota-realtime-cost">—</dd><small>人民币 / API 美元</small></div><div><dt>总剩余额度</dt><dd id="quota-total">—</dd></div><div><dt>可调度剩余额度</dt><dd id="quota-schedulable">—</dd></div><div><dt>最近 1 小时消耗</dt><dd id="quota-consumed">—</dd></div><div><dt>最近 1 小时 API 产出</dt><dd id="quota-output">—</dd></div><div><dt>预计可用时间</dt><dd id="quota-estimated-hours">—</dd></div></dl>
+      <div class="quota-charts">
+        <figure><figcaption><span>API 消耗速率</span><small>最近 8 小时</small></figcaption><svg id="quota-balance-chart" viewBox="0 0 1000 150" role="img" aria-label="上游最近八小时当前采样与一小时滚动 API 消耗速率"></svg></figure>
+        <figure><figcaption><span>实时成本</span><small>最近 8 小时</small></figcaption><svg id="quota-cost-chart" viewBox="0 0 1000 150" role="img" aria-label="上游最近八小时当前采样与一小时滚动实时成本趋势"></svg></figure>
+      </div>
     </section>
     <section id="upstream-usage-panel" class="upstream-usage-panel" aria-live="polite">
-      <header><div><p class="eyebrow">UPSTREAM QUOTA / USAGE</p><h2>额度与用量</h2></div><div class="upstream-usage-actions"><button id="upstream-usage-refresh-all" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>查询全部上游</span></button><span id="upstream-usage-state" class="section-state">尚未查询</span></div></header>
+      <header><div><p class="eyebrow">UPSTREAM QUOTA / USAGE</p><h2>额度与用量</h2></div><div class="upstream-usage-actions"><span id="upstream-usage-state" class="section-state">尚未查询</span></div></header>
     </section>
     <section class="table-section">
+      <section class="metric-strip upstream-metrics" aria-label="上游概要">
+        <div><span>上游账号</span><strong id="upstream-total">—</strong></div>
+        <div><span>可调度</span><strong id="upstream-available">—</strong><small>当前筛选结果</small></div>
+        <div><span>全局充值成本</span><strong id="upstream-recharged">—</strong></div>
+        <div><span>当前页</span><strong id="upstream-page-metric">—</strong></div>
+      </section>
       <div class="table-toolbar">
         <form id="upstream-search-form" class="score-query-controls">
           <label class="filter-field"><span>模糊筛选</span><input id="upstream-search" type="search" placeholder="ID、名称、base_url、Key 前缀或状态" autocomplete="off" /></label>
@@ -34,7 +47,7 @@
       </div>
       <div class="table-wrap">
         <table class="data-table upstream-table" aria-label="runtime API-key 上游账号列表">
-          <thead><tr><th>ID / 名称</th><th>Key 前缀</th><th>后缀</th><th>费率（元/刀）</th><th>状态</th><th>余额</th><th>Token / 请求</th><th>API 费用</th><th>分组 / Proxy</th><th>充值成本</th><th>更新时间</th></tr></thead>
+          <thead><tr><th>账号 / URL</th><th>Key 前缀</th><th>后缀</th><th>成本（元/刀）</th><th>状态</th><th>账号余额（人民币）</th><th>Token / 请求</th><th>API 费用</th><th>分组 / Proxy</th><th>充值成本</th><th>更新时间</th></tr></thead>
           <tbody id="upstream-body"><tr><td colspan="11" class="empty">正在读取上游账号</td></tr></tbody>
         </table>
       </div>
@@ -44,7 +57,7 @@
 
   <dialog id="upstream-create-dialog" class="upstream-dialog">
     <form id="upstream-create-form" method="dialog">
-      <header><div><p class="eyebrow">RUNTIME CREATE</p><h2>新增 API-key 上游</h2></div><button class="icon-command" value="cancel" type="submit" title="关闭" aria-label="关闭">×</button></header>
+      <header><div><p class="eyebrow">RUNTIME CREATE</p><h2>新增 API-key 上游</h2></div><button class="icon-command" data-dialog-close type="button" title="关闭" aria-label="关闭">×</button></header>
       <p id="upstream-create-state" class="dialog-state">默认优先级 1、并发容量 16，号池选择混池 #2 和自用 #3。</p>
       <div class="upstream-form-grid">
         <label class="wide-field"><span>Base URL</span><input id="upstream-create-base-url" type="url" placeholder="https://api.example.com" required autocomplete="url" /></label>
@@ -57,13 +70,13 @@
       </div>
       <fieldset class="group-picker upstream-group-picker"><legend>目标号池</legend><div id="upstream-create-groups"><span class="upstream-group-loading">正在读取号池选项</span></div></fieldset>
       <section class="upstream-job-console" aria-label="创建日志"><header><span>创建日志</span><code id="upstream-create-job">JOB —</code></header><ol id="upstream-create-logs" class="upstream-job-logs"><li class="empty">等待提交</li></ol></section>
-      <footer><button class="text-command" value="cancel" type="submit">取消</button><button id="upstream-create-submit" class="primary-command" value="default" type="submit">创建上游</button></footer>
+      <footer><button class="text-command" data-dialog-close type="button">取消</button><button id="upstream-create-submit" class="primary-command" value="default" type="submit">创建上游</button></footer>
     </form>
   </dialog>
 
   <dialog id="upstream-edit-dialog" class="upstream-dialog">
     <form id="upstream-edit-form" method="dialog">
-      <header><div><p class="eyebrow">RUNTIME ACCOUNT <span id="upstream-edit-id">#—</span></p><h2>调整上游</h2></div><button class="icon-command" value="cancel" type="submit" title="关闭" aria-label="关闭">×</button></header>
+      <header><div><p class="eyebrow">RUNTIME ACCOUNT <span id="upstream-edit-id">#—</span></p><h2>调整上游</h2></div><button class="icon-command" data-dialog-close type="button" title="关闭" aria-label="关闭">×</button></header>
       <p id="upstream-edit-summary" class="dialog-state">—</p>
       <div class="upstream-edit-meta"><span id="upstream-edit-base-url">—</span><span id="upstream-edit-key-prefix">Key —</span></div>
       <div class="upstream-form-grid">
@@ -74,7 +87,7 @@
       <p id="upstream-edit-state" class="dialog-state"></p>
       <section class="upstream-edit-usage"><header><strong>额度与用量</strong><button id="upstream-edit-usage" class="text-command" type="button">查询</button></header><div id="upstream-edit-usage-result" class="upstream-usage-results"><p class="empty">尚未查询</p></div></section>
       <section class="upstream-job-console" aria-label="调整日志"><header><span>调整日志</span><code id="upstream-edit-job">JOB —</code></header><ol id="upstream-edit-logs" class="upstream-job-logs"><li class="empty">等待提交</li></ol></section>
-      <footer><button class="text-command" value="cancel" type="submit">取消</button><button id="upstream-edit-submit" class="primary-command" value="default" type="submit">保存调整</button></footer>
+      <footer><button class="text-command" data-dialog-close type="button">取消</button><button id="upstream-edit-submit" class="primary-command" value="default" type="submit">保存调整</button></footer>
     </form>
   </dialog>
 </body>

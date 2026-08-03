@@ -46,6 +46,8 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   const config = await Bun.file(new URL("../config/sub2rank.yaml", import.meta.url)).text();
   expect(config).toContain("errorCode: 502");
   expect(config).toContain("errorCode: 524");
+  expect(config).toContain("input exceeds the context window of this model");
+  expect(config).not.toMatch(/errorCode: 404\n/u);
   expect(config).not.toContain("statusCode:");
 });
 
@@ -80,4 +82,33 @@ test("usage target discovery uses one queued database read", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("rolling upstream output excludes OAuth usage", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  expect(source).toContain("LOWER(usage_account.type) = 'apikey'");
+  expect(source).toContain("usage_account.id = usage.account_id");
+});
+
+test("template application verifies persisted runtime fields through the queued reader", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  expect(source).toContain("upstream-template-verify");
+  expect(source).toContain("runtime-template-readback-mismatch");
+  expect(source).toContain("verifiedCount");
+});
+
+test("upstream creation applies and verifies the failover template before success", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const createBody = source.slice(source.indexOf("  async create(input:"), source.indexOf("  async update(id:"));
+  expect(createBody).toContain("await this.applyTemplate([resolvedAccountId])");
+  expect(createBody).toContain('operation: "template", partial: true');
+  expect(createBody).toContain("template: { applied: true, verified: true }");
+});
+
+test("recharge recovery covers every API-key account in the normalized wallet", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const rechargeBody = source.slice(source.indexOf("  async recharge(id:"), source.lastIndexOf("\n}"));
+  expect(rechargeBody).toContain("await this.walletAccounts(account.baseUrl)");
+  expect(rechargeBody).toContain("recoveredAccountIds.push(candidate.id)");
+  expect(rechargeBody).toContain("walletAccountIds: walletAccounts.map");
 });

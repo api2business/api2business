@@ -2,8 +2,10 @@ import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { TemporalGateway } from "./temporal-client";
+import type { ProbeIsolationService } from "./probe-isolation";
 import {
   queryUpstreamUsageConcurrently,
+  type UpstreamUsageResult,
   type UpstreamUsageTarget,
 } from "./upstream-usage";
 import {
@@ -12,8 +14,22 @@ import {
   recordUpstreamRechargeCost,
   type UpstreamRechargeCostEntry,
 } from "./upstream-recharge-ledger";
+import {
+  normalizeUpstreamWallet,
+  readUpstreamValuationPolicy,
+  upstreamBalanceRateByWallet,
+} from "./upstream-valuation";
 
 type Row = Record<string, unknown>;
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const row = value as Row;
+    return `{${Object.keys(row).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(row[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
 
 export interface UpstreamManagementErrorDetails {
   operation?: string;
@@ -217,6 +233,13 @@ export function parseUpstreamName(name: string, baseUrl: string): { suffix: stri
   return Number.isFinite(rate) && rate > 0 ? { suffix, rateCnyPerApiUsd: rate } : null;
 }
 
+function parseUpstreamNameTail(name: string): { suffix: string; rateCnyPerApiUsd: number } | null {
+  const match = name.trim().match(/\s([A-Za-z0-9][A-Za-z0-9._-]{0,31})\s+(\d+(?:\.\d{1,6})?)$/u);
+  if (!match) return null;
+  const rate = Number(match[2]);
+  return Number.isFinite(rate) && rate > 0 ? { suffix: match[1]!, rateCnyPerApiUsd: rate } : null;
+}
+
 function safeMessage(value: string): string {
   return value
     .replace(/sk-[A-Za-z0-9_=+/.-]+/gu, "[REDACTED]")
@@ -347,6 +370,7 @@ export class UpstreamManagementService {
     private readonly reads: Sub2ApiReadClient,
     private readonly temporal: TemporalGateway | null = null,
     private readonly runtime: Sub2ApiRuntimeService | null = null,
+    private readonly probeIsolation: ProbeIsolationService | null = null,
   ) {}
 
   private readLedger(): UpstreamRechargeCostEntry[] {
@@ -398,6 +422,7 @@ export class UpstreamManagementService {
         { id: 3, name: "自用" },
         { id: 6, name: "Grok" },
       ],
+      valuation: readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath),
       valuesRedacted: true,
     };
   }
@@ -603,6 +628,28 @@ export class UpstreamManagementService {
     return rowToAccount(row, rechargeTotalsByAccount(entries), entries);
   }
 
+  private async walletAccounts(baseUrl: string): Promise<UpstreamAccount[]> {
+    const query = await this.reads.query<Row>({
+      key: `upstream-wallet-accounts:${normalizeUpstreamWallet(baseUrl)}`,
+      kind: "upstream-wallet-accounts",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: `${accountSelect}
+        WHERE a.deleted_at IS NULL
+          AND LOWER(a.type) = 'apikey'
+          AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
+        GROUP BY a.id
+        ORDER BY a.id`,
+      parameters: [],
+    });
+    const wallet = normalizeUpstreamWallet(baseUrl);
+    const entries = this.readLedger();
+    const totals = rechargeTotalsByAccount(entries);
+    return query.rows
+      .map((row) => rowToAccount(row, totals, entries))
+      .filter((candidate) => normalizeUpstreamWallet(candidate.baseUrl) === wallet);
+  }
+
   private async resolveCreatedAccount(
     accountId: number | null,
     name: string,
@@ -684,6 +731,15 @@ export class UpstreamManagementService {
           a.name,
           RTRIM(COALESCE(a.credentials->>'base_url', ''), '/') AS base_url,
           COALESCE(a.credentials->>'api_key', '') AS api_key
+          ,a.status
+          ,COALESCE(a.schedulable, false) AS schedulable
+          ,(SELECT COALESCE(SUM(usage.actual_cost), 0)::numeric
+            FROM usage_logs usage
+            JOIN accounts usage_account ON usage_account.id = usage.account_id
+            WHERE usage_account.deleted_at IS NULL
+              AND LOWER(usage_account.type) = 'apikey'
+              AND NULLIF(usage_account.credentials->>'base_url', '') IS NOT NULL
+          ) AS api_amount_usd_total
         FROM accounts a
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
@@ -698,6 +754,8 @@ export class UpstreamManagementService {
       name: String(item.name ?? ""),
       baseUrl: normalizeBaseUrl(String(item.base_url ?? "")),
       apiKey: String(item.api_key ?? ""),
+      status: String(item.status ?? "unknown"),
+      schedulable: item.schedulable === true,
     }));
     const results = await queryUpstreamUsageConcurrently(targets, {
       concurrency: settings.usageConcurrency,
@@ -720,7 +778,68 @@ export class UpstreamManagementService {
       queueDurationMs: query.queueDurationMs,
       queryDurationMs: query.queryDurationMs,
       upstreamConcurrency: settings.usageConcurrency,
+      apiAmountUsdTotal: Number(query.rows[0]?.api_amount_usd_total ?? 0),
       results,
+      valuesRedacted: true,
+    };
+  }
+
+  async synchronizeDetectedRates(results: UpstreamUsageResult[]): Promise<Record<string, unknown>> {
+    if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+    const policy = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
+    const synchronized: number[] = [];
+    const alreadySynchronized: number[] = [];
+    const retained: Array<{ accountId: number; reason: string }> = [];
+    const failed: Array<{ accountId: number; error: string }> = [];
+    for (const result of results) {
+      const multiplier = Number(result.billingMultiplier.value);
+      if (result.billingMultiplier.value == null || !Number.isFinite(multiplier) || multiplier <= 0) {
+        result.billingMultiplier.syncStatus = "retained-manual";
+        result.billingMultiplier.syncMessage = "未取得有效正倍率，保留手工费率";
+        retained.push({ accountId: result.accountId, reason: "invalid-or-missing-multiplier" });
+        continue;
+      }
+      const parsed = parseUpstreamName(result.accountName, result.baseUrl) ?? parseUpstreamNameTail(result.accountName);
+      if (!parsed) {
+        result.billingMultiplier.syncStatus = "retained-manual";
+        result.billingMultiplier.syncMessage = "账号名称缺少可保留的后缀，未自动改名";
+        retained.push({ accountId: result.accountId, reason: "unparseable-account-suffix" });
+        continue;
+      }
+      const wallet = normalizeUpstreamWallet(result.baseUrl);
+      const walletRate = upstreamBalanceRateByWallet(wallet, policy.defaultCnyPerApiUsd, policy.walletCnyPerApiUsd);
+      const detectedRate = Number(formatRate(multiplier * walletRate));
+      result.billingMultiplier.previousManualRateCnyPerApiUsd = parsed.rateCnyPerApiUsd;
+      result.billingMultiplier.synchronizedRateCnyPerApiUsd = detectedRate;
+      if (Math.abs(parsed.rateCnyPerApiUsd - detectedRate) <= 0.0000005) {
+        result.billingMultiplier.syncStatus = "already-synchronized";
+        result.billingMultiplier.syncMessage = "手工费率已与探测成本一致";
+        alreadySynchronized.push(result.accountId);
+        continue;
+      }
+      try {
+        const name = formatUpstreamName(result.baseUrl, parsed.suffix, detectedRate);
+        await this.runtime.updateAccount(result.accountId, { name });
+        result.billingMultiplier.syncStatus = "synchronized";
+        result.billingMultiplier.syncMessage = `已从 ${formatRate(parsed.rateCnyPerApiUsd)} 同步为 ${formatRate(detectedRate)} 元/刀`;
+        synchronized.push(result.accountId);
+      } catch (error) {
+        const message = safeMessage(error instanceof Error ? error.message : String(error));
+        result.billingMultiplier.syncStatus = "failed";
+        result.billingMultiplier.syncMessage = message;
+        failed.push({ accountId: result.accountId, error: message });
+      }
+    }
+    return {
+      attempted: results.length,
+      synchronizedCount: synchronized.length,
+      alreadySynchronizedCount: alreadySynchronized.length,
+      retainedCount: retained.length,
+      failedCount: failed.length,
+      synchronized,
+      alreadySynchronized,
+      retained,
+      failed,
       valuesRedacted: true,
     };
   }
@@ -752,18 +871,68 @@ export class UpstreamManagementService {
         failed.push({ accountId, error: safeMessage(error instanceof Error ? error.message : String(error)) });
       }
     }
+    const verify = applied.length ? await this.reads.query<Row>({
+      key: `upstream-template-verify:${applied.join(",")}`,
+      kind: "upstream-template-verify",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: `SELECT id,
+          COALESCE((credentials->>'pool_mode')::boolean, true) AS pool_mode,
+          COALESCE((credentials->>'temp_unschedulable_enabled')::boolean, false) AS temp_enabled,
+          COALESCE(credentials->'temp_unschedulable_rules', '[]'::jsonb) AS temp_rules
+        FROM accounts
+        WHERE deleted_at IS NULL
+          AND id = ANY(string_to_array($1::text, $2::text)::bigint[])
+        ORDER BY id`,
+      parameters: [applied.join(","), ","],
+    }) : null;
+    const expectedRules = this.config.operations.upstreamManagement.failoverRules;
+    const verified: number[] = [];
+    const misaligned: Array<{
+      accountId: number;
+      reason: string;
+      poolMode?: unknown;
+      tempEnabled?: unknown;
+      ruleCount?: number;
+      rulesAligned?: boolean;
+    }> = [];
+    for (const row of verify?.rows ?? []) {
+      const accountId = Number(row.id);
+      const rawRules = typeof row.temp_rules === "string" ? (() => {
+        try { return JSON.parse(row.temp_rules) as unknown; } catch { return []; }
+      })() : row.temp_rules;
+      const rulesAligned = canonicalJson(rawRules) === canonicalJson(expectedRules);
+      if (row.pool_mode === false && row.temp_enabled === true && rulesAligned) verified.push(accountId);
+      else misaligned.push({
+        accountId,
+        reason: "runtime-template-readback-mismatch",
+        poolMode: row.pool_mode,
+        tempEnabled: row.temp_enabled,
+        ruleCount: Array.isArray(rawRules) ? rawRules.length : 0,
+        rulesAligned,
+      });
+    }
+    for (const accountId of applied) {
+      if (!verified.includes(accountId) && !misaligned.some((item) => item.accountId === accountId)) {
+        misaligned.push({ accountId, reason: "runtime-account-missing-from-readback" });
+      }
+    }
     return {
-      ok: failed.length === 0,
+      ok: failed.length === 0 && misaligned.length === 0,
       operation: "template",
       requestedAccountIds: accountIds,
       targetCount: ids.length,
       appliedCount: applied.length,
       failedCount: failed.length,
+      verifiedCount: verified.length,
+      misalignedCount: misaligned.length,
       applied,
       failed,
-      databaseQueries: query.cached ? 0 : 1,
-      queueDurationMs: query.queueDurationMs,
-      queryDurationMs: query.queryDurationMs,
+      verified,
+      misaligned,
+      databaseQueries: (query.cached ? 0 : 1) + (verify?.cached ? 0 : verify ? 1 : 0),
+      queueDurationMs: query.queueDurationMs + (verify?.queueDurationMs ?? 0),
+      queryDurationMs: query.queryDurationMs + (verify?.queryDurationMs ?? 0),
       valuesRedacted: true,
     };
   }
@@ -828,17 +997,33 @@ export class UpstreamManagementService {
     }
     if (createError !== null) recovered = true;
     const resolvedAccountId = account.id;
-    const desiredGroupIds = [...groupIds].sort((left, right) => left - right);
+    const probeBinding = this.probeIsolation
+      ? await this.probeIsolation.ensure(resolvedAccountId)
+      : null;
+    const effectiveGroupIds = probeBinding
+      ? [...new Set([...groupIds, probeBinding.groupId])]
+      : [...groupIds];
+    const desiredGroupIds = [...effectiveGroupIds].sort((left, right) => left - right);
     const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
     if (account.priority !== priority || account.capacity !== capacity || account.proxyId !== settings.proxyId
       || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds)) {
       if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
-      await this.runtime.updateAccount(resolvedAccountId, { priority, concurrency: capacity, group_ids: groupIds, proxy_id: settings.proxyId });
+      await this.runtime.updateAccount(resolvedAccountId, { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId });
       const configured = await this.accountQuery(resolvedAccountId);
       if (!configured) throw new UpstreamManagementError("运行设置已提交但排队查询未找到账号", 502, {
         operation: "settings", partial: true, accountId: resolvedAccountId,
       });
       account = configured;
+    }
+    // Template application is part of upstream creation, so creation cannot be
+    // reported as complete until the persisted failover policy is verified.
+    const templateResult = await this.applyTemplate([resolvedAccountId]);
+    if (templateResult.ok !== true) {
+      throw new UpstreamManagementError(
+        "上游账号已创建，但 Codex 通用切号模板未通过校验；请从上游列表重试模板作业",
+        502,
+        { operation: "template", partial: true, accountId: resolvedAccountId },
+      );
     }
     let accounting: Record<string, unknown> | null = null;
     if (recharge !== null) {
@@ -862,7 +1047,15 @@ export class UpstreamManagementService {
       });
       account = refreshed;
     }
-    return { ok: true, operation: recovered ? "create-recovered" : "create", recovered, account, accounting };
+    return {
+      ok: true,
+      operation: recovered ? "create-recovered" : "create",
+      recovered,
+      account,
+      template: { applied: true, verified: true },
+      probeIsolation: probeBinding ? { enabled: true, groupId: probeBinding.groupId, keyCreated: probeBinding.keyCreated } : { enabled: false },
+      accounting,
+    };
   }
 
   async update(id: number, input: {
@@ -899,25 +1092,41 @@ export class UpstreamManagementService {
       amountCny,
       description: input.description,
     });
-    let recovered = false;
-    if (account.status !== "active" || !account.schedulable) {
+    const walletAccounts = await this.walletAccounts(account.baseUrl);
+    const recoveryTargets = walletAccounts.filter((candidate) => candidate.status !== "active" || !candidate.schedulable);
+    const recoveredAccountIds: number[] = [];
+    const recoveryErrors: string[] = [];
+    if (recoveryTargets.length && !this.runtime) throw new UpstreamManagementError(
+      "充值已记账，但 ApiState Sub2API runtime mutation service 不可用",
+      502,
+      { operation: "recovery", partial: true, accountId: id, accounting },
+    );
+    for (const candidate of recoveryTargets) {
       try {
-        if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
-        await this.runtime.recoverAccount(id);
+        await this.runtime!.recoverAccount(candidate.id);
+        recoveredAccountIds.push(candidate.id);
       } catch (error) {
-        throw new UpstreamManagementError(
-          `充值已记账，但恢复调度失败：${error instanceof Error ? error.message : String(error)}`,
-          502,
-          { operation: "recovery", partial: true, accountId: id, accounting },
-        );
+        recoveryErrors.push(`#${candidate.id}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      recovered = true;
     }
+    if (recoveryErrors.length) throw new UpstreamManagementError(
+      `充值已记账，同源账号部分恢复失败：${recoveryErrors.join("；")}`,
+      502,
+      { operation: "recovery", partial: true, accountId: id, accounting },
+    );
     const refreshed = await this.accountQuery(id);
     if (!refreshed) throw new UpstreamManagementError("充值完成但排队查询未找到账号", 502, {
       operation: "recharge", partial: true, accountId: id, accounting,
     });
     account = refreshed;
-    return { ok: true, operation: "recharge", account, accounting, recovered };
+    return {
+      ok: true,
+      operation: "recharge",
+      account,
+      accounting,
+      recovered: recoveredAccountIds.length > 0,
+      recoveredAccountIds,
+      walletAccountIds: walletAccounts.map((candidate) => candidate.id),
+    };
   }
 }

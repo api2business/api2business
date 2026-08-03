@@ -21,6 +21,9 @@ function composeRun(config: AppConfig, action: string, component?: NativeService
     chmodSync(ledgerDirectory, 0o700);
     mkdirSync(config.operations.accountImportArchiveDirectory, { recursive: true, mode: 0o700 });
     chmodSync(config.operations.accountImportArchiveDirectory, 0o700);
+    const probeSecretDirectory = dirname(resolve(config.rootDirectory, config.sub2api.idleProbe.isolation.secretFile));
+    mkdirSync(probeSecretDirectory, { recursive: true, mode: 0o700 });
+    chmodSync(probeSecretDirectory, 0o700);
     const envPath = resolve(config.rootDirectory, config.runtime.native.composeEnvFile);
     mkdirSync(resolve(envPath, ".."), { recursive: true, mode: 0o700 });
     const lines = Object.entries(config.runtime.native.env).map(([key, ref]) => `${key}=${readSecret(config, ref).replace(/\\/gu, "\\\\").replace(/\n/gu, "\\n")}`);

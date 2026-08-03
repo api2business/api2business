@@ -59,6 +59,16 @@ export class AdminHttpClient {
       body: JSON.stringify({ recentCallLimit, accountSelector, groupSelector }),
     }, 60000);
   }
+  idleProbePlan(accountIds: number[]): Promise<Record<string, unknown>> {
+    const query = accountIds.length > 0 ? `?accountIds=${encodeURIComponent(accountIds.join(","))}` : "";
+    return this.request(`/api/operations/idle-probe${query}`);
+  }
+  idleProbeRun(accountIds: number[], rounds: number): Promise<Record<string, unknown>> {
+    return this.request("/api/operations/idle-probe", {
+      method: "POST",
+      body: JSON.stringify({ accountIds, rounds }),
+    });
+  }
   ranking(): Promise<Record<string, unknown>> { return this.request("/api/ranking"); }
   lottery(): Promise<Record<string, unknown>> { return this.request("/api/lottery"); }
   workflowSubmit(command: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -86,6 +96,13 @@ export class AdminHttpClient {
       body: JSON.stringify({ ...input, operationId }),
     }, 30000);
   }
+  upstreamRecharge(id: number, amountCny: number, operationId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/upstreams/${id}/recharge`, {
+      method: "POST",
+      headers: { "Idempotency-Key": operationId },
+      body: JSON.stringify({ amountCny, operationId }),
+    }, 30000);
+  }
   upstreamJob(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/upstreams/jobs/${encodeURIComponent(id)}`);
   }
@@ -96,15 +113,19 @@ export class AdminHttpClient {
       body: JSON.stringify({ accountIds, operationId }),
     }, 30000);
   }
-  upstreamUsageCache(results: Array<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  upstreamUsageCache(results: Array<Record<string, unknown>>, apiAmountUsdTotal: number | null = null, recordSample = false): Promise<Record<string, unknown>> {
     return this.request("/api/internal/upstream-usage-cache", {
       method: "POST",
-      body: JSON.stringify({ results }),
+      body: JSON.stringify({ results, apiAmountUsdTotal, recordSample }),
     });
   }
   upstreamUsageCacheRead(accountIds: number[]): Promise<Record<string, unknown>> {
     const query = accountIds.length ? `?accountIds=${encodeURIComponent(accountIds.join(","))}` : "";
     return this.request(`/api/upstreams/usage-cache${query}`);
+  }
+  upstreamQuotaSummary(): Promise<Record<string, unknown>> { return this.request("/api/upstreams/quota-summary"); }
+  oauthRuntimeSummary(profile: "codex" | "grok"): Promise<Record<string, unknown>> {
+    return this.request(`/api/oauth/runtime-summary?profile=${profile}`);
   }
   upstreamUsageCacheRestore(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/usage-cache/restore", {
@@ -184,6 +205,12 @@ export class AdminHttpClient {
       method: "POST",
       body: JSON.stringify(input),
     }, 60000);
+  }
+  addCash(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/api/operations/cash", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   }
   userBalanceLiability(): Promise<Record<string, unknown>> {
     return this.request("/api/admin/users/balance-liability", {}, 60000);

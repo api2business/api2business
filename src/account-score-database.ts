@@ -54,62 +54,65 @@ WITH target_accounts AS (
 account_stats AS (
   SELECT
     a.account_id,
-    COUNT(*) FILTER (WHERE e.kind = 'usage')::int AS success_requests,
-    COUNT(DISTINCT e.request_id) FILTER (WHERE e.request_id IS NOT NULL)::int AS attributed_requests,
-    COUNT(DISTINCT e.request_id) FILTER (
+    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage'), 0)::numeric AS success_requests,
+    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.request_id IS NOT NULL), 0)::numeric AS attributed_requests,
+    COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.request_id IS NOT NULL AND f.triggered
-    )::int AS failover_requests,
-    COUNT(DISTINCT e.request_id) FILTER (
+    ), 0)::numeric AS failover_requests,
+    COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.request_id IS NOT NULL
         AND f.triggered
         AND e.kind = 'error'
         AND e.client_status_code BETWEEN 200 AND 399
-    )::int AS failover_recovered,
-    COUNT(DISTINCT e.request_id) FILTER (
+    ), 0)::numeric AS failover_recovered,
+    COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.request_id IS NOT NULL
         AND f.triggered
         AND e.kind = 'error'
         AND e.client_status_code >= 400
-    )::int AS failover_failed,
-    COUNT(DISTINCT e.request_id) FILTER (
+    ), 0)::numeric AS failover_failed,
+    COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.request_id IS NOT NULL AND f.aborted
-    )::int AS failover_aborted,
-    COUNT(DISTINCT e.request_id) FILTER (
+    ), 0)::numeric AS failover_aborted,
+    COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.kind = 'error' AND e.scoreable AND e.request_id IS NOT NULL
-    )::int AS failure_requests,
-    COUNT(*) FILTER (
+    ), 0)::numeric AS failure_requests,
+    COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.recent_rank <= $4
-    )::int AS burst_attempts,
-    COUNT(DISTINCT e.request_id) FILTER (
+    ), 0)::numeric AS burst_attempts,
+    COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.recent_rank <= $4
         AND e.kind = 'error'
         AND e.scoreable
         AND e.request_id IS NOT NULL
-    )::int AS burst_failure_requests,
-    COUNT(DISTINCT e.request_id) FILTER (
+    ), 0)::numeric AS burst_failure_requests,
+    COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.kind = 'error' AND e.request_id IS NOT NULL
-    )::int AS customer_error_requests,
-    COUNT(*) FILTER (WHERE e.kind = 'error' AND NOT e.scoreable)::int AS excluded_error_requests,
-    COUNT(*) FILTER (WHERE e.kind = 'usage' AND e.stream)::int AS stream_success_requests,
-    COUNT(e.first_token_ms) FILTER (WHERE e.kind = 'usage' AND e.stream)::int AS first_token_samples,
-    PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY e.first_token_ms)
-      FILTER (WHERE e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL) AS ttft_p50_ms,
-    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY e.first_token_ms)
-      FILTER (WHERE e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL) AS ttft_p95_ms,
-    PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY e.first_token_ms)
-      FILTER (WHERE e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL) AS ttft_p99_ms,
+    ), 0)::numeric AS customer_error_requests,
+    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'error' AND NOT e.scoreable), 0)::numeric AS excluded_error_requests,
+    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage' AND e.stream), 0)::numeric AS stream_success_requests,
+    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL), 0)::numeric AS first_token_samples,
+    ARRAY_AGG(e.first_token_ms ORDER BY e.first_token_ms)
+      FILTER (WHERE e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL) AS ttft_values,
+    ARRAY_AGG(e.sample_weight ORDER BY e.first_token_ms)
+      FILTER (WHERE e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL) AS ttft_weights,
     MAX(e.first_token_ms) FILTER (WHERE e.kind = 'usage' AND e.stream) AS ttft_max_ms,
-    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY e.duration_ms)
-      FILTER (WHERE e.kind = 'usage' AND e.duration_ms IS NOT NULL) AS duration_p95_ms,
-    COALESCE(SUM(e.input_tokens + e.output_tokens) FILTER (WHERE e.kind = 'usage'), 0)::bigint AS token_count,
-    COALESCE(SUM(e.actual_cost) FILTER (WHERE e.kind = 'usage'), 0)::numeric AS api_amount_usd,
-    COUNT(*)::int AS selected_calls
+    ARRAY_AGG(e.duration_ms ORDER BY e.duration_ms)
+      FILTER (WHERE e.kind = 'usage' AND e.duration_ms IS NOT NULL) AS duration_values,
+    ARRAY_AGG(e.sample_weight ORDER BY e.duration_ms)
+      FILTER (WHERE e.kind = 'usage' AND e.duration_ms IS NOT NULL) AS duration_weights,
+    COALESCE(SUM((e.input_tokens + e.output_tokens) * e.sample_weight) FILTER (WHERE e.kind = 'usage'), 0)::numeric AS token_count,
+    COALESCE(SUM(e.actual_cost * e.sample_weight) FILTER (WHERE e.kind = 'usage'), 0)::numeric AS api_amount_usd,
+    COALESCE(SUM(e.sample_weight), 0)::numeric AS effective_sample_weight,
+    COUNT(e.id)::int AS selected_calls
   FROM target_accounts a
   LEFT JOIN LATERAL (
-    SELECT
-      candidate.*,
-      ROW_NUMBER() OVER (ORDER BY candidate.created_at DESC, candidate.id DESC) AS recent_rank
+    SELECT ranked.*,
+      GREATEST($8::numeric, 1 - FLOOR((ranked.recent_rank - 1)::numeric / $6::numeric) * $7::numeric) AS sample_weight
     FROM (
+      SELECT candidate.*,
+        ROW_NUMBER() OVER (ORDER BY candidate.created_at DESC, candidate.id DESC) AS recent_rank
+      FROM (
       (
         SELECT
           'usage'::text AS kind,
@@ -126,6 +129,7 @@ account_stats AS (
           false AS scoreable
         FROM usage_logs u
         WHERE u.account_id = a.account_id
+          AND u.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
         ORDER BY u.created_at DESC
         LIMIT $1
       )
@@ -165,6 +169,7 @@ account_stats AS (
           END AS scoreable
         FROM ops_error_logs o
         WHERE o.account_id = a.account_id
+          AND o.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND (
             COALESCE(o.status_code, 0) >= 400
             OR COALESCE(o.upstream_status_code, 0) >= 400
@@ -173,9 +178,10 @@ account_stats AS (
         ORDER BY o.created_at DESC
         LIMIT $1
       )
-    ) candidate
-    ORDER BY candidate.created_at DESC
-    LIMIT $1
+      ) candidate
+      ORDER BY candidate.created_at DESC
+      LIMIT $1
+    ) ranked
   ) e ON true
   LEFT JOIN LATERAL (
     SELECT EXISTS (
@@ -209,6 +215,30 @@ function numeric(value: unknown): number | null {
 function percentile(value: unknown): number | null {
   const parsed = numeric(value);
   return parsed === null ? null : Math.round(parsed);
+}
+
+function numericArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(Number).filter(Number.isFinite);
+}
+
+export function weightedPercentile(values: unknown, weights: unknown, quantile: number): number | null {
+  if (!Number.isFinite(quantile) || quantile < 0 || quantile > 1) throw new Error("quantile must be between 0 and 1");
+  const samples = numericArray(values);
+  const sampleWeights = numericArray(weights);
+  if (samples.length === 0 || samples.length !== sampleWeights.length) return null;
+  const pairs = samples.map((value, index) => ({ value, weight: sampleWeights[index]! }))
+    .filter((sample) => sample.weight > 0)
+    .sort((left, right) => left.value - right.value);
+  const totalWeight = pairs.reduce((total, sample) => total + sample.weight, 0);
+  if (totalWeight <= 0) return null;
+  const target = totalWeight * quantile;
+  let cumulative = 0;
+  for (const sample of pairs) {
+    cumulative += sample.weight;
+    if (cumulative >= target) return Math.round(sample.value);
+  }
+  return Math.round(pairs.at(-1)!.value);
 }
 
 function costRate(name: string): number | null {
@@ -295,7 +325,10 @@ export function scoreRecentDatabaseRow(
   const failoverRate = attributedRequests > 0 ? Math.round(failoverRequests / attributedRequests * 1_000_000) / 1_000_000 : null;
   const firstTokenSamples = numeric(row.first_token_samples) ?? 0;
   const streamSuccessRequests = numeric(row.stream_success_requests) ?? 0;
-  const ttftP95Ms = percentile(row.ttft_p95_ms);
+  const ttftP50Ms = weightedPercentile(row.ttft_values, row.ttft_weights, 0.50) ?? percentile(row.ttft_p50_ms);
+  const ttftP95Ms = weightedPercentile(row.ttft_values, row.ttft_weights, 0.95) ?? percentile(row.ttft_p95_ms);
+  const ttftP99Ms = weightedPercentile(row.ttft_values, row.ttft_weights, 0.99) ?? percentile(row.ttft_p99_ms);
+  const durationP95Ms = weightedPercentile(row.duration_values, row.duration_weights, 0.95) ?? percentile(row.duration_p95_ms);
   const reliability = effectiveFailureRate === null ? null : Math.round(policy.reliabilityWeight * (1 - Math.min(Math.max(effectiveFailureRate, 0), policy.failureZeroScoreRate) / policy.failureZeroScoreRate) * 100) / 100;
   const failover = failoverRate === null ? null : Math.round(policy.failoverWeight * (1 - Math.min(Math.max(failoverRate, 0), policy.failoverZeroScoreRate) / policy.failoverZeroScoreRate) * 100) / 100;
   const latency = firstTokenSamples < 5 || ttftP95Ms === null
@@ -373,11 +406,11 @@ export function scoreRecentDatabaseRow(
     streamSuccessRequests,
     firstTokenSamples,
     firstTokenCoverage: streamSuccessRequests > 0 ? Math.round(firstTokenSamples / streamSuccessRequests * 1_000_000) / 1_000_000 : null,
-    ttftP50Ms: percentile(row.ttft_p50_ms),
+    ttftP50Ms,
     ttftP95Ms,
-    ttftP99Ms: percentile(row.ttft_p99_ms),
+    ttftP99Ms,
     ttftMaxMs: percentile(row.ttft_max_ms),
-    durationP95Ms: percentile(row.duration_p95_ms),
+    durationP95Ms,
     customerErrorRequests: numeric(row.customer_error_requests) ?? 0,
     scoreableUpstreamErrorRequests: failureRequests,
     excludedNonUpstreamErrorRequests: numeric(row.excluded_error_requests) ?? 0,
@@ -391,6 +424,7 @@ export function scoreRecentDatabaseRow(
     scoreComponents: { reliability, failover, latency, baseline: policy.baselineWeight, availableWeight },
     recentCallLimit,
     selectedCalls: numeric(row.selected_calls) ?? 0,
+    effectiveSampleWeight: numeric(row.effective_sample_weight) ?? 0,
     evidenceMode: "recent-account-calls-postgresql",
   };
 }
@@ -441,6 +475,7 @@ export async function collectRecentCallScoresFromDatabase(
       accountSelector,
       groupSelector,
       Math.min(recentCallLimit, config.sub2api.scorePolicy.failureBurstCallLimit),
+      config.sub2api.scoreSamplePolicy,
     ]),
     kind: "scores.rank",
     sql: recentAccountAggregateSql,
@@ -449,6 +484,10 @@ export async function collectRecentCallScoresFromDatabase(
       accountSelector,
       groupSelector,
       Math.min(recentCallLimit, config.sub2api.scorePolicy.failureBurstCallLimit),
+      config.sub2api.scoreSamplePolicy.retentionHours,
+      config.sub2api.scoreSamplePolicy.decayBucketSize,
+      config.sub2api.scoreSamplePolicy.decayStep,
+      config.sub2api.scoreSamplePolicy.minimumWeight,
     ],
     priority,
     cacheMode: priority === "automatic" ? "prefer-cache" : "bypass-cache",
