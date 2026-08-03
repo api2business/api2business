@@ -204,6 +204,7 @@ function scheduleScoreRefresh() {
       loadUnifiedUpstreamAssets(),
       loadUnifiedQuotaSummary(),
       loadPoolQuality(),
+      loadPriorityHistory(),
     ])
     scheduleScoreRefresh()
   }, interval * 1000)
@@ -709,12 +710,13 @@ async function scoresPage() {
     loadUnifiedQuotaSummary(),
     loadPoolQuality(),
     loadIdleProbeRollingUsage(),
+    loadPriorityHistory(),
   ]))
   $('#refresh-scores').addEventListener('click', async () => {
     const button = $('#refresh-scores')
     button.disabled = true
     try {
-      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage()])
+      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage(), loadPriorityHistory()])
     }
     catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }
@@ -880,6 +882,7 @@ let priorityAutomationExists = false
 let priorityHistoryRecords = []
 let priorityHistoryPage = 1
 const priorityHistoryPageSize = 10
+let priorityHistoryInFlight = null
 const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
 let cashPage = 1
 let auditPage = 1
@@ -1015,9 +1018,31 @@ function renderPriorityHistoryPage() {
 }
 
 async function loadPriorityHistory() {
-  const data = await requestJson('/api/operations/priority-history')
-  priorityHistoryRecords = data.records ?? []
-  renderPriorityHistoryPage()
+  if (priorityHistoryInFlight !== null) return await priorityHistoryInFlight
+  const button = $('#refresh-history')
+  const previousState = $('#history-page-state').textContent
+  button.disabled = true
+  button.classList.add('is-loading')
+  button.setAttribute('aria-busy', 'true')
+  $('#history-page-state').textContent = '正在刷新记录…'
+  priorityHistoryInFlight = requestJson('/api/operations/priority-history', { cache: 'no-store' })
+    .then((data) => {
+      priorityHistoryRecords = data.records ?? []
+      renderPriorityHistoryPage()
+      return data
+    })
+  try {
+    return await priorityHistoryInFlight
+  } catch (error) {
+    $('#history-page-state').textContent = `刷新失败：${error instanceof Error ? error.message : String(error)}`
+    throw error
+  } finally {
+    priorityHistoryInFlight = null
+    button.disabled = false
+    button.classList.remove('is-loading')
+    button.removeAttribute('aria-busy')
+    if ($('#history-page-state').textContent === '正在刷新记录…') $('#history-page-state').textContent = previousState
+  }
 }
 
 async function loadPriorityAutomation() {

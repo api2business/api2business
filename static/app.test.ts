@@ -369,7 +369,7 @@ test("score toolbar refresh uses the queue-backed manual ranking path", async ()
   const end = app.indexOf("const [initial] = await Promise.all([", start);
   const handler = app.slice(start, end);
 
-  expect(handler).toContain("await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage()])");
+  expect(handler).toContain("await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage(), loadPriorityHistory()])");
   expect(handler).not.toContain("/api/scores/refresh");
 });
 
@@ -392,6 +392,9 @@ test("score page refreshes once on open and keeps periodic refresh disabled by d
   expect(app).toContain("const scoreRefreshIntervals = new Set([0, 300, 900, 1800])");
   expect(app).toContain("if (scoreRefreshInFlight !== null) return await scoreRefreshInFlight");
   expect(app).toContain("scheduleScoreRefresh()");
+  expect(app).toContain("requestJson('/api/operations/priority-history', { cache: 'no-store' })");
+  expect(app).toContain("$('#history-page-state').textContent = '正在刷新记录…'");
+  expect(app).toContain("loadPoolQuality(),\n      loadPriorityHistory(),");
 });
 
 test("zero-change priority history is labelled as converged", async () => {
@@ -408,7 +411,7 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
-  expect(html).toContain('/app.js?v=idle-probe-v1');
+  expect(html).toContain('/app.js?v=priority-history-refresh-v1');
   expect(html).toContain('/styles.css?v=refresh-latency-v1');
   expect(app).toContain("key: 'rollingScore'");
   expect(html).toContain('id="score-create-upstream"');
