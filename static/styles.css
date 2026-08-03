@@ -368,6 +368,12 @@ button:disabled { cursor: wait; opacity: .48; }
 .unified-upstream-table th[data-score-sort]:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
 .unified-upstream-table .account-cell { min-width: 250px; }
 .unified-upstream-table .account-cell small { max-width: 270px; overflow: hidden; text-overflow: ellipsis; }
+.unified-upstream-table .sample-time { min-width: 92px; font-family: var(--mono); }
+.sample-time span { display: inline-flex; align-items: center; min-height: 24px; color: var(--muted); font-weight: 650; }
+.sample-time-fresh span, .sample-time-recent span { color: var(--signal); }
+.sample-time-aging span { color: var(--paper); }
+.sample-time-old span { color: var(--warning); }
+.sample-time-missing span { font-weight: 500; }
 .table-action { display: inline-flex; align-items: center; min-height: 30px; color: var(--signal); text-decoration: none; }
 .automation-section { padding-bottom: 24px; }
 .upstream-table { min-width: 1120px; table-layout: fixed; }

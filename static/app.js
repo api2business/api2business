@@ -1,4 +1,5 @@
 import { shouldApplyScorePayload } from './score-display-freshness.js'
+import { sampleTimeDisplay } from './sample-time.js'
 
 const page = document.body.dataset.page
 const $ = (selector) => document.querySelector(selector)
@@ -293,6 +294,7 @@ function renderScoreRows() {
     const { upstream, usageResult, balanceCny, probeCost } = scoreAsset(row)
     const desiredLabel = desiredPriority === null ? number(row.priority) : `${number(row.priority)} → ${number(desiredPriority)}`
     const status = upstream ? upstreamStatus(upstream) : { label: available ? '可调度' : '不可用', className: available ? 'is-available' : 'is-error' }
+    const latestSample = sampleTimeDisplay(row.latestSampleAt)
     return `<tr class="${available ? '' : 'score-row-unavailable'}">
       <td class="account-cell"><b>${escapeHtml(row.accountName)}</b><small>#${escapeHtml(row.accountId)}${upstream?.baseUrl ? ` · ${escapeHtml(upstream.baseUrl)}` : ''}</small></td>
       <td><span class="upstream-status ${status.className}">${status.label}</span><small class="upstream-muted">${escapeHtml(reason.label ?? upstream?.status ?? '—')}</small></td>
@@ -302,7 +304,7 @@ function renderScoreRows() {
       <td class="upstream-rate">${upstream?.rateCnyPerApiUsd == null ? costRate == null ? '—' : `¥${number(costRate, 4)}` : `¥${number(upstream.rateCnyPerApiUsd, 4)}`}</td>
       <td class="upstream-multiplier"><strong>${probeCost === null ? '未知' : `¥${number(probeCost, 4)}`}</strong><small>${escapeHtml(usageResult?.billingMultiplier?.source ?? '无探测')}</small></td>
       <td class="usd-cell">${usd(usage.apiAmountUsd)}<small class="upstream-muted">${compact(usage.requestCount)} 请求</small></td>
-      <td>${row.latestSampleAt ? time(row.latestSampleAt) : '无样本'}</td>
+      <td class="sample-time sample-time-${latestSample.freshness}"${latestSample.exact ? ` title="北京时间 ${escapeHtml(latestSample.exact)}"` : ''}><span>${escapeHtml(latestSample.label)}</span></td>
       <td>${percent(row.failureRate)}<small class="upstream-muted">${number(row.observedAttempts)} 次尝试</small></td>
       <td>${row.ttftP95Ms == null ? '—' : `${number(row.ttftP95Ms)} ms`}</td>
       <td class="failover-cell" title="失败 ${number(row.failureRequests)} 次；触发切号 ${number(row.failoverRequests)} 次，其中恢复 ${number(row.failoverRecovered)} 次；未触发切号 ${number(row.failoverNotTriggered)} 次">
