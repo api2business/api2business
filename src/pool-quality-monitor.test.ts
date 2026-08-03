@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { collectPoolQualitySample, poolQualityHistory } from "./pool-quality-monitor";
+import { collectPoolQualitySample, poolQualityHistory, poolQualitySql } from "./pool-quality-monitor";
 import { loadConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -30,6 +30,13 @@ test("pool quality uses one queued query and separates exact upstream accounts",
     { accountId: 10, accountName: "https://api.example.com plus 0.05", baseUrl: "https://api.example.com/v1", attempts: 2, ratio: 0.666667, costRateCnyPerApiUsd: 0.05, costSource: "manual" },
     { accountId: 11, accountName: "https://api.example.com pro 0.08", baseUrl: "https://api.example.com", attempts: 1, ratio: 0.333333, costRateCnyPerApiUsd: 0.08, costSource: "manual" },
   ]);
+});
+
+test("pool quality excludes monitor-user probe keys without changing account scoring", () => {
+  expect(poolQualitySql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
+  expect(poolQualitySql).toContain("k.name LIKE 'apistate-probe-%'");
+  expect(poolQualitySql).toContain("p.id = u.api_key_id");
+  expect(poolQualitySql).toContain("p.id = o.api_key_id");
 });
 
 test("pool quality history preserves bounded chart fields", () => {

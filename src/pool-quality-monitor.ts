@@ -13,8 +13,16 @@ export interface PoolParticipation {
   costSource: "detected" | "manual" | null;
 }
 
-const poolQualitySql = `
-WITH target_accounts AS (
+export const poolQualitySql = `
+WITH internal_probe_keys AS (
+  SELECT k.id
+  FROM api_keys k
+  JOIN users owner ON owner.id = k.user_id
+  WHERE owner.email = 'monitor-user@sub2api.platform-infra.local'
+    AND owner.deleted_at IS NULL
+    AND k.deleted_at IS NULL
+    AND k.name LIKE 'apistate-probe-%'
+), target_accounts AS (
   SELECT a.id, a.name, RTRIM(COALESCE(a.credentials->>'base_url', ''), '/') AS base_url
   FROM accounts a
   WHERE a.deleted_at IS NULL
@@ -30,6 +38,7 @@ WITH target_accounts AS (
       a.name AS account_name, a.base_url, u.stream, u.first_token_ms::bigint,
       u.duration_ms::bigint, false AS scoreable, NULL::int AS client_status_code
     FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
+    WHERE NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
     UNION ALL
     SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at, o.account_id,
       a.name AS account_name, a.base_url, o.stream, o.time_to_first_token_ms::bigint,
@@ -51,8 +60,12 @@ WITH target_accounts AS (
       END AS scoreable,
       o.status_code::int AS client_status_code
     FROM ops_error_logs o JOIN target_accounts a ON a.id = o.account_id
-    WHERE COALESCE(o.status_code, 0) >= 400 OR COALESCE(o.upstream_status_code, 0) >= 400
+    WHERE (
+      COALESCE(o.status_code, 0) >= 400
+      OR COALESCE(o.upstream_status_code, 0) >= 400
       OR o.error_type = 'cyber_policy'
+    )
+      AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = o.api_key_id)
   ) combined
   ORDER BY created_at DESC, id DESC
   LIMIT $1
