@@ -119,7 +119,12 @@ export class IdleAccountProbeService {
           const settled = await Promise.all(batch.map(async (candidate) => {
             try {
               const response = await this.isolation!.probe(candidate.accountId, policy.model, policy.accountTimeoutMs);
-              return { accountId: candidate.accountId, accountName: candidate.accountName, ok: true, response };
+              return {
+                accountId: candidate.accountId,
+                accountName: candidate.accountName,
+                ok: response.ordinaryLogRecorded === true,
+                response,
+              };
             } catch (error) {
               return { accountId: candidate.accountId, accountName: candidate.accountName, ok: false, error: error instanceof Error ? error.message : String(error) };
             }
@@ -130,6 +135,11 @@ export class IdleAccountProbeService {
       }
       const succeeded = results.filter((result) => result.ok === true).length;
       const failed = results.filter((result) => result.ok === false).length;
+      const ordinaryLogRecorded = results.length > 0 && results.every((result) => {
+        const response = result.response;
+        return response && typeof response === "object"
+          && (response as Record<string, unknown>).ordinaryLogRecorded === true;
+      });
       return {
         ok: failed === 0,
         skipped: false,
@@ -141,7 +151,7 @@ export class IdleAccountProbeService {
         durationMs: Date.now() - startedAt,
         results,
         evidence: "isolated-user-api-key-responses-request",
-        ordinaryLogRecorded: true,
+        ordinaryLogRecorded,
         valuesPrinted: false,
       };
     } finally {

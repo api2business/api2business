@@ -69,3 +69,20 @@ test("idle probe skips a concurrent round and never retries inside one account a
   });
   expect(calls).toBe(1);
 });
+
+test("idle probe does not claim an ordinary log when the gateway never responds", async () => {
+  const isolation = {
+    probe: async () => ({ classification: "error", ordinaryLogRecorded: false, errorMarker: "request-timeout" }),
+  };
+  const service = new IdleAccountProbeService(config, reads([{
+    account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
+  }]), null, isolation as never);
+
+  expect(await service.run([369], 1)).toMatchObject({
+    ok: false,
+    attempted: 1,
+    succeeded: 0,
+    failed: 1,
+    ordinaryLogRecorded: false,
+  });
+});

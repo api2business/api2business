@@ -34,6 +34,15 @@ function generatedSecret(prefix: string): string {
   return `${prefix}${randomBytes(24).toString("hex")}`;
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function timeoutError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError"
+    || error instanceof Error && /timed out|timeout/iu.test(error.message);
+}
+
 function pageItems(value: unknown): Row[] {
   const data = row(value) as Partial<Paginated<Row>>;
   return Array.isArray(data.items) ? data.items.map(row) : [];
@@ -228,11 +237,29 @@ export class ProbeIsolationService {
 
   private async ensureRecord(accountId: number, file: ProbeKeyFile): Promise<ProbeIsolationRecordResult> {
     const existing = file.records[String(accountId)];
-    const groupId = await this.findOrCreateGroup(accountId);
-    const key = await this.ensureUserAndKey(accountId, groupId, existing);
-    await this.ensureAccountBinding(accountId, groupId);
+    let groupId: number;
+    try {
+      groupId = await this.findOrCreateGroup(accountId);
+    } catch (error) {
+      throw new Error(`探活隔离分组阶段失败：${errorMessage(error)}`);
+    }
+    let key: { record: ProbeKeyRecord; keyCreated: boolean };
+    try {
+      key = await this.ensureUserAndKey(accountId, groupId, existing);
+    } catch (error) {
+      throw new Error(`探活隔离专用凭据阶段失败：${errorMessage(error)}`);
+    }
+    try {
+      await this.ensureAccountBinding(accountId, groupId);
+    } catch (error) {
+      throw new Error(`探活隔离账号绑定阶段失败：${errorMessage(error)}`);
+    }
     file.records[String(accountId)] = key.record;
-    this.writeFile(file);
+    try {
+      this.writeFile(file);
+    } catch (error) {
+      throw new Error(`探活隔离 Secret 持久化阶段失败：${errorMessage(error)}`);
+    }
     return { binding: { accountId, groupId, keyCreated: key.keyCreated }, record: key.record };
   }
 
@@ -250,16 +277,31 @@ export class ProbeIsolationService {
   async probe(accountId: number, model: string, timeoutMs: number): Promise<Record<string, unknown>> {
     const ensured = await this.inLock(async () => await this.ensureRecord(accountId, this.readFile()));
     const startedAt = Date.now();
-    const response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-        authorization: `Bearer ${ensured.record.apiKey}`,
-      },
-      body: JSON.stringify({ model, input: "health probe", max_output_tokens: 1, stream: false }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}/responses`, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          authorization: `Bearer ${ensured.record.apiKey}`,
+        },
+        body: JSON.stringify({ model, input: "health probe", max_output_tokens: 1, stream: false }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      return {
+        accountId,
+        groupId: ensured.binding.groupId,
+        classification: "error",
+        httpStatus: null,
+        durationMs: Date.now() - startedAt,
+        ordinaryLogRecorded: false,
+        responseBytes: 0,
+        errorMarker: timeoutError(error) ? "request-timeout" : "transport-error",
+        error: errorMessage(error),
+      };
+    }
     const body = await response.text();
     const success = response.status >= 200 && response.status < 300;
     const lowered = body.toLowerCase();

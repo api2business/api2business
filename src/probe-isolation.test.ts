@@ -169,3 +169,24 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     globalThis.fetch = originalFetch;
   }
 });
+
+test("probe reports a gateway timeout without claiming an ordinary log", async () => {
+  const { service } = fixture();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new DOMException("The operation timed out.", "TimeoutError");
+  }) as unknown as typeof fetch;
+  try {
+    const result = await service.probe(42, "gpt-5.5", 1000);
+    expect(result).toMatchObject({
+      accountId: 42,
+      groupId: 51,
+      classification: "error",
+      httpStatus: null,
+      ordinaryLogRecorded: false,
+      errorMarker: "request-timeout",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

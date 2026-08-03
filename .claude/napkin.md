@@ -30,6 +30,8 @@
 | 2026-08-03 | self | 给批量导入增加专用 timeout 时一度在 `mutate()` 内直接 fetch，绕过了统一认证头注入 | 传输选项必须沿 `request()` 统一路径透传，不能复制请求实现 |
 | 2026-08-03 | runtime | Sub2API 原生账号测试 API 返回独立管理测试结果，但不会写入普通 `usage_logs`、`ops_error_logs` 或 failover 链 | ApiState 必须标注 `admin-account-test-response` 且声明 `ordinaryLogRecorded: false`；在官方测试链复用普通日志前保持自动探活关闭，不伪造评分样本 |
 | 2026-08-03 | user | 探活隔离分组若公开或用上游 URL 命名，会泄露供应商信息并允许其他用户选到该组 | 每账号使用 `is_exclusive=true` 的私有组，名称固定为 `apistate-probe-<accountId>`，只绑定目标账号和专用 Key；不得出现上游 URL、域名或费率 |
+| 2026-08-03 | self | 为核对 Compose 挂载误用 `docker inspect .Config.Env`，导致诊断输出包含运行面 Secret | 容器诊断只查询 `WorkingDir`、`Mounts`、状态和脱敏路径；禁止输出完整 `.Config.Env`，环境字段只经受控状态接口核对 presence/fingerprint |
+| 2026-08-03 | runtime | 探活工作流超时后被误判为普通网关请求超时，但 Secret 未落盘且账号未绑定隔离组，实际失败发生在隔离初始化阶段 | 隔离初始化按分组、专用凭据、账号绑定和 Secret 持久化分阶段返回脱敏错误；只有收到网关 HTTP 响应才能将普通日志标记为已记录候选 |
 
 ## User Preferences
 - 调度算法变更先手动生成并确认一次真实优先级调整，排队回读成功后再启用或调整自动调优周期。
