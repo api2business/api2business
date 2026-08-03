@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="theme-color" content="#111412" /><title>账号导入 | ApiState</title><link rel="stylesheet" href="/styles.css?v=oauth-output-v5" /><script src="/app.js?v=oauth-output-v5" type="module"></script></head>
+<meta name="theme-color" content="#111412" /><title>账号导入 | ApiState</title><link rel="stylesheet" href="/styles.css?v=import-economics-v1" /><script src="/app.js?v=import-economics-v1" type="module"></script></head>
 <body data-page="account-import"><div data-shell></div><main class="workspace import-workspace">
   <header class="page-head"><div><p class="eyebrow">ACCOUNT RUNTIME / CONTROLLED IMPORT</p><h1>账号批量导入</h1></div><span id="import-state" class="state-badge">等待输入</span></header>
   <section class="import-layout">
@@ -12,15 +12,29 @@
         <label><span>导入平台</span><select id="import-platform"><option value="auto">自动识别</option><option value="openai">Codex</option><option value="grok">Grok</option></select></label>
         <label><span>优先级</span><input id="import-priority" type="number" min="1" max="1000" value="1" required /></label>
         <label><span>容量</span><input id="import-capacity" type="number" min="1" value="16" required /></label>
-        <label><span>代理池基准 ID</span><input id="import-proxy" type="number" min="3" value="3" required /></label>
         <label><span>账号总价（人民币）</span><input id="import-total-cost" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00" /></label>
         <label><span>账号单价（人民币）</span><input id="import-unit-cost" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00" required /></label>
         <label><span>账号类型</span><select id="import-plan-type" required></select></label>
-        <label class="toggle-field"><input id="import-per-account-proxy" type="checkbox" /><span>逐账号独立随机分配 Proxy</span></label>
+        <details class="import-advanced">
+          <summary>高级设置</summary>
+          <div class="import-advanced-grid">
+            <label><span>代理池基准 ID</span><input id="import-proxy" type="number" min="3" value="3" required /></label>
+            <label class="toggle-field"><input id="import-per-account-proxy" type="checkbox" /><span>逐账号独立随机分配 Proxy</span></label>
+          </div>
+        </details>
       </div>
       <fieldset class="group-picker"><legend>目标分组</legend><div id="import-groups"></div></fieldset>
       <button id="import-submit" class="primary-command" type="submit">确认导入</button>
     </form>
-    <section class="import-console"><header><div><p class="eyebrow">JOB STREAM</p><h2>导入日志</h2></div><code id="import-job-id">JOB —</code></header><div id="import-summary" class="import-summary">等待提交导入作业</div><ol id="import-logs" class="import-logs"><li class="empty">暂无日志</li></ol></section>
+    <section class="import-console"><header><div><p class="eyebrow">JOB STREAM</p><h2>导入结果</h2></div><code id="import-job-id">JOB —</code></header>
+      <div id="import-economics" class="import-economics is-pending" aria-live="polite">
+        <div><span>本批采购成本</span><strong id="import-acquisition-cost">—</strong><small id="import-accounted-count">等待导入终态</small></div>
+        <div><span>初始预期产出</span><strong id="import-expected-output">—</strong><small id="import-expected-basis">按账号类型核算</small></div>
+        <div class="import-economics-primary"><span>初始预期成本</span><strong id="import-expected-cost">—</strong><small>人民币 / API 美元</small></div>
+      </div>
+      <div id="import-summary" class="import-summary">等待提交导入作业</div>
+      <div class="import-log-heading"><span>作业日志</span><small>按时间顺序保留导入、校验与记账证据</small></div>
+      <ol id="import-logs" class="import-logs"><li class="empty">暂无日志</li></ol>
+    </section>
   </section>
 </main></body></html>
