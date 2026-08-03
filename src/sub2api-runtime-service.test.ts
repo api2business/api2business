@@ -39,3 +39,17 @@ test("keeps OpenAI OAuth on the codex-session import endpoint", async () => {
     timeoutMs: 120000,
   })]);
 });
+
+test("corrects account plan types with one native bulk credentials merge", async () => {
+  const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
+  const client = { mutate: async (method: string, path: string, body: Record<string, unknown>) => {
+    calls.push({ method, path, body });
+    return { success: 2, failed: 0, success_ids: [400, 401] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  const output = await runtime.correctAccountPlanTypes([401, 400, 401], "k12");
+  expect(calls).toEqual([{ method: "POST", path: "/admin/accounts/bulk-update", body: {
+    account_ids: [400, 401], credentials: { plan_type: "k12" },
+  } }]);
+  expect(output).toEqual(expect.objectContaining({ accountIds: [400, 401], planType: "k12" }));
+});

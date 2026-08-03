@@ -29,6 +29,7 @@ test("skips only uniquely matched accounts whose runtime settings are aligned", 
   expect(plan.skipped).toEqual([{ index: 1, accountId: 41 }]);
   expect(plan.sourceIndexes).toEqual([2]);
   expect(plan.pendingExisting).toEqual([{ index: 2, accountId: 42 }]);
+  expect(plan.planTypeCorrections).toEqual([]);
   expect(plan.proxyCandidateIds).toEqual([141, 142]);
   expect(plan.proxyCandidateIds).toContain(plan.initialProxyId);
   expect((JSON.parse(plan.content) as { accounts: unknown[] }).accounts).toHaveLength(1);
@@ -55,7 +56,32 @@ test("skips an aligned account bound to any existing proxy in the matching pool"
   }, reads);
   expect(plan.skipped).toEqual([{ index: 1, accountId: 79 }]);
   expect(plan.sourceIndexes).toEqual([]);
+  expect(plan.planTypeCorrections).toEqual([]);
   expect((JSON.parse(plan.content) as { accounts: unknown[] }).accounts).toHaveLength(0);
+});
+
+test("plans a direct type correction without reimporting an otherwise aligned OAuth account", async () => {
+  const reads = {
+    query: async () => ({
+      rows: [
+        { row_kind: "account", id: 400, user_id: "user-type-only", access_token_sha256: tokenHash("token"), priority: 1, concurrency: 16, proxy_id: 44, proxy_name: "proxy-44", plan_type: "free", group_ids: [2, 3] },
+        { row_kind: "proxy", id: 44 },
+      ],
+      queueDurationMs: 0, queryDurationMs: 0, totalDurationMs: 0,
+      queryStartedAt: "2026-01-01T00:00:00.000Z", queryCompletedAt: "2026-01-01T00:00:00.000Z",
+      deduplicated: false, cached: false,
+    }),
+  } as unknown as Sub2ApiReadClient;
+  const plan = await accountImportPreflight(JSON.stringify({ accounts: [
+    { credentials: { chatgpt_user_id: "user-type-only", access_token: "token" } },
+  ], proxies: [] }), {
+    platform: "openai", priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, planType: "k12",
+  }, reads);
+  expect(plan.sourceIndexes).toEqual([]);
+  expect(plan.pendingExisting).toEqual([]);
+  expect(plan.skipped).toEqual([{ index: 1, accountId: 400 }]);
+  expect(plan.planTypeCorrections).toEqual([{ index: 1, accountId: 400 }]);
+  expect((JSON.parse(plan.content) as { accounts: unknown[] }).accounts).toEqual([]);
 });
 
 test("reimports the same OAuth user when the access token fingerprint changed", async () => {

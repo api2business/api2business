@@ -14,21 +14,21 @@ test("inspects only runtime fields without credentials", async () => {
   const result = await inspectAccounts([99], reads([{
     id: 99, name: "account", platform: "openai", type: "oauth", status: "active", schedulable: true,
     priority: 1, capacity: 5, proxy_id: 8, proxy_name: "pool-8", proxy_status: "active",
-    group_ids: [2, 3], group_names: ["pool", "self"], credentials: { access_token: "secret" },
+    group_ids: [2, 3], group_names: ["pool", "self"], plan_type: "k12", credentials: { access_token: "secret" },
   }]));
   expect(result.accounts).toEqual([{
     id: 99, name: "account", platform: "openai", type: "oauth", status: "active", schedulable: true,
-    priority: 1, capacity: 5, proxyId: 8, proxyName: "pool-8", proxyStatus: "active",
+    priority: 1, capacity: 5, planType: "k12", proxyId: 8, proxyName: "pool-8", proxyStatus: "active",
     groupIds: [2, 3], groupNames: ["pool", "self"],
   }]);
   expect(JSON.stringify(result)).not.toContain("secret");
 });
 
 test("reports an unbound imported account as misaligned", async () => {
-  const result = await verifyImportedAccounts([99], { priority: 1, capacity: 5, groupIds: [2, 3] }, [3, 8], reads([{
+  const result = await verifyImportedAccounts([99], { priority: 1, capacity: 5, groupIds: [2, 3], planType: "k12" }, [3, 8], reads([{
     id: 99, name: "account", platform: "openai", type: "oauth", status: "active", schedulable: true,
     priority: 1, capacity: 5, proxy_id: null, proxy_name: "", proxy_status: "",
-    group_ids: [2, 3], group_names: ["pool", "self"],
+    group_ids: [2, 3], group_names: ["pool", "self"], plan_type: "k12",
   }]));
   expect(result.ok).toBe(false);
   expect((result.accounts as Array<Record<string, unknown>>)[0]?.reasons).toEqual(["proxy-unbound"]);

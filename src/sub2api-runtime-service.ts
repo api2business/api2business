@@ -194,6 +194,18 @@ export class Sub2ApiRuntimeService {
     return await this.client.mutate("PUT", `/admin/accounts/${accountId}`, patch);
   }
 
+  async correctAccountPlanTypes(accountIds: number[], planType: "free" | "k12" | "plus" | "team"): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+      throw new Error("plan type correction requires stable positive account IDs");
+    }
+    const result = await this.client.mutate<Record<string, unknown>>("POST", "/admin/accounts/bulk-update", {
+      account_ids: ids,
+      credentials: { plan_type: planType },
+    });
+    return { accountIds: ids, planType, result };
+  }
+
   async applyApiKeyFailoverTemplate(accountId: number): Promise<unknown> {
     const account = await this.client.getAccount(accountId);
     if (String(account.type ?? "").toLowerCase() !== "apikey") {

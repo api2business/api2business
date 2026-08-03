@@ -229,21 +229,48 @@ export class AccountImportService {
     try {
       if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
       job.state = "running"; this.log(job, "job", "start", `开始处理 ${job.accountCount} 个账号`); await this.persistWorkerJob(job);
-      const plan = await accountImportPreflight(content, {
+      let plan = await accountImportPreflight(content, {
         ...job.settings,
         platform: job.settings.platform ?? job.source.platform,
       }, this.reads);
       for (const skipped of plan.skipped) {
         this.log(job, "account", "skipped", `stage=account state=skipped index=${skipped.index}/${job.accountCount} account-id=${skipped.accountId}`);
       }
+      const correctedAccountIds = plan.planTypeCorrections.map((item) => item.accountId);
+      if (correctedAccountIds.length > 0) {
+        if (!job.settings.confirm) throw new Error("账号导入 worker 只接受已确认作业");
+        this.log(job, "plan-type-correction", "start", `stage=plan-type-correction state=start accounts=${correctedAccountIds.length} plan-type=${job.settings.planType}`);
+        await this.persistWorkerJob(job);
+        await this.runtime.correctAccountPlanTypes(correctedAccountIds, job.settings.planType);
+        const reconciled = await accountImportPreflight(content, {
+          ...job.settings,
+          platform: job.settings.platform ?? job.source.platform,
+        }, this.reads);
+        if (reconciled.planTypeCorrections.length > 0) {
+          throw new Error(`账号类型更正后仍有 ${reconciled.planTypeCorrections.length}/${correctedAccountIds.length} 个账号未对齐`);
+        }
+        plan = reconciled;
+        this.log(job, "plan-type-correction", "done", `stage=plan-type-correction state=done accounts=${correctedAccountIds.length} plan-type=${job.settings.planType}`);
+        await this.persistWorkerJob(job);
+      }
       this.log(job, "proxy", "planned", job.settings.perAccountProxy === true
         ? `代理池候选 ${plan.proxyCandidateIds.length} 个，将为每个新建账号独立随机分配`
         : `代理池候选 ${plan.proxyCandidateIds.length} 个，整批共用 Proxy #${plan.initialProxyId}（原生批量导入）`);
       await this.persistWorkerJob(job);
       if (plan.sourceIndexes.length === 0) {
-        job.result = completedWithoutWrites(job, plan);
+        job.result = completedWithoutWrites(job, plan, correctedAccountIds);
+        if (correctedAccountIds.length > 0) {
+          const planTypeCorrections = recordAccountImportPlanTypeCorrections({
+            path: this.config.operations.accountImportLedgerPath,
+            accountIds: correctedAccountIds,
+            planType: job.settings.planType,
+          });
+          job.accounting = { recordedCount: 0, totalCostCny: 0, planTypeCorrections };
+          job.result.accounting = job.accounting;
+          this.log(job, "accounting", "recorded", `人民币采购成本已记账 0 个账号，共 ¥0.00；类型更正 ${planTypeCorrections.correctedCount} 个`);
+        }
         job.state = "succeeded";
-        this.log(job, "job", "done", "全部账号已导入并对齐，本轮未写入");
+        this.log(job, "job", "done", correctedAccountIds.length > 0 ? "已有账号类型已更正，本轮未新增账号" : "全部账号已导入并对齐，本轮未写入");
         await this.persistWorkerJob(job);
         return;
       }
@@ -310,7 +337,7 @@ export class AccountImportService {
         });
         const planTypeCorrections = recordAccountImportPlanTypeCorrections({
           path: this.config.operations.accountImportLedgerPath,
-          accountIds: updatedIds,
+          accountIds: [...correctedAccountIds, ...updatedIds],
           planType: job.settings.planType,
         });
         job.accounting = { ...acquisition, planTypeCorrections };
@@ -366,12 +393,12 @@ export class AccountImportService {
   }
 }
 
-function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan): Record<string, unknown> {
+function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan, correctedAccountIds: number[] = []): Record<string, unknown> {
   return {
     ok: true,
     action: "apistate-sub2api-runtime-import",
     mode: "confirmed",
-    mutation: false,
+    mutation: correctedAccountIds.length > 0,
     file: { fingerprint: job.fingerprint, accountCount: job.accountCount, valuesPrinted: false },
     settings: {
       ...job.settings,
@@ -379,7 +406,11 @@ function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan
       sharedProxyId: job.settings.perAccountProxy === true ? null : plan.initialProxyId,
       proxyCandidateCount: plan.proxyCandidateIds.length,
     },
-    result: { createdIds: [], updatedIds: [], skippedIds: plan.skipped.map((item) => item.accountId), skipped: plan.skipped.length, failed: 0, failures: [], isolated: 0 },
+    result: {
+      createdIds: [], updatedIds: [], skippedIds: plan.skipped.map((item) => item.accountId),
+      planTypeCorrectedIds: correctedAccountIds, planTypeCorrected: correctedAccountIds.length,
+      skipped: plan.skipped.length, failed: 0, failures: [], isolated: 0,
+    },
     valuesPrinted: false,
   };
 }

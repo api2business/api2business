@@ -27,6 +27,7 @@ export async function inspectAccounts(accountIds: number[], reads: Sub2ApiReadCl
       SELECT
         a.id, a.name, a.platform, a.type, a.status, a.schedulable, a.priority,
         a.concurrency AS capacity, a.proxy_id,
+        COALESCE(LOWER(a.credentials->>'plan_type'), '') AS plan_type,
         COALESCE(p.name, '') AS proxy_name,
         COALESCE(p.status, '') AS proxy_status,
         COALESCE(array_agg(DISTINCT ag.group_id) FILTER (WHERE ag.group_id IS NOT NULL), '{}') AS group_ids,
@@ -51,6 +52,7 @@ export async function inspectAccounts(accountIds: number[], reads: Sub2ApiReadCl
     schedulable: row.schedulable === true,
     priority: integer(row.priority),
     capacity: integer(row.capacity),
+    planType: String(row.plan_type ?? "").toLowerCase(),
     proxyId: integer(row.proxy_id),
     proxyName: row.proxy_name ? String(row.proxy_name) : null,
     proxyStatus: row.proxy_status ? String(row.proxy_status) : null,
@@ -69,7 +71,7 @@ export async function inspectAccounts(accountIds: number[], reads: Sub2ApiReadCl
 
 export async function verifyImportedAccounts(
   accountIds: number[],
-  settings: { priority: number; capacity: number; groupIds: number[]; platform?: "openai" | "grok" },
+  settings: { priority: number; capacity: number; groupIds: number[]; platform?: "openai" | "grok"; planType?: string },
   proxyCandidateIds: number[],
   reads: Sub2ApiReadClient,
   proxyOptions: { sharedProxyId?: number; strictProxyAccountIds?: number[] } = {},
@@ -81,6 +83,7 @@ export async function verifyImportedAccounts(
     const reasons: string[] = [];
     if (settings.platform && String(row.platform) !== settings.platform) reasons.push("platform-mismatch");
     if (String(row.type) !== "oauth") reasons.push("type-mismatch");
+    if (settings.planType && String(row.planType) !== settings.planType) reasons.push("plan-type-mismatch");
     if (Number(row.priority) !== settings.priority) reasons.push("priority-mismatch");
     if (Number(row.capacity) !== settings.capacity) reasons.push("capacity-mismatch");
     const groups = integerArray(row.groupIds);

@@ -35,6 +35,7 @@ export interface AccountImportPreflightPlan {
   content: string;
   sourceIndexes: number[];
   skipped: Array<{ index: number; accountId: number }>;
+  planTypeCorrections: Array<{ index: number; accountId: number }>;
   pendingExisting: Array<{ index: number; accountId: number }>;
   initialProxyId: number;
   proxyCandidateIds: number[];
@@ -81,8 +82,11 @@ function baseAligned(row: AccountRow, settings: AccountImportPreflightSettings):
   const groups = new Set(groupIds(row.group_ids));
   if (id === null || integer(row.priority) !== settings.priority || integer(row.concurrency) !== settings.capacity) return false;
   if (settings.groupIds.some((groupId) => !groups.has(groupId))) return false;
-  if (text(row.plan_type).toLowerCase() !== settings.planType) return false;
   return true;
+}
+
+function planTypeAligned(row: AccountRow, settings: AccountImportPreflightSettings): boolean {
+  return text(row.plan_type).toLowerCase() === settings.planType;
 }
 
 function credentialsAligned(row: AccountRow, item: ImportIdentity): boolean {
@@ -171,6 +175,7 @@ export async function accountImportPreflight(
     if (accessHash) byAccess.set(accessHash, [...(byAccess.get(accessHash) ?? []), row]);
   }
   const skipped: AccountImportPreflightPlan["skipped"] = [];
+  const planTypeCorrections: AccountImportPreflightPlan["planTypeCorrections"] = [];
   const pendingExisting: AccountImportPreflightPlan["pendingExisting"] = [];
   const sourceIndexes: number[] = [];
   const remaining: unknown[] = [];
@@ -182,6 +187,7 @@ export async function accountImportPreflight(
       const match = matches[0]!;
       const existing = { index: offset + 1, accountId: integer(match.id)! };
       skipped.push(existing);
+      if (!planTypeAligned(match, settings)) planTypeCorrections.push(existing);
       continue;
     }
     const account = record(accounts[offset]);
@@ -206,6 +212,7 @@ export async function accountImportPreflight(
     content: filteredContent,
     sourceIndexes,
     skipped,
+    planTypeCorrections,
     pendingExisting,
     initialProxyId: deterministicProxyId(requestIdentity, proxyCandidateIds),
     proxyCandidateIds,

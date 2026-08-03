@@ -66,6 +66,7 @@ test("classifies timeout reconciliation without charging pre-existing updates as
   const base = {
     content: JSON.stringify({ accounts: [] }), sourceIndexes: [2, 3],
     skipped: [{ index: 1, accountId: 395 }], pendingExisting: [{ index: 2, accountId: 396 }],
+    planTypeCorrections: [],
     initialProxyId: 49, proxyCandidateIds: [49],
   } satisfies AccountImportPreflightPlan;
   const reconciled = {
