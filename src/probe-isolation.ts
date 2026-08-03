@@ -136,6 +136,10 @@ export class ProbeIsolationService {
     return remaining;
   }
 
+  private stageDeadline(deadline?: number): number {
+    return deadline ?? Date.now() + this.config.operations.upstreamManagement.mutationTimeoutMs;
+  }
+
   private async findOrCreateGroup(accountId: number, deadline?: number): Promise<number> {
     const isolation = this.config.sub2api.idleProbe.isolation;
     const name = `${isolation.groupNamePrefix}${accountId}`;
@@ -262,7 +266,7 @@ export class ProbeIsolationService {
       groupId = storedGroupId;
     } else {
       try {
-        groupId = await this.findOrCreateGroup(accountId, deadline);
+        groupId = await this.findOrCreateGroup(accountId, this.stageDeadline(deadline));
       } catch (error) {
         throw new Error(`探活隔离分组阶段失败：${errorMessage(error)}`);
       }
@@ -289,7 +293,7 @@ export class ProbeIsolationService {
       key = { record: { ...existing, groupId, ready: false }, keyCreated: false };
     } else {
       try {
-        key = await this.ensureUserAndKey(accountId, groupId, existing, deadline);
+        key = await this.ensureUserAndKey(accountId, groupId, existing, this.stageDeadline(deadline));
       } catch (error) {
         throw new Error(`探活隔离专用凭据阶段失败：${errorMessage(error)}`);
       }
@@ -301,7 +305,7 @@ export class ProbeIsolationService {
       }
     }
     try {
-      await this.ensureAccountBinding(accountId, groupId, deadline);
+      await this.ensureAccountBinding(accountId, groupId, this.stageDeadline(deadline));
     } catch (error) {
       throw new Error(`探活隔离账号绑定阶段失败：${errorMessage(error)}`);
     }
@@ -318,8 +322,7 @@ export class ProbeIsolationService {
   async ensure(accountId: number): Promise<ProbeIsolationBinding> {
     if (!this.config.sub2api.idleProbe.isolation.enabled) throw new Error("探活隔离策略未启用");
     if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error("探活账号 ID 无效");
-    const deadline = Date.now() + this.config.operations.upstreamManagement.mutationTimeoutMs;
-    return await this.inLock(async () => (await this.ensureRecord(accountId, this.readFile(), deadline)).binding);
+    return await this.inLock(async () => (await this.ensureRecord(accountId, this.readFile())).binding);
   }
 
   get(accountId: number): ProbeIsolationBinding | null {

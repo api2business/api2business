@@ -15,7 +15,7 @@ interface FakeState {
   groupCreates: Row[];
   keyCreates: Row[];
   accountUpdates: Row[];
-  requestTimeouts: number[];
+  requestTimeouts: Array<{ path: string; timeoutMs: number }>;
 }
 
 class FakeClient {
@@ -24,7 +24,7 @@ class FakeClient {
   fork() { return new FakeClient(this.state); }
 
   async request<T>(path: string, _init?: unknown, _authenticate?: boolean, timeoutMs?: number): Promise<T> {
-    if (timeoutMs !== undefined) this.state.requestTimeouts.push(timeoutMs);
+    if (timeoutMs !== undefined) this.state.requestTimeouts.push({ path, timeoutMs });
     if (path.startsWith("/admin/groups?")) return { items: this.state.groups, total: this.state.groups.length, page: 1, page_size: 100, pages: 1 } as T;
     if (/^\/admin\/groups\/\d+$/u.test(path)) return this.state.groups.find((item) => Number(item.id) === Number(path.split("/").at(-1))) as T;
     if (path.startsWith("/admin/users?")) return { items: this.state.users, total: this.state.users.length, page: 1, page_size: 100, pages: 1 } as T;
@@ -34,7 +34,7 @@ class FakeClient {
   }
 
   async mutate<T>(method: string, path: string, body: unknown, _key?: string, timeoutMs?: number): Promise<T> {
-    if (timeoutMs !== undefined) this.state.requestTimeouts.push(timeoutMs);
+    if (timeoutMs !== undefined) this.state.requestTimeouts.push({ path: `${method} ${path}`, timeoutMs });
     const payload = body as Row;
     if (method === "POST" && path === "/admin/groups") {
       this.state.groupCreates.push(payload);
@@ -69,12 +69,12 @@ class FakeClient {
   }
 
   async getAccount(_accountId?: number, timeoutMs?: number) {
-    if (timeoutMs !== undefined) this.state.requestTimeouts.push(timeoutMs);
+    if (timeoutMs !== undefined) this.state.requestTimeouts.push({ path: "get-account", timeoutMs });
     return this.state.account;
   }
 
   async listGroupAccounts(groupId: number, _platform?: string, timeoutMs?: number) {
-    if (timeoutMs !== undefined) this.state.requestTimeouts.push(timeoutMs);
+    if (timeoutMs !== undefined) this.state.requestTimeouts.push({ path: "list-group-accounts", timeoutMs });
     return Array.isArray(this.state.account.group_ids) && this.state.account.group_ids.includes(groupId)
       ? [{ id: this.state.account.id }]
       : [];
@@ -137,7 +137,7 @@ test("probe isolation creates one private internal-ID group and redacts every se
   expect(state.keyCreates).toEqual([expect.objectContaining({ name: "apistate-probe", group_id: 51 })]);
   expect(state.accountUpdates).toEqual([expect.objectContaining({ group_ids: [2, 3, 51] })]);
   expect(state.requestTimeouts.length).toBeGreaterThan(0);
-  expect(state.requestTimeouts.every((timeoutMs) => timeoutMs > 100000 && timeoutMs <= 120000)).toBe(true);
+  expect(state.requestTimeouts.every(({ timeoutMs }) => timeoutMs > 100000 && timeoutMs <= 120000)).toBe(true);
 
   const secretPath = join(rootDirectory, ".state/idle-probe/probe-keys.json");
   expect(statSync(secretPath).mode & 0o777).toBe(0o600);
@@ -154,6 +154,28 @@ test("concurrent ensure calls are idempotent and keep the target as the only gro
   expect(state.groupCreates).toHaveLength(1);
   expect(state.keyCreates).toHaveLength(1);
   expect(state.accountUpdates).toHaveLength(1);
+});
+
+test("standalone provisioning resets the bounded budget between credential and account-binding stages", async () => {
+  const { state, service } = fixture();
+  const fake = service as unknown as { admin: { mutate: (...args: unknown[]) => Promise<unknown> } };
+  const mutate = fake.admin.mutate.bind(fake.admin);
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  fake.admin.mutate = async (...args) => {
+    const result = await mutate(...args);
+    if (args[1] === "/keys") now += 110_000;
+    return result;
+  };
+  try {
+    await service.ensure(42);
+  } finally {
+    Date.now = originalNow;
+  }
+
+  const accountRead = state.requestTimeouts.find(({ path }) => path === "get-account");
+  expect(accountRead?.timeoutMs).toBe(120000);
 });
 
 test("probe isolation rejects a private group shared with another upstream account", async () => {
