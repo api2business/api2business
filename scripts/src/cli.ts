@@ -217,6 +217,7 @@ function help(): Record<string, unknown> {
       "upstreams quota-summary --over-api",
       "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
+      "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
       "upstreams create --base-url <https-url> --suffix <name> --rate <CNY/API_USD> [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
       "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--template-only] [--confirm] --over-api",
       "upstreams recharge --id <account-id> --recharge-cny <CNY> [--confirm] --over-api",
@@ -427,6 +428,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-template", accountIds, scope: accountIds.length ? "selected" : "all-api-key", hint: "add --confirm to execute" };
     return await client.upstreamTemplate(accountIds, `upstream-template-${crypto.randomUUID()}`);
+  }
+  if (group === "upstreams" && action === "isolation") {
+    if (!parsed.accounts) throw new Error("upstreams isolation requires --accounts");
+    const accountIds = parseAccountIdSelector(parsed.accounts);
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-isolation", accountIds, hint: "add --confirm to execute" };
+    return await client.upstreamIsolation(accountIds, `upstream-isolation-${crypto.randomUUID()}`);
   }
   if (group === "upstreams" && action === "status") {
     if (!parsed.id) throw new Error("upstreams status requires --id");

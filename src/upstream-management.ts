@@ -88,6 +88,7 @@ export type UpstreamWorkerOperation =
   | { action: "create"; input: UpstreamCreateInput }
   | { action: "update"; input: { id: number; suffix?: string; rateCnyPerApiUsd?: number } }
   | { action: "recharge"; input: { id: number; amountCny: number; operationId: string; description?: string } }
+  | { action: "isolation"; input: { accountIds: number[] } }
   | { action: "template"; input: { accountIds: number[] } }
   | { action: "usage"; input: { accountIds: number[] } };
 
@@ -548,6 +549,15 @@ export class UpstreamManagementService {
     return await this.submitOperation(idempotency, { action: "template", input: { accountIds: ids } });
   }
 
+  async submitIsolation(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds.map(Number))];
+    if (ids.length === 0 || ids.some((id) => !positiveInteger(id))) {
+      throw new Error("上游隔离需要至少一个有效账号 ID");
+    }
+    const idempotency = operationId(operationIdValue, "upstream-isolation");
+    return await this.submitOperation(idempotency, { action: "isolation", input: { accountIds: ids } });
+  }
+
   claimOperation(id: string): UpstreamWorkerOperation | null {
     this.prunePendingOperations();
     return this.pendingOperations.get(id)?.operation ?? null;
@@ -560,29 +570,7 @@ export class UpstreamManagementService {
 
   async workflowStatus(id: string): Promise<Record<string, unknown>> {
     if (!this.temporal) throw new UpstreamManagementError("Temporal worker 当前不可用", 503, { operation: "status" });
-    const status = await this.temporal.status(id);
-    if (status.terminal !== true || status.state === "completed") return status;
-    const pending = [...this.pendingOperations.entries()].find(([, entry]) => entry.submitted.workflowId === id);
-    if (!pending || pending[1].operation.action !== "create") return status;
-    const input = pending[1].operation.input;
-    if (input.rechargeCny !== null) return status;
-    const name = formatUpstreamName(normalizeBaseUrl(input.baseUrl), validateSuffix(input.suffix), validateRate(input.rateCnyPerApiUsd));
-    const account = await this.accountQueryByIdentity(name, input.baseUrl);
-    const desiredGroups = [...input.groupIds].sort((left, right) => left - right);
-    const actualGroups = [...(account?.groupIds ?? [])].sort((left, right) => left - right);
-    if (!account || account.priority !== input.priority || account.capacity !== input.capacity
-      || account.proxyId !== this.config.operations.upstreamManagement.proxyId
-      || JSON.stringify(actualGroups) !== JSON.stringify(desiredGroups)) return status;
-    this.pendingOperations.delete(pending[0]);
-    return {
-      ...status,
-      ok: true,
-      state: "completed",
-      terminal: true,
-      error: null,
-      recoveredFrom: status.state,
-      result: { ok: true, operation: "create-recovered", recovered: true, account, accounting: null },
-    };
+    return await this.temporal.status(id);
   }
 
   private async accountQuery(id: number): Promise<UpstreamAccount | null> {
@@ -937,6 +925,54 @@ export class UpstreamManagementService {
     };
   }
 
+  async ensureProbeIsolation(accountIds: number[]): Promise<Record<string, unknown>> {
+    if (!this.probeIsolation) throw new Error("ApiState 上游探活隔离服务不可用");
+    const requested = [...new Set(accountIds.map(Number))].sort((left, right) => left - right);
+    if (requested.length === 0 || requested.some((accountId) => !positiveInteger(accountId))) {
+      throw new Error("上游隔离需要至少一个有效账号 ID");
+    }
+    const query = await this.reads.query<Row>({
+      key: `upstream-isolation-targets:${requested.join(",")}`,
+      kind: "upstream-isolation-targets",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: `SELECT id
+        FROM accounts
+        WHERE deleted_at IS NULL
+          AND LOWER(type) = 'apikey'
+          AND id = ANY(string_to_array($1::text, $2::text)::bigint[])
+        ORDER BY id`,
+      parameters: [requested.join(","), ","],
+    });
+    const targets = query.rows.map((item) => Number(item.id)).filter(positiveInteger);
+    const completed: Array<{ accountId: number; groupId: number; keyCreated: boolean }> = [];
+    const failed: Array<{ accountId: number; error: string }> = requested
+      .filter((accountId) => !targets.includes(accountId))
+      .map((accountId) => ({ accountId, error: "账号不存在或不是 API-key 上游" }));
+    for (const accountId of targets) {
+      try {
+        const binding = await this.probeIsolation.ensure(accountId);
+        completed.push({ accountId, groupId: binding.groupId, keyCreated: binding.keyCreated });
+      } catch (error) {
+        failed.push({ accountId, error: safeMessage(error instanceof Error ? error.message : String(error)) });
+      }
+    }
+    return {
+      ok: failed.length === 0,
+      operation: "probe-isolation",
+      requestedAccountIds: requested,
+      targetCount: targets.length,
+      completedCount: completed.length,
+      failedCount: failed.length,
+      completed,
+      failed,
+      databaseQueries: query.cached ? 0 : 1,
+      queueDurationMs: query.queueDurationMs,
+      queryDurationMs: query.queryDurationMs,
+      valuesRedacted: true,
+    };
+  }
+
   async create(input: {
     baseUrl: string;
     apiKey: string;
@@ -949,6 +985,7 @@ export class UpstreamManagementService {
     operationId?: string | null;
     description?: string;
   }): Promise<Record<string, unknown>> {
+    if (!this.probeIsolation) throw new Error("ApiState 上游探活隔离服务不可用");
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const suffix = validateSuffix(input.suffix);
     const rate = validateRate(input.rateCnyPerApiUsd);
@@ -997,12 +1034,17 @@ export class UpstreamManagementService {
     }
     if (createError !== null) recovered = true;
     const resolvedAccountId = account.id;
-    const probeBinding = this.probeIsolation
-      ? await this.probeIsolation.ensure(resolvedAccountId)
-      : null;
-    const effectiveGroupIds = probeBinding
-      ? [...new Set([...groupIds, probeBinding.groupId])]
-      : [...groupIds];
+    let probeBinding: Awaited<ReturnType<ProbeIsolationService["ensure"]>>;
+    try {
+      probeBinding = await this.probeIsolation.ensure(resolvedAccountId);
+    } catch (error) {
+      throw new UpstreamManagementError(
+        `上游账号已创建，但私有探活分组和专用 API Key 未完成：${safeMessage(error instanceof Error ? error.message : String(error))}`,
+        502,
+        { operation: "probe-isolation", partial: true, accountId: resolvedAccountId },
+      );
+    }
+    const effectiveGroupIds = [...new Set([...groupIds, probeBinding.groupId])];
     const desiredGroupIds = [...effectiveGroupIds].sort((left, right) => left - right);
     const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
     if (account.priority !== priority || account.capacity !== capacity || account.proxyId !== settings.proxyId
@@ -1053,7 +1095,7 @@ export class UpstreamManagementService {
       recovered,
       account,
       template: { applied: true, verified: true },
-      probeIsolation: probeBinding ? { enabled: true, groupId: probeBinding.groupId, keyCreated: probeBinding.keyCreated } : { enabled: false },
+      probeIsolation: { enabled: true, groupId: probeBinding.groupId, keyCreated: probeBinding.keyCreated },
       accounting,
     };
   }

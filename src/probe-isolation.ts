@@ -69,7 +69,7 @@ function accountIds(rows: Row[]): number[] {
   return rows.map((item) => id(item.id)).filter((value): value is number => value !== null);
 }
 
-function readyRecord(record: ProbeKeyRecord | undefined): record is ProbeKeyRecord {
+function readyRecord(record: ProbeKeyRecord | undefined): boolean {
   return Boolean(record && (record.ready === true || (record.ready === undefined && id(record.userId) !== null)));
 }
 
@@ -323,9 +323,8 @@ export class ProbeIsolationService {
 
   get(accountId: number): ProbeIsolationBinding | null {
     const record = this.readFile().records[String(accountId)];
-    return readyRecord(record)
-      ? { accountId, groupId: record.groupId, keyCreated: false }
-      : null;
+    if (!record || !readyRecord(record)) return null;
+    return { accountId, groupId: record.groupId, keyCreated: false };
   }
 
   async probe(accountId: number, model: string, timeoutMs: number): Promise<Record<string, unknown>> {

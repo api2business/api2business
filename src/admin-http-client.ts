@@ -139,6 +139,13 @@ export class AdminHttpClient {
       body: JSON.stringify({ accountIds, operationId }),
     }, 30000);
   }
+  upstreamIsolation(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/isolation", {
+      method: "POST",
+      headers: { "Idempotency-Key": operationId },
+      body: JSON.stringify({ accountIds, operationId }),
+    }, 30000);
+  }
   priorityAutomation(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-automation"); }
   priorityHistory(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-history"); }
   accountImport(input: Record<string, unknown>): Promise<Record<string, unknown>> {

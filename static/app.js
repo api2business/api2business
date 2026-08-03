@@ -551,7 +551,7 @@ async function scoresPage() {
     $('#score-upstream-create-capacity').value = String(defaults.capacity ?? 16)
     const defaultIds = (defaults.groupIds ?? [2, 3]).map(Number)
     $('#score-upstream-create-groups').innerHTML = (options.groups ?? []).map((group) => `<label><input type="checkbox" value="${escapeHtml(group.id)}" ${defaultIds.includes(Number(group.id)) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${escapeHtml(group.id)}</b></span></label>`).join('')
-    $('#score-upstream-create-state').textContent = '创建时将使用当前优先级、并发容量、号池、Proxy #3 和切号模板。'
+    $('#score-upstream-create-state').textContent = '创建时将自动配置号池、Proxy #3、切号模板，以及账号专属私有探活分组和 API Key。'
     $('#score-upstream-create-state').removeAttribute('data-state')
     $('#score-upstream-create-logs').innerHTML = '<li class="empty">等待提交</li>'
     createOperationId = upstreamOperationId('score-upstream-create')
@@ -2297,7 +2297,7 @@ async function upstreamsPage() {
     event.target.click()
   })
   $('#upstream-create').addEventListener('click', () => {
-    $('#upstream-create-state').textContent = '创建时将使用当前优先级、并发容量、号池、Proxy #3 和切号模板。'
+    $('#upstream-create-state').textContent = '创建时将自动配置号池、Proxy #3、切号模板，以及账号专属私有探活分组和 API Key。'
     $('#upstream-create-state').removeAttribute('data-state')
     createOperationId = upstreamOperationId('upstream-create')
     resetJobLog('create')

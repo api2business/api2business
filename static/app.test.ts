@@ -60,7 +60,7 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(app).toContain("requestJson('/api/upstreams/usage'");
   expect(app).toContain("result.databaseQueries");
   expect(app).toContain("queryUsage([], (status)");
-  expect(html).toContain('/app.js?v=live-layout-v15');
+  expect(html).toContain('/app.js?v=upstream-isolation-v1');
   expect(html).toContain('class="page-head upstream-slim-head"');
   expect(html).toContain('class="metric-strip upstream-metrics"');
   expect(html).toContain('id="upstream-quota-refresh-interval"');
@@ -404,7 +404,7 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
-  expect(html).toContain('/app.js?v=refresh-latency-v1');
+  expect(html).toContain('/app.js?v=upstream-isolation-v1');
   expect(html).toContain('/styles.css?v=refresh-latency-v1');
   expect(app).toContain("key: 'rollingScore'");
   expect(html).toContain('id="score-create-upstream"');

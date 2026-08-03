@@ -116,6 +116,7 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     if (pending.action === "create") result = await upstreams.create(pending.input);
     else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
     else if (pending.action === "recharge") result = await upstreams.recharge(pending.input.id, pending.input);
+    else if (pending.action === "isolation") result = await upstreams.ensureProbeIsolation(pending.input.accountIds);
     else if (pending.action === "template") result = await upstreams.applyTemplate(pending.input.accountIds);
     else {
       result = await upstreams.usage(pending.input.accountIds);

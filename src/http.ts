@@ -207,6 +207,20 @@ export function createHandler(
           typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
         ), 202);
       }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/isolation") {
+        const input = await body(request);
+        let accountIds: number[] = [];
+        try {
+          if (Array.isArray(input.accountIds)) accountIds = normalizeAccountIds(input.accountIds);
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+        if (accountIds.length === 0) return json({ ok: false, error: "accountIds 不能为空" }, 400);
+        return json(await upstreams.submitIsolation(
+          accountIds,
+          typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
+        ), 202);
+      }
       if (request.method === "POST" && url.pathname === "/api/upstreams") {
         const input = await body(request);
         if (typeof input.baseUrl !== "string" || typeof input.apiKey !== "string"

@@ -97,12 +97,15 @@ test("template application verifies persisted runtime fields through the queued 
   expect(source).toContain("verifiedCount");
 });
 
-test("upstream creation applies and verifies the failover template before success", async () => {
+test("upstream creation requires probe isolation and verifies the failover template before success", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   const createBody = source.slice(source.indexOf("  async create(input:"), source.indexOf("  async update(id:"));
   expect(createBody).toContain("await this.applyTemplate([resolvedAccountId])");
+  expect(createBody).toContain("await this.probeIsolation.ensure(resolvedAccountId)");
+  expect(createBody).toContain('operation: "probe-isolation", partial: true');
   expect(createBody).toContain('operation: "template", partial: true');
   expect(createBody).toContain("template: { applied: true, verified: true }");
+  expect(createBody).toContain("probeIsolation: { enabled: true");
 });
 
 test("recharge recovery covers every API-key account in the normalized wallet", async () => {
