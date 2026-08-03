@@ -160,6 +160,7 @@ export class ProbeIsolationService {
   private async ensureUserAndKey(accountId: number, groupId: number, stored: ProbeKeyRecord | undefined): Promise<{ record: ProbeKeyRecord; keyCreated: boolean }> {
     const email = stored?.email ?? `apistate-probe-${accountId}@sub2api.platform-infra.local`;
     const password = stored?.password ?? generatedSecret("ApistateProbe-");
+    const storedApiKey = stored?.apiKey ?? generatedSecret("sk-apistate-probe-");
     const listed = await this.admin.request<Paginated<Row>>(`/admin/users?search=${encodeURIComponent(email)}&page=1&page_size=100`);
     let user = pageItems(listed).find((item) => String(item.email ?? "") === email);
     let userId = id(user?.id);
@@ -198,12 +199,12 @@ export class ProbeIsolationService {
     const existingPlaintext = typeof existingKey?.key === "string" ? existingKey.key : null;
     if (existingKeyId !== null) {
       if (id(existingKey?.group_id) !== groupId) await userClient.mutate("PUT", `/keys/${existingKeyId}`, { group_id: groupId });
-      if (existingPlaintext) return {
-        record: { accountId, groupId, userId, email, password, apiKey: existingPlaintext },
+      if (existingPlaintext || stored?.apiKey) return {
+        record: { accountId, groupId, userId, email, password, apiKey: existingPlaintext ?? storedApiKey },
         keyCreated: false,
       };
     }
-    const apiKey = existingPlaintext ?? generatedSecret("sk-apistate-probe-");
+    const apiKey = existingPlaintext ?? storedApiKey;
     const created = await userClient.mutate<Row>("POST", "/keys", {
       name: "apistate-probe",
       group_id: groupId,
@@ -236,12 +237,28 @@ export class ProbeIsolationService {
   }
 
   private async ensureRecord(accountId: number, file: ProbeKeyFile): Promise<ProbeIsolationRecordResult> {
-    const existing = file.records[String(accountId)];
+    let existing = file.records[String(accountId)];
     let groupId: number;
     try {
       groupId = await this.findOrCreateGroup(accountId);
     } catch (error) {
       throw new Error(`探活隔离分组阶段失败：${errorMessage(error)}`);
+    }
+    if (!existing) {
+      existing = {
+        accountId,
+        groupId,
+        userId: 0,
+        email: `apistate-probe-${accountId}@sub2api.platform-infra.local`,
+        password: generatedSecret("ApistateProbe-"),
+        apiKey: generatedSecret("sk-apistate-probe-"),
+      };
+      file.records[String(accountId)] = existing;
+      try {
+        this.writeFile(file);
+      } catch (error) {
+        throw new Error(`探活隔离 Secret 持久化阶段失败：${errorMessage(error)}`);
+      }
     }
     let key: { record: ProbeKeyRecord; keyCreated: boolean };
     try {
@@ -271,7 +288,9 @@ export class ProbeIsolationService {
 
   get(accountId: number): ProbeIsolationBinding | null {
     const record = this.readFile().records[String(accountId)];
-    return record ? { accountId, groupId: record.groupId, keyCreated: false } : null;
+    return record && id(record.userId) !== null
+      ? { accountId, groupId: record.groupId, keyCreated: false }
+      : null;
   }
 
   async probe(accountId: number, model: string, timeoutMs: number): Promise<Record<string, unknown>> {

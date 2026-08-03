@@ -154,7 +154,10 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
   const originalFetch = globalThis.fetch;
   let requestUrl = "";
   let requestBody = "";
-  globalThis.fetch = (async (input, init) => {
+  globalThis.fetch = (async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
     requestUrl = String(input);
     requestBody = String(init?.body ?? "");
     return new Response(JSON.stringify({ id: "resp_probe", output: [] }), { status: 200 });
@@ -189,4 +192,31 @@ test("probe reports a gateway timeout without claiming an ordinary log", async (
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("probe isolation persists generated credentials before a remote credential-stage failure", async () => {
+  const { rootDirectory, service } = fixture();
+  const fake = service as unknown as { admin: { request: (path: string) => Promise<unknown> } };
+  const request = fake.admin.request.bind(fake.admin);
+  fake.admin.request = async (path) => {
+    if (path.startsWith("/admin/users?")) throw new DOMException("The operation timed out.", "TimeoutError");
+    return await request(path);
+  };
+
+  await expect(service.ensure(42)).rejects.toThrow("探活隔离专用凭据阶段失败");
+  const secretPath = join(rootDirectory, ".state/idle-probe/probe-keys.json");
+  expect(statSync(secretPath).mode & 0o777).toBe(0o600);
+  const secret = JSON.parse(readFileSync(secretPath, "utf8")) as { records: Record<string, Row> };
+  expect(secret.records["42"]).toMatchObject({ accountId: 42, groupId: 51, userId: 0 });
+  expect(String(secret.records["42"]?.apiKey)).toStartWith("sk-apistate-probe-");
+  expect(service.get(42)).toBeNull();
+});
+
+test("probe isolation reuses the persisted key when the API masks existing key plaintext", async () => {
+  const { state, service } = fixture();
+  await service.ensure(42);
+  delete state.keys[0]?.key;
+
+  expect(await service.ensure(42)).toMatchObject({ accountId: 42, groupId: 51, keyCreated: false });
+  expect(state.keyCreates).toHaveLength(1);
 });
