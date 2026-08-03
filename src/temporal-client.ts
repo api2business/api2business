@@ -147,7 +147,7 @@ export class TemporalGateway {
   }
 
   async ensureIdleProbeSchedule(): Promise<{ started: boolean; workflowId: string }> {
-    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-probe-v2`;
+    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-probe-v3`;
     try {
       await this.client.workflow.start("idleAccountProbeScheduleWorkflow", {
         taskQueue: this.runtime.taskQueue,
