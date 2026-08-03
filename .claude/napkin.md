@@ -33,6 +33,7 @@
 | 2026-08-03 | self | 为核对 Compose 挂载误用 `docker inspect .Config.Env`，导致诊断输出包含运行面 Secret | 容器诊断只查询 `WorkingDir`、`Mounts`、状态和脱敏路径；禁止输出完整 `.Config.Env`，环境字段只经受控状态接口核对 presence/fingerprint |
 | 2026-08-03 | runtime | 探活工作流超时后被误判为普通网关请求超时，但 Secret 未落盘且账号未绑定隔离组，实际失败发生在隔离初始化阶段 | 隔离初始化按分组、专用凭据、账号绑定和 Secret 持久化分阶段返回脱敏错误；只有收到网关 HTTP 响应才能将普通日志标记为已记录候选 |
 | 2026-08-03 | self | ApiState `web-probe product-smoke` 误把页面内的 PK01 后端标签当成 Web target，并误用通用 profile | ApiState Web 使用 owning target `NC01`；上游资产页使用 profile `scores`，PK01 只表示 Sub2API 后端目标 |
+| 2026-08-03 | self | 账号导入页升级静态资源缓存版本后，遗漏同步 ZIP 预览测试里的版本断言 | 每次修改 HTML 的 `app.js?v=` 或 `styles.css?v=` 时，同步检索并更新所有静态测试中的缓存版本断言 |
 
 ## User Preferences
 - 调度算法变更先手动生成并确认一次真实优先级调整，排队回读成功后再启用或调整自动调优周期。

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="theme-color" content="#111412" /><title>账号导入 | ApiState</title><link rel="stylesheet" href="/styles.css?v=import-economics-v1" /><script src="/app.js?v=zip-preview-v1" type="module"></script></head>
+<meta name="theme-color" content="#111412" /><title>账号导入 | ApiState</title><link rel="stylesheet" href="/styles.css?v=import-type-confirm-v1" /><script src="/app.js?v=import-type-confirm-v1" type="module"></script></head>
 <body data-page="account-import"><div data-shell></div><main class="workspace import-workspace">
   <header class="page-head"><div><p class="eyebrow">ACCOUNT RUNTIME / CONTROLLED IMPORT</p><h1>账号批量导入</h1></div><span id="import-state" class="state-badge">等待输入</span></header>
   <section class="import-layout">
@@ -24,7 +24,7 @@
         </details>
       </div>
       <fieldset class="group-picker"><legend>目标分组</legend><div id="import-groups"></div></fieldset>
-      <button id="import-submit" class="primary-command" type="submit">确认导入</button>
+      <button id="import-submit" class="primary-command" type="submit">导入账号</button>
     </form>
     <section class="import-console"><header><div><p class="eyebrow">JOB STREAM</p><h2>导入结果</h2></div><code id="import-job-id">JOB —</code></header>
       <div id="import-economics" class="import-economics is-pending" aria-live="polite">
@@ -37,4 +37,18 @@
       <ol id="import-logs" class="import-logs"><li class="empty">暂无日志</li></ol>
     </section>
   </section>
-</main></body></html>
+</main>
+<dialog id="import-plan-confirm-dialog" class="import-confirm-dialog" aria-labelledby="import-confirm-title">
+  <form id="import-plan-confirm-form" method="dialog">
+    <header><div><p class="eyebrow">FINAL ACCOUNT TYPE</p><h2 id="import-confirm-title">确认账号类型</h2></div><button id="import-confirm-close-icon" class="icon-command" type="button" title="关闭" aria-label="关闭">×</button></header>
+    <div class="import-confirm-summary" aria-label="本批导入摘要">
+      <div><span>账号</span><strong id="import-confirm-account-count">—</strong></div>
+      <div><span>平台</span><strong id="import-confirm-platform">—</strong></div>
+      <div><span>单价</span><strong id="import-confirm-unit-cost">—</strong></div>
+    </div>
+    <fieldset class="import-confirm-type-picker"><legend>本批账号属于</legend><div id="import-confirm-types"></div></fieldset>
+    <p id="import-confirm-state" class="dialog-state">请选择一个账号类型后提交。</p>
+    <footer><button id="import-confirm-cancel" class="text-command" type="button">取消</button><button id="import-confirm-submit" class="primary-command" type="submit" disabled>按所选类型导入</button></footer>
+  </form>
+</dialog>
+</body></html>

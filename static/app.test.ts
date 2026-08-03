@@ -5,11 +5,17 @@ test("account import supports Team manual selection and three price-inferred typ
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
   const cli = await Bun.file(new URL("../scripts/src/cli.ts", import.meta.url)).text();
   expect(html).toContain('id="import-plan-type"');
+  expect(html).toContain('id="import-plan-confirm-dialog"');
+  expect(html).toContain('id="import-confirm-types"');
+  expect(html).toContain('id="import-confirm-submit"');
   expect(html).toContain('id="import-total-cost"');
   expect(html).toContain('id="import-per-account-proxy"');
   expect(html).toContain('<details class="import-advanced">');
   expect(html.indexOf('id="import-proxy"')).toBeGreaterThan(html.indexOf('<summary>高级设置</summary>'));
-  expect(app).toContain("planType: planType.value");
+  expect(app).toContain("planType: confirmedPlanType");
+  expect(app).toContain("Plus / Pro");
+  expect(app).toContain("openPlanTypeConfirmation()");
+  expect(app).toContain("input[name=\"import-confirm-plan-type\"]:checked");
   expect(app).toContain("perAccountProxy: $('#import-per-account-proxy').checked");
   expect(app).toContain("defaults.perAccountProxy === true");
   expect(app).toContain("planType.value = defaults.planType");
@@ -41,7 +47,7 @@ test("ZIP import previews merged JSON and recognized account count before submit
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
   expect(html).toContain("合并后的 JSON");
-  expect(html).toContain("/app.js?v=zip-preview-v1");
+  expect(html).toContain("/app.js?v=import-type-confirm-v1");
   expect(app).toContain("requestJson('/api/account-import/preview'");
   expect(app).toContain("JSON.stringify(JSON.parse(preview.content), null, 2)");
   expect(app).toContain("preview.accountCount");

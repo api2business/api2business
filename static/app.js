@@ -1652,6 +1652,9 @@ async function loadProcurement() {
 async function accountImportPage() {
   const options = await requestJson('/api/account-import/options')
   const defaults = options.defaults
+  const confirmDialog = $('#import-plan-confirm-dialog')
+  const confirmForm = $('#import-plan-confirm-form')
+  const confirmButton = $('#import-confirm-submit')
   $('#import-priority').value = defaults.priority
   $('#import-capacity').value = defaults.capacity
   $('#import-proxy').value = defaults.sourceProxyId
@@ -1717,6 +1720,36 @@ async function accountImportPage() {
       const payload = JSON.parse(importContent)
       return Array.isArray(payload?.accounts) ? payload.accounts.length : 0
     } catch { return 0 }
+  }
+  const planTypeLabel = (value) => ({ free: 'Free', k12: 'K12', plus: 'Plus / Pro', team: 'Team' })[value] ?? String(value).toUpperCase()
+  const planTypeDescription = (value) => ({
+    free: '免费额度账号',
+    k12: 'K12 OAuth 账号',
+    plus: 'Plus 或 Pro OAuth 账号',
+    team: 'Team OAuth 账号',
+  })[value] ?? 'OAuth 账号'
+  const openPlanTypeConfirmation = () => {
+    const detected = detectedImportPlatform()
+    const selectedPlatform = platformSelect.value === 'auto' ? detected : platformSelect.value
+    const currentPlanType = selectedPlatform === 'grok' ? 'free' : planType.value
+    const accountCount = importedAccountCount()
+    const unitCost = Number($('#import-unit-cost').value)
+    $('#import-confirm-account-count').textContent = `${number(accountCount)} 个`
+    $('#import-confirm-platform').textContent = selectedPlatform === 'grok' ? 'Grok' : 'Codex'
+    $('#import-confirm-unit-cost').textContent = Number.isFinite(unitCost) && unitCost > 0 ? `${cny(unitCost)} / 个` : '—'
+    $('#import-confirm-types').innerHTML = options.planTypes.map((item) => {
+      const disabled = selectedPlatform === 'grok' && item.id !== 'free'
+      const current = item.id === currentPlanType
+      return `<label class="import-confirm-type${current ? ' is-current' : ''}${disabled ? ' is-disabled' : ''}">
+        <input type="radio" name="import-confirm-plan-type" value="${escapeHtml(item.id)}" ${disabled ? 'disabled' : ''} />
+        <span><strong>${escapeHtml(planTypeLabel(item.id))}</strong><small>${escapeHtml(planTypeDescription(item.id))}</small></span>
+        ${current ? '<em>当前建议</em>' : ''}
+      </label>`
+    }).join('')
+    confirmButton.disabled = true
+    $('#import-confirm-state').textContent = selectedPlatform === 'grok' ? 'Grok 当前仅支持 Free，请明确选择后提交。' : '请选择本批 OAuth 账号的实际类型。'
+    $('#import-confirm-state').removeAttribute('data-state')
+    if (!confirmDialog.open) confirmDialog.showModal()
   }
   const updateUnitCostFromTotal = () => {
     const total = Number($('#import-total-cost').value)
@@ -1821,14 +1854,16 @@ async function accountImportPage() {
     $('#import-logs').innerHTML = job.logs.length ? job.logs.map((log) => `<li data-state="${escapeHtml(log.state)}"><time>${time(log.timestamp)}</time><b>${escapeHtml(log.stage)}</b><span>${escapeHtml(log.message)}</span></li>`).join('') : '<li class="empty">等待作业启动</li>'
     $('#import-logs').scrollTop = $('#import-logs').scrollHeight
   }
-  $('#import-form').addEventListener('submit', async (event) => {
-    event.preventDefault()
-    const button = $('#import-submit'); button.disabled = true
-    if (importInputFormat === 'zip' && !importPreview) {
-      $('#import-platform-state').textContent = 'ZIP 尚未成功解析，不能提交导入'
-      button.disabled = false
-      return
-    }
+  let importSubmitting = false
+  const submitImport = async (confirmedPlanType) => {
+    if (importSubmitting) return
+    importSubmitting = true
+    planType.value = confirmedPlanType
+    planTypeManuallySelected = true
+    const button = $('#import-submit')
+    button.disabled = true
+    confirmButton.disabled = true
+    if (confirmDialog.open) confirmDialog.close()
     try {
       const groupIds = [...document.querySelectorAll('#import-groups input:checked')].map((input) => Number(input.value))
       const response = await requestJson('/api/account-import/jobs', { method: 'POST', body: JSON.stringify({
@@ -1836,7 +1871,7 @@ async function accountImportPage() {
         priority: Number($('#import-priority').value), capacity: Number($('#import-capacity').value),
         groupIds, sourceProxyId: Number($('#import-proxy').value),
         perAccountProxy: $('#import-per-account-proxy').checked,
-        unitCostCny: Number($('#import-unit-cost').value), planType: planType.value,
+        unitCostCny: Number($('#import-unit-cost').value), planType: confirmedPlanType,
         platform: platformSelect.value === 'auto' ? undefined : platformSelect.value, confirm: true,
       }) }, 30000)
       let job = response.job; renderJob(job)
@@ -1844,8 +1879,39 @@ async function accountImportPage() {
         await new Promise((resolve) => setTimeout(resolve, 1000))
         job = (await requestJson(`/api/account-import/jobs/${encodeURIComponent(job.id)}`)).job; renderJob(job)
       }
-    } finally { button.disabled = false }
+    } finally {
+      importSubmitting = false
+      button.disabled = false
+    }
+  }
+  $('#import-form').addEventListener('submit', (event) => {
+    event.preventDefault()
+    if (importInputFormat === 'zip' && !importPreview) {
+      $('#import-platform-state').textContent = 'ZIP 尚未成功解析，不能提交导入'
+      return
+    }
+    openPlanTypeConfirmation()
   })
+  $('#import-confirm-types').addEventListener('change', (event) => {
+    if (!(event.target instanceof HTMLInputElement) || event.target.name !== 'import-confirm-plan-type') return
+    confirmButton.disabled = false
+    $('#import-confirm-state').textContent = `将按 ${planTypeLabel(event.target.value)} 类型导入并记账。`
+    $('#import-confirm-state').dataset.state = 'success'
+  })
+  confirmForm.addEventListener('submit', (event) => {
+    event.preventDefault()
+    const selected = confirmForm.querySelector('input[name="import-confirm-plan-type"]:checked')
+    if (!selected) {
+      $('#import-confirm-state').textContent = '必须明确选择账号类型。'
+      $('#import-confirm-state').dataset.state = 'error'
+      return
+    }
+    void submitImport(selected.value)
+  })
+  const closeConfirmation = () => { if (confirmDialog.open && !importSubmitting) confirmDialog.close() }
+  $('#import-confirm-cancel').addEventListener('click', closeConfirmation)
+  $('#import-confirm-close-icon').addEventListener('click', closeConfirmation)
+  confirmDialog.addEventListener('click', (event) => { if (event.target === confirmDialog) closeConfirmation() })
 }
 
 let upstreamPage = 1
