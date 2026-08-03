@@ -124,11 +124,21 @@ export class ProbeIsolationService {
     try { return await operation(); } finally { release(); }
   }
 
-  private async findOrCreateGroup(accountId: number): Promise<number> {
+  private remainingTimeout(deadline?: number): number | undefined {
+    if (deadline === undefined) return undefined;
+    const remaining = Math.ceil(deadline - Date.now());
+    if (remaining <= 0) throw new DOMException("The operation timed out.", "TimeoutError");
+    return remaining;
+  }
+
+  private async findOrCreateGroup(accountId: number, deadline?: number): Promise<number> {
     const isolation = this.config.sub2api.idleProbe.isolation;
     const name = `${isolation.groupNamePrefix}${accountId}`;
     const listed = await this.admin.request<Paginated<Row>>(
       `/admin/groups?platform=openai&search=${encodeURIComponent(name)}&page=1&page_size=100`,
+      {},
+      true,
+      this.remainingTimeout(deadline),
     );
     const existing = pageItems(listed).find((item) => String(item.name ?? "") === name);
     const existingId = id(existing?.id);
@@ -140,7 +150,7 @@ export class ProbeIsolationService {
       is_exclusive: true,
       subscription_type: "standard",
       rpm_limit: 0,
-    })).id);
+    }, undefined, this.remainingTimeout(deadline))).id);
     if (groupId === null) throw new Error("创建探活私有分组后未返回稳定 ID");
 
     if (existingId !== null && (existing?.is_exclusive !== true || Number(existing.rate_multiplier) !== isolation.groupRateMultiplier || String(existing.status ?? "active") !== "active")) {
@@ -148,20 +158,20 @@ export class ProbeIsolationService {
         is_exclusive: true,
         rate_multiplier: isolation.groupRateMultiplier,
         status: "active",
-      });
+      }, undefined, this.remainingTimeout(deadline));
     }
-    const verified = row(await this.admin.request<Row>(`/admin/groups/${groupId}`));
+    const verified = row(await this.admin.request<Row>(`/admin/groups/${groupId}`, {}, true, this.remainingTimeout(deadline)));
     if (String(verified.name ?? "") !== name || verified.is_exclusive !== true || String(verified.status ?? "") !== "active") {
       throw new Error(`探活分组 ${groupId} 未通过私有属性回读`);
     }
     return groupId;
   }
 
-  private async ensureUserAndKey(accountId: number, groupId: number, stored: ProbeKeyRecord | undefined): Promise<{ record: ProbeKeyRecord; keyCreated: boolean }> {
+  private async ensureUserAndKey(accountId: number, groupId: number, stored: ProbeKeyRecord | undefined, deadline?: number): Promise<{ record: ProbeKeyRecord; keyCreated: boolean }> {
     const email = stored?.email ?? `apistate-probe-${accountId}@sub2api.platform-infra.local`;
     const password = stored?.password ?? generatedSecret("ApistateProbe-");
     const storedApiKey = stored?.apiKey ?? generatedSecret("sk-apistate-probe-");
-    const listed = await this.admin.request<Paginated<Row>>(`/admin/users?search=${encodeURIComponent(email)}&page=1&page_size=100`);
+    const listed = await this.admin.request<Paginated<Row>>(`/admin/users?search=${encodeURIComponent(email)}&page=1&page_size=100`, {}, true, this.remainingTimeout(deadline));
     let user = pageItems(listed).find((item) => String(item.email ?? "") === email);
     let userId = id(user?.id);
     if (userId === null) {
@@ -175,7 +185,7 @@ export class ProbeIsolationService {
         concurrency: 1,
         rpm_limit: 0,
         allowed_groups: [groupId],
-      });
+      }, undefined, this.remainingTimeout(deadline));
       userId = id(user.id);
     } else {
       const allowedGroups = [...new Set([...ids(user?.allowed_groups), groupId])];
@@ -186,19 +196,19 @@ export class ProbeIsolationService {
         concurrency: 1,
         rpm_limit: 0,
         ...(Number.isFinite(balance) && balance > 0 ? {} : { balance: this.config.sub2api.idleProbe.isolation.userBalance }),
-      });
+      }, undefined, this.remainingTimeout(deadline));
     }
     if (userId === null) throw new Error("创建探活专用用户后未返回稳定 ID");
-    const verifiedUser = row(await this.admin.request<Row>(`/admin/users/${userId}`));
+    const verifiedUser = row(await this.admin.request<Row>(`/admin/users/${userId}`, {}, true, this.remainingTimeout(deadline)));
     if (!ids(verifiedUser.allowed_groups).includes(groupId)) throw new Error(`探活专用用户 ${userId} 未绑定私有分组 ${groupId}`);
 
     const userClient = this.admin.fork({ email, password });
-    const keyList = await userClient.request<Paginated<Row>>("/keys?page=1&page_size=100&search=apistate-probe");
+    const keyList = await userClient.request<Paginated<Row>>("/keys?page=1&page_size=100&search=apistate-probe", {}, true, this.remainingTimeout(deadline));
     const existingKey = pageItems(keyList).find((item) => String(item.name ?? "") === "apistate-probe");
     const existingKeyId = id(existingKey?.id);
     const existingPlaintext = typeof existingKey?.key === "string" ? existingKey.key : null;
     if (existingKeyId !== null) {
-      if (id(existingKey?.group_id) !== groupId) await userClient.mutate("PUT", `/keys/${existingKeyId}`, { group_id: groupId });
+      if (id(existingKey?.group_id) !== groupId) await userClient.mutate("PUT", `/keys/${existingKeyId}`, { group_id: groupId }, undefined, this.remainingTimeout(deadline));
       if (existingPlaintext || stored?.apiKey) return {
         record: { accountId, groupId, userId, email, password, apiKey: existingPlaintext ?? storedApiKey },
         keyCreated: false,
@@ -209,7 +219,7 @@ export class ProbeIsolationService {
       name: "apistate-probe",
       group_id: groupId,
       custom_key: apiKey,
-    });
+    }, undefined, this.remainingTimeout(deadline));
     const returnedKey = typeof created.key === "string" ? created.key : apiKey;
     return {
       record: { accountId, groupId, userId, email, password, apiKey: returnedKey },
@@ -217,30 +227,30 @@ export class ProbeIsolationService {
     };
   }
 
-  private async ensureAccountBinding(accountId: number, groupId: number): Promise<void> {
-    const account = row(await this.admin.getAccount(accountId));
+  private async ensureAccountBinding(accountId: number, groupId: number, deadline?: number): Promise<void> {
+    const account = row(await this.admin.getAccount(accountId, this.remainingTimeout(deadline)));
     const currentGroupIds = accountGroupIds(account);
     if (!currentGroupIds.includes(groupId)) {
       if (!this.runtime) throw new Error("探活账号绑定需要 Sub2API runtime mutation service");
       await this.runtime.updateAccount(accountId, {
         group_ids: [...new Set([...currentGroupIds, groupId])],
         confirm_mixed_channel_risk: true,
-      });
+      }, this.remainingTimeout(deadline));
     }
-    const verifiedAccount = row(await this.admin.getAccount(accountId));
+    const verifiedAccount = row(await this.admin.getAccount(accountId, this.remainingTimeout(deadline)));
     if (!accountGroupIds(verifiedAccount).includes(groupId)) throw new Error(`账号 ${accountId} 未绑定探活私有分组 ${groupId}`);
-    const members = await this.admin.listGroupAccounts(groupId, "openai");
+    const members = await this.admin.listGroupAccounts(groupId, "openai", this.remainingTimeout(deadline));
     const memberIds = accountIds(members as unknown as Row[]);
     if (memberIds.some((memberId) => memberId !== accountId)) {
       throw new Error(`探活私有分组 ${groupId} 存在其他账号成员，拒绝继续使用`);
     }
   }
 
-  private async ensureRecord(accountId: number, file: ProbeKeyFile): Promise<ProbeIsolationRecordResult> {
+  private async ensureRecord(accountId: number, file: ProbeKeyFile, deadline?: number): Promise<ProbeIsolationRecordResult> {
     let existing = file.records[String(accountId)];
     let groupId: number;
     try {
-      groupId = await this.findOrCreateGroup(accountId);
+      groupId = await this.findOrCreateGroup(accountId, deadline);
     } catch (error) {
       throw new Error(`探活隔离分组阶段失败：${errorMessage(error)}`);
     }
@@ -262,12 +272,12 @@ export class ProbeIsolationService {
     }
     let key: { record: ProbeKeyRecord; keyCreated: boolean };
     try {
-      key = await this.ensureUserAndKey(accountId, groupId, existing);
+      key = await this.ensureUserAndKey(accountId, groupId, existing, deadline);
     } catch (error) {
       throw new Error(`探活隔离专用凭据阶段失败：${errorMessage(error)}`);
     }
     try {
-      await this.ensureAccountBinding(accountId, groupId);
+      await this.ensureAccountBinding(accountId, groupId, deadline);
     } catch (error) {
       throw new Error(`探活隔离账号绑定阶段失败：${errorMessage(error)}`);
     }
@@ -294,8 +304,10 @@ export class ProbeIsolationService {
   }
 
   async probe(accountId: number, model: string, timeoutMs: number): Promise<Record<string, unknown>> {
-    const ensured = await this.inLock(async () => await this.ensureRecord(accountId, this.readFile()));
     const startedAt = Date.now();
+    const roundBudgetMs = Math.max(1_000, this.config.sub2api.idleProbe.roundTimeoutSeconds * 1_000 - 1_000);
+    const deadline = startedAt + roundBudgetMs;
+    const ensured = await this.inLock(async () => await this.ensureRecord(accountId, this.readFile(), deadline));
     let response: Response;
     try {
       response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}/responses`, {
@@ -306,7 +318,7 @@ export class ProbeIsolationService {
           authorization: `Bearer ${ensured.record.apiKey}`,
         },
         body: JSON.stringify({ model, input: "health probe", max_output_tokens: 1, stream: false }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(Math.min(timeoutMs, this.remainingTimeout(deadline) ?? timeoutMs)),
       });
     } catch (error) {
       return {

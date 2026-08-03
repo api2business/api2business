@@ -89,6 +89,7 @@ function fixture() {
     rootDirectory,
     sub2api: {
       idleProbe: {
+        roundTimeoutSeconds: 50,
         isolation: {
           enabled: true,
           gatewayBaseUrl: "https://api.example.com/v1",

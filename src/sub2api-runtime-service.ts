@@ -190,8 +190,8 @@ export class Sub2ApiRuntimeService {
     }, idempotencyKey);
   }
 
-  async updateAccount(accountId: number, patch: Row): Promise<unknown> {
-    return await this.client.mutate("PUT", `/admin/accounts/${accountId}`, patch);
+  async updateAccount(accountId: number, patch: Row, timeoutMs?: number): Promise<unknown> {
+    return await this.client.mutate("PUT", `/admin/accounts/${accountId}`, patch, undefined, timeoutMs);
   }
 
   async correctAccountPlanTypes(accountIds: number[], planType: "free" | "k12" | "plus" | "team"): Promise<Record<string, unknown>> {

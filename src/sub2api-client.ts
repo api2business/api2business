@@ -65,6 +65,12 @@ export interface Sub2ApiSystemLog {
   extra?: Record<string, unknown>;
 }
 
+function remainingTimeoutMs(deadline: number): number {
+  const remaining = Math.ceil(deadline - Date.now());
+  if (remaining <= 0) throw new DOMException("The operation timed out.", "TimeoutError");
+  return remaining;
+}
+
 export class Sub2ApiClient {
   private token: string | null = null;
   private tokenExpiresAt = 0;
@@ -79,14 +85,15 @@ export class Sub2ApiClient {
   }
 
   async request<T>(path: string, init: RequestInit = {}, authenticate = true, timeoutMs?: number): Promise<T> {
+    const deadline = Date.now() + (timeoutMs ?? this.config.sub2api.requestTimeoutMs);
     const headers = new Headers(init.headers);
     headers.set("accept", "application/json");
     if (init.body) headers.set("content-type", "application/json");
-    if (authenticate) headers.set("authorization", `Bearer ${await this.accessToken()}`);
+    if (authenticate) headers.set("authorization", `Bearer ${await this.accessToken(remainingTimeoutMs(deadline))}`);
     const response = await fetch(`${this.config.sub2api.baseUrl}${path}`, {
       ...init,
       headers,
-      signal: AbortSignal.timeout(timeoutMs ?? this.config.sub2api.requestTimeoutMs),
+      signal: AbortSignal.timeout(remainingTimeoutMs(deadline)),
     });
     const payload = (await response.json().catch(() => null)) as Envelope<T> | null;
     if (!response.ok || !payload || payload.code !== 0) throw new Error(`Sub2API ${init.method ?? "GET"} ${path} failed: HTTP ${response.status} ${payload?.message ?? "invalid response"}`);
@@ -104,23 +111,24 @@ export class Sub2ApiClient {
   }
 
   async requestRaw(method: "GET" | "POST", path: string, body?: unknown, timeoutMs?: number): Promise<{ httpStatus: number; body: string }> {
-    const headers = new Headers({ accept: "application/json", authorization: `Bearer ${await this.accessToken()}` });
+    const deadline = Date.now() + (timeoutMs ?? this.config.sub2api.requestTimeoutMs);
+    const headers = new Headers({ accept: "application/json", authorization: `Bearer ${await this.accessToken(remainingTimeoutMs(deadline))}` });
     if (body !== undefined) headers.set("content-type", "application/json");
     const response = await fetch(`${this.config.sub2api.baseUrl}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs ?? this.config.sub2api.requestTimeoutMs),
+      signal: AbortSignal.timeout(remainingTimeoutMs(deadline)),
     });
     return { httpStatus: response.status, body: await response.text() };
   }
 
-  private async accessToken(): Promise<string> {
+  private async accessToken(timeoutMs?: number): Promise<string> {
     if (this.token && Date.now() < this.tokenExpiresAt) return this.token;
     const data = await this.request<{ access_token: string; expires_in?: number }>("/auth/login", {
       method: "POST",
       body: JSON.stringify(this.credentials),
-    }, false);
+    }, false, timeoutMs);
     if (!data.access_token) throw new Error("Sub2API login response is missing access_token");
     this.token = data.access_token;
     const lifetimeSeconds = data.expires_in && data.expires_in > 120 ? data.expires_in - 60 : 300;
@@ -165,11 +173,11 @@ export class Sub2ApiClient {
     return await this.request<Sub2ApiGroup[]>("/admin/groups/all");
   }
 
-  async getAccount(id: number): Promise<Record<string, unknown>> {
-    return await this.request<Record<string, unknown>>(`/admin/accounts/${id}`);
+  async getAccount(id: number, timeoutMs?: number): Promise<Record<string, unknown>> {
+    return await this.request<Record<string, unknown>>(`/admin/accounts/${id}`, {}, true, timeoutMs);
   }
 
-  async listGroupAccounts(groupId: number, platform: string): Promise<Sub2ApiAccount[]> {
+  async listGroupAccounts(groupId: number, platform: string, timeoutMs?: number): Promise<Sub2ApiAccount[]> {
     const params = new URLSearchParams({
       page: "1",
       page_size: "1000",
@@ -178,7 +186,7 @@ export class Sub2ApiClient {
       sort_by: "id",
       sort_order: "asc",
     });
-    return (await this.request<Paginated<Sub2ApiAccount>>(`/admin/accounts?${params}`)).items;
+    return (await this.request<Paginated<Sub2ApiAccount>>(`/admin/accounts?${params}`, {}, true, timeoutMs)).items;
   }
 
   async listGroupUsage(groupId: number, start: Date, end: Date): Promise<Sub2ApiUsageRow[]> {
