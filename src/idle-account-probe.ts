@@ -204,6 +204,9 @@ export class IdleAccountProbeService {
     const policy = this.config.sub2api.idleProbe;
     const results: Array<Record<string, unknown>> = [];
     let bulkRecoveryFailures = 0;
+    let planned = 0;
+    let ready = 0;
+    const unreadyAccountIds = new Set<number>();
     try {
       for (let round = 1; round <= rounds; round += 1) {
         if (Date.now() - startedAt >= policy.roundTimeoutSeconds * 1000) {
@@ -211,8 +214,14 @@ export class IdleAccountProbeService {
           break;
         }
         const plan = await this.plan(accountIds, "automatic");
-        const candidates = (plan.candidates as IdleProbeCandidate[])
+        const plannedCandidates = plan.candidates as IdleProbeCandidate[];
+        const candidates = plannedCandidates
           .filter((candidate) => this.isolation!.get(candidate.accountId) !== null);
+        planned += plannedCandidates.length;
+        ready += candidates.length;
+        for (const candidate of plannedCandidates) {
+          if (this.isolation!.get(candidate.accountId) === null) unreadyAccountIds.add(candidate.accountId);
+        }
         if (candidates.length > 0) {
           try {
             await this.runtime.recoverAccounts(
@@ -278,6 +287,9 @@ export class IdleAccountProbeService {
         succeeded,
         failed,
         bulkRecoveryFailures,
+        planned,
+        ready,
+        unreadyAccountIds: [...unreadyAccountIds].sort((left, right) => left - right),
         durationMs: Date.now() - startedAt,
         results,
         evidence: "isolated-user-api-key-responses-request",

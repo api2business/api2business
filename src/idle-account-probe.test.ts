@@ -76,6 +76,9 @@ test("idle probe skips a concurrent round and never retries inside one account a
   expect(await service.run([369], 1)).toMatchObject({ skipped: true, reason: "in-flight" });
   release();
   expect(await first).toMatchObject({
+    planned: 1,
+    ready: 1,
+    unreadyAccountIds: [],
     attempted: 1,
     succeeded: 1,
     failed: 0,

@@ -422,7 +422,9 @@ export function createHandler(
       }
       if (request.method === "POST" && url.pathname === "/api/operations/idle-probe") {
         const input = await body(request);
-        const accountIds = Array.isArray(input.accountIds) ? normalizeAccountIds(input.accountIds) : [];
+        const accountIds = Array.isArray(input.accountIds) && input.accountIds.length > 0
+          ? normalizeAccountIds(input.accountIds)
+          : [];
         const rounds = Number(input.rounds ?? 1);
         if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10) {
           return json({ ok: false, error: "rounds must be an integer from 1 to 10" }, 400);
@@ -431,7 +433,9 @@ export function createHandler(
       }
       if (request.method === "POST" && url.pathname === "/api/operations/idle-probe/reconcile") {
         const input = await body(request);
-        const accountIds = Array.isArray(input.accountIds) ? normalizeAccountIds(input.accountIds) : [];
+        const accountIds = Array.isArray(input.accountIds) && input.accountIds.length > 0
+          ? normalizeAccountIds(input.accountIds)
+          : [];
         return json(await dispatcher.submit({ kind: "account.idle-probe.reconcile", accountIds }), 202);
       }
       if (request.method === "GET" && url.pathname === "/api/ranking") return json({ ok: true, ranking: await dispatcher.dispatch({ kind: "ranking.get" }) });
