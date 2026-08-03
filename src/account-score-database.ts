@@ -104,6 +104,7 @@ account_stats AS (
     COALESCE(SUM((e.input_tokens + e.output_tokens) * e.sample_weight) FILTER (WHERE e.kind = 'usage'), 0)::numeric AS token_count,
     COALESCE(SUM(e.actual_cost * e.sample_weight) FILTER (WHERE e.kind = 'usage'), 0)::numeric AS api_amount_usd,
     COALESCE(SUM(e.sample_weight), 0)::numeric AS effective_sample_weight,
+    MAX(e.created_at) AS latest_sample_at,
     COUNT(e.id)::int AS selected_calls
   FROM target_accounts a
   LEFT JOIN LATERAL (
@@ -424,6 +425,7 @@ export function scoreRecentDatabaseRow(
     scoreComponents: { reliability, failover, latency, baseline: policy.baselineWeight, availableWeight },
     recentCallLimit,
     selectedCalls: numeric(row.selected_calls) ?? 0,
+    latestSampleAt: row.latest_sample_at ?? null,
     effectiveSampleWeight: numeric(row.effective_sample_weight) ?? 0,
     evidenceMode: "recent-account-calls-postgresql",
   };

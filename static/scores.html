@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111412" />
   <title>上游资产与实时成本 | ApiState</title>
   <link rel="stylesheet" href="/styles.css?v=refresh-latency-v1" />
-  <script src="/app.js?v=cost-recovery-v1" type="module"></script>
+  <script src="/app.js?v=idle-probe-v1" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -51,6 +51,7 @@
           <span>上次更新时间</span>
           <strong id="score-updated-time">尚无成功快照</strong>
           <small id="score-refresh-countdown">自动刷新已关闭</small>
+          <small id="idle-probe-rolling">探活 24h：等待读取</small>
         </div>
       </div>
       <div class="profile-tabs" role="tablist" aria-label="评分账号类型">
@@ -61,8 +62,8 @@
       <div id="plan-progress" class="operation-progress" aria-live="polite"></div>
       <div class="table-wrap">
         <table class="data-table unified-upstream-table" aria-label="上游账号资产、评分与实时成本总表">
-          <thead><tr><th data-score-sort="accountName">账号</th><th data-score-sort="available">状态</th><th data-score-sort="score" aria-sort="descending">评分</th><th data-score-sort="priority">优先级</th><th data-score-sort="balance">账号余额</th><th data-score-sort="rate">手工费率</th><th data-score-sort="probeCost">探测成本</th><th data-score-sort="apiAmountUsd">API 产出</th><th data-score-sort="failureRate">失败率</th><th data-score-sort="ttftP95Ms">TTFT P95</th><th>失败 / 切号 / 恢复</th><th>分组</th><th>操作</th></tr></thead>
-          <tbody id="score-body"><tr><td colspan="13" class="empty">正在合并评分与资产数据...</td></tr></tbody>
+          <thead><tr><th data-score-sort="accountName">账号</th><th data-score-sort="available">状态</th><th data-score-sort="score" aria-sort="descending">评分</th><th data-score-sort="priority">优先级</th><th data-score-sort="balance">账号余额</th><th data-score-sort="rate">手工费率</th><th data-score-sort="probeCost">探测成本</th><th data-score-sort="apiAmountUsd">API 产出</th><th data-score-sort="latestSampleAt">最新样本</th><th data-score-sort="failureRate">失败率</th><th data-score-sort="ttftP95Ms">TTFT P95</th><th>失败 / 切号 / 恢复</th><th>分组</th><th>操作</th></tr></thead>
+          <tbody id="score-body"><tr><td colspan="14" class="empty">正在合并评分与资产数据...</td></tr></tbody>
         </table>
       </div>
       <div class="table-pager score-pager" aria-label="评分结果分页">

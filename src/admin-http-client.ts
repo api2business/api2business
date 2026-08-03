@@ -69,6 +69,12 @@ export class AdminHttpClient {
       body: JSON.stringify({ accountIds, rounds }),
     });
   }
+  idleProbeReconcile(accountIds: number[]): Promise<Record<string, unknown>> {
+    return this.request("/api/operations/idle-probe/reconcile", {
+      method: "POST",
+      body: JSON.stringify({ accountIds }),
+    });
+  }
   ranking(): Promise<Record<string, unknown>> { return this.request("/api/ranking"); }
   lottery(): Promise<Record<string, unknown>> { return this.request("/api/lottery"); }
   workflowSubmit(command: Record<string, unknown>): Promise<Record<string, unknown>> {

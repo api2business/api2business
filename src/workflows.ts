@@ -56,15 +56,28 @@ export async function upstreamQuotaScheduleWorkflow(input: ScheduledUpstreamQuot
 }
 
 export async function idleAccountProbeScheduleWorkflow(input: ScheduledIdleProbeInput): Promise<void> {
-  const activity = proxyActivities<Activities>({
+  const probeActivity = proxyActivities<Activities>({
     startToCloseTimeout: input.roundTimeoutMs,
     scheduleToCloseTimeout: input.roundTimeoutMs,
+    retry: { maximumAttempts: 1 },
+  });
+  const provisionActivity = proxyActivities<Activities>({
+    startToCloseTimeout: input.provisionTimeoutMs,
+    scheduleToCloseTimeout: input.provisionTimeoutMs,
     retry: { maximumAttempts: 1 },
   });
   for (let iteration = 0; iteration < 500; iteration += 1) {
     const roundStartedAt = Date.now();
     try {
-      await activity.executeOperation({
+      await provisionActivity.executeOperation({
+        operationId: `${workflowInfo().runId}:idle-probe-reconcile:${iteration}`,
+        command: { kind: "account.idle-probe.reconcile", accountIds: [] },
+      });
+    } catch {
+      // 初始化失败不阻止已就绪账号进入本轮探活。
+    }
+    try {
+      await probeActivity.executeOperation({
         operationId: `${workflowInfo().runId}:idle-probe:${iteration}`,
         command: { kind: "account.idle-probe.run", accountIds: [], rounds: 1 },
       });

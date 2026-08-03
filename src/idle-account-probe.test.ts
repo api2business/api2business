@@ -8,11 +8,12 @@ const config = {
     idleProbe: {
       enabled: true, intervalSeconds: 60, idleSeconds: 60, model: "gpt-5.5",
       candidateLimit: 20, concurrency: 4, accountTimeoutMs: 15000, roundTimeoutSeconds: 50,
+      provisionCandidateLimit: 1, provisionTimeoutSeconds: 120,
       isolation: {
         enabled: true,
         gatewayBaseUrl: "https://api.example.com/v1",
         groupNamePrefix: "apistate-probe-",
-        groupRateMultiplier: 0.0001,
+        groupRateMultiplier: 1,
         userBalance: 0.01,
         secretFile: ".state/idle-probe/probe-keys.json",
       },
@@ -40,7 +41,7 @@ test("idle probe selects only ordinary-log-idle schedulable API-key accounts", a
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
   }]), null);
   const plan = await service.plan();
-  expect(plan.databaseQueries).toBe(1);
+  expect(plan.databaseQueries).toBe(2);
   expect(plan.candidates).toEqual([{
     accountId: 369, accountName: "upstream plus 0.05", platform: "openai", priority: 300,
   }]);
@@ -51,6 +52,7 @@ test("idle probe skips a concurrent round and never retries inside one account a
   let release = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const isolation = {
+    get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => { calls += 1; await gate; return { classification: "alive", ordinaryLogRecorded: true }; },
   };
   const service = new IdleAccountProbeService(config, reads([{
@@ -72,6 +74,7 @@ test("idle probe skips a concurrent round and never retries inside one account a
 
 test("idle probe does not claim an ordinary log when the gateway never responds", async () => {
   const isolation = {
+    get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => ({ classification: "error", ordinaryLogRecorded: false, errorMarker: "request-timeout" }),
   };
   const service = new IdleAccountProbeService(config, reads([{

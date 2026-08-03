@@ -48,6 +48,32 @@ export interface IdleProbeCandidate {
   priority: number;
 }
 
+export const idleProbeRollingUsageSql = `
+WITH probe_users AS (
+  SELECT id
+  FROM users
+  WHERE email LIKE 'apistate-probe-%@sub2api.platform-infra.local'
+    AND deleted_at IS NULL
+), usage AS (
+  SELECT COUNT(*)::int AS success_requests,
+    COALESCE(SUM(u.actual_cost), 0)::numeric AS consumed_api_amount_usd,
+    MIN(u.created_at) AS first_sample_at,
+    MAX(u.created_at) AS latest_sample_at,
+    COUNT(DISTINCT u.account_id)::int AS sampled_accounts
+  FROM usage_logs u
+  JOIN probe_users p ON p.id = u.user_id
+  WHERE u.created_at >= NOW() - INTERVAL '24 hours'
+), errors AS (
+  SELECT COUNT(*)::int AS error_requests,
+    MAX(o.created_at) AS latest_error_at
+  FROM ops_error_logs o
+  JOIN probe_users p ON p.id = o.user_id
+  WHERE o.created_at >= NOW() - INTERVAL '24 hours'
+)
+SELECT usage.*, errors.error_requests, errors.latest_error_at
+FROM usage CROSS JOIN errors
+`;
+
 export class IdleAccountProbeService {
   private running = false;
 
@@ -84,6 +110,7 @@ export class IdleAccountProbeService {
       platform: String(row.platform),
       priority: Number(row.priority),
     } satisfies IdleProbeCandidate));
+    const rolling24Hours = await this.rollingUsage(priority);
     return {
       ok: true,
       mutation: false,
@@ -91,9 +118,70 @@ export class IdleAccountProbeService {
       idleSeconds: policy.idleSeconds,
       candidateLimit: policy.candidateLimit,
       candidates,
-      databaseQueries: 1,
+      rolling24Hours,
+      databaseQueries: 2,
       queueDurationMs: result.queueDurationMs,
       queryDurationMs: result.queryDurationMs,
+      valuesPrinted: false,
+    };
+  }
+
+  async rollingUsage(priority: Sub2ApiReadPriority = "manual"): Promise<Record<string, unknown>> {
+    const result = await this.reads.query<Record<string, unknown>>({
+      key: "accounts.idle-probe.rolling-24-hours",
+      kind: "accounts.idle-probe.rolling-24-hours",
+      sql: idleProbeRollingUsageSql,
+      parameters: [],
+      priority,
+      cacheMode: "bypass-cache",
+    });
+    const row = result.rows[0] ?? {};
+    const successRequests = Number(row.success_requests ?? 0);
+    const errorRequests = Number(row.error_requests ?? 0);
+    return {
+      windowHours: 24,
+      successRequests,
+      errorRequests,
+      requestAttempts: successRequests + errorRequests,
+      sampledAccounts: Number(row.sampled_accounts ?? 0),
+      consumedApiAmountUsd: Number(row.consumed_api_amount_usd ?? 0),
+      firstSampleAt: row.first_sample_at ?? null,
+      latestSampleAt: row.latest_sample_at ?? row.latest_error_at ?? null,
+      source: "ordinary-usage-logs-probe-users",
+    };
+  }
+
+  async reconcile(accountIds: number[] = []): Promise<Record<string, unknown>> {
+    if (!this.isolation) throw new Error("idle probe reconciliation requires isolated probe API key");
+    const plan = await this.plan(accountIds, "automatic");
+    const candidates = (plan.candidates as IdleProbeCandidate[])
+      .filter((candidate) => this.isolation!.get(candidate.accountId) === null)
+      .slice(0, this.config.sub2api.idleProbe.provisionCandidateLimit);
+    const results: Array<Record<string, unknown>> = [];
+    for (const candidate of candidates) {
+      try {
+        const binding = await this.isolation.ensure(candidate.accountId);
+        results.push({
+          accountId: candidate.accountId,
+          ok: true,
+          groupId: binding.groupId,
+          keyCreated: binding.keyCreated,
+        });
+      } catch (error) {
+        results.push({
+          accountId: candidate.accountId,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return {
+      ok: results.every((result) => result.ok === true),
+      mutation: true,
+      attempted: results.length,
+      succeeded: results.filter((result) => result.ok === true).length,
+      failed: results.filter((result) => result.ok === false).length,
+      results,
       valuesPrinted: false,
     };
   }
@@ -113,7 +201,8 @@ export class IdleAccountProbeService {
           break;
         }
         const plan = await this.plan(accountIds, "automatic");
-        const candidates = plan.candidates as IdleProbeCandidate[];
+        const candidates = (plan.candidates as IdleProbeCandidate[])
+          .filter((candidate) => this.isolation!.get(candidate.accountId) !== null);
         for (let offset = 0; offset < candidates.length; offset += policy.concurrency) {
           const batch = candidates.slice(offset, offset + policy.concurrency);
           const settled = await Promise.all(batch.map(async (candidate) => {

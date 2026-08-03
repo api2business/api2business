@@ -15,6 +15,7 @@ interface ProbeKeyRecord {
   password: string;
   apiKey: string;
   ready?: boolean;
+  policyVersion?: number;
 }
 
 interface ProbeKeyFile {
@@ -70,7 +71,7 @@ function accountIds(rows: Row[]): number[] {
 }
 
 function readyRecord(record: ProbeKeyRecord | undefined): boolean {
-  return Boolean(record && (record.ready === true || (record.ready === undefined && id(record.userId) !== null)));
+  return Boolean(record && record.ready === true && record.policyVersion === 2);
 }
 
 export interface ProbeIsolationBinding {
@@ -257,19 +258,11 @@ export class ProbeIsolationService {
 
   private async ensureRecord(accountId: number, file: ProbeKeyFile, deadline?: number): Promise<ProbeIsolationRecordResult> {
     let existing = file.records[String(accountId)];
-    if (readyRecord(existing)) {
-      return { binding: { accountId, groupId: existing.groupId, keyCreated: false }, record: existing };
-    }
     let groupId: number;
-    const storedGroupId = id(existing?.groupId);
-    if (storedGroupId !== null) {
-      groupId = storedGroupId;
-    } else {
-      try {
-        groupId = await this.findOrCreateGroup(accountId, this.stageDeadline(deadline));
-      } catch (error) {
-        throw new Error(`探活隔离分组阶段失败：${errorMessage(error)}`);
-      }
+    try {
+      groupId = await this.findOrCreateGroup(accountId, this.stageDeadline(deadline));
+    } catch (error) {
+      throw new Error(`探活隔离分组阶段失败：${errorMessage(error)}`);
     }
     if (!existing) {
       existing = {
@@ -309,7 +302,7 @@ export class ProbeIsolationService {
     } catch (error) {
       throw new Error(`探活隔离账号绑定阶段失败：${errorMessage(error)}`);
     }
-    const completed = { ...key.record, ready: true };
+    const completed = { ...key.record, ready: true, policyVersion: 2 };
     file.records[String(accountId)] = completed;
     try {
       this.writeFile(file);
@@ -335,7 +328,22 @@ export class ProbeIsolationService {
     const startedAt = Date.now();
     const roundBudgetMs = Math.max(1_000, this.config.sub2api.idleProbe.roundTimeoutSeconds * 1_000 - 1_000);
     const deadline = startedAt + roundBudgetMs;
-    const ensured = await this.inLock(async () => await this.ensureRecord(accountId, this.readFile(), deadline));
+    const stored = this.readFile().records[String(accountId)];
+    if (!stored || !readyRecord(stored)) {
+      return {
+        accountId,
+        classification: "skipped",
+        httpStatus: null,
+        durationMs: Date.now() - startedAt,
+        ordinaryLogRecorded: false,
+        responseBytes: 0,
+        errorMarker: "isolation-not-ready",
+      };
+    }
+    const ensured = {
+      binding: { accountId, groupId: stored.groupId, keyCreated: false },
+      record: stored,
+    };
     let response: Response;
     try {
       response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}/responses`, {

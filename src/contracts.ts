@@ -15,6 +15,7 @@ export type AppCommand =
   | { kind: "upstream.operation"; operationId: string }
   | { kind: "upstream.quota.sample" }
   | { kind: "account.idle-probe.run"; accountIds: number[]; rounds: number }
+  | { kind: "account.idle-probe.reconcile"; accountIds: number[] }
   | { kind: "account.import"; jobId: string }
   | { kind: "account.lifecycle.detect"; jobId: string }
   | { kind: "account.lifecycle.settle"; jobId: string; candidateIds: number[] }
@@ -43,6 +44,7 @@ export interface ScheduledUpstreamQuotaInput extends WorkflowOptions {
 export interface ScheduledIdleProbeInput extends WorkflowOptions {
   intervalMs: number;
   roundTimeoutMs: number;
+  provisionTimeoutMs: number;
 }
 
 export function usesWorkflow(command: AppCommand): boolean {
@@ -55,6 +57,7 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "upstream.operation"
     || command.kind === "upstream.quota.sample"
     || command.kind === "account.idle-probe.run"
+    || command.kind === "account.idle-probe.reconcile"
     || command.kind === "account.import"
     || command.kind === "account.lifecycle.detect"
     || command.kind === "account.lifecycle.settle"

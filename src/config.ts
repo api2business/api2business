@@ -132,6 +132,8 @@ export interface AppConfig {
       concurrency: number;
       accountTimeoutMs: number;
       roundTimeoutSeconds: number;
+      provisionCandidateLimit: number;
+      provisionTimeoutSeconds: number;
       isolation: {
         enabled: boolean;
         gatewayBaseUrl: string;
@@ -709,6 +711,8 @@ export function loadConfig(path: string): AppConfig {
         concurrency: integerValue(idleProbe, "concurrency", "sub2api.idleProbe", 1, 20),
         accountTimeoutMs: integerValue(idleProbe, "accountTimeoutMs", "sub2api.idleProbe", 1000, 120000),
         roundTimeoutSeconds: integerValue(idleProbe, "roundTimeoutSeconds", "sub2api.idleProbe", 5, 300),
+        provisionCandidateLimit: integerValue(idleProbe, "provisionCandidateLimit", "sub2api.idleProbe", 1, 20),
+        provisionTimeoutSeconds: integerValue(idleProbe, "provisionTimeoutSeconds", "sub2api.idleProbe", 10, 300),
         isolation: (() => {
           const value = object(idleProbe.isolation, "sub2api.idleProbe.isolation");
           const gatewayBaseUrl = stringValue(value, "gatewayBaseUrl", "sub2api.idleProbe.isolation").replace(/\/$/u, "");

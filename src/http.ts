@@ -417,6 +417,9 @@ export function createHandler(
         const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
         return json(await operations.idleProbePlan(accountIds));
       }
+      if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/summary") {
+        return json({ ok: true, rolling24Hours: await operations.idleProbeRollingUsage() });
+      }
       if (request.method === "POST" && url.pathname === "/api/operations/idle-probe") {
         const input = await body(request);
         const accountIds = Array.isArray(input.accountIds) ? normalizeAccountIds(input.accountIds) : [];
@@ -425,6 +428,11 @@ export function createHandler(
           return json({ ok: false, error: "rounds must be an integer from 1 to 10" }, 400);
         }
         return json(await dispatcher.submit({ kind: "account.idle-probe.run", accountIds, rounds }), 202);
+      }
+      if (request.method === "POST" && url.pathname === "/api/operations/idle-probe/reconcile") {
+        const input = await body(request);
+        const accountIds = Array.isArray(input.accountIds) ? normalizeAccountIds(input.accountIds) : [];
+        return json(await dispatcher.submit({ kind: "account.idle-probe.reconcile", accountIds }), 202);
       }
       if (request.method === "GET" && url.pathname === "/api/ranking") return json({ ok: true, ranking: await dispatcher.dispatch({ kind: "ranking.get" }) });
       if (request.method === "GET" && url.pathname === "/api/lottery") return json(await dispatcher.dispatch({ kind: "lottery.publicState" }));

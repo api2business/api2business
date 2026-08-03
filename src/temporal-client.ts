@@ -147,7 +147,7 @@ export class TemporalGateway {
   }
 
   async ensureIdleProbeSchedule(): Promise<{ started: boolean; workflowId: string }> {
-    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-probe-v1`;
+    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-probe-v2`;
     try {
       await this.client.workflow.start("idleAccountProbeScheduleWorkflow", {
         taskQueue: this.runtime.taskQueue,
@@ -155,6 +155,7 @@ export class TemporalGateway {
         args: [{
           intervalMs: this.config.sub2api.idleProbe.intervalSeconds * 1000,
           roundTimeoutMs: this.config.sub2api.idleProbe.roundTimeoutSeconds * 1000,
+          provisionTimeoutMs: this.config.sub2api.idleProbe.provisionTimeoutSeconds * 1000,
           activityStartToCloseTimeout: `${this.config.sub2api.idleProbe.roundTimeoutSeconds}s`,
           maximumAttempts: 1,
         }],

@@ -102,7 +102,7 @@ function fixture() {
           enabled: true,
           gatewayBaseUrl: "https://api.example.com/v1",
           groupNamePrefix: "apistate-probe-",
-          groupRateMultiplier: 0.0001,
+          groupRateMultiplier: 1,
           userBalance: 0.01,
           secretFile: ".state/idle-probe/probe-keys.json",
         },
@@ -131,7 +131,7 @@ test("probe isolation creates one private internal-ID group and redacts every se
   expect(state.groupCreates).toEqual([expect.objectContaining({
     name: "apistate-probe-42",
     is_exclusive: true,
-    rate_multiplier: 0.0001,
+    rate_multiplier: 1,
   })]);
   expect(String(state.groupCreates[0]?.name)).not.toContain("hwpod.com");
   expect(state.keyCreates).toEqual([expect.objectContaining({ name: "apistate-probe", group_id: 51 })]);
@@ -199,6 +199,7 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     return new Response(JSON.stringify({ id: "resp_probe", output: [] }), { status: 200 });
   }) as unknown as typeof fetch;
   try {
+    await service.ensure(42);
     const result = await service.probe(42, "gpt-5.5", 1000);
     expect(result).toMatchObject({ accountId: 42, groupId: 51, classification: "alive", ordinaryLogRecorded: true });
     expect(requestUrl).toBe("https://api.example.com/v1/responses");
@@ -216,6 +217,7 @@ test("probe reports a gateway timeout without claiming an ordinary log", async (
     throw new DOMException("The operation timed out.", "TimeoutError");
   }) as unknown as typeof fetch;
   try {
+    await service.ensure(42);
     const result = await service.probe(42, "gpt-5.5", 1000);
     expect(result).toMatchObject({
       accountId: 42,

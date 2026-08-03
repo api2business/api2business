@@ -151,6 +151,14 @@ export class OperationsService {
     return await this.idleProbe.plan(accountIds, "manual");
   }
 
+  async reconcileIdleProbe(accountIds: number[] = []) {
+    return await this.idleProbe.reconcile(accountIds);
+  }
+
+  async idleProbeRollingUsage() {
+    return await this.idleProbe.rollingUsage("manual");
+  }
+
   async runIdleProbe(accountIds: number[] = [], rounds = 1) {
     return await this.idleProbe.run(accountIds, rounds);
   }

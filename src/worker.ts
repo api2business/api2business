@@ -89,6 +89,9 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
   if (command.kind === "account.idle-probe.run") {
     return await operations.runIdleProbe(command.accountIds, command.rounds);
   }
+  if (command.kind === "account.idle-probe.reconcile") {
+    return await operations.reconcileIdleProbe(command.accountIds);
+  }
   if (command.kind === "priority.plan.create") {
     return await operations.generatePriorityPlan(command.recentCallLimit, command.operator);
   }

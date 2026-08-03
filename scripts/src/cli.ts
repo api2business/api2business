@@ -210,6 +210,7 @@ function help(): Record<string, unknown> {
       "accounts oauth-economics [--profile codex|grok] [--over-api]",
       "accounts oauth-runtime [--profile codex|grok] [--over-api]",
       "accounts idle-probe plan [--accounts <id-or-range,...>] --over-api",
+      "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--confirm] --over-api",
       "accounts idle-probe run [--accounts <id-or-range,...>] [--rounds 1..10] [--confirm] --over-api",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
       "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] --over-api",
@@ -540,6 +541,16 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const verb = parsed.command[2];
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     if (verb === "plan") return await client.idleProbePlan(accountIds);
+    if (verb === "reconcile") {
+      if (!parsed.confirm) return {
+        ok: true,
+        mutation: false,
+        action: "account-idle-probe-reconcile",
+        accountIds,
+        hint: "add --confirm to execute",
+      };
+      return await client.idleProbeReconcile(accountIds);
+    }
     if (verb === "run") {
       const rounds = parsed.rounds ?? 1;
       if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10) throw new Error("--rounds must be an integer from 1 to 10");

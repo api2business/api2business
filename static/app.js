@@ -245,6 +245,7 @@ function scoreSortValue(row, key) {
     rate: upstream?.rateCnyPerApiUsd ?? usage.costRateCnyPerApiUsd,
     probeCost,
     apiAmountUsd: Number(usage.apiAmountUsd),
+    latestSampleAt: row.latestSampleAt ? Date.parse(row.latestSampleAt) : null,
     failureRate: Number(row.failureRate),
     ttftP95Ms: Number(row.ttftP95Ms),
   }
@@ -259,6 +260,13 @@ function compareScoreRows(left, right) {
   if (missingA !== missingB) return missingA ? 1 : -1
   const result = typeof a === 'string' ? a.localeCompare(String(b), 'zh-CN') : Number(a) - Number(b)
   return (scoreSort.direction === 'asc' ? result : -result) || Number(left.accountId) - Number(right.accountId)
+}
+
+async function loadIdleProbeRollingUsage() {
+  const data = await requestJson('/api/operations/idle-probe/summary')
+  const rolling = data.rolling24Hours ?? {}
+  $('#idle-probe-rolling').textContent = `探活 24h：${number(rolling.requestAttempts)} 次 · ${usdText(rolling.consumedApiAmountUsd, 4)} · ${number(rolling.sampledAccounts)} 个账号${rolling.latestSampleAt ? ` · 最近 ${time(rolling.latestSampleAt)}` : ''}`
+  return rolling
 }
 
 function renderScoreRows() {
@@ -294,6 +302,7 @@ function renderScoreRows() {
       <td class="upstream-rate">${upstream?.rateCnyPerApiUsd == null ? costRate == null ? '—' : `¥${number(costRate, 4)}` : `¥${number(upstream.rateCnyPerApiUsd, 4)}`}</td>
       <td class="upstream-multiplier"><strong>${probeCost === null ? '未知' : `¥${number(probeCost, 4)}`}</strong><small>${escapeHtml(usageResult?.billingMultiplier?.source ?? '无探测')}</small></td>
       <td class="usd-cell">${usd(usage.apiAmountUsd)}<small class="upstream-muted">${compact(usage.requestCount)} 请求</small></td>
+      <td>${row.latestSampleAt ? time(row.latestSampleAt) : '无样本'}</td>
       <td>${percent(row.failureRate)}<small class="upstream-muted">${number(row.observedAttempts)} 次尝试</small></td>
       <td>${row.ttftP95Ms == null ? '—' : `${number(row.ttftP95Ms)} ms`}</td>
       <td class="failover-cell" title="失败 ${number(row.failureRequests)} 次；触发切号 ${number(row.failoverRequests)} 次，其中恢复 ${number(row.failoverRecovered)} 次；未触发切号 ${number(row.failoverNotTriggered)} 次">
@@ -303,7 +312,7 @@ function renderScoreRows() {
       <td>${groupLabels(row)}</td>
       <td>${upstream ? `<button class="text-command table-action" type="button" data-score-upstream-edit="${escapeHtml(row.accountId)}">调整</button>` : '—'}</td>
     </tr>`
-  }).join('') : '<tr><td colspan="13" class="empty">没有匹配的账号</td></tr>'
+  }).join('') : '<tr><td colspan="14" class="empty">没有匹配的账号</td></tr>'
   const range = filteredRows.length === 0 ? '0 条' : `${start + 1}-${Math.min(start + scorePageSize, filteredRows.length)} / ${number(filteredRows.length)} 条`
   $('#score-page').textContent = `${scorePage} / ${totalPages} · ${range}`
   $('#score-prev').disabled = scorePage <= 1
@@ -697,12 +706,13 @@ async function scoresPage() {
     loadUnifiedUpstreamAssets(),
     loadUnifiedQuotaSummary(),
     loadPoolQuality(),
+    loadIdleProbeRollingUsage(),
   ]))
   $('#refresh-scores').addEventListener('click', async () => {
     const button = $('#refresh-scores')
     button.disabled = true
     try {
-      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality()])
+      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage()])
     }
     catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }
@@ -718,6 +728,9 @@ async function scoresPage() {
     loadPoolQuality().catch((error) => {
       $('#pool-quality-state').textContent = `质量采样读取失败：${error instanceof Error ? error.message : String(error)}`
     }),
+    loadIdleProbeRollingUsage().catch((error) => {
+      $('#idle-probe-rolling').textContent = `探活 24h：读取失败 · ${error instanceof Error ? error.message : String(error)}`
+    }),
   ])
   const options = initial.availableCallOptions ?? []
   const preferredLimit = options.includes(1000) ? 1000 : options[0]
@@ -731,6 +744,7 @@ async function scoresPage() {
         requestJson('/api/scores'),
         loadUnifiedQuotaSummary(),
         loadPoolQuality(),
+        loadIdleProbeRollingUsage(),
       ])
       if (scores.status === 'fulfilled') renderScores(scores.value)
     }
