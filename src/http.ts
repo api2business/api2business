@@ -224,6 +224,14 @@ export function createHandler(
         }));
       }
       if (request.method === "GET" && url.pathname === "/api/account-import/options") return json(imports.options());
+      if (request.method === "POST" && url.pathname === "/api/account-import/preview") {
+        const input = await body(request);
+        if (typeof input.content !== "string" || (input.inputFormat !== "json" && input.inputFormat !== "zip")) {
+          return json({ ok: false, error: "导入预览需要 JSON 或 ZIP 内容" }, 400);
+        }
+        try { return json(imports.preview({ content: input.content, inputFormat: input.inputFormat })); }
+        catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
+      }
       if (request.method === "POST" && url.pathname === "/api/account-import/jobs") {
         const input = await body(request) as unknown as AccountImportRequest;
         if (typeof input.content !== "string" || typeof input.confirm !== "boolean"

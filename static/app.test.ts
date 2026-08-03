@@ -37,6 +37,19 @@ test("account import supports Team manual selection and three price-inferred typ
   expect(app).not.toContain("new URLSearchParams(location.search).get('job')");
 });
 
+test("ZIP import previews merged JSON and recognized account count before submit", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
+  expect(html).toContain("合并后的 JSON");
+  expect(html).toContain("/app.js?v=zip-preview-v1");
+  expect(app).toContain("requestJson('/api/account-import/preview'");
+  expect(app).toContain("JSON.stringify(JSON.parse(preview.content), null, 2)");
+  expect(app).toContain("preview.accountCount");
+  expect(app).toContain("importPreview.source.duplicateAccountCount");
+  expect(app).toContain("importInputFormat === 'zip' && !importPreview");
+  expect(app).toContain("ZIP 尚未成功解析，不能提交导入");
+});
+
 test("upstream management exposes queued quota and usage queries", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./upstreams.html", import.meta.url)).text();

@@ -7,6 +7,7 @@ import type { AccountImportPreflightPlan } from "./account-import-preflight";
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { runtimeImportIdempotencyKey } from "./sub2api-runtime-service";
+import { strToU8, zipSync } from "fflate";
 
 test("projects YAML-owned account import defaults", () => {
   const service = new AccountImportService({ operations: {
@@ -22,6 +23,16 @@ test("projects YAML-owned account import defaults", () => {
   });
   expect(service.options().planTypes).toEqual([{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }, { id: "team", name: "Team" }, { id: "free", name: "Free" }]);
   expect(service.options().initialExpectedApiUsdPerAccount).toEqual({ free: 3.8, k12: 20, plus: 135, team: 140 });
+});
+
+test("previews a ZIP with the same merged account count and platform used by import", () => {
+  const service = new AccountImportService({} as AppConfig, {} as Sub2ApiReadClient);
+  const payload = (id: string) => JSON.stringify({ accounts: [{ platform: "openai", credentials: { chatgpt_user_id: id, access_token: `token-${id}` } }], proxies: [] });
+  const zip = zipSync({ "a.json": strToU8(payload("user-a")), "b.json": strToU8(payload("user-b")) });
+  const preview = service.preview({ content: Buffer.from(zip).toString("base64"), inputFormat: "zip" });
+  expect(preview).toEqual(expect.objectContaining({ ok: true, accountCount: 2, platform: "openai", valuesPrinted: false }));
+  expect(preview.source).toEqual({ format: "zip", jsonFileCount: 2, duplicateAccountCount: 0, platform: "openai" });
+  expect((JSON.parse(preview.content) as { accounts: unknown[] }).accounts).toHaveLength(2);
 });
 
 test("projects nested CLI errors without exposing credentials", () => {

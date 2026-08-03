@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="theme-color" content="#111412" /><title>账号导入 | ApiState</title><link rel="stylesheet" href="/styles.css?v=import-economics-v1" /><script src="/app.js?v=import-economics-v1" type="module"></script></head>
+<meta name="theme-color" content="#111412" /><title>账号导入 | ApiState</title><link rel="stylesheet" href="/styles.css?v=import-economics-v1" /><script src="/app.js?v=zip-preview-v1" type="module"></script></head>
 <body data-page="account-import"><div data-shell></div><main class="workspace import-workspace">
   <header class="page-head"><div><p class="eyebrow">ACCOUNT RUNTIME / CONTROLLED IMPORT</p><h1>账号批量导入</h1></div><span id="import-state" class="state-badge">等待输入</span></header>
   <section class="import-layout">
     <form id="import-form" class="import-form">
       <div id="drop-zone" class="drop-zone" tabindex="0" role="button"><strong>拖拽 JSON 或 ZIP 到这里</strong><span>或点击选择文件</span><small id="file-state">尚未选择文件</small><input id="import-file" type="file" accept="application/json,application/zip,.json,.zip" hidden /></div>
-      <label class="json-field"><span>JSON 内容</span><textarea id="import-json" spellcheck="false" placeholder="粘贴 Sub2API 导出的 JSON"></textarea></label>
+      <label class="json-field"><span>合并后的 JSON</span><textarea id="import-json" spellcheck="false" placeholder="粘贴 Sub2API 导出的 JSON"></textarea></label>
       <p id="import-platform-state" class="section-state">等待识别 Codex 或 Grok</p>
       <div class="import-settings">
         <label><span>导入平台</span><select id="import-platform"><option value="auto">自动识别</option><option value="openai">Codex</option><option value="grok">Grok</option></select></label>

@@ -1052,8 +1052,11 @@ async function accountImportPage() {
   const zone = $('#drop-zone')
   let importInputFormat = 'json'
   let importContent = ''
+  let importPreview = null
+  let previewSequence = 0
   const platformSelect = $('#import-platform')
   const detectedImportPlatform = () => {
+    if (importPreview?.platform) return importPreview.platform
     if (importInputFormat !== 'json') return null
     try {
       const payload = JSON.parse(importContent)
@@ -1065,7 +1068,7 @@ async function accountImportPage() {
     const detected = detectedImportPlatform()
     const platform = platformSelect.value === 'auto' ? detected : platformSelect.value
     if (!platform) {
-      $('#import-platform-state').textContent = importInputFormat === 'zip' ? 'ZIP 提交后由服务端自动识别 Codex 或 Grok' : '等待识别 Codex 或 Grok'
+      $('#import-platform-state').textContent = importInputFormat === 'zip' ? '正在解析 ZIP 并识别账号' : '等待识别 Codex 或 Grok'
       return
     }
     if (platform === 'grok') {
@@ -1077,12 +1080,16 @@ async function accountImportPage() {
     })
     $('#file-state').dataset.platform = platform
     const source = platformSelect.value === 'auto' ? '自动识别' : '手动选择'
+    const preview = importPreview
+      ? `${importPreview.source.jsonFileCount} 个 JSON · 去重 ${importPreview.source.duplicateAccountCount} · ${importPreview.accountCount} 个账号 · `
+      : ''
     $('#import-platform-state').textContent = platform === 'grok'
-      ? `${source} Grok · 当前固定 Free · 默认导入 Grok #6`
-      : `${source} Codex · 类型继续按单价自动选择或手动调整`
+      ? `${preview}${source} Grok · 当前固定 Free · 默认导入 Grok #6`
+      : `${preview}${source} Codex · 类型继续按单价自动选择或手动调整`
   }
   platformSelect.addEventListener('change', applyDetectedPlatform)
   const importedAccountCount = () => {
+    if (importPreview?.accountCount) return importPreview.accountCount
     if (importInputFormat !== 'json') return 0
     try {
       const payload = JSON.parse(importContent)
@@ -1106,20 +1113,47 @@ async function accountImportPage() {
   }
   const loadFile = async (file) => {
     if (!file) return
+    const sequence = ++previewSequence
     const zip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip'
     importInputFormat = zip ? 'zip' : 'json'
+    importPreview = null
     importContent = zip ? bytesToBase64(new Uint8Array(await file.arrayBuffer())) : await file.text()
-    $('#import-json').value = zip ? '' : importContent
-    $('#import-json').disabled = zip
-    $('#import-json').placeholder = zip ? 'ZIP 将在服务端安全合并，二进制内容不会回显' : '粘贴 Sub2API 导出的 JSON'
+    $('#import-json').value = zip ? '正在安全解析并合并 ZIP 内的 JSON…' : importContent
+    $('#import-json').readOnly = zip
+    $('#import-json').placeholder = zip ? 'ZIP 解析后将在这里展示合并 JSON' : '粘贴 Sub2API 导出的 JSON'
     $('#file-state').textContent = `${file.name} · ${number(file.size)} bytes`
-    applyDetectedPlatform()
-    updateUnitCostFromTotal()
+    if (!zip) {
+      applyDetectedPlatform()
+      updateUnitCostFromTotal()
+      return
+    }
+    $('#import-submit').disabled = true
+    $('#import-platform-state').textContent = '正在解析 ZIP、合并 JSON 并识别账号数量'
+    try {
+      const preview = await requestJson('/api/account-import/preview', {
+        method: 'POST', body: JSON.stringify({ content: importContent, inputFormat: 'zip' }),
+      }, 30000)
+      if (sequence !== previewSequence) return
+      importPreview = preview
+      $('#import-json').value = JSON.stringify(JSON.parse(preview.content), null, 2)
+      $('#file-state').textContent = `${file.name} · ${number(file.size)} bytes · ${preview.accountCount} 个账号`
+      applyDetectedPlatform()
+      updateUnitCostFromTotal()
+    } catch (error) {
+      if (sequence !== previewSequence) return
+      importPreview = null
+      $('#import-json').value = ''
+      $('#file-state').textContent = `${file.name} · ZIP 解析失败`
+      $('#import-platform-state').textContent = error instanceof Error ? error.message : String(error)
+    } finally {
+      if (sequence === previewSequence) $('#import-submit').disabled = false
+    }
   }
   $('#import-json').addEventListener('input', () => {
-    if ($('#import-json').disabled) return
+    if ($('#import-json').readOnly) return
     importInputFormat = 'json'
     importContent = $('#import-json').value
+    importPreview = null
     applyDetectedPlatform()
     updateUnitCostFromTotal()
   })
@@ -1154,6 +1188,11 @@ async function accountImportPage() {
   $('#import-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     const button = $('#import-submit'); button.disabled = true
+    if (importInputFormat === 'zip' && !importPreview) {
+      $('#import-platform-state').textContent = 'ZIP 尚未成功解析，不能提交导入'
+      button.disabled = false
+      return
+    }
     try {
       const groupIds = [...document.querySelectorAll('#import-groups input:checked')].map((input) => Number(input.value))
       const response = await requestJson('/api/account-import/jobs', { method: 'POST', body: JSON.stringify({

@@ -141,6 +141,11 @@ export class AccountImportService {
     ] };
   }
 
+  preview(input: Pick<AccountImportRequest, "content" | "inputFormat">) {
+    const parsed = normalizeAccountImportInput(input.content, input.inputFormat);
+    return { ok: true, ...parsed, valuesPrinted: false };
+  }
+
   async submit(input: AccountImportRequest): Promise<ImportJob> {
     const parsed = normalizeAccountImportInput(input.content, input.inputFormat);
     const selectedPlatform = input.platform ?? parsed.platform;
