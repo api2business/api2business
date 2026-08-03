@@ -53,3 +53,68 @@ test("corrects account plan types with one native bulk credentials merge", async
   } }]);
   expect(output).toEqual(expect.objectContaining({ accountIds: [400, 401], planType: "k12" }));
 });
+
+test("updates accounts with the same priority in one native bulk request", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {
+    calls.push({ path, body });
+    return { success: 2, failed: 0, success_ids: [402, 403], failed_ids: [] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  const output = await runtime.updatePriorities({ "403": 120, "402": 120 });
+  expect(calls).toEqual([{ path: "/admin/accounts/bulk-update", body: {
+    account_ids: [402, 403], priority: 120,
+  } }]);
+  expect(output).toEqual({
+    updated: 2,
+    bulkUpdateCount: 1,
+    bulkUpdates: [{ priority: 120, accountIds: [402, 403], updated: 2 }],
+  });
+});
+
+test("updates distinct priorities concurrently inside the caller batch", async () => {
+  let active = 0;
+  let maximumActive = 0;
+  const client = { mutate: async (_method: string, _path: string, body: Record<string, unknown>) => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    await Bun.sleep(5);
+    active -= 1;
+    return { success: 1, failed: 0, success_ids: body.account_ids, failed_ids: [] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  const output = await runtime.updatePriorities({ "404": 110, "405": 120, "406": 130 });
+  expect(maximumActive).toBe(3);
+  expect(output).toEqual(expect.objectContaining({ updated: 3, bulkUpdateCount: 3 }));
+});
+
+test("rejects a partial native bulk priority update", async () => {
+  const client = { mutate: async () => ({
+    success: 1,
+    failed: 1,
+    success_ids: [407],
+    failed_ids: [408],
+  }) } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  expect(runtime.updatePriorities({ "407": 140, "408": 140 })).rejects.toThrow(
+    "Sub2API bulk priority update failed for accounts 408",
+  );
+});
+
+test("waits for every concurrent bulk write before reporting one failure", async () => {
+  let slowWriteFinished = false;
+  const client = { mutate: async (_method: string, _path: string, body: Record<string, unknown>) => {
+    const accountIds = body.account_ids as number[];
+    if (accountIds[0] === 409) {
+      return { success: 0, failed: 1, success_ids: [], failed_ids: [409] };
+    }
+    await Bun.sleep(5);
+    slowWriteFinished = true;
+    return { success: 1, failed: 0, success_ids: accountIds, failed_ids: [] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  await expect(runtime.updatePriorities({ "409": 150, "410": 160 })).rejects.toThrow(
+    "Sub2API bulk priority update failed for accounts 409",
+  );
+  expect(slowWriteFinished).toBe(true);
+});

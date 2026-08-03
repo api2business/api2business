@@ -21,6 +21,13 @@ interface BatchCreateResult {
   results?: unknown;
 }
 
+interface BulkUpdateResult {
+  success?: unknown;
+  failed?: unknown;
+  success_ids?: unknown;
+  failed_ids?: unknown;
+}
+
 function record(value: unknown): Row | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
 }
@@ -226,12 +233,58 @@ export class Sub2ApiRuntimeService {
   }
 
   async updatePriorities(priorities: Record<string, number>): Promise<unknown> {
-    const items = [];
-    for (const [id, priority] of Object.entries(priorities).sort(([left], [right]) => Number(left) - Number(right))) {
-      await this.updateAccount(Number(id), { priority });
-      items.push({ accountId: Number(id), priority, updated: true });
+    const groups = new Map<number, number[]>();
+    for (const [rawId, rawPriority] of Object.entries(priorities)) {
+      const accountId = positiveInteger(rawId);
+      const priority = Number(rawPriority);
+      if (accountId === null || !Number.isSafeInteger(priority) || priority < 1) {
+        throw new Error(`invalid priority update target: account ${rawId}, priority ${rawPriority}`);
+      }
+      const accountIds = groups.get(priority) ?? [];
+      accountIds.push(accountId);
+      groups.set(priority, accountIds);
     }
-    return { updated: items.length, items };
+
+    const settledUpdates = await Promise.allSettled([...groups]
+      .sort(([left], [right]) => left - right)
+      .map(async ([priority, unsortedIds]) => {
+        const accountIds = [...new Set(unsortedIds)].sort((left, right) => left - right);
+        const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update", {
+          account_ids: accountIds,
+          priority,
+        });
+        const successIds = Array.isArray(result.success_ids)
+          ? result.success_ids.map(positiveInteger).filter((id): id is number => id !== null).sort((left, right) => left - right)
+          : [];
+        const failedIds = Array.isArray(result.failed_ids)
+          ? result.failed_ids.map(positiveInteger).filter((id): id is number => id !== null).sort((left, right) => left - right)
+          : [];
+        const reportedSuccess = Number(result.success ?? Number.NaN);
+        const reportedFailed = Number(result.failed ?? Number.NaN);
+        if (reportedFailed !== 0 || failedIds.length > 0) {
+          throw new Error(`Sub2API bulk priority update failed for accounts ${failedIds.join(",") || accountIds.join(",")}`);
+        }
+        if (reportedSuccess !== accountIds.length || successIds.length !== accountIds.length ||
+          successIds.some((id, index) => id !== accountIds[index])) {
+          throw new Error(`Sub2API bulk priority update result mismatch for priority ${priority}`);
+        }
+        return { priority, accountIds, updated: accountIds.length };
+      }));
+    const failures = settledUpdates.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0) {
+      throw new Error(failures
+        .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason))
+        .join("; "));
+    }
+    const bulkUpdates = settledUpdates
+      .filter((result): result is PromiseFulfilledResult<{ priority: number; accountIds: number[]; updated: number }> => result.status === "fulfilled")
+      .map((result) => result.value);
+
+    return {
+      updated: bulkUpdates.reduce((total, update) => total + update.updated, 0),
+      bulkUpdateCount: bulkUpdates.length,
+      bulkUpdates,
+    };
   }
 
   async testAccount(accountId: number, model: string, timeoutMs?: number): Promise<unknown> {

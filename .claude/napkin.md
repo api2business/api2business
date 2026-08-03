@@ -48,6 +48,7 @@
 
 ## Patterns That Work
 - ApiState L1 运行与验收使用项目 CLI 和 `--over-api`，不裸调运行组件。
+- Sub2API `v0.1.170` 优先级写入使用 `/admin/accounts/bulk-update`；按目标优先级分组，并只在 YAML `priorityWrite.batchSize` 边界内并发，批次统一走排队回读验证。
 - Sub2API 原生 OAuth 批量导入使用独立 120 秒 timeout；transport timeout 后先走同一 preflight 对账，按原始匹配区分新建与更新，禁止盲重试或重复记账。
 - 大批量 runtime 删除即使 CLI 因输出预算返回失败，也必须通过 ApiState 排队数据库回读判断真实终态。
 - OAuth 与上游历史曲线使用同一个配置式 SVG 组件；单位格式化、共享纵轴、刻度和图例由调用配置提供，页面不再手写重复图例。
