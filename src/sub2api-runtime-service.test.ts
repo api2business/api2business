@@ -54,6 +54,23 @@ test("corrects account plan types with one native bulk credentials merge", async
   expect(output).toEqual(expect.objectContaining({ accountIds: [400, 401], planType: "k12" }));
 });
 
+test("recovers a planned account batch with one native bulk request", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const runtime = new Sub2ApiRuntimeService({
+    mutate: async (method: string, path: string, body: unknown) => {
+      calls.push({ method, path, body });
+      return { success: 3, failed: 0 };
+    },
+  } as never);
+
+  expect(await runtime.recoverAccounts([9, 7, 8])).toMatchObject({ accountIds: [7, 8, 9], recovered: 3 });
+  expect(calls).toEqual([{
+    method: "POST",
+    path: "/admin/accounts/bulk-update",
+    body: { account_ids: [7, 8, 9], status: "active", schedulable: true },
+  }]);
+});
+
 test("updates accounts with the same priority in one native bulk request", async () => {
   const calls: Array<{ path: string; body: Record<string, unknown>; timeoutMs?: number }> = [];
   const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>, _key?: string, timeoutMs?: number) => {

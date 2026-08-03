@@ -203,6 +203,7 @@ export class IdleAccountProbeService {
     const startedAt = Date.now();
     const policy = this.config.sub2api.idleProbe;
     const results: Array<Record<string, unknown>> = [];
+    let bulkRecoveryFailures = 0;
     try {
       for (let round = 1; round <= rounds; round += 1) {
         if (Date.now() - startedAt >= policy.roundTimeoutSeconds * 1000) {
@@ -212,11 +213,28 @@ export class IdleAccountProbeService {
         const plan = await this.plan(accountIds, "automatic");
         const candidates = (plan.candidates as IdleProbeCandidate[])
           .filter((candidate) => this.isolation!.get(candidate.accountId) !== null);
+        if (candidates.length > 0) {
+          try {
+            await this.runtime.recoverAccounts(
+              candidates.map((candidate) => candidate.accountId),
+              policy.accountTimeoutMs,
+            );
+          } catch (error) {
+            bulkRecoveryFailures += 1;
+            results.push({
+              round,
+              skipped: true,
+              reason: "bulk-recovery-failed",
+              accountIds: candidates.map((candidate) => candidate.accountId),
+              error: error instanceof Error ? error.message : String(error),
+            });
+            continue;
+          }
+        }
         for (let offset = 0; offset < candidates.length; offset += policy.concurrency) {
           const batch = candidates.slice(offset, offset + policy.concurrency);
           const settled = await Promise.all(batch.map(async (candidate) => {
             try {
-              await this.runtime!.recoverAccount(candidate.accountId, policy.accountTimeoutMs);
               const response = await this.isolation!.probe(candidate.accountId, policy.model, policy.accountTimeoutMs);
               return {
                 accountId: candidate.accountId,
@@ -252,13 +270,14 @@ export class IdleAccountProbeService {
           && (response as Record<string, unknown>).ordinaryLogRecorded === true;
       });
       return {
-        ok: failed === 0,
+        ok: failed === 0 && bulkRecoveryFailures === 0,
         skipped: false,
         model: policy.model,
         rounds,
         attempted: succeeded + failed,
         succeeded,
         failed,
+        bulkRecoveryFailures,
         durationMs: Date.now() - startedAt,
         results,
         evidence: "isolated-user-api-key-responses-request",

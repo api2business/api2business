@@ -59,14 +59,14 @@ test("idle probe usage follows monitor-user owned API keys", () => {
 
 test("idle probe skips a concurrent round and never retries inside one account attempt", async () => {
   let calls = 0;
-  let recoveries = 0;
+  const recoveryPlans: number[][] = [];
   let release = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => { calls += 1; await gate; return { classification: "alive", ordinaryLogRecorded: true }; },
   };
-  const runtime = { recoverAccount: async () => { recoveries += 1; } };
+  const runtime = { recoverAccounts: async (accountIds: number[]) => { recoveryPlans.push(accountIds); } };
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
     account_status: "error", schedulable: false,
@@ -83,7 +83,7 @@ test("idle probe skips a concurrent round and never retries inside one account a
     ordinaryLogRecorded: true,
   });
   expect(calls).toBe(1);
-  expect(recoveries).toBe(1);
+  expect(recoveryPlans).toEqual([[369]]);
 });
 
 test("idle probe does not claim an ordinary log when the gateway never responds", async () => {
@@ -91,7 +91,7 @@ test("idle probe does not claim an ordinary log when the gateway never responds"
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => ({ classification: "error", ordinaryLogRecorded: false, errorMarker: "request-timeout" }),
   };
-  const runtime = { recoverAccount: async () => {} };
+  const runtime = { recoverAccounts: async () => {} };
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
     account_status: "active", schedulable: true,
@@ -106,9 +106,9 @@ test("idle probe does not claim an ordinary log when the gateway never responds"
   });
 });
 
-test("idle probe does not send a request when runtime recovery fails", async () => {
+test("idle probe does not send requests when planned bulk recovery fails", async () => {
   let probes = 0;
-  const runtime = { recoverAccount: async () => { throw new Error("restore failed"); } };
+  const runtime = { recoverAccounts: async () => { throw new Error("restore failed"); } };
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => { probes += 1; return { classification: "alive", ordinaryLogRecorded: true }; },
@@ -120,9 +120,9 @@ test("idle probe does not send a request when runtime recovery fails", async () 
 
   expect(await service.run([369], 1)).toMatchObject({
     ok: false,
-    attempted: 1,
-    failed: 1,
-    results: [{ recoveredBeforeProbe: false, error: "restore failed" }],
+    attempted: 0,
+    bulkRecoveryFailures: 1,
+    results: [{ skipped: true, reason: "bulk-recovery-failed", accountIds: [369], error: "restore failed" }],
   });
   expect(probes).toBe(0);
 });

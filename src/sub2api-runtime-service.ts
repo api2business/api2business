@@ -232,6 +232,24 @@ export class Sub2ApiRuntimeService {
     await this.setSchedulable(accountId, true, timeoutMs);
   }
 
+  async recoverAccounts(accountIds: number[], timeoutMs?: number): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+      throw new Error("bulk account recovery requires stable positive account IDs");
+    }
+    const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update", {
+      account_ids: ids,
+      status: "active",
+      schedulable: true,
+    }, undefined, timeoutMs);
+    const failed = Number(result.failed ?? 0);
+    const success = Number(result.success ?? 0);
+    if (failed > 0 || (success > 0 && success !== ids.length)) {
+      throw new Error(`Sub2API bulk account recovery updated ${success}/${ids.length}, failed ${failed}`);
+    }
+    return { accountIds: ids, recovered: success || ids.length, result };
+  }
+
   async updatePriorities(priorities: Record<string, number>, timeoutMs?: number): Promise<unknown> {
     const groups = new Map<number, number[]>();
     for (const [rawId, rawPriority] of Object.entries(priorities)) {
