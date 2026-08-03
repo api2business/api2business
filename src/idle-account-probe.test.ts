@@ -33,17 +33,21 @@ function reads(rows: Array<Record<string, unknown>>): Sub2ApiReadClient {
   };
 }
 
-test("idle probe selects only ordinary-log-idle schedulable API-key accounts", async () => {
+test("idle probe selects ordinary-log-idle API-key accounts regardless of runtime state", async () => {
   expect(idleProbeCandidatesSql).toContain("LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'");
+  expect(idleProbeCandidatesSql).not.toContain("a.status = 'active'");
+  expect(idleProbeCandidatesSql).not.toContain("a.schedulable = true");
   expect(idleProbeCandidatesSql).toContain("FROM usage_logs");
   expect(idleProbeCandidatesSql).toContain("FROM ops_error_logs");
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
+    account_status: "error", schedulable: false, temp_unschedulable_until: "2026-08-04T08:00:00Z",
   }]), null);
   const plan = await service.plan();
   expect(plan.databaseQueries).toBe(2);
   expect(plan.candidates).toEqual([{
     accountId: 369, accountName: "upstream plus 0.05", platform: "openai", priority: 300,
+    status: "error", schedulable: false, hadRuntimeBlock: true,
   }]);
 });
 
@@ -55,15 +59,18 @@ test("idle probe usage follows monitor-user owned API keys", () => {
 
 test("idle probe skips a concurrent round and never retries inside one account attempt", async () => {
   let calls = 0;
+  let recoveries = 0;
   let release = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => { calls += 1; await gate; return { classification: "alive", ordinaryLogRecorded: true }; },
   };
+  const runtime = { recoverAccount: async () => { recoveries += 1; } };
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
-  }]), null, isolation as never);
+    account_status: "error", schedulable: false,
+  }]), runtime as never, isolation as never);
   const first = service.run([369], 1);
   await Bun.sleep(1);
   expect(await service.run([369], 1)).toMatchObject({ skipped: true, reason: "in-flight" });
@@ -76,6 +83,7 @@ test("idle probe skips a concurrent round and never retries inside one account a
     ordinaryLogRecorded: true,
   });
   expect(calls).toBe(1);
+  expect(recoveries).toBe(1);
 });
 
 test("idle probe does not claim an ordinary log when the gateway never responds", async () => {
@@ -83,9 +91,11 @@ test("idle probe does not claim an ordinary log when the gateway never responds"
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => ({ classification: "error", ordinaryLogRecorded: false, errorMarker: "request-timeout" }),
   };
+  const runtime = { recoverAccount: async () => {} };
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
-  }]), null, isolation as never);
+    account_status: "active", schedulable: true,
+  }]), runtime as never, isolation as never);
 
   expect(await service.run([369], 1)).toMatchObject({
     ok: false,
@@ -94,4 +104,25 @@ test("idle probe does not claim an ordinary log when the gateway never responds"
     failed: 1,
     ordinaryLogRecorded: false,
   });
+});
+
+test("idle probe does not send a request when runtime recovery fails", async () => {
+  let probes = 0;
+  const runtime = { recoverAccount: async () => { throw new Error("restore failed"); } };
+  const isolation = {
+    get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
+    probe: async () => { probes += 1; return { classification: "alive", ordinaryLogRecorded: true }; },
+  };
+  const service = new IdleAccountProbeService(config, reads([{
+    account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
+    account_status: "error", schedulable: false,
+  }]), runtime as never, isolation as never);
+
+  expect(await service.run([369], 1)).toMatchObject({
+    ok: false,
+    attempted: 1,
+    failed: 1,
+    results: [{ recoveredBeforeProbe: false, error: "restore failed" }],
+  });
+  expect(probes).toBe(0);
 });

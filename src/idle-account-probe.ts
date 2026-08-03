@@ -4,16 +4,13 @@ import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { ProbeIsolationService } from "./probe-isolation";
 
 const idleProbeCandidatesSql = `
-SELECT a.id::int AS account_id, a.name AS account_name, a.platform, a.priority::int AS priority
+SELECT a.id::int AS account_id, a.name AS account_name, a.platform, a.priority::int AS priority,
+  a.status AS account_status, a.schedulable,
+  a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until
 FROM accounts a
 WHERE a.deleted_at IS NULL
   AND LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'
   AND a.platform = $1
-  AND a.status = 'active'
-  AND a.schedulable = true
-  AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
-  AND (a.overload_until IS NULL OR a.overload_until <= NOW())
-  AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW())
   AND EXISTS (
     SELECT 1 FROM account_groups ag
     WHERE ag.account_id = a.id
@@ -46,6 +43,9 @@ export interface IdleProbeCandidate {
   accountName: string;
   platform: string;
   priority: number;
+  status: string;
+  schedulable: boolean;
+  hadRuntimeBlock: boolean;
 }
 
 export const idleProbeRollingUsageSql = `
@@ -112,6 +112,11 @@ export class IdleAccountProbeService {
       accountName: String(row.account_name),
       platform: String(row.platform),
       priority: Number(row.priority),
+      status: String(row.account_status ?? "unknown"),
+      schedulable: row.schedulable === true,
+      hadRuntimeBlock: row.rate_limit_reset_at != null
+        || row.overload_until != null
+        || row.temp_unschedulable_until != null,
     } satisfies IdleProbeCandidate));
     const rolling24Hours = await this.rollingUsage(priority);
     return {
@@ -191,6 +196,7 @@ export class IdleAccountProbeService {
 
   async run(accountIds: number[] = [], rounds = 1): Promise<Record<string, unknown>> {
     if (!this.isolation) throw new Error("idle probe execution requires isolated probe API key");
+    if (!this.runtime) throw new Error("idle probe execution requires Sub2API runtime recovery service");
     if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10) throw new Error("idle probe rounds must be an integer from 1 to 10");
     if (this.running) return { ok: true, skipped: true, reason: "in-flight", valuesPrinted: false };
     this.running = true;
@@ -210,15 +216,28 @@ export class IdleAccountProbeService {
           const batch = candidates.slice(offset, offset + policy.concurrency);
           const settled = await Promise.all(batch.map(async (candidate) => {
             try {
+              await this.runtime!.recoverAccount(candidate.accountId, policy.accountTimeoutMs);
               const response = await this.isolation!.probe(candidate.accountId, policy.model, policy.accountTimeoutMs);
               return {
                 accountId: candidate.accountId,
                 accountName: candidate.accountName,
+                recoveredBeforeProbe: true,
+                previousRuntimeState: {
+                  status: candidate.status,
+                  schedulable: candidate.schedulable,
+                  hadRuntimeBlock: candidate.hadRuntimeBlock,
+                },
                 ok: response.ordinaryLogRecorded === true,
                 response,
               };
             } catch (error) {
-              return { accountId: candidate.accountId, accountName: candidate.accountName, ok: false, error: error instanceof Error ? error.message : String(error) };
+              return {
+                accountId: candidate.accountId,
+                accountName: candidate.accountName,
+                recoveredBeforeProbe: false,
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              };
             }
           }));
           results.push(...settled.map((result) => ({ round, ...result })));

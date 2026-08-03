@@ -223,13 +223,13 @@ export class Sub2ApiRuntimeService {
     });
   }
 
-  async setSchedulable(accountId: number, schedulable: boolean): Promise<unknown> {
-    return await this.client.mutate("POST", `/admin/accounts/${accountId}/schedulable`, { schedulable });
+  async setSchedulable(accountId: number, schedulable: boolean, timeoutMs?: number): Promise<unknown> {
+    return await this.client.mutate("POST", `/admin/accounts/${accountId}/schedulable`, { schedulable }, undefined, timeoutMs);
   }
 
-  async recoverAccount(accountId: number): Promise<void> {
-    await this.updateAccount(accountId, { status: "active" });
-    await this.setSchedulable(accountId, true);
+  async recoverAccount(accountId: number, timeoutMs?: number): Promise<void> {
+    await this.updateAccount(accountId, { status: "active" }, timeoutMs);
+    await this.setSchedulable(accountId, true, timeoutMs);
   }
 
   async updatePriorities(priorities: Record<string, number>, timeoutMs?: number): Promise<unknown> {
