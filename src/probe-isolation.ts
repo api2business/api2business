@@ -318,7 +318,8 @@ export class ProbeIsolationService {
   async ensure(accountId: number): Promise<ProbeIsolationBinding> {
     if (!this.config.sub2api.idleProbe.isolation.enabled) throw new Error("探活隔离策略未启用");
     if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error("探活账号 ID 无效");
-    return await this.inLock(async () => (await this.ensureRecord(accountId, this.readFile())).binding);
+    const deadline = Date.now() + this.config.operations.upstreamManagement.mutationTimeoutMs;
+    return await this.inLock(async () => (await this.ensureRecord(accountId, this.readFile(), deadline)).binding);
   }
 
   get(accountId: number): ProbeIsolationBinding | null {

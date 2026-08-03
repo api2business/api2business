@@ -15,6 +15,7 @@ interface FakeState {
   groupCreates: Row[];
   keyCreates: Row[];
   accountUpdates: Row[];
+  requestTimeouts: number[];
 }
 
 class FakeClient {
@@ -22,7 +23,8 @@ class FakeClient {
 
   fork() { return new FakeClient(this.state); }
 
-  async request<T>(path: string): Promise<T> {
+  async request<T>(path: string, _init?: unknown, _authenticate?: boolean, timeoutMs?: number): Promise<T> {
+    if (timeoutMs !== undefined) this.state.requestTimeouts.push(timeoutMs);
     if (path.startsWith("/admin/groups?")) return { items: this.state.groups, total: this.state.groups.length, page: 1, page_size: 100, pages: 1 } as T;
     if (/^\/admin\/groups\/\d+$/u.test(path)) return this.state.groups.find((item) => Number(item.id) === Number(path.split("/").at(-1))) as T;
     if (path.startsWith("/admin/users?")) return { items: this.state.users, total: this.state.users.length, page: 1, page_size: 100, pages: 1 } as T;
@@ -31,7 +33,8 @@ class FakeClient {
     throw new Error(`unexpected request ${path}`);
   }
 
-  async mutate<T>(method: string, path: string, body: unknown): Promise<T> {
+  async mutate<T>(method: string, path: string, body: unknown, _key?: string, timeoutMs?: number): Promise<T> {
+    if (timeoutMs !== undefined) this.state.requestTimeouts.push(timeoutMs);
     const payload = body as Row;
     if (method === "POST" && path === "/admin/groups") {
       this.state.groupCreates.push(payload);
@@ -65,9 +68,13 @@ class FakeClient {
     throw new Error(`unexpected mutation ${method} ${path}`);
   }
 
-  async getAccount() { return this.state.account; }
+  async getAccount(_accountId?: number, timeoutMs?: number) {
+    if (timeoutMs !== undefined) this.state.requestTimeouts.push(timeoutMs);
+    return this.state.account;
+  }
 
-  async listGroupAccounts(groupId: number) {
+  async listGroupAccounts(groupId: number, _platform?: string, timeoutMs?: number) {
+    if (timeoutMs !== undefined) this.state.requestTimeouts.push(timeoutMs);
     return Array.isArray(this.state.account.group_ids) && this.state.account.group_ids.includes(groupId)
       ? [{ id: this.state.account.id }]
       : [];
@@ -84,6 +91,7 @@ function fixture() {
     groupCreates: [],
     keyCreates: [],
     accountUpdates: [],
+    requestTimeouts: [],
   };
   const config = {
     rootDirectory,
@@ -99,6 +107,9 @@ function fixture() {
           secretFile: ".state/idle-probe/probe-keys.json",
         },
       },
+    },
+    operations: {
+      upstreamManagement: { mutationTimeoutMs: 120000 },
     },
   } as AppConfig;
   const client = new FakeClient(state);
@@ -125,6 +136,8 @@ test("probe isolation creates one private internal-ID group and redacts every se
   expect(String(state.groupCreates[0]?.name)).not.toContain("hwpod.com");
   expect(state.keyCreates).toEqual([expect.objectContaining({ name: "apistate-probe", group_id: 51 })]);
   expect(state.accountUpdates).toEqual([expect.objectContaining({ group_ids: [2, 3, 51] })]);
+  expect(state.requestTimeouts.length).toBeGreaterThan(0);
+  expect(state.requestTimeouts.every((timeoutMs) => timeoutMs > 100000 && timeoutMs <= 120000)).toBe(true);
 
   const secretPath = join(rootDirectory, ".state/idle-probe/probe-keys.json");
   expect(statSync(secretPath).mode & 0o777).toBe(0o600);
