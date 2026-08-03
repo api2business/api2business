@@ -49,12 +49,14 @@ export interface IdleProbeCandidate {
 }
 
 export const idleProbeRollingUsageSql = `
-WITH probe_users AS (
-  SELECT id
-  FROM users
-  WHERE (email = 'monitor-user@sub2api.platform-infra.local'
-      OR email LIKE 'apistate-probe-%@sub2api.platform-infra.local')
-    AND deleted_at IS NULL
+WITH probe_keys AS (
+  SELECT k.id
+  FROM api_keys k
+  JOIN users owner ON owner.id = k.user_id
+  WHERE owner.email = 'monitor-user@sub2api.platform-infra.local'
+    AND owner.deleted_at IS NULL
+    AND k.deleted_at IS NULL
+    AND k.name LIKE 'apistate-probe-%'
 ), usage AS (
   SELECT COUNT(*)::int AS success_requests,
     COALESCE(SUM(u.actual_cost), 0)::numeric AS consumed_api_amount_usd,
@@ -62,13 +64,13 @@ WITH probe_users AS (
     MAX(u.created_at) AS latest_sample_at,
     COUNT(DISTINCT u.account_id)::int AS sampled_accounts
   FROM usage_logs u
-  JOIN probe_users p ON p.id = u.user_id
+  JOIN probe_keys p ON p.id = u.api_key_id
   WHERE u.created_at >= NOW() - INTERVAL '24 hours'
 ), errors AS (
   SELECT COUNT(*)::int AS error_requests,
     MAX(o.created_at) AS latest_error_at
   FROM ops_error_logs o
-  JOIN probe_users p ON p.id = o.user_id
+  JOIN probe_keys p ON p.id = o.api_key_id
   WHERE o.created_at >= NOW() - INTERVAL '24 hours'
 )
 SELECT usage.*, errors.error_requests, errors.latest_error_at

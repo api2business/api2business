@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AppConfig } from "./config";
-import { IdleAccountProbeService, idleProbeCandidatesSql } from "./idle-account-probe";
+import { IdleAccountProbeService, idleProbeCandidatesSql, idleProbeRollingUsageSql } from "./idle-account-probe";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 const config = {
@@ -45,6 +45,12 @@ test("idle probe selects only ordinary-log-idle schedulable API-key accounts", a
   expect(plan.candidates).toEqual([{
     accountId: 369, accountName: "upstream plus 0.05", platform: "openai", priority: 300,
   }]);
+});
+
+test("idle probe usage follows monitor-user owned API keys", () => {
+  expect(idleProbeRollingUsageSql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
+  expect(idleProbeRollingUsageSql).toContain("JOIN probe_keys p ON p.id = u.api_key_id");
+  expect(idleProbeRollingUsageSql).toContain("JOIN probe_keys p ON p.id = o.api_key_id");
 });
 
 test("idle probe skips a concurrent round and never retries inside one account attempt", async () => {
