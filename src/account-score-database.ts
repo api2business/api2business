@@ -287,8 +287,8 @@ function availabilityReason(row: Row, currentAvailable: boolean, billingErrorPat
   return { code: "unknown", label: "原因未记录", detail: "当前状态不可用，但没有可判定的原因证据", resetAt: null };
 }
 
-function grade(score: number | null, comparable: boolean, attempts: number): string {
-  if (score === null || (!comparable && !(score < 60 && attempts >= 10))) return "insufficient";
+function grade(score: number | null): string {
+  if (score === null) return "insufficient";
   return score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "E";
 }
 
@@ -347,7 +347,7 @@ export function scoreRecentDatabaseRow(
     ? Math.round(((reliability ?? 0) + (failover ?? 0) + (latency ?? 0) + policy.baselineWeight) / availableWeight * 1_000) / 10
     : null;
   const comparable = observedAttempts >= 10 && firstTokenSamples >= 5;
-  const accountGrade = grade(score, comparable, observedAttempts);
+  const accountGrade = grade(score);
   const untilActive = (value: unknown): boolean => {
     const parsed = Date.parse(String(value ?? ""));
     return Number.isFinite(parsed) && parsed > now;

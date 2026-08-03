@@ -101,6 +101,37 @@ test("database aggregate accepts a 2000-call analysis window", () => {
   }, 2000, scorePolicy)).not.toThrow();
 });
 
+test("sample count does not reduce score or grade", () => {
+  const successful = scoreRecentDatabaseRow({
+    account_id: 41,
+    account_name: "one-success 0.08",
+    status: "active",
+    schedulable: true,
+    priority: 1,
+    group_ids: [2],
+    group_names: ["pool"],
+    success_requests: 1,
+    failure_requests: 0,
+    selected_calls: 1,
+  }, 1000, scorePolicy);
+  const failed = scoreRecentDatabaseRow({
+    account_id: 42,
+    account_name: "one-failure 0.08",
+    status: "active",
+    schedulable: true,
+    priority: 1,
+    group_ids: [2],
+    group_names: ["pool"],
+    success_requests: 0,
+    failure_requests: 1,
+    selected_calls: 1,
+  }, 1000, scorePolicy);
+
+  expect(successful).toMatchObject({ score: 100, grade: "A", confidence: "low", scoreComparable: false });
+  expect(failed).toMatchObject({ grade: "E", confidence: "low", scoreComparable: false });
+  expect(Number(failed.score)).toBeLessThan(60);
+});
+
 test("database score always projects failover and recovered request counts", () => {
   const recovered = scoreRecentDatabaseRow({
     account_id: 2,

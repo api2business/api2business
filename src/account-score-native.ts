@@ -146,8 +146,8 @@ function customerErrorAttribution(row: Sub2ApiRequestError): { scoreable: boolea
     : { scoreable: false, reason: "unattributed-customer-error" };
 }
 
-function grade(score: number | null, comparable: boolean, attempts: number): string {
-  if (score === null || (!comparable && !(score < 60 && attempts >= 10))) return "insufficient";
+function grade(score: number | null): string {
+  if (score === null) return "insufficient";
   return score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "E";
 }
 
@@ -238,7 +238,7 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
     const availableWeight = (reliability === null ? 0 : 60) + (latency === null ? 0 : 25) + 15;
     const score = attempts > 0 ? Math.round(((reliability ?? 0) + (latency ?? 0) + availability) / availableWeight * 1_000) / 10 : null;
     const comparable = attempts >= 10 && ttft.length >= 5;
-    const accountGrade = grade(score, comparable, attempts);
+    const accountGrade = grade(score);
     const failoverIds = failover.get(account.id) ?? new Set<string>();
     const failoverRecovered = [...failoverIds].filter((id) => (finalStatus.get(id) ?? 999) < 400).length;
     const failoverFailed = [...failoverIds].filter((id) => (finalStatus.get(id) ?? 0) >= 400).length;

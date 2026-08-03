@@ -44,8 +44,8 @@ function latencyPoints(ttftP95Ms: number | null): number | null {
   return ttftP95Ms === null ? null : Math.round(25 * (1 - Math.min(Math.max(ttftP95Ms - 10_000, 0), 170_000) / 170_000) * 100) / 100;
 }
 
-function scoreGrade(score: number | null, comparable: boolean, observedAttempts: number): string {
-  if (score === null || (!comparable && !(score < 60 && observedAttempts >= 10))) return "insufficient";
+function scoreGrade(score: number | null): string {
+  if (score === null) return "insufficient";
   return score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "E";
 }
 
@@ -81,7 +81,7 @@ export function mergeAccountScores(rows: Row[]): Row[] {
     const earned = (reliability ?? 0) + (latency ?? 0) + availability;
     const score = observedAttempts > 0 && availableWeight > 0 ? Math.round(earned / availableWeight * 1_000) / 10 : null;
     const comparable = observedAttempts >= 10 && firstTokenSamples >= 5;
-    const grade = scoreGrade(score, comparable, observedAttempts);
+    const grade = scoreGrade(score);
     const reasons = [...new Set(accountRows.flatMap((row) => Array.isArray(row.reasons) ? row.reasons.map(String) : []))];
 
     return {
