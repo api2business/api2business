@@ -259,10 +259,11 @@ export class AccountImportService {
       await this.persistWorkerJob(job);
       if (plan.sourceIndexes.length === 0) {
         job.result = completedWithoutWrites(job, plan, correctedAccountIds);
-        if (correctedAccountIds.length > 0) {
+        const ledgerAccountIds = plan.skipped.map((item) => item.accountId);
+        if (ledgerAccountIds.length > 0) {
           const planTypeCorrections = recordAccountImportPlanTypeCorrections({
             path: this.config.operations.accountImportLedgerPath,
-            accountIds: correctedAccountIds,
+            accountIds: ledgerAccountIds,
             planType: job.settings.planType,
           });
           job.accounting = { recordedCount: 0, totalCostCny: 0, planTypeCorrections };
@@ -337,7 +338,7 @@ export class AccountImportService {
         });
         const planTypeCorrections = recordAccountImportPlanTypeCorrections({
           path: this.config.operations.accountImportLedgerPath,
-          accountIds: [...correctedAccountIds, ...updatedIds],
+          accountIds: [...plan.skipped.map((item) => item.accountId), ...updatedIds],
           planType: job.settings.planType,
         });
         job.accounting = { ...acquisition, planTypeCorrections };
