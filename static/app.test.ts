@@ -78,7 +78,8 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(html).toContain('id="quota-cost-chart"');
   expect(app).toContain("requestJson('/api/upstreams/quota-summary')");
   expect(app).toContain("usdText(summary.apiAmountUsd, 3)");
-  expect(app).toContain("raw !== null && raw !== undefined");
+  expect(app).toContain('carryForwardChartPoints(points, series)');
+  expect(app).toContain("lastFiniteChartValue(points, 'sampleRealtimeCostCnyPerApiUsd')");
   expect(html).toContain('/styles.css?v=live-layout-v15');
   expect(html).toContain('最近 8 小时');
   expect(html).toContain('<th>账号余额（人民币）</th>');

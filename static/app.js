@@ -378,6 +378,7 @@ async function loadUnifiedQuotaSummary() {
 }
 
 function renderUnifiedQuotaSummary(summary) {
+  const points = Array.isArray(summary.history) ? summary.history : []
   const total = Number(summary.totalRemainingCny)
   const schedulable = Number(summary.schedulableRemainingCny)
   const known = summary.totalRemainingCny != null && Number.isFinite(total)
@@ -385,14 +386,16 @@ function renderUnifiedQuotaSummary(summary) {
   $('#quota-schedulable').textContent = summary.schedulableRemainingCny == null ? '—' : cny(schedulable)
   $('#quota-consumed').textContent = summary.consumedCny == null ? '暂不可计算' : cny(summary.consumedCny)
   $('#quota-output').textContent = summary.apiAmountUsd == null ? '暂不可计算' : usdText(summary.apiAmountUsd, 3)
-  $('#quota-realtime-cost').textContent = summary.realtimeCostCnyPerApiUsd == null ? '暂不可计算' : `¥${number(summary.realtimeCostCnyPerApiUsd, 4)}/刀`
+  const rollingCost = finiteChartValue(summary.realtimeCostCnyPerApiUsd) ?? lastFiniteChartValue(points, 'realtimeCostCnyPerApiUsd')
+  $('#quota-realtime-cost').textContent = rollingCost === null ? '暂不可计算' : `¥${number(rollingCost, 4)}/刀`
   const hours = summary.estimatedAvailableHours == null ? null : Number(summary.estimatedAvailableHours)
   $('#quota-estimated-hours').textContent = hours !== null && Number.isFinite(hours) ? (hours >= 24 ? `${number(hours / 24, 1)} 天` : `${number(hours, 1)} 小时`) : '暂不可估算'
-  const points = Array.isArray(summary.history) ? summary.history : []
-  const latest = points.at(-1)
-  $('#quota-sample-speed').textContent = latest?.sampleApiAmountUsdPerHour == null ? '暂不可计算' : usdText(latest.sampleApiAmountUsdPerHour, 2)
-  $('#quota-rolling-speed').textContent = latest?.rollingApiAmountUsdPerHour == null ? '暂不可计算' : usdText(latest.rollingApiAmountUsdPerHour, 2)
-  $('#quota-sample-cost').textContent = latest?.sampleRealtimeCostCnyPerApiUsd == null ? '暂不可计算' : `¥${number(latest.sampleRealtimeCostCnyPerApiUsd, 4)}/刀`
+  const sampleSpeed = lastFiniteChartValue(points, 'sampleApiAmountUsdPerHour')
+  const rollingSpeed = lastFiniteChartValue(points, 'rollingApiAmountUsdPerHour')
+  const sampleCost = lastFiniteChartValue(points, 'sampleRealtimeCostCnyPerApiUsd')
+  $('#quota-sample-speed').textContent = sampleSpeed === null ? '暂不可计算' : usdText(sampleSpeed, 2)
+  $('#quota-rolling-speed').textContent = rollingSpeed === null ? '暂不可计算' : usdText(rollingSpeed, 2)
+  $('#quota-sample-cost').textContent = sampleCost === null ? '暂不可计算' : `¥${number(sampleCost, 4)}/刀`
   const walletDistribution = Array.isArray(summary.walletDistribution) ? summary.walletDistribution : []
   renderDonut({
     ring: $('#quota-ring'), detail: $('#quota-ring-detail'), items: walletDistribution,
@@ -1159,10 +1162,42 @@ async function loadOperations({ showCached = false } = {}) {
   writeOperationsSnapshot(ledger, audits)
 }
 
+function finiteChartValue(value) {
+  if (value === null || value === undefined) return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function carryForwardChartPoints(points, series) {
+  const latest = new Map()
+  return points.map((point) => {
+    const normalized = { ...point }
+    series.forEach(({ key }) => {
+      const value = finiteChartValue(point[key])
+      if (value === null) {
+        if (latest.has(key)) normalized[key] = latest.get(key)
+      } else {
+        latest.set(key, value)
+        normalized[key] = value
+      }
+    })
+    return normalized
+  })
+}
+
+function lastFiniteChartValue(points, key) {
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const value = finiteChartValue(points[index]?.[key])
+    if (value !== null) return value
+  }
+  return null
+}
+
 function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null }) {
   const chartWidth = 1000
   if (points.length < 2) return `<text x="${chartWidth / 2}" y="78" text-anchor="middle" class="chart-empty">至少需要两个采样点</text>`
-  const values = series.flatMap(({ key }) => points
+  const chartPoints = carryForwardChartPoints(points, series)
+  const values = series.flatMap(({ key }) => chartPoints
     .filter((point) => point[key] !== null && point[key] !== undefined)
     .map((point) => Number(point[key])).filter(Number.isFinite))
   if (values.length < 2) return `<text x="${chartWidth / 2}" y="78" text-anchor="middle" class="chart-empty">当前指标暂无有效曲线</text>`
@@ -1175,7 +1210,7 @@ function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLab
   const max = upperBound ?? rawMax + padding
   const span = Math.max(max - min, 0.001)
   const plotLeft = 64, plotRight = chartWidth - 14, plotTop = 18, plotBottom = 126
-  const x = (index) => plotLeft + index * (plotRight - plotLeft) / Math.max(1, points.length - 1)
+  const x = (index) => plotLeft + index * (plotRight - plotLeft) / Math.max(1, chartPoints.length - 1)
   const y = (value) => plotBottom - (Math.min(max, Math.max(min, value)) - min) / span * (plotBottom - plotTop)
   const formatValue = typeof valueFormatter === 'function' ? valueFormatter : (value) => number(value, 2)
   const ticks = [max, (max + min) / 2, min]
@@ -1184,7 +1219,7 @@ function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLab
     return `<text x="56" y="${row + 3}" text-anchor="end" class="chart-axis chart-axis-y">${escapeHtml(formatValue(value))}</text><line x1="${plotLeft}" y1="${row}" x2="${plotRight}" y2="${row}" class="chart-grid"/>`
   }).join('')
   const lines = series.map(({ key, className, label }) => {
-    const valid = points.map((point, index) => ({ index, raw: point[key], value: Number(point[key]) }))
+    const valid = chartPoints.map((point, index) => ({ index, raw: point[key], value: Number(point[key]) }))
       .filter(({ raw, value }) => raw !== null && raw !== undefined && Number.isFinite(value))
     if (valid.length < 2) return ''
     const latest = valid.at(-1)
@@ -1192,11 +1227,11 @@ function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLab
     const clippedLow = lowerBound === null ? '' : valid.filter(({ value }) => value < lowerBound).map(({ index, value }) => `<path class="${className} chart-clipped-point" d="M ${x(index) - 4} ${plotBottom - 7} L ${x(index)} ${plotBottom - 1} L ${x(index) + 4} ${plotBottom - 7} Z"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(value))}${unit ? ` ${escapeHtml(unit)}` : ''}（低于图表下限 ${escapeHtml(formatValue(lowerBound))}）</title></path>`).join('')
     return `<polyline class="${className}" points="${valid.map(({ index, value }) => `${x(index)},${y(value)}`).join(' ')}"/><circle class="${className} chart-latest-point" cx="${x(latest.index)}" cy="${y(latest.value)}" r="3"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(latest.value))}${unit ? ` ${escapeHtml(unit)}` : ''}</title></circle>${clippedHigh}${clippedLow}`
   }).join('')
-  const first = new Date(points[0].sampledAt), last = new Date(points.at(-1).sampledAt)
+  const first = new Date(chartPoints[0].sampledAt), last = new Date(chartPoints.at(-1).sampledAt)
   const label = (date) => date.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false })
   const legend = series.map(({ className, label: seriesLabel }) => `<span class="history-chart-legend-item ${className}">${escapeHtml(seriesLabel ?? '')}</span>`).join('')
-  const hoverWidth = (plotRight - plotLeft) / Math.max(1, points.length - 1)
-  const hoverTargets = points.map((point, index) => {
+  const hoverWidth = (plotRight - plotLeft) / Math.max(1, chartPoints.length - 1)
+  const hoverTargets = chartPoints.map((point, index) => {
     const at = new Date(point.sampledAt)
     const details = series.map(({ key, label: seriesLabel }) => {
       const value = Number(point[key])
@@ -2036,22 +2071,23 @@ async function upstreamsPage() {
   const loadQuotaSummary = async () => {
     try {
       const summary = await requestJson('/api/upstreams/quota-summary')
+      const points = Array.isArray(summary.history) ? summary.history : []
       const total = Number(summary.totalRemainingCny), schedulable = Number(summary.schedulableRemainingCny)
       const known = summary.totalRemainingCny != null && Number.isFinite(total)
       $('#quota-total').textContent = known ? cny(total) : '—'
       $('#quota-schedulable').textContent = summary.schedulableRemainingCny == null ? '—' : cny(schedulable)
       $('#quota-consumed').textContent = summary.consumedCny == null ? '暂不可计算' : cny(summary.consumedCny)
       $('#quota-output').textContent = summary.apiAmountUsd == null ? '暂不可计算' : usdText(summary.apiAmountUsd, 3)
-      $('#quota-realtime-cost').textContent = summary.realtimeCostCnyPerApiUsd == null ? '暂不可计算' : `¥${number(summary.realtimeCostCnyPerApiUsd, 4)}/刀`
+      const rollingCost = finiteChartValue(summary.realtimeCostCnyPerApiUsd) ?? lastFiniteChartValue(points, 'realtimeCostCnyPerApiUsd')
+      $('#quota-realtime-cost').textContent = rollingCost === null ? '暂不可计算' : `¥${number(rollingCost, 4)}/刀`
       const hours = summary.estimatedAvailableHours == null ? null : Number(summary.estimatedAvailableHours)
       $('#quota-estimated-hours').textContent = hours !== null && Number.isFinite(hours) ? (hours >= 24 ? `${number(hours / 24, 1)} 天` : `${number(hours, 1)} 小时`) : '暂不可估算'
-      const latestPoint = Array.isArray(summary.history) ? summary.history.at(-1) : null
-      const sampleSpeed = latestPoint?.sampleApiAmountUsdPerHour
-      const rollingSpeed = latestPoint?.rollingApiAmountUsdPerHour
-      $('#quota-sample-speed').textContent = sampleSpeed == null || !Number.isFinite(Number(sampleSpeed)) ? '暂不可计算' : usdText(sampleSpeed, 2)
-      $('#quota-rolling-speed').textContent = rollingSpeed == null || !Number.isFinite(Number(rollingSpeed)) ? '暂不可计算' : usdText(rollingSpeed, 2)
-      const sampleCost = latestPoint?.sampleRealtimeCostCnyPerApiUsd
-      $('#quota-sample-cost').textContent = sampleCost == null || !Number.isFinite(Number(sampleCost)) ? '暂不可计算' : `¥${number(sampleCost, 4)}/刀`
+      const sampleSpeed = lastFiniteChartValue(points, 'sampleApiAmountUsdPerHour')
+      const rollingSpeed = lastFiniteChartValue(points, 'rollingApiAmountUsdPerHour')
+      const sampleCost = lastFiniteChartValue(points, 'sampleRealtimeCostCnyPerApiUsd')
+      $('#quota-sample-speed').textContent = sampleSpeed === null ? '暂不可计算' : usdText(sampleSpeed, 2)
+      $('#quota-rolling-speed').textContent = rollingSpeed === null ? '暂不可计算' : usdText(rollingSpeed, 2)
+      $('#quota-sample-cost').textContent = sampleCost === null ? '暂不可计算' : `¥${number(sampleCost, 4)}/刀`
       const walletDistribution = Array.isArray(summary.walletDistribution) ? summary.walletDistribution : []
       renderDonut({
         ring: $('#quota-ring'), detail: $('#quota-ring-detail'), items: walletDistribution,
@@ -2060,7 +2096,7 @@ async function upstreamsPage() {
         itemDetail: (item) => `${percent(item.ratio)} · ${cny(item.remainingCny)}${item.remainingUsd == null ? '' : ` · $${number(item.remainingUsd, 2)}`}${item.schedulable ? '' : ' · 不可调度'}`,
       })
       $('#quota-monitor-state').textContent = `${summary.sampledAt ? time(summary.sampledAt) : '尚无采样'} · ${number(summary.knownWallets)} 个已知 wallet${summary.warning ? ` · ${summary.warning}` : ''}`
-      renderQuotaCharts(summary.history)
+      renderQuotaCharts(points)
     } catch (error) { $('#quota-monitor-state').textContent = `额度摘要读取失败：${error instanceof Error ? error.message : String(error)}` }
   }
   const queryUsage = async (accountIds, onStatus = () => {}) => {
