@@ -775,7 +775,10 @@ export class OperationsService {
     if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
     const startedAt = Date.now();
     try {
-      await this.runtime.updatePriorities(priorities);
+      await this.runtime.updatePriorities(
+        priorities,
+        this.config.operations.priorityWrite.requestTimeoutMs,
+      );
       return { ok: true, exitCode: 0, timedOut: false, writeDurationMs: Date.now() - startedAt, outputAvailable: true, error: "" };
     } catch (error) {
       return { ok: false, exitCode: 1, timedOut: false, writeDurationMs: Date.now() - startedAt, outputAvailable: false,

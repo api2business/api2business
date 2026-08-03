@@ -212,6 +212,7 @@ export interface AppConfig {
     };
     priorityWrite: {
       batchSize: number;
+      requestTimeoutMs: number;
       interBatchMinimumDelayMs: number;
       interBatchMaximumDelayMs: number;
       maximumRetries: number;
@@ -865,6 +866,13 @@ export function loadConfig(path: string): AppConfig {
       },
       priorityWrite: {
         batchSize: integerValue(priorityWrite, "batchSize", "operations.priorityWrite", 1, 100),
+        requestTimeoutMs: integerValue(
+          priorityWrite,
+          "requestTimeoutMs",
+          "operations.priorityWrite",
+          1000,
+          120000,
+        ),
         interBatchMinimumDelayMs,
         interBatchMaximumDelayMs,
         maximumRetries: integerValue(priorityWrite, "maximumRetries", "operations.priorityWrite", 0, 3),

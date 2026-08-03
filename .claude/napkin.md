@@ -35,6 +35,7 @@
 | 2026-08-03 | self | ApiState `web-probe product-smoke` 误把页面内的 PK01 后端标签当成 Web target，并误用通用 profile | ApiState Web 使用 owning target `NC01`；上游资产页使用 profile `scores`，PK01 只表示 Sub2API 后端目标 |
 | 2026-08-03 | self | 账号导入页升级静态资源缓存版本后，遗漏同步 ZIP 预览测试里的版本断言 | 每次修改 HTML 的 `app.js?v=` 或 `styles.css?v=` 时，同步检索并更新所有静态测试中的缓存版本断言 |
 | 2026-08-03 | runtime | 上游实时成本用已知 wallet 的余额消耗除以全部 API-key 产出，且图表把成本空值延续为旧异常值，导致采样恢复后成本严重低估并长期贴住展示上限 | 成本分子和分母必须按同一 wallet、同一余额变化锚点配对；未知 wallet 产出不进入成本分母，空值在图表中断开且顶部不回填旧值 |
+| 2026-08-03 | runtime | Worker 冷启动后优先级 bulk-update 与登录共用 20 秒全局预算，登录消耗后更新在约 15 秒处临界超时，触发 15 秒回读和整轮重试 | 优先级写入使用 owning YAML 的独立请求预算；仍让认证和操作共享一次总预算，但为正常登录加批量更新预留足够余量 |
 
 ## User Preferences
 - 调度算法变更先手动生成并确认一次真实优先级调整，排队回读成功后再启用或调整自动调优周期。

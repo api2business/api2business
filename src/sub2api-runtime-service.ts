@@ -232,7 +232,7 @@ export class Sub2ApiRuntimeService {
     await this.setSchedulable(accountId, true);
   }
 
-  async updatePriorities(priorities: Record<string, number>): Promise<unknown> {
+  async updatePriorities(priorities: Record<string, number>, timeoutMs?: number): Promise<unknown> {
     const groups = new Map<number, number[]>();
     for (const [rawId, rawPriority] of Object.entries(priorities)) {
       const accountId = positiveInteger(rawId);
@@ -252,7 +252,7 @@ export class Sub2ApiRuntimeService {
         const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update", {
           account_ids: accountIds,
           priority,
-        });
+        }, undefined, timeoutMs);
         const successIds = Array.isArray(result.success_ids)
           ? result.success_ids.map(positiveInteger).filter((id): id is number => id !== null).sort((left, right) => left - right)
           : [];

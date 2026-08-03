@@ -55,16 +55,16 @@ test("corrects account plan types with one native bulk credentials merge", async
 });
 
 test("updates accounts with the same priority in one native bulk request", async () => {
-  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
-  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {
-    calls.push({ path, body });
+  const calls: Array<{ path: string; body: Record<string, unknown>; timeoutMs?: number }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>, _key?: string, timeoutMs?: number) => {
+    calls.push({ path, body, timeoutMs });
     return { success: 2, failed: 0, success_ids: [402, 403], failed_ids: [] };
   } } as unknown as Sub2ApiClient;
   const runtime = new Sub2ApiRuntimeService(client);
-  const output = await runtime.updatePriorities({ "403": 120, "402": 120 });
+  const output = await runtime.updatePriorities({ "403": 120, "402": 120 }, 30000);
   expect(calls).toEqual([{ path: "/admin/accounts/bulk-update", body: {
     account_ids: [402, 403], priority: 120,
-  } }]);
+  }, timeoutMs: 30000 }]);
   expect(output).toEqual({
     updated: 2,
     bulkUpdateCount: 1,
