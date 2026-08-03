@@ -14,6 +14,7 @@ interface ProbeKeyRecord {
   email: string;
   password: string;
   apiKey: string;
+  ready?: boolean;
 }
 
 interface ProbeKeyFile {
@@ -66,6 +67,10 @@ function accountGroupIds(account: Row): number[] {
 
 function accountIds(rows: Row[]): number[] {
   return rows.map((item) => id(item.id)).filter((value): value is number => value !== null);
+}
+
+function readyRecord(record: ProbeKeyRecord | undefined): record is ProbeKeyRecord {
+  return Boolean(record && (record.ready === true || (record.ready === undefined && id(record.userId) !== null)));
 }
 
 export interface ProbeIsolationBinding {
@@ -210,7 +215,7 @@ export class ProbeIsolationService {
     if (existingKeyId !== null) {
       if (id(existingKey?.group_id) !== groupId) await userClient.mutate("PUT", `/keys/${existingKeyId}`, { group_id: groupId }, undefined, this.remainingTimeout(deadline));
       if (existingPlaintext || stored?.apiKey) return {
-        record: { accountId, groupId, userId, email, password, apiKey: existingPlaintext ?? storedApiKey },
+        record: { accountId, groupId, userId, email, password, apiKey: existingPlaintext ?? storedApiKey, ready: false },
         keyCreated: false,
       };
     }
@@ -222,7 +227,7 @@ export class ProbeIsolationService {
     }, undefined, this.remainingTimeout(deadline));
     const returnedKey = typeof created.key === "string" ? created.key : apiKey;
     return {
-      record: { accountId, groupId, userId, email, password, apiKey: returnedKey },
+      record: { accountId, groupId, userId, email, password, apiKey: returnedKey, ready: false },
       keyCreated: true,
     };
   }
@@ -248,11 +253,19 @@ export class ProbeIsolationService {
 
   private async ensureRecord(accountId: number, file: ProbeKeyFile, deadline?: number): Promise<ProbeIsolationRecordResult> {
     let existing = file.records[String(accountId)];
+    if (readyRecord(existing)) {
+      return { binding: { accountId, groupId: existing.groupId, keyCreated: false }, record: existing };
+    }
     let groupId: number;
-    try {
-      groupId = await this.findOrCreateGroup(accountId, deadline);
-    } catch (error) {
-      throw new Error(`探活隔离分组阶段失败：${errorMessage(error)}`);
+    const storedGroupId = id(existing?.groupId);
+    if (storedGroupId !== null) {
+      groupId = storedGroupId;
+    } else {
+      try {
+        groupId = await this.findOrCreateGroup(accountId, deadline);
+      } catch (error) {
+        throw new Error(`探活隔离分组阶段失败：${errorMessage(error)}`);
+      }
     }
     if (!existing) {
       existing = {
@@ -262,6 +275,7 @@ export class ProbeIsolationService {
         email: `apistate-probe-${accountId}@sub2api.platform-infra.local`,
         password: generatedSecret("ApistateProbe-"),
         apiKey: generatedSecret("sk-apistate-probe-"),
+        ready: false,
       };
       file.records[String(accountId)] = existing;
       try {
@@ -271,23 +285,34 @@ export class ProbeIsolationService {
       }
     }
     let key: { record: ProbeKeyRecord; keyCreated: boolean };
-    try {
-      key = await this.ensureUserAndKey(accountId, groupId, existing, deadline);
-    } catch (error) {
-      throw new Error(`探活隔离专用凭据阶段失败：${errorMessage(error)}`);
+    if (id(existing.userId) !== null) {
+      key = { record: { ...existing, groupId, ready: false }, keyCreated: false };
+    } else {
+      try {
+        key = await this.ensureUserAndKey(accountId, groupId, existing, deadline);
+      } catch (error) {
+        throw new Error(`探活隔离专用凭据阶段失败：${errorMessage(error)}`);
+      }
+      file.records[String(accountId)] = key.record;
+      try {
+        this.writeFile(file);
+      } catch (error) {
+        throw new Error(`探活隔离 Secret 持久化阶段失败：${errorMessage(error)}`);
+      }
     }
     try {
       await this.ensureAccountBinding(accountId, groupId, deadline);
     } catch (error) {
       throw new Error(`探活隔离账号绑定阶段失败：${errorMessage(error)}`);
     }
-    file.records[String(accountId)] = key.record;
+    const completed = { ...key.record, ready: true };
+    file.records[String(accountId)] = completed;
     try {
       this.writeFile(file);
     } catch (error) {
       throw new Error(`探活隔离 Secret 持久化阶段失败：${errorMessage(error)}`);
     }
-    return { binding: { accountId, groupId, keyCreated: key.keyCreated }, record: key.record };
+    return { binding: { accountId, groupId, keyCreated: key.keyCreated }, record: completed };
   }
 
   async ensure(accountId: number): Promise<ProbeIsolationBinding> {
@@ -298,7 +323,7 @@ export class ProbeIsolationService {
 
   get(accountId: number): ProbeIsolationBinding | null {
     const record = this.readFile().records[String(accountId)];
-    return record && id(record.userId) !== null
+    return readyRecord(record)
       ? { accountId, groupId: record.groupId, keyCreated: false }
       : null;
   }

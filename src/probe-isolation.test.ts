@@ -221,3 +221,20 @@ test("probe isolation reuses the persisted key when the API masks existing key p
   expect(await service.ensure(42)).toMatchObject({ accountId: 42, groupId: 51, keyCreated: false });
   expect(state.keyCreates).toHaveLength(1);
 });
+
+test("probe isolation resumes at account binding after credentials were persisted", async () => {
+  const { rootDirectory, state, service } = fixture();
+  const fake = service as unknown as { admin: { getAccount: () => Promise<Row> } };
+  const getAccount = fake.admin.getAccount.bind(fake.admin);
+  fake.admin.getAccount = async () => { throw new DOMException("The operation timed out.", "TimeoutError"); };
+
+  await expect(service.ensure(42)).rejects.toThrow("探活隔离账号绑定阶段失败");
+  const secretPath = join(rootDirectory, ".state/idle-probe/probe-keys.json");
+  const partial = JSON.parse(readFileSync(secretPath, "utf8")) as { records: Record<string, Row> };
+  expect(partial.records["42"]).toMatchObject({ userId: 61, ready: false });
+  expect(service.get(42)).toBeNull();
+
+  fake.admin.getAccount = getAccount;
+  expect(await service.ensure(42)).toMatchObject({ accountId: 42, groupId: 51, keyCreated: false });
+  expect(state.keyCreates).toHaveLength(1);
+});
