@@ -12,7 +12,7 @@ const config = {
         enabled: true,
         gatewayBaseUrl: "https://api.example.com/v1",
         groupNamePrefix: "apistate-probe-",
-        groupRateMultiplier: 0,
+        groupRateMultiplier: 0.0001,
         userBalance: 0.01,
         secretFile: ".state/idle-probe/probe-keys.json",
       },

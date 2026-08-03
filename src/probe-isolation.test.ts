@@ -93,7 +93,7 @@ function fixture() {
           enabled: true,
           gatewayBaseUrl: "https://api.example.com/v1",
           groupNamePrefix: "apistate-probe-",
-          groupRateMultiplier: 0,
+          groupRateMultiplier: 0.0001,
           userBalance: 0.01,
           secretFile: ".state/idle-probe/probe-keys.json",
         },
@@ -119,7 +119,7 @@ test("probe isolation creates one private internal-ID group and redacts every se
   expect(state.groupCreates).toEqual([expect.objectContaining({
     name: "apistate-probe-42",
     is_exclusive: true,
-    rate_multiplier: 0,
+    rate_multiplier: 0.0001,
   })]);
   expect(String(state.groupCreates[0]?.name)).not.toContain("hwpod.com");
   expect(state.keyCreates).toEqual([expect.objectContaining({ name: "apistate-probe", group_id: 51 })]);

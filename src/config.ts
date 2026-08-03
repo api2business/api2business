@@ -727,7 +727,7 @@ export function loadConfig(path: string): AppConfig {
             enabled: booleanValue(value, "enabled", "sub2api.idleProbe.isolation"),
             gatewayBaseUrl,
             groupNamePrefix,
-            groupRateMultiplier: numberValue(value, "groupRateMultiplier", "sub2api.idleProbe.isolation", 0, 1),
+            groupRateMultiplier: numberValue(value, "groupRateMultiplier", "sub2api.idleProbe.isolation", 0.0001, 1),
             userBalance: numberValue(value, "userBalance", "sub2api.idleProbe.isolation", 0.000001, 1),
             secretFile,
           };
