@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AppConfig } from "./config";
-import { IdleAccountProbeService, idleProbeCandidatesSql, idleProbeRollingUsageSql } from "./idle-account-probe";
+import { IdleAccountProbeService, idleProbeCandidatesSql, idleProbeRequestJitterMs, idleProbeRollingUsageSql } from "./idle-account-probe";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 const config = {
@@ -8,6 +8,7 @@ const config = {
     idleProbe: {
       enabled: true, intervalSeconds: 60, idleSeconds: 60, model: "gpt-5.5",
       candidateLimit: 20, concurrency: 4, accountTimeoutMs: 15000, roundTimeoutSeconds: 50,
+      requestJitterMinMs: 0, requestJitterMaxMs: 0,
       provisionCandidateLimit: 1, provisionTimeoutSeconds: 120,
       isolation: {
         enabled: true,
@@ -55,6 +56,11 @@ test("idle probe usage follows monitor-user owned API keys", () => {
   expect(idleProbeRollingUsageSql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
   expect(idleProbeRollingUsageSql).toContain("JOIN probe_keys p ON p.id = u.api_key_id");
   expect(idleProbeRollingUsageSql).toContain("JOIN probe_keys p ON p.id = o.api_key_id");
+});
+
+test("idle probe request jitter includes both configured boundaries", () => {
+  expect(idleProbeRequestJitterMs(1000, 3000, () => 0)).toBe(1000);
+  expect(idleProbeRequestJitterMs(1000, 3000, () => 0.999999)).toBe(3000);
 });
 
 test("idle probe skips a concurrent round and never retries inside one account attempt", async () => {

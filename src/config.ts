@@ -131,6 +131,8 @@ export interface AppConfig {
       candidateLimit: number;
       concurrency: number;
       accountTimeoutMs: number;
+      requestJitterMinMs: number;
+      requestJitterMaxMs: number;
       roundTimeoutSeconds: number;
       provisionCandidateLimit: number;
       provisionTimeoutSeconds: number;
@@ -702,7 +704,13 @@ export function loadConfig(path: string): AppConfig {
         decayStep: numberValue(scoreSamplePolicy, "decayStep", "sub2api.scoreSamplePolicy", 0.000001, 1),
         minimumWeight: numberValue(scoreSamplePolicy, "minimumWeight", "sub2api.scoreSamplePolicy", 0.000001, 1),
       },
-      idleProbe: {
+      idleProbe: (() => {
+        const requestJitterMinMs = integerValue(idleProbe, "requestJitterMinMs", "sub2api.idleProbe", 0, 60000);
+        const requestJitterMaxMs = integerValue(idleProbe, "requestJitterMaxMs", "sub2api.idleProbe", 0, 60000);
+        if (requestJitterMaxMs < requestJitterMinMs) {
+          throw new Error("sub2api.idleProbe.requestJitterMaxMs must be greater than or equal to requestJitterMinMs");
+        }
+        return {
         enabled: booleanValue(idleProbe, "enabled", "sub2api.idleProbe"),
         intervalSeconds: integerValue(idleProbe, "intervalSeconds", "sub2api.idleProbe", 10, 3600),
         idleSeconds: integerValue(idleProbe, "idleSeconds", "sub2api.idleProbe", 10, 86400),
@@ -710,6 +718,8 @@ export function loadConfig(path: string): AppConfig {
         candidateLimit: integerValue(idleProbe, "candidateLimit", "sub2api.idleProbe", 1, 100),
         concurrency: integerValue(idleProbe, "concurrency", "sub2api.idleProbe", 1, 20),
         accountTimeoutMs: integerValue(idleProbe, "accountTimeoutMs", "sub2api.idleProbe", 1000, 120000),
+        requestJitterMinMs,
+        requestJitterMaxMs,
         roundTimeoutSeconds: integerValue(idleProbe, "roundTimeoutSeconds", "sub2api.idleProbe", 5, 300),
         provisionCandidateLimit: integerValue(idleProbe, "provisionCandidateLimit", "sub2api.idleProbe", 1, 20),
         provisionTimeoutSeconds: integerValue(idleProbe, "provisionTimeoutSeconds", "sub2api.idleProbe", 10, 300),
@@ -737,7 +747,8 @@ export function loadConfig(path: string): AppConfig {
             secretFile,
           };
         })(),
-      },
+        };
+      })(),
       priorityPlan: readPriorityPlanPolicy(sub2api.priorityPlan, "sub2api.priorityPlan"),
       grokPriorityPlan: readPriorityPlanPolicy(sub2api.grokPriorityPlan, "sub2api.grokPriorityPlan"),
       adminCredentials: {

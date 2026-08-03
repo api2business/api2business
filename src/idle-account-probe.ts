@@ -38,6 +38,10 @@ ORDER BY COALESCE((
 LIMIT $4
 `;
 
+export function idleProbeRequestJitterMs(minimumMs: number, maximumMs: number, random = Math.random): number {
+  return minimumMs + Math.floor(random() * (maximumMs - minimumMs + 1));
+}
+
 export interface IdleProbeCandidate {
   accountId: number;
   accountName: string;
@@ -242,11 +246,14 @@ export class IdleAccountProbeService {
         }
         const settled = await Promise.all(candidates.map(async (candidate) => {
             try {
+              const jitterMs = idleProbeRequestJitterMs(policy.requestJitterMinMs, policy.requestJitterMaxMs);
+              await Bun.sleep(jitterMs);
               const response = await this.isolation!.probe(candidate.accountId, policy.model, policy.accountTimeoutMs);
               return {
                 accountId: candidate.accountId,
                 accountName: candidate.accountName,
                 recoveredBeforeProbe: true,
+                jitterMs,
                 previousRuntimeState: {
                   status: candidate.status,
                   schedulable: candidate.schedulable,
@@ -287,6 +294,7 @@ export class IdleAccountProbeService {
         ready,
         unreadyAccountIds: [...unreadyAccountIds].sort((left, right) => left - right),
         probeConcurrency: "all-ready-candidates",
+        requestJitterMs: { minimum: policy.requestJitterMinMs, maximum: policy.requestJitterMaxMs },
         durationMs: Date.now() - startedAt,
         results,
         evidence: "isolated-user-api-key-responses-request",
