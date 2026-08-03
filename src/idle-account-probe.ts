@@ -52,7 +52,8 @@ export const idleProbeRollingUsageSql = `
 WITH probe_users AS (
   SELECT id
   FROM users
-  WHERE email LIKE 'apistate-probe-%@sub2api.platform-infra.local'
+  WHERE (email = 'monitor-user@sub2api.platform-infra.local'
+      OR email LIKE 'apistate-probe-%@sub2api.platform-infra.local')
     AND deleted_at IS NULL
 ), usage AS (
   SELECT COUNT(*)::int AS success_requests,

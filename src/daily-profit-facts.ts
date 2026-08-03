@@ -66,6 +66,8 @@ historical_users AS (
   CROSS JOIN bounds b
   LEFT JOIN event_totals e ON e.user_id = u.id
   WHERE LOWER(COALESCE(u.role, '')) <> 'admin'
+    AND u.email <> 'monitor-user@sub2api.platform-infra.local'
+    AND u.email NOT LIKE 'apistate-probe-%@sub2api.platform-infra.local'
 ),
 liability AS (
   SELECT

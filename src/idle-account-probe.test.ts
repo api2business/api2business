@@ -14,7 +14,7 @@ const config = {
         gatewayBaseUrl: "https://api.example.com/v1",
         groupNamePrefix: "apistate-probe-",
         groupRateMultiplier: 1,
-        userBalance: 0.01,
+        userBalance: 100,
         secretFile: ".state/idle-probe/probe-keys.json",
       },
     },

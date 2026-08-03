@@ -18,10 +18,22 @@ interface ProbeKeyRecord {
   policyVersion?: number;
 }
 
+interface MonitorUserRecord {
+  userId: number;
+  email: string;
+  password: string;
+  funded: boolean;
+}
+
 interface ProbeKeyFile {
   version: 1;
+  monitor?: MonitorUserRecord;
   records: Record<string, ProbeKeyRecord>;
 }
+
+const MONITOR_EMAIL = "monitor-user@sub2api.platform-infra.local";
+const MONITOR_USERNAME = "monitor-user";
+const POLICY_VERSION = 3;
 
 function row(value: unknown): Row {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -71,7 +83,7 @@ function accountIds(rows: Row[]): number[] {
 }
 
 function readyRecord(record: ProbeKeyRecord | undefined): boolean {
-  return Boolean(record && record.ready === true && record.policyVersion === 2);
+  return Boolean(record && record.ready === true && record.policyVersion === POLICY_VERSION && record.email === MONITOR_EMAIL);
 }
 
 export interface ProbeIsolationBinding {
@@ -109,7 +121,7 @@ export class ProbeIsolationService {
     if (parsed.version !== 1 || !parsed.records || typeof parsed.records !== "object" || Array.isArray(parsed.records)) {
       throw new Error("探活隔离 Secret 文件格式无效");
     }
-    return { version: 1, records: parsed.records as Record<string, ProbeKeyRecord> };
+    return { version: 1, monitor: parsed.monitor, records: parsed.records as Record<string, ProbeKeyRecord> };
   }
 
   private writeFile(value: ProbeKeyFile): void {
@@ -177,62 +189,74 @@ export class ProbeIsolationService {
     return groupId;
   }
 
-  private async ensureUserAndKey(accountId: number, groupId: number, stored: ProbeKeyRecord | undefined, deadline?: number): Promise<{ record: ProbeKeyRecord; keyCreated: boolean }> {
-    const email = stored?.email ?? `apistate-probe-${accountId}@sub2api.platform-infra.local`;
-    const password = stored?.password ?? generatedSecret("ApistateProbe-");
-    const storedApiKey = stored?.apiKey ?? generatedSecret("sk-apistate-probe-");
-    const listed = await this.admin.request<Paginated<Row>>(`/admin/users?search=${encodeURIComponent(email)}&page=1&page_size=100`, {}, true, this.remainingTimeout(deadline));
-    let user = pageItems(listed).find((item) => String(item.email ?? "") === email);
+  private async ensureMonitorUser(file: ProbeKeyFile, groupId: number, deadline?: number): Promise<MonitorUserRecord> {
+    const password = file.monitor?.password ?? generatedSecret("ApistateMonitor-");
+    const listed = await this.admin.request<Paginated<Row>>(`/admin/users?search=${encodeURIComponent(MONITOR_EMAIL)}&page=1&page_size=100`, {}, true, this.remainingTimeout(deadline));
+    let user = pageItems(listed).find((item) => String(item.email ?? "") === MONITOR_EMAIL);
     let userId = id(user?.id);
+    let funded = file.monitor?.funded === true;
     if (userId === null) {
       user = await this.admin.mutate<Row>("POST", "/admin/users", {
-        email,
+        email: MONITOR_EMAIL,
         password,
-        username: `apistate-probe-${accountId}`,
-        notes: "ApiState 内部探活主体",
+        username: MONITOR_USERNAME,
+        notes: "ApiState 内部探活共享主体",
         role: "user",
         balance: this.config.sub2api.idleProbe.isolation.userBalance,
-        concurrency: 1,
+        concurrency: this.config.sub2api.idleProbe.concurrency,
         rpm_limit: 0,
         allowed_groups: [groupId],
       }, undefined, this.remainingTimeout(deadline));
       userId = id(user.id);
+      funded = true;
     } else {
       const allowedGroups = [...new Set([...ids(user?.allowed_groups), groupId])];
-      const balance = Number(user?.balance);
       await this.admin.mutate("PUT", `/admin/users/${userId}`, {
         password,
         allowed_groups: allowedGroups,
-        concurrency: 1,
+        concurrency: this.config.sub2api.idleProbe.concurrency,
         rpm_limit: 0,
-        ...(Number.isFinite(balance) && balance > 0 ? {} : { balance: this.config.sub2api.idleProbe.isolation.userBalance }),
+        ...(!funded ? { balance: this.config.sub2api.idleProbe.isolation.userBalance } : {}),
       }, undefined, this.remainingTimeout(deadline));
+      funded = true;
     }
-    if (userId === null) throw new Error("创建探活专用用户后未返回稳定 ID");
+    if (userId === null) throw new Error("创建 monitor-user 后未返回稳定 ID");
+    const monitor = { userId, email: MONITOR_EMAIL, password, funded };
+    file.monitor = monitor;
+    this.writeFile(file);
+    return monitor;
+  }
+
+  private async ensureUserAndKey(accountId: number, groupId: number, stored: ProbeKeyRecord | undefined, file: ProbeKeyFile, deadline?: number): Promise<{ record: ProbeKeyRecord; keyCreated: boolean }> {
+    const { email, password, userId } = await this.ensureMonitorUser(file, groupId, deadline);
+    const keyName = `apistate-probe-${accountId}`;
+    const storedApiKey = stored?.policyVersion === POLICY_VERSION && stored.email === MONITOR_EMAIL
+      ? stored.apiKey
+      : generatedSecret("sk-apistate-probe-");
     const verifiedUser = row(await this.admin.request<Row>(`/admin/users/${userId}`, {}, true, this.remainingTimeout(deadline)));
-    if (!ids(verifiedUser.allowed_groups).includes(groupId)) throw new Error(`探活专用用户 ${userId} 未绑定私有分组 ${groupId}`);
+    if (!ids(verifiedUser.allowed_groups).includes(groupId)) throw new Error(`monitor-user ${userId} 未绑定私有分组 ${groupId}`);
 
     const userClient = this.admin.fork({ email, password });
-    const keyList = await userClient.request<Paginated<Row>>("/keys?page=1&page_size=100&search=apistate-probe", {}, true, this.remainingTimeout(deadline));
-    const existingKey = pageItems(keyList).find((item) => String(item.name ?? "") === "apistate-probe");
+    const keyList = await userClient.request<Paginated<Row>>(`/keys?page=1&page_size=100&search=${encodeURIComponent(keyName)}`, {}, true, this.remainingTimeout(deadline));
+    const existingKey = pageItems(keyList).find((item) => String(item.name ?? "") === keyName);
     const existingKeyId = id(existingKey?.id);
     const existingPlaintext = typeof existingKey?.key === "string" ? existingKey.key : null;
     if (existingKeyId !== null) {
       if (id(existingKey?.group_id) !== groupId) await userClient.mutate("PUT", `/keys/${existingKeyId}`, { group_id: groupId }, undefined, this.remainingTimeout(deadline));
-      if (existingPlaintext || stored?.apiKey) return {
-        record: { accountId, groupId, userId, email, password, apiKey: existingPlaintext ?? storedApiKey, ready: false },
+      if (existingPlaintext || storedApiKey) return {
+        record: { accountId, groupId, userId, email, password, apiKey: existingPlaintext ?? storedApiKey, ready: false, policyVersion: POLICY_VERSION },
         keyCreated: false,
       };
     }
     const apiKey = existingPlaintext ?? storedApiKey;
     const created = await userClient.mutate<Row>("POST", "/keys", {
-      name: "apistate-probe",
+      name: keyName,
       group_id: groupId,
       custom_key: apiKey,
     }, undefined, this.remainingTimeout(deadline));
     const returnedKey = typeof created.key === "string" ? created.key : apiKey;
     return {
-      record: { accountId, groupId, userId, email, password, apiKey: returnedKey, ready: false },
+      record: { accountId, groupId, userId, email, password, apiKey: returnedKey, ready: false, policyVersion: POLICY_VERSION },
       keyCreated: true,
     };
   }
@@ -282,27 +306,23 @@ export class ProbeIsolationService {
       }
     }
     let key: { record: ProbeKeyRecord; keyCreated: boolean };
-    if (id(existing.userId) !== null) {
-      key = { record: { ...existing, groupId, ready: false }, keyCreated: false };
-    } else {
-      try {
-        key = await this.ensureUserAndKey(accountId, groupId, existing, this.stageDeadline(deadline));
-      } catch (error) {
-        throw new Error(`探活隔离专用凭据阶段失败：${errorMessage(error)}`);
-      }
-      file.records[String(accountId)] = key.record;
-      try {
-        this.writeFile(file);
-      } catch (error) {
-        throw new Error(`探活隔离 Secret 持久化阶段失败：${errorMessage(error)}`);
-      }
+    try {
+      key = await this.ensureUserAndKey(accountId, groupId, existing, file, this.stageDeadline(deadline));
+    } catch (error) {
+      throw new Error(`探活隔离专用凭据阶段失败：${errorMessage(error)}`);
+    }
+    file.records[String(accountId)] = key.record;
+    try {
+      this.writeFile(file);
+    } catch (error) {
+      throw new Error(`探活隔离 Secret 持久化阶段失败：${errorMessage(error)}`);
     }
     try {
       await this.ensureAccountBinding(accountId, groupId, this.stageDeadline(deadline));
     } catch (error) {
       throw new Error(`探活隔离账号绑定阶段失败：${errorMessage(error)}`);
     }
-    const completed = { ...key.record, ready: true, policyVersion: 2 };
+    const completed = { ...key.record, ready: true, policyVersion: POLICY_VERSION };
     file.records[String(accountId)] = completed;
     try {
       this.writeFile(file);

@@ -103,7 +103,7 @@ function fixture() {
           gatewayBaseUrl: "https://api.example.com/v1",
           groupNamePrefix: "apistate-probe-",
           groupRateMultiplier: 1,
-          userBalance: 0.01,
+          userBalance: 100,
           secretFile: ".state/idle-probe/probe-keys.json",
         },
       },
@@ -134,7 +134,12 @@ test("probe isolation creates one private internal-ID group and redacts every se
     rate_multiplier: 1,
   })]);
   expect(String(state.groupCreates[0]?.name)).not.toContain("hwpod.com");
-  expect(state.keyCreates).toEqual([expect.objectContaining({ name: "apistate-probe", group_id: 51 })]);
+  expect(state.keyCreates).toEqual([expect.objectContaining({ name: "apistate-probe-42", group_id: 51 })]);
+  expect(state.users).toEqual([expect.objectContaining({
+    email: "monitor-user@sub2api.platform-infra.local",
+    username: "monitor-user",
+    balance: 100,
+  })]);
   expect(state.accountUpdates).toEqual([expect.objectContaining({ group_ids: [2, 3, 51] })]);
   expect(state.requestTimeouts.length).toBeGreaterThan(0);
   expect(state.requestTimeouts.every(({ timeoutMs }) => timeoutMs > 100000 && timeoutMs <= 120000)).toBe(true);
@@ -227,6 +232,27 @@ test("probe reports a gateway timeout without claiming an ordinary log", async (
       ordinaryLogRecorded: false,
       errorMarker: "request-timeout",
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("an exhausted monitor user is not automatically replenished", async () => {
+  const { state, service } = fixture();
+  await service.ensure(42);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("insufficient account balance", { status: 403 })) as unknown as typeof fetch;
+  try {
+    expect(await service.probe(42, "gpt-5.5", 1000)).toMatchObject({
+      classification: "dead",
+      errorMarker: "insufficient",
+      ordinaryLogRecorded: true,
+    });
+    expect(service.get(42)).toMatchObject({ accountId: 42, groupId: 51 });
+    state.users[0]!.balance = 0;
+    await service.ensure(42);
+    expect(state.users[0]?.balance).toBe(0);
+    expect(service.get(42)).toMatchObject({ accountId: 42, groupId: 51 });
   } finally {
     globalThis.fetch = originalFetch;
   }
