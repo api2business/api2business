@@ -6,6 +6,7 @@ import type { AccountLifecycleService, LifecycleJobPatch, LifecycleRequest } fro
 import type { AccountImportService, ImportJobPatch, AccountImportRequest } from "./account-import-service";
 import { UpstreamManagementError, type UpstreamManagementService } from "./upstream-management";
 import type { AppCommand, OperationRequest } from "./contracts";
+import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { TemporalSubmissionError } from "./temporal-client";
@@ -470,6 +471,19 @@ export function createHandler(
       }
       if (request.method === "POST" && url.pathname === "/api/operations/priority-plans") {
         const input = await body(request);
+        if (input.priorities !== undefined) {
+          let priorities: Record<string, number>;
+          try {
+            priorities = normalizeManualPriorityAssignments(input.priorities);
+          } catch (error) {
+            return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+          }
+          return json(await dispatcher.submit({
+            kind: "priority.plan.manual-create",
+            priorities,
+            operator: config.webAuth.username,
+          }), 202);
+        }
         const limit = Number(input.recentCallLimit ?? config.monitor.recentCallLimit);
         if (!config.monitor.recentCallOptions.includes(limit)) return json({ ok: false, error: "评分样本档位无效" }, 400);
         return json(await dispatcher.submit({

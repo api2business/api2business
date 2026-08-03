@@ -92,6 +92,9 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
   if (command.kind === "priority.plan.create") {
     return await operations.generatePriorityPlan(command.recentCallLimit, command.operator);
   }
+  if (command.kind === "priority.plan.manual-create") {
+    return await operations.createManualPriorityPlan(command.priorities, command.operator);
+  }
   if (command.kind === "priority.plan.confirm") {
     return await operations.confirmPriorityPlan(command.planId, command.operator);
   }

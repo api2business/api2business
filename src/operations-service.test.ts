@@ -167,6 +167,123 @@ test("slow automatic plans persist an empty write batch and skip only that cycle
   expect(fixture.created[0]!.priorities).toEqual({});
 });
 
+test("manual priority plans read once and persist only changed non-OAuth accounts", async () => {
+  const created: Array<Record<string, unknown>> = [];
+  const audits: Array<Record<string, unknown>> = [];
+  const queries: Array<Record<string, unknown>> = [];
+  const store = {
+    async withPriorityOptimizationQueue<T>(operation: (lease: Record<string, unknown>) => Promise<T>) {
+      return await operation({
+        queueName: "priority-optimization-global",
+        queuedAt: "2026-08-03T20:00:00.000Z",
+        acquiredAt: "2026-08-03T20:00:00.005Z",
+        waitMs: 5,
+      });
+    },
+    async createPlan(input: Record<string, unknown>) {
+      created.push(input);
+      return { id: "manual-plan-1", expiresAt: "2026-08-03T20:15:00.000Z" };
+    },
+    async audit(_action: string, _status: string, _operator: string, input: unknown, result: unknown) {
+      audits.push({ input, result });
+    },
+  } as unknown as OperationsStore;
+  const reads = {
+    async query(input: Record<string, unknown>) {
+      queries.push(input);
+      return {
+        rows: [
+          { id: "51", account_name: "alpha plus", priority: 300, account_type: "apikey", platform: "openai" },
+          { id: "52", account_name: "alpha pro", priority: 300, account_type: "apikey", platform: "openai" },
+          { id: "64", account_name: "beta plus", priority: 300, account_type: "apikey", platform: "openai" },
+        ],
+        queueDurationMs: 2,
+        queryDurationMs: 3,
+        totalDurationMs: 5,
+        queryStartedAt: "2026-08-03T20:00:00.005Z",
+        queryCompletedAt: "2026-08-03T20:00:00.010Z",
+        deduplicated: false,
+        cached: false,
+      };
+    },
+    status() { return {}; },
+  } as unknown as Sub2ApiReadClient;
+  const config = {
+    monitor: { target: "NC01-DOCKER" },
+    operations: {
+      planTtlMinutes: 15,
+      priorityWrite: { batchSize: 3 },
+    },
+  } as AppConfig;
+  const service = new OperationsService(config, store, reads);
+
+  const result = await service.createManualPriorityPlan({ "51": 299, "52": 299, "64": 300 }, "tester");
+
+  expect(queries).toHaveLength(1);
+  expect(queries[0]).toMatchObject({
+    kind: "priorities.manual-plan",
+    parameters: ["51,52,64"],
+    priority: "manual",
+    cacheMode: "bypass-cache",
+  });
+  expect(result).toMatchObject({
+    planId: "manual-plan-1",
+    source: "operator-specified",
+    requestedCount: 3,
+    changedCount: 2,
+    priorities: { "51": 299, "52": 299 },
+    changes: [
+      { accountId: 51, beforePriority: 300, desiredPriority: 299, change: "update", profile: "codex" },
+      { accountId: 52, beforePriority: 300, desiredPriority: 299, change: "update", profile: "codex" },
+      { accountId: 64, beforePriority: 300, desiredPriority: 300, change: "unchanged", profile: "codex" },
+    ],
+    apply: { batchSize: 3, verification: "native-api-read-broker" },
+  });
+  expect(created[0]).toMatchObject({
+    recentCallLimit: 0,
+    priorities: { "51": 299, "52": 299 },
+    triggerType: "manual",
+  });
+  expect(audits).toHaveLength(1);
+});
+
+test("manual priority plans reject OAuth and missing accounts before persistence", async () => {
+  let createCount = 0;
+  const store = {
+    async withPriorityOptimizationQueue<T>(operation: (lease: Record<string, unknown>) => Promise<T>) {
+      return await operation({ queueName: "priority-optimization-global", waitMs: 0 });
+    },
+    async createPlan() { createCount += 1; },
+  } as unknown as OperationsStore;
+  const config = {
+    monitor: { target: "NC01-DOCKER" },
+    operations: { planTtlMinutes: 15, priorityWrite: { batchSize: 3 } },
+  } as AppConfig;
+  let rows: Array<Record<string, unknown>> = [];
+  const reads = {
+    async query() {
+      return {
+        rows,
+        queueDurationMs: 0,
+        queryDurationMs: 1,
+        totalDurationMs: 1,
+        queryStartedAt: "2026-08-03T20:00:00.000Z",
+        queryCompletedAt: "2026-08-03T20:00:00.001Z",
+        deduplicated: false,
+        cached: false,
+      };
+    },
+    status() { return {}; },
+  } as unknown as Sub2ApiReadClient;
+  const service = new OperationsService(config, store, reads);
+
+  rows = [{ id: "51", priority: 300, account_type: "oauth", platform: "openai" }];
+  await expect(service.createManualPriorityPlan({ "51": 299 }, "tester")).rejects.toThrow("rejected OAuth accounts: 51");
+  rows = [{ id: "51", priority: 300, account_type: "apikey", platform: "openai" }];
+  await expect(service.createManualPriorityPlan({ "51": 299, "52": 299 }, "tester")).rejects.toThrow("accounts do not exist: 52");
+  expect(createCount).toBe(0);
+});
+
 test("confirming nine changes writes three sequential rounds of three", async () => {
   const priorities = Object.fromEntries(Array.from({ length: 9 }, (_, index) => [String(index + 1), 100 + index]));
   const appliedBatches: Array<Record<string, number>> = [];

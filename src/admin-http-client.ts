@@ -237,6 +237,9 @@ export class AdminHttpClient {
   createPriorityPlan(recentCallLimit: number): Promise<Record<string, unknown>> {
     return this.request("/api/operations/priority-plans", { method: "POST", body: JSON.stringify({ recentCallLimit }) }, 60000);
   }
+  createManualPriorityPlan(priorities: Record<string, number>): Promise<Record<string, unknown>> {
+    return this.request("/api/operations/priority-plans", { method: "POST", body: JSON.stringify({ priorities }) }, 60000);
+  }
   confirmPriorityPlan(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/operations/priority-plans/${encodeURIComponent(id)}/confirm`, { method: "POST", body: "{}" }, 240000);
   }

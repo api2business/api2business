@@ -64,11 +64,13 @@ import {
 import { collectPoolQualitySample, poolQualityHistory } from "./pool-quality-monitor";
 import { IdleAccountProbeService } from "./idle-account-probe";
 import type { ProbeIsolationService } from "./probe-isolation";
+import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
 
 export { normalizeUpstreamWallet, upstreamBalanceRateByWallet } from "./upstream-valuation";
 
 const prioritiesByIdSql = `
-SELECT id::text AS id, priority::int AS priority, type AS account_type
+SELECT id::text AS id, name AS account_name, priority::int AS priority,
+  type AS account_type, platform
 FROM accounts
 WHERE id = ANY(string_to_array($1, ',')::bigint[])
 `;
@@ -516,6 +518,98 @@ export class OperationsService {
         executionStartedAt,
         queue,
       );
+    });
+  }
+
+  async createManualPriorityPlan(
+    requestedPriorities: Record<string, number>,
+    operator: string,
+  ): Promise<Record<string, unknown>> {
+    const requested = normalizeManualPriorityAssignments(requestedPriorities);
+    return await this.store.withPriorityOptimizationQueue(async (queue) => {
+      const accountIds = Object.keys(requested);
+      const read = await this.reads.query<Record<string, unknown>>({
+        key: JSON.stringify(["priorities.manual-plan", accountIds]),
+        kind: "priorities.manual-plan",
+        sql: prioritiesByIdSql,
+        parameters: [accountIds.join(",")],
+        priority: "manual",
+        cacheMode: "bypass-cache",
+      });
+      const rowsById = new Map(read.rows.map((row) => [String(row.id), row]));
+      const missingIds = accountIds.filter((accountId) => !rowsById.has(accountId));
+      if (missingIds.length > 0) throw new Error(`manual priority plan accounts do not exist: ${missingIds.join(",")}`);
+      const oauthIds = accountIds.filter((accountId) =>
+        String(rowsById.get(accountId)?.account_type ?? "").trim().toLowerCase() === "oauth"
+      );
+      if (oauthIds.length > 0) throw new Error(`manual priority plan rejected OAuth accounts: ${oauthIds.join(",")}`);
+
+      const changes = accountIds.map((accountId) => {
+        const row = rowsById.get(accountId)!;
+        const beforePriority = Number(row.priority);
+        const desiredPriority = requested[accountId]!;
+        return {
+          accountId: Number(accountId),
+          accountName: String(row.account_name ?? accountId),
+          profile: String(row.platform ?? "").trim().toLowerCase() === "grok" ? "grok" : "codex",
+          beforePriority,
+          desiredPriority,
+          change: beforePriority === desiredPriority ? "unchanged" : "update",
+        };
+      });
+      const priorities = Object.fromEntries(changes
+        .filter((change) => change.change === "update")
+        .map((change) => [String(change.accountId), change.desiredPriority]));
+      const profileNames = [...new Set(changes.map((change) => change.profile))];
+      const profiles = Object.fromEntries(profileNames.map((profile) => {
+        const profileChanges = changes.filter((change) => change.profile === profile);
+        return [profile, {
+          requestedCount: profileChanges.length,
+          changedCount: profileChanges.filter((change) => change.change === "update").length,
+        }];
+      }));
+      const result = {
+        ok: true,
+        action: "priority-plan-manual-create",
+        source: "operator-specified",
+        mutation: false,
+        recentCallLimit: 0,
+        eligibleCount: changes.length,
+        requestedCount: changes.length,
+        changedCount: Object.keys(priorities).length,
+        priorities,
+        changes,
+        profiles,
+        databaseQueries: 1,
+        queueDurationMs: read.queueDurationMs,
+        queryDurationMs: read.queryDurationMs,
+        totalDurationMs: read.totalDurationMs,
+        apply: {
+          through: "apistate-priority-plan-confirm",
+          target: this.config.monitor.target,
+          writeMode: "backend-api-paced",
+          batchSize: this.config.operations.priorityWrite.batchSize,
+          verification: "native-api-read-broker",
+        },
+      };
+      const plan = await this.store.createPlan({
+        operator,
+        recentCallLimit: 0,
+        ttlMinutes: this.config.operations.planTtlMinutes,
+        priorities,
+        result,
+        triggerType: "manual",
+      });
+      await this.store.audit("priority.plan.generate", "succeeded", operator, {
+        source: "operator-specified",
+        accountIds: accountIds.map(Number),
+      }, {
+        planId: plan.id,
+        changedCount: Object.keys(priorities).length,
+        queueName: queue.queueName,
+        queueWaitMs: queue.waitMs,
+      });
+      return { ...result, planId: plan.id, expiresAt: plan.expiresAt, queue };
     });
   }
 

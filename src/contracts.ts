@@ -19,6 +19,7 @@ export type AppCommand =
   | { kind: "account.lifecycle.detect"; jobId: string }
   | { kind: "account.lifecycle.settle"; jobId: string; candidateIds: number[] }
   | { kind: "priority.plan.create"; recentCallLimit: number; operator: string }
+  | { kind: "priority.plan.manual-create"; priorities: Record<string, number>; operator: string }
   | { kind: "priority.plan.confirm"; planId: string; operator: string }
   | { kind: "priority.automation.run" };
 
@@ -58,6 +59,7 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "account.lifecycle.detect"
     || command.kind === "account.lifecycle.settle"
     || command.kind === "priority.plan.create"
+    || command.kind === "priority.plan.manual-create"
     || command.kind === "priority.plan.confirm"
     || command.kind === "priority.automation.run";
 }

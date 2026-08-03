@@ -17,6 +17,7 @@ import { emitOAuthEconomics } from "./oauth-economics-output";
 import { emitDailyProfit } from "./daily-profit-output";
 import { parseAccountIdSelector } from "../../src/account-batch-economics";
 import { runBoundedProcess } from "../../src/bounded-process";
+import { parseManualPriorityAssignments } from "./priority-plan-input";
 
 type Row = Record<string, unknown>;
 
@@ -72,6 +73,7 @@ interface Parsed {
   search: string | null;
   apiKeyStdin: boolean;
   templateOnly: boolean;
+  priorities: string | null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -89,7 +91,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--priorities", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -168,6 +170,7 @@ function parseArgs(args: string[]): Parsed {
     rounds: integer("--rounds"),
     page: integer("--page"), search: value(args, "--search"), apiKeyStdin: args.includes("--api-key-stdin"),
     templateOnly: args.includes("--template-only"),
+    priorities: value(args, "--priorities"),
   };
 }
 
@@ -195,6 +198,7 @@ function help(): Record<string, unknown> {
       "workflow status --id <workflow-id>",
       "priority automation get|create|update|delete --over-api [--interval-seconds N --calls N --enabled true|false] [--confirm]",
       "priority plan create --over-api [--calls N]",
+      "priority plan manual-create --over-api --priorities ACCOUNT_ID:PRIORITY[,ACCOUNT_ID:PRIORITY...]",
       "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
       "accounts import --file <json|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 16 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
@@ -618,12 +622,16 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "priority" && action === "plan") {
     const verb = parsed.command[2];
     if (verb === "create") return await client.createPriorityPlan(parsed.calls ?? config.monitor.recentCallLimit);
+    if (verb === "manual-create") {
+      if (!parsed.priorities) throw new Error("priority plan manual-create requires --priorities");
+      return await client.createManualPriorityPlan(parseManualPriorityAssignments(parsed.priorities));
+    }
     if (verb === "confirm") {
       if (!parsed.id) throw new Error("priority plan confirm requires --id");
       return parsed.confirm ? await client.confirmPriorityPlan(parsed.id)
         : { ok: true, mutation: false, id: parsed.id, hint: "add --confirm to execute" };
     }
-    throw new Error("priority plan requires create or confirm");
+    throw new Error("priority plan requires create, manual-create, or confirm");
   }
   if (group === "priority" && parsed.command[1] === "automation") {
     const verb = parsed.command[2];
