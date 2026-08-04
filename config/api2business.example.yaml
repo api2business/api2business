@@ -21,7 +21,7 @@ monitor:
     - 5000
   target: example-runtime
   cli:
-    workDir: /workspace/unidesk
+    workDir: /integrations
     executable: /usr/local/bin/bun
     entrypoint: scripts/cli.ts
     mainServerHost: 127.0.0.1
@@ -330,7 +330,7 @@ operations:
 
 temporal:
   addressEnv: API2BUSINESS_TEMPORAL_ADDRESS
-  namespace: unidesk
+  namespace: default
   taskQueue: api2business
   scoreScheduleWorkflowId: api2business-score-refresh-schedule
   submissionTimeoutMs: 10000
@@ -353,7 +353,7 @@ runtime:
       mode: embedded
       databasePath: .state/api2business.sqlite
       scoreCachePath: .state/account-scores.json
-      monitorWorkDir: /workspace/unidesk
+      monitorWorkDir: /integrations
       temporalTaskQueue: api2business-native
     production:
       mode: http
@@ -457,7 +457,7 @@ runtime:
       secureCookies: false
       databasePath: .state/api2business.sqlite
       scoreCachePath: .state/account-scores.json
-      monitorWorkDir: /workspace/unidesk
+      monitorWorkDir: /integrations
       temporalTaskQueue: api2business-compose
       scoreScheduleWorkflowId: api2business-compose-score-refresh-schedule
       adminTokenEnv: API2BUSINESS_API_KEY
@@ -480,7 +480,7 @@ runtime:
       secureCookies: false
       databasePath: .state/api2business.sqlite
       scoreCachePath: .state/account-scores.json
-      monitorWorkDir: /workspace/unidesk
+      monitorWorkDir: /integrations
       temporalTaskQueue: api2business-native
       scoreScheduleWorkflowId: api2business-native-score-refresh-schedule
       adminTokenEnv: API2BUSINESS_API_KEY

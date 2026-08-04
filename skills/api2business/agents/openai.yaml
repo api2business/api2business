@@ -1,0 +1,4 @@
+interface:
+  display_name: "Api2Business"
+  short_description: "部署和维护 Api2Business"
+  default_prompt: "使用 $api2business 完成 Api2Business 的部署、验证或运行维护。"

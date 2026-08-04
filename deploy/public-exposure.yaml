@@ -1,0 +1,9 @@
+version: 1
+kind: Api2BusinessPublicExposure
+
+publicEdge:
+  enabled: true
+  hostname: api2business.hwpod.com
+  upstream: 127.0.0.1:15173
+  healthPath: /health
+  expectedA: 152.53.229.148

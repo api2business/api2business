@@ -70,7 +70,7 @@ export async function collectNativeScores(client: Sub2ApiClient, eventSource: Ru
     groups: groupRows,
     accounts: accountRows,
     collection: {
-      mode: "nc01-native-api-local-aggregation",
+      mode: "native-api-local-aggregation",
       window,
       startAt: start.toISOString(),
       endAt: now.toISOString(),
@@ -346,7 +346,7 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
     },
     accounts: accountRows,
     collection: {
-      mode: "nc01-native-api-local-aggregation",
+      mode: "native-api-local-aggregation",
       accountCount: input.accounts.length,
       usageRows: input.usage.length,
       requestErrorRows: input.requestErrors.length,

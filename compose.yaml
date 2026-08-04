@@ -8,10 +8,9 @@ services:
         required: false
     volumes:
       - ./config:/app/config:ro
-      - ${UNIDESK_ROOT:-/workspace/unidesk}:${UNIDESK_ROOT:-/workspace/unidesk}:ro
+      - ${API2BUSINESS_INTEGRATION_ROOT:-./.state/integrations}:/integrations:ro
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
-      - /opt/unidesk/platform-infra/sub2api-nc01:/opt/unidesk/platform-infra/sub2api-nc01:ro
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
     command: ["bun", "src/api.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}", "--runtime", "compose"]
   worker:
@@ -23,10 +22,9 @@ services:
         required: false
     volumes:
       - ./config:/app/config:ro
-      - ${UNIDESK_ROOT:-/workspace/unidesk}:${UNIDESK_ROOT:-/workspace/unidesk}:ro
+      - ${API2BUSINESS_INTEGRATION_ROOT:-./.state/integrations}:/integrations:ro
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
-      - /opt/unidesk/platform-infra/sub2api-nc01:/opt/unidesk/platform-infra/sub2api-nc01:ro
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
     command: ["bun", "src/worker.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}", "--runtime", "compose"]
     depends_on: [api]

@@ -79,18 +79,19 @@ function validateManifest(manifest, expected) {
   const configMap = objects.find((item) => item.kind === "ConfigMap" && item.metadata?.name === "api2business-config");
   if (deployment === undefined || service === undefined || configMap === undefined) throw new Error("rendered manifest must contain the Api2Business Deployment, Service and ConfigMap");
   if (deployment.spec?.template?.spec?.containers?.[0]?.image !== expected.digestRef) throw new Error("rendered Deployment image is not the expected digest reference");
-  if (deployment.spec?.template?.metadata?.annotations?.["unidesk.ai/source-commit"] !== expected.sourceCommit) throw new Error("rendered Deployment source commit annotation is incorrect");
-  if (deployment.spec?.template?.metadata?.annotations?.["unidesk.ai/api2business-config-sha256"] !== expected.configSha256) throw new Error("rendered Deployment config SHA annotation is incorrect");
+  if (deployment.spec?.template?.metadata?.annotations?.["api2business.dev/source-commit"] !== expected.sourceCommit) throw new Error("rendered Deployment source commit annotation is incorrect");
+  if (deployment.spec?.template?.metadata?.annotations?.["api2business.dev/config-sha256"] !== expected.configSha256) throw new Error("rendered Deployment config SHA annotation is incorrect");
   if (configMap.binaryData?.["api2business.yaml"] !== expected.configBase64) throw new Error("rendered ConfigMap does not contain the exact source config");
 }
 
 function main() {
-  const giteaToken = required(process.env.GITEA_TOKEN, "GITEA_TOKEN");
+  const gitToken = required(process.env.GIT_TOKEN, "GIT_TOKEN");
+  const gitUsername = required(process.env.GIT_USERNAME, "GIT_USERNAME");
   const askPassPath = resolve(required(process.env.TMPDIR ?? "/tmp", "TMPDIR"), "api2business-git-askpass.sh");
   writeFileSync(askPassPath, `#!/bin/sh
 case "$1" in
-  *Username*) printf '%s' 'unidesk-admin' ;;
-  *Password*) printf '%s' "$GITEA_TOKEN" ;;
+  *Username*) printf '%s' "$GIT_USERNAME" ;;
+  *Password*) printf '%s' "$GIT_TOKEN" ;;
   *) exit 1 ;;
 esac
 `, { mode: 0o700 });

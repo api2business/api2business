@@ -103,6 +103,17 @@ chmod 600 /path/to/secrets/*.env
 生产账本、采样缓存和每日经营分析同样应放在 Git 忽略的状态目录中。公开 issue、日志
 和截图不得包含 API key、访问令牌、用户邮箱、供应商 URL 或真实数据库地址。
 
+## 部署
+
+部署不绑定特定平台。仓库提供容器镜像、Compose 配置和 Kubernetes 基础模板，其他
+运行环境也可以复用同一镜像与配置合同。完整流程见
+[部署参考](docs/reference/deployment.md)，自动化代理入口见
+[`skills/api2business/SKILL.md`](skills/api2business/SKILL.md)。
+
+```bash
+bun run deploy:validate
+```
+
 ## 开发检查
 
 ```bash

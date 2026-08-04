@@ -55,7 +55,7 @@ describe("aggregateNativeGroupScore", () => {
     expect(row.failoverRecovered).toBe(1);
     expect((row.usage as Record<string, unknown>).tokenCount).toBe(2400);
     expect((row.usage as Record<string, unknown>).upstreamCostCny).toBe(0.04);
-    expect(result.collection.mode).toBe("nc01-native-api-local-aggregation");
+    expect(result.collection.mode).toBe("native-api-local-aggregation");
   });
 
   test("does not attribute another group policy event", () => {

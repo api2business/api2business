@@ -8,7 +8,8 @@
     "api": "bun --hot src/api.ts --config config/api2business.yaml --runtime native",
     "worker": "bun src/worker.ts --config config/api2business.yaml --runtime native",
     "dev:web": "API2BUSINESS_CONFIG_PATH=config/api2business.yaml API2BUSINESS_RUNTIME_ID=native bunx vite --config vite.config.ts",
-    "check": "bunx tsc --noEmit"
+    "check": "bunx tsc --noEmit",
+    "deploy:validate": "bun scripts/deploy/validate.mjs"
   },
   "dependencies": {
     "@temporalio/client": "^1.20.3",
