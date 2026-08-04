@@ -6,7 +6,7 @@ import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 const config = {
   sub2api: {
     idleProbe: {
-      enabled: true, intervalSeconds: 60, idleSeconds: 60, model: "gpt-5.5",
+      enabled: true, intervalSeconds: 60, idleSeconds: 60, model: "gpt-5.4-mini",
       candidateLimit: 20, concurrency: 4, accountTimeoutMs: 15000, roundTimeoutSeconds: 50,
       requestJitterMinMs: 0, requestJitterMaxMs: 0,
       provisionCandidateLimit: 1, provisionTimeoutSeconds: 120,
