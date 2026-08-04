@@ -21,7 +21,7 @@ test("pool quality uses one queued query and separates exact upstream accounts",
     },
     status() { throw new Error("not used"); },
   } as unknown as Sub2ApiReadClient;
-  const sample = await collectPoolQualitySample(loadConfig("config/sub2rank.yaml"), reads, "2026-08-03T00:00:00.000Z");
+  const sample = await collectPoolQualitySample(loadConfig("config/api2business.example.yaml"), reads, "2026-08-03T00:00:00.000Z");
   expect(queries).toBe(1);
   expect(sample.observedAttempts).toBe(3);
   expect(sample.participation).toHaveLength(2);
@@ -34,7 +34,7 @@ test("pool quality uses one queued query and separates exact upstream accounts",
 
 test("pool quality excludes monitor-user probe keys without changing account scoring", () => {
   expect(poolQualitySql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
-  expect(poolQualitySql).toContain("k.name LIKE 'apistate-probe-%'");
+  expect(poolQualitySql).toContain("k.name LIKE 'api2business-probe-%'");
   expect(poolQualitySql).toContain("p.id = u.api_key_id");
   expect(poolQualitySql).toContain("p.id = o.api_key_id");
 });

@@ -71,7 +71,7 @@ export class TemporalGateway {
         Date.now() + this.config.temporal.submissionTimeoutMs,
         async () => await this.client.workflow.start("operationWorkflow", {
           taskQueue: this.runtime.taskQueue,
-          workflowId: `apistate-${command.kind.replaceAll(".", "-")}-${operation.operationId}`,
+          workflowId: `api2business-${command.kind.replaceAll(".", "-")}-${operation.operationId}`,
           workflowExecutionTimeout: this.config.temporal.workflowExecutionTimeout,
           args: [{
             operation,

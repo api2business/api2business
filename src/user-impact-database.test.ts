@@ -11,7 +11,7 @@ test("parses offset-free impact windows in the owning timezone", () => {
 test("masks identities with at most three visible prefix characters", () => {
   expect(maskIdentity("wenrui")).toBe("wen***");
   expect(maskIdentity("bo")).toBe("bo***");
-  expect(maskIdentity("customer@example.com", true)).toBe("mai***@163.com");
+  expect(maskIdentity("customer@example.com", true)).toBe("cus***@example.com");
 });
 
 test("uses one bounded database aggregation and excludes recovered requests", () => {

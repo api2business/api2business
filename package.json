@@ -1,13 +1,13 @@
 {
-  "name": "apistate",
+  "name": "api2business",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "cli": "bun scripts/apistate-cli.ts --config config/sub2rank.yaml",
-    "api": "bun --hot src/api.ts --config config/sub2rank.yaml --runtime native",
-    "worker": "bun src/worker.ts --config config/sub2rank.yaml --runtime native",
-    "dev:web": "APISTATE_CONFIG_PATH=config/sub2rank.yaml APISTATE_RUNTIME_ID=native bunx vite --config vite.config.ts",
+    "cli": "bun scripts/api2business-cli.ts --config config/api2business.yaml",
+    "api": "bun --hot src/api.ts --config config/api2business.yaml --runtime native",
+    "worker": "bun src/worker.ts --config config/api2business.yaml --runtime native",
+    "dev:web": "API2BUSINESS_CONFIG_PATH=config/api2business.yaml API2BUSINESS_RUNTIME_ID=native bunx vite --config vite.config.ts",
     "check": "bunx tsc --noEmit"
   },
   "dependencies": {

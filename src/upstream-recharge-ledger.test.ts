@@ -19,7 +19,7 @@ function input(path: string, operationId = "recharge-1") {
 }
 
 test("upstream recharge ledger is CNY, owner-only, and idempotent", () => {
-  const directory = mkdtempSync(join(tmpdir(), "apistate-upstream-ledger-"));
+  const directory = mkdtempSync(join(tmpdir(), "api2business-upstream-ledger-"));
   const path = join(directory, "ledger", "upstream.jsonl");
   const first = recordUpstreamRechargeCost(input(path));
   const duplicate = recordUpstreamRechargeCost(input(path));
@@ -31,7 +31,7 @@ test("upstream recharge ledger is CNY, owner-only, and idempotent", () => {
 });
 
 test("reusing an upstream recharge idempotency key for another amount is rejected", () => {
-  const directory = mkdtempSync(join(tmpdir(), "apistate-upstream-ledger-conflict-"));
+  const directory = mkdtempSync(join(tmpdir(), "api2business-upstream-ledger-conflict-"));
   const path = join(directory, "ledger", "upstream.jsonl");
   recordUpstreamRechargeCost(input(path));
   expect(() => recordUpstreamRechargeCost({ ...input(path), amountCny: 50 })).toThrow("幂等键已用于其他账号或金额");

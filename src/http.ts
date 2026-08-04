@@ -119,7 +119,7 @@ export function createHandler(
       const apiKey = apiKeyAuthorized(request, auth) || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        return json({ ok: true, service: "apistate-api" });
+        return json({ ok: true, service: "api2business-api" });
       }
       if (request.method === "POST" && url.pathname === "/api/login") {
         const input = await body(request);
@@ -388,7 +388,7 @@ export function createHandler(
       }
       if (request.method === "GET" && url.pathname === "/api/status") {
         const scores = await dispatcher.dispatch({ kind: "scores.get" }) as Record<string, unknown>;
-        return json({ ok: true, service: "apistate", scoreStatus: scores.status, refreshedAt: scores.refreshedAt, nextRefreshAt: scores.nextRefreshAt });
+        return json({ ok: true, service: "api2business", scoreStatus: scores.status, refreshedAt: scores.refreshedAt, nextRefreshAt: scores.nextRefreshAt });
       }
       if (request.method === "GET" && url.pathname === "/api/scores") {
         const state = await dispatcher.dispatch({ kind: "scores.get" }) as Record<string, unknown>;
@@ -783,7 +783,7 @@ export function createHandler(
       const headers = typeof cached.headers === "string" ? JSON.parse(cached.headers) : cached.headers;
       return new Response(String(cached.body), {
         status: Number(cached.status),
-        headers: { ...(headers as Record<string, string>), "cache-control": "no-store", "x-apistate-cache": "hit", "x-apistate-cached-at": String(cached.cached_at) },
+        headers: { ...(headers as Record<string, string>), "cache-control": "no-store", "x-api2business-cache": "hit", "x-api2business-cached-at": String(cached.cached_at) },
       });
     }
     const response = await handle(request);

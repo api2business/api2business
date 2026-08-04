@@ -36,7 +36,7 @@ test("aggregates plan types and total economics in one queued query", async () =
   } as unknown as Sub2ApiReadClient;
   const config = {
     monitor: { timezone: "Asia/Shanghai" },
-    operations: { accountImportLedgerPath: "/tmp/apistate-import-economics-missing.jsonl" },
+    operations: { accountImportLedgerPath: "/tmp/api2business-import-economics-missing.jsonl" },
   } as AppConfig;
   const result = await collectAccountImportEconomics(config, reads, {
     day: "2026-07-30",
@@ -87,7 +87,7 @@ test("keeps historical usage for accounts that were deleted after import", async
 });
 
 test("projects stable import batches independently of deleted account matches", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "apistate-batch-economics-"));
+  const directory = mkdtempSync(join(tmpdir(), "api2business-batch-economics-"));
   const path = join(directory, "costs.jsonl");
   try {
     recordAccountImportCosts({ path, fingerprint: "batch-abc12345", accountIds: [108, 109], unitCostCny: 3.3, planType: "k12", occurredOn: "2026-07-30" });

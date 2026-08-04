@@ -15,7 +15,7 @@ FROM users u
 WHERE u.deleted_at IS NULL
   AND LOWER(COALESCE(u.role, '')) <> 'admin'
   AND u.email <> 'monitor-user@sub2api.platform-infra.local'
-  AND u.email NOT LIKE 'apistate-probe-%@sub2api.platform-infra.local'
+  AND u.email NOT LIKE 'api2business-probe-%@sub2api.platform-infra.local'
 `;
 
 function number(value: unknown): number {

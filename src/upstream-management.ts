@@ -775,7 +775,7 @@ export class UpstreamManagementService {
   }
 
   async synchronizeDetectedRates(results: UpstreamUsageResult[]): Promise<Record<string, unknown>> {
-    if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+    if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
     const policy = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
     const synchronized: number[] = [];
     const alreadySynchronized: number[] = [];
@@ -835,7 +835,7 @@ export class UpstreamManagementService {
   }
 
   async applyTemplate(accountIds: number[]): Promise<Record<string, unknown>> {
-    if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+    if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
     const query = await this.reads.query<Row>({
       key: `upstream-template-targets:${accountIds.length ? accountIds.join(",") : "all"}`,
       kind: "upstream-template-targets",
@@ -928,7 +928,7 @@ export class UpstreamManagementService {
   }
 
   async ensureProbeIsolation(accountIds: number[]): Promise<Record<string, unknown>> {
-    if (!this.probeIsolation) throw new Error("ApiState 上游探活隔离服务不可用");
+    if (!this.probeIsolation) throw new Error("Api2Business 上游探活隔离服务不可用");
     const requested = [...new Set(accountIds.map(Number))].sort((left, right) => left - right);
     if (requested.length === 0 || requested.some((accountId) => !positiveInteger(accountId))) {
       throw new Error("上游隔离需要至少一个有效账号 ID");
@@ -987,7 +987,7 @@ export class UpstreamManagementService {
     operationId?: string | null;
     description?: string;
   }): Promise<Record<string, unknown>> {
-    if (!this.probeIsolation) throw new Error("ApiState 上游探活隔离服务不可用");
+    if (!this.probeIsolation) throw new Error("Api2Business 上游探活隔离服务不可用");
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const suffix = validateSuffix(input.suffix);
     const rate = validateRate(input.rateCnyPerApiUsd);
@@ -1008,7 +1008,7 @@ export class UpstreamManagementService {
     let account = await this.accountQueryByIdentity(name, baseUrl);
     let recovered = account !== null;
     if (!account) {
-      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+      if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
       try {
         const result = await this.runtime.createApiKeyAccount({
           name, platform: "openai", type: "apikey",
@@ -1051,7 +1051,7 @@ export class UpstreamManagementService {
     const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
     if (account.priority !== priority || account.capacity !== capacity || account.proxyId !== settings.proxyId
       || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds)) {
-      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+      if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
       await this.runtime.updateAccount(resolvedAccountId, { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId });
       const configured = await this.accountQuery(resolvedAccountId);
       if (!configured) throw new UpstreamManagementError("运行设置已提交但排队查询未找到账号", 502, {
@@ -1108,7 +1108,7 @@ export class UpstreamManagementService {
   }): Promise<Record<string, unknown>> {
     const account = await this.accountQuery(id);
     if (!account) throw new UpstreamManagementError("上游账号不存在", 404, { operation: "update", accountId: id });
-    if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+    if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
     if (input.suffix !== undefined || input.rateCnyPerApiUsd !== undefined) {
       const suffix = input.suffix === undefined ? account.suffix : validateSuffix(String(input.suffix));
       const rate = input.rateCnyPerApiUsd === undefined ? account.rateCnyPerApiUsd : validateRate(input.rateCnyPerApiUsd);
@@ -1141,7 +1141,7 @@ export class UpstreamManagementService {
     const recoveredAccountIds: number[] = [];
     const recoveryErrors: string[] = [];
     if (recoveryTargets.length && !this.runtime) throw new UpstreamManagementError(
-      "充值已记账，但 ApiState Sub2API runtime mutation service 不可用",
+      "充值已记账，但 Api2Business Sub2API runtime mutation service 不可用",
       502,
       { operation: "recovery", partial: true, accountId: id, accounting },
     );

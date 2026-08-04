@@ -32,12 +32,12 @@ export class AdminHttpClient {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`ApiState API transport failed for ${path}: ${message}`, { cause: error });
+      throw new Error(`Api2Business API transport failed for ${path}: ${message}`, { cause: error });
     }
     const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
     if (!response.ok || !payload) {
       const detail = payload?.error ? `: ${payload.error}` : "";
-      throw new Error(`ApiState API ${path} returned HTTP ${response.status}${detail}`);
+      throw new Error(`Api2Business API ${path} returned HTTP ${response.status}${detail}`);
     }
     return payload as T;
   }
@@ -336,7 +336,7 @@ export class AdminHttpClient {
       60000,
     );
     if (response.operationId !== operation.operationId) {
-      throw new Error("ApiState internal operation response identity mismatch");
+      throw new Error("Api2Business internal operation response identity mismatch");
     }
     return response.result;
   }

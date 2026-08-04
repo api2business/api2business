@@ -57,7 +57,7 @@ test("redacts upstream user identifiers from database errors", () => {
 });
 
 test("archives submitted JSON in the local state directory with owner-only permissions", () => {
-  const directory = join(mkdtempSync(join(tmpdir(), "apistate-import-archive-")), "account-imports");
+  const directory = join(mkdtempSync(join(tmpdir(), "api2business-import-archive-")), "account-imports");
   const content = JSON.stringify({ accounts: [], proxies: [] });
   const fileName = archiveAccountImportContent(directory, "job-fixture", content);
   const path = join(directory, fileName);

@@ -36,8 +36,8 @@ test("priority plan text includes review evidence and exact priorities", () => {
       recommendations: [],
     },
     apply: {
-      through: "apistate-priority-plan-confirm",
-      target: "NC01-DOCKER",
+      through: "api2business-priority-plan-confirm",
+      target: "example-runtime",
       writeMode: "backend-api-paced",
       batchSize: 3,
       verification: "native-api-read-broker",
@@ -49,7 +49,7 @@ test("priority plan text includes review evidence and exact priorities", () => {
   expect(lines.join("\n")).toContain("3.4%");
   expect(lines.join("\n")).toContain("24117ms");
   expect(lines.join("\n")).toContain("0.200");
-  expect(lines.join("\n")).toContain('"target":"NC01-DOCKER"');
+  expect(lines.join("\n")).toContain('"target":"example-runtime"');
   expect(lines.join("\n")).not.toContain("PK01");
   expect(lines).toContain('PRIORITIES_JSON {"2":111,"8":288}');
 });

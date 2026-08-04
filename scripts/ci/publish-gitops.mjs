@@ -6,10 +6,10 @@ import { dirname, resolve } from "node:path";
 import { parseAllDocuments } from "yaml";
 
 const placeholders = {
-  image: "__SUB2RANK_IMAGE_REF__",
-  configBase64: "__SUB2RANK_CONFIG_BASE64__",
-  configSha256: "__SUB2RANK_CONFIG_SHA256__",
-  sourceCommit: "__SUB2RANK_SOURCE_COMMIT__",
+  image: "__API2BUSINESS_IMAGE_REF__",
+  configBase64: "__API2BUSINESS_CONFIG_BASE64__",
+  configSha256: "__API2BUSINESS_CONFIG_SHA256__",
+  sourceCommit: "__API2BUSINESS_SOURCE_COMMIT__",
 };
 
 function option(name) {
@@ -74,19 +74,19 @@ function validateManifest(manifest, expected) {
   const errors = documents.flatMap((document) => document.errors);
   if (errors.length > 0) throw new Error(`rendered manifest is invalid YAML: ${errors[0].message}`);
   const objects = documents.map((document) => document.toJSON()).filter((value) => value !== null).map((value, index) => record(value, `manifest[${index}]`));
-  const deployment = objects.find((item) => item.kind === "Deployment" && item.metadata?.name === "sub2rank");
-  const service = objects.find((item) => item.kind === "Service" && item.metadata?.name === "sub2rank");
-  const configMap = objects.find((item) => item.kind === "ConfigMap" && item.metadata?.name === "sub2rank-config");
-  if (deployment === undefined || service === undefined || configMap === undefined) throw new Error("rendered manifest must contain the Sub2Rank Deployment, Service and ConfigMap");
+  const deployment = objects.find((item) => item.kind === "Deployment" && item.metadata?.name === "api2business");
+  const service = objects.find((item) => item.kind === "Service" && item.metadata?.name === "api2business");
+  const configMap = objects.find((item) => item.kind === "ConfigMap" && item.metadata?.name === "api2business-config");
+  if (deployment === undefined || service === undefined || configMap === undefined) throw new Error("rendered manifest must contain the Api2Business Deployment, Service and ConfigMap");
   if (deployment.spec?.template?.spec?.containers?.[0]?.image !== expected.digestRef) throw new Error("rendered Deployment image is not the expected digest reference");
   if (deployment.spec?.template?.metadata?.annotations?.["unidesk.ai/source-commit"] !== expected.sourceCommit) throw new Error("rendered Deployment source commit annotation is incorrect");
-  if (deployment.spec?.template?.metadata?.annotations?.["unidesk.ai/sub2rank-config-sha256"] !== expected.configSha256) throw new Error("rendered Deployment config SHA annotation is incorrect");
-  if (configMap.binaryData?.["sub2rank.yaml"] !== expected.configBase64) throw new Error("rendered ConfigMap does not contain the exact source config");
+  if (deployment.spec?.template?.metadata?.annotations?.["unidesk.ai/api2business-config-sha256"] !== expected.configSha256) throw new Error("rendered Deployment config SHA annotation is incorrect");
+  if (configMap.binaryData?.["api2business.yaml"] !== expected.configBase64) throw new Error("rendered ConfigMap does not contain the exact source config");
 }
 
 function main() {
   const giteaToken = required(process.env.GITEA_TOKEN, "GITEA_TOKEN");
-  const askPassPath = resolve(required(process.env.TMPDIR ?? "/tmp", "TMPDIR"), "apistate-git-askpass.sh");
+  const askPassPath = resolve(required(process.env.TMPDIR ?? "/tmp", "TMPDIR"), "api2business-git-askpass.sh");
   writeFileSync(askPassPath, `#!/bin/sh
 case "$1" in
   *Username*) printf '%s' 'unidesk-admin' ;;
@@ -118,7 +118,7 @@ esac
 
   const configText = readFileSync(resolve(sourceRoot, configPath), "utf8");
   const appConfig = record(Bun.YAML.parse(configText), configPath);
-  if (appConfig.kind !== "Sub2Rank") throw new Error(`${configPath}.kind must be Sub2Rank`);
+  if (appConfig.kind !== "Api2Business") throw new Error(`${configPath}.kind must be Api2Business`);
   const lottery = record(appConfig.lottery, `${configPath}.lottery`);
   const automaticCredit = record(lottery.automaticCredit, `${configPath}.lottery.automaticCredit`);
   if (typeof automaticCredit.enabled !== "boolean" || !new Set(["dry-run", "live"]).has(automaticCredit.mode)) throw new Error(`${configPath}.lottery.automaticCredit must declare enabled and mode`);
@@ -155,8 +155,8 @@ esac
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, `${JSON.stringify({
     version: 1,
-    kind: "Sub2RankReleaseState",
-    service: "sub2rank",
+    kind: "Api2BusinessReleaseState",
+    service: "api2business",
     sourceCommit,
     configSha256,
     digest,
@@ -169,7 +169,7 @@ esac
   run("git", ["config", "user.email", authorEmail], worktree);
   run("git", ["add", "--", manifestPath, releaseStatePath], worktree);
   const changed = run("git", ["diff", "--cached", "--quiet"], worktree, true).status !== 0;
-  if (changed) run("git", ["commit", "-m", `sub2rank: deploy ${sourceCommit.slice(0, 12)}`], worktree);
+  if (changed) run("git", ["commit", "-m", `api2business: deploy ${sourceCommit.slice(0, 12)}`], worktree);
   run("git", ["remote", "set-url", "origin", writeUrl], worktree);
 
   let pushAttempts = 0;

@@ -72,7 +72,7 @@ function shell() {
     ['account-import', '/account-import', '账号导入'],
   ]
   mount.innerHTML = `<header class="topbar">
-    <a class="brand" href="/scores"><span class="brand-mark">AS</span><span><b>ApiState</b><small>Sub2API Operations</small></span></a>
+    <a class="brand" href="/scores"><span class="brand-mark">AS</span><span><b>Api2Business</b><small>Sub2API Operations</small></span></a>
     <nav class="primary-nav" aria-label="主导航">${links.map(([id, href, label]) => `<a href="${href}"${page === id ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
     <div class="topbar-actions"><span class="live-sign"><i></i> PK01</span><button id="logout" class="text-command" type="button">退出</button></div>
   </header>`
@@ -121,7 +121,7 @@ let activeScoreProfile = 'codex'
 let scorePage = 1
 const scorePageSize = 10
 const scoreRefreshIntervals = new Set([0, 300, 900, 1800])
-const scoreRefreshIntervalStorageKey = 'apistate.scoreRefreshIntervalSeconds'
+const scoreRefreshIntervalStorageKey = 'api2business.scoreRefreshIntervalSeconds'
 let scoreRefreshTimer = null
 let scoreRefreshCountdownTimer = null
 let scoreRefreshDueAt = null
@@ -758,7 +758,7 @@ async function scoresPage() {
 }
 
 const rankingRefreshIntervals = new Set([0, 30, 60, 120, 300])
-const rankingRefreshStorageKey = 'apistate.rankingRefreshIntervalSeconds.v1'
+const rankingRefreshStorageKey = 'api2business.rankingRefreshIntervalSeconds.v1'
 let rankingRefreshTimer = null
 let rankingRefreshCountdownTimer = null
 let rankingRefreshDueAt = null
@@ -887,7 +887,7 @@ const priorityHistoryPageSize = 10
 let priorityHistoryInFlight = null
 let idleProbeHistoryPage = 1
 let idleProbeHistoryInFlight = null
-const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
+const operationsSnapshotKey = 'api2business.operations.snapshot.v1'
 let cashPage = 1
 let auditPage = 1
 let oauthPage = 1
@@ -901,7 +901,7 @@ let oauthRefreshDueAt = null
 let oauthCostLoading = false
 let procurementPage = 1
 let procurementBudget = null
-const oauthRefreshIntervalStorageKey = 'apistate.operations.oauth-refresh-interval.v2'
+const oauthRefreshIntervalStorageKey = 'api2business.operations.oauth-refresh-interval.v2'
 const oauthRefreshIntervals = new Set([0, 30, 60, 120, 300])
 
 function renderPager(prefix, pagination) {
@@ -2151,7 +2151,7 @@ async function upstreamsPage() {
   let quotaRefreshTimer = null
   let quotaRefreshCountdownTimer = null
   let quotaRefreshDueAt = null
-  const quotaRefreshStorageKey = 'apistate.operations.upstream-quota-refresh-interval.v1'
+  const quotaRefreshStorageKey = 'api2business.operations.upstream-quota-refresh-interval.v1'
   const renderQuotaRefreshCountdown = () => {
     const target = $('#upstream-quota-refresh-countdown')
     const interval = Number($('#upstream-quota-refresh-interval')?.value)

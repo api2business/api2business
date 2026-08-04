@@ -1,0 +1,492 @@
+apiVersion: api2business.pikapython.com/v1
+kind: Api2Business
+
+metadata:
+  name: api2business
+  owner: example
+
+monitor:
+  timezone: Asia/Shanghai
+  refreshIntervalMinutes: 10
+  automaticRefresh:
+    enabled: false
+  recentCallLimit: 1000
+  errorAggregateLimit: 1000
+  errorAggregateTop: 20
+  recentCallOptions:
+    - 100
+    - 500
+    - 1000
+    - 2000
+    - 5000
+  target: example-runtime
+  cli:
+    workDir: /workspace/unidesk
+    executable: /usr/local/bin/bun
+    entrypoint: scripts/cli.ts
+    mainServerHost: 127.0.0.1
+    timeoutMs: 180000
+
+webAuth:
+  username: admin
+  cookieName: api2business_session
+  sessionTtlSeconds: 43200
+
+sub2api:
+  baseUrl: https://api.example.com/api/v1
+  requestTimeoutMs: 20000
+  pageSize: 100
+  scoreDatabase:
+    sourceRef: secrets/sub2api.env
+    sourceKey: DATABASE_URL
+    statementTimeoutMs: 15000
+    queueTimeoutMs: 30000
+    cacheTtlMs: 5000
+    cacheMaxEntries: 64
+  scorePolicy:
+    reliabilityWeight: 48
+    failoverWeight: 10
+    latencyWeight: 37
+    baselineWeight: 5
+    failureZeroScoreRate: 0.2
+    failureBurstCallLimit: 100
+    failoverZeroScoreRate: 0.2
+    ttftFullScoreMs: 5000
+    ttftZeroScoreMs: 55000
+  poolScorePolicy:
+    reliabilityWeight: 58
+    failoverWeight: 0
+    latencyWeight: 37
+    baselineWeight: 5
+    failureZeroScoreRate: 0.2
+    failureBurstCallLimit: 100
+    failoverZeroScoreRate: 0.2
+    ttftFullScoreMs: 5000
+    ttftZeroScoreMs: 55000
+  grokScorePolicy:
+    reliabilityWeight: 50
+    failoverWeight: 15
+    latencyWeight: 25
+    baselineWeight: 10
+    failureZeroScoreRate: 0.2
+    failureBurstCallLimit: 100
+    failoverZeroScoreRate: 0.2
+    ttftFullScoreMs: 7000
+    ttftZeroScoreMs: 70000
+  scoreSamplePolicy:
+    retentionHours: 8
+    decayBucketSize: 100
+    decayStep: 0.1
+    minimumWeight: 0.1
+  idleProbe:
+    enabled: true
+    intervalSeconds: 60
+    idleSeconds: 600
+    model: gpt-5.5
+    candidateLimit: 10
+    concurrency: 1000
+    accountTimeoutMs: 30000
+    requestJitterMinMs: 1000
+    requestJitterMaxMs: 3000
+    roundTimeoutSeconds: 50
+    provisionCandidateLimit: 1
+    provisionTimeoutSeconds: 120
+    isolation:
+      enabled: true
+      gatewayBaseUrl: https://api.example.com/v1
+      groupNamePrefix: api2business-probe-
+      groupRateMultiplier: 1
+      userBalance: 100
+      secretFile: .state/idle-probe/probe-keys.json
+  priorityPlan:
+    platform: openai
+    eligibleGroupIds: [2, 3]
+    requiredConfidence: high
+    requireCurrentAvailable: true
+    qualityWeight: 58
+    costWeight: 17
+    explorationWeight: 8
+    explorationTargetAttempts: 50
+    explorationQualityPrior: 25
+    balanceWeight: 17
+    dynamicQualityFeedback:
+      targetQualityScore: 85
+      coefficient: 2
+    referenceScore: 92
+    pointsPerScore: 10
+    minimumChange: 5
+    normalizationTopK: 20
+    minimumPriorityUniformity: 0.25
+    minimumPriority: 100
+    maximumPriority: 300
+    fixedPriorities: {}
+    reservePolicies: {}
+    procurementAdvice:
+      enabled: true
+      minimumQualityScore: 75
+      valueWeight: 80
+      redundancyWeight: 20
+      recommendationLimit: 2
+      statusAlertLimit: 20
+      maximumRecommendationsPerSupplier: 1
+      minimumSupplierCount: 4
+      maximumSupplierShare: 0.4
+      billingErrorPatterns:
+        - insufficient account balance
+        - insufficient balance
+        - payment required
+        - account balance depleted
+        - 余额不足
+        - 用户额度不足
+        - 预扣费额度失败
+        - 欠费
+  grokPriorityPlan:
+    platform: grok
+    eligibleGroupIds: [6]
+    requiredConfidence: high
+    requireCurrentAvailable: true
+    qualityWeight: 85
+    costWeight: 15
+    explorationWeight: 0
+    explorationTargetAttempts: 50
+    explorationQualityPrior: 0
+    balanceWeight: 0
+    dynamicQualityFeedback:
+      targetQualityScore: 85
+      coefficient: 0
+    referenceScore: 80
+    pointsPerScore: 8
+    minimumChange: 5
+    normalizationTopK: 20
+    minimumPriorityUniformity: 0.25
+    minimumPriority: 100
+    maximumPriority: 300
+    fixedPriorities: {}
+    reservePolicies: {}
+    procurementAdvice:
+      enabled: false
+      minimumQualityScore: 80
+      valueWeight: 80
+      redundancyWeight: 20
+      recommendationLimit: 3
+      statusAlertLimit: 20
+      maximumRecommendationsPerSupplier: 1
+      minimumSupplierCount: 4
+      maximumSupplierShare: 0.4
+      billingErrorPatterns:
+        - insufficient account balance
+        - insufficient balance
+        - payment required
+        - account balance depleted
+        - 余额不足
+        - 用户额度不足
+        - 预扣费额度失败
+        - 欠费
+  adminCredentials:
+    sourceRef: secrets/sub2api.env
+    emailKey: ADMIN_EMAIL
+    passwordKey: ADMIN_PASSWORD
+
+lottery:
+  timezone: Asia/Shanghai
+  initialDrawCount: 1
+  dailyGrant:
+    hour: 6
+    minute: 0
+    count: 1
+  eligibility:
+    activeWithinHours: 24
+    statuses:
+      - active
+    excludedRoles:
+      - admin
+    excludedIdentities:
+      - example-user
+    identityFields:
+      - username
+      - email
+      - emailLocalPart
+  prize:
+    amountUsd: 100
+  automaticCredit:
+    enabled: false
+    mode: dry-run
+    notesPrefix: Api2Business 每日抽奖奖金
+  creditTest:
+    targetIdentifier: admin
+    identityFields:
+      - username
+      - emailLocalPart
+    amountUsd: 0.01
+    notes: Api2Business CLI 管理员充值链路测试
+
+ranking:
+  timezone: Asia/Shanghai
+  windowDays: 1
+  sourceLimit: 100
+  displayLimit: 20
+
+records:
+  publicLimit: 20
+
+operations:
+  databaseUrlEnv: API2BUSINESS_DATABASE_URL
+  ledgerYamlPath: /var/lib/api2business/sub2api-pool.yaml
+  accountImportLedgerPath: /var/lib/api2business/ledger/account-import-costs.jsonl
+  upstreamRechargeLedgerPath: /var/lib/api2business/ledger/upstream-recharge-costs.jsonl
+  accountLifecycleLedgerPath: /var/lib/api2business/ledger/account-lifecycle-settlements.jsonl
+  accountImportArchiveDirectory: /var/lib/api2business/account-imports
+  accountLifecycle:
+    defaultModel: gpt-5.6-sol
+    testBatchSize: 8
+    testTimeoutMs: 1800000
+    deleteTimeoutMs: 600000
+  accountImportDefaults:
+    priority: 1
+    capacity: 16
+    importTimeoutMs: 120000
+    groupIds: [2, 3]
+    sourceProxyId: 3
+    perAccountProxy: false
+    planType: k12
+    freeCostThresholdCny: 1
+    plusCostThresholdCny: 7
+  upstreamManagement:
+    pageSize: 10
+    defaultTemplate: codex-upstream-failover
+    primaryGroupId: 2
+    groupIds: [2, 3]
+    priority: 1
+    capacity: 16
+    proxyId: 3
+    mutationTimeoutMs: 120000
+    usageConcurrency: 8
+    usageTimeoutMs: 15000
+    usageDays: 30
+    quotaSampleIntervalSeconds: 300
+    quotaSampleTimeoutSeconds: 240
+    failoverRules:
+      - errorCode: 429
+        keywords: [usage limit reached, API key 额度已用完, concurrency limit exceeded, upstream rate limit exceeded, too many pending requests, selected model is at capacity, upstream_error]
+        durationMinutes: 3
+      - errorCode: 400
+        keywords: [selected model is at capacity, our servers are currently overloaded, please try again later, upstream request failed, invalid_encrypted_content]
+        durationMinutes: 3
+      - errorCode: 402
+        keywords: [insufficient account balance, insufficient balance, payment required, account balance depleted, billing hard limit, balance is insufficient, 余额不足, 欠费]
+        durationMinutes: 10
+      - errorCode: 403
+        keywords: [insufficient account balance, insufficient balance, payment required, account balance depleted, failed to validate api key, invalid api key, 余额不足, 欠费]
+        durationMinutes: 10
+      - errorCode: 500
+        keywords: [failed to validate api key, do request failed, upstream gateway error]
+        durationMinutes: 3
+      - errorCode: 502
+        keywords: [upstream service temporarily unavailable, upstream request failed, upstream response stream was interrupted, service temporarily unavailable, 服务暂时不可用, overloaded, our servers are currently overloaded, please try again later, concurrency limit exceeded, rate_limit_exceeded, upstream rate limit exceeded, insufficient account balance, insufficient balance, selected model is at capacity, upstream_error, api_error, recovered upstream error 502, "error code: 502", "status code: 502"]
+        durationMinutes: 3
+      - errorCode: 503
+        keywords: [upstream service temporarily unavailable, upstream request failed, service temporarily unavailable, 服务暂时不可用, temporarily unavailable, overloaded, concurrency limit exceeded, selected model is at capacity, upstream_error, api_error, unexpected eof, bad_response_status_code, "error code: 503", "status code: 503"]
+        durationMinutes: 3
+      - errorCode: 504
+        keywords: [concurrency limit exceeded, upstream service temporarily unavailable, service temporarily unavailable, upstream gateway error, gateway timeout, upstream timeout, request timeout, timeout awaiting response headers, context deadline exceeded, deadline exceeded, selected model is at capacity, upstream_error, api_error, recovered upstream error 504, "error code: 504", "status code: 504", "504"]
+        durationMinutes: 3
+      - errorCode: 522
+        keywords: [upstream request failed]
+        durationMinutes: 3
+      - errorCode: 524
+        keywords: [upstream request failed, service temporarily unavailable, overloaded, concurrency limit exceeded, recovered upstream error 524, "error code: 524", "524"]
+        durationMinutes: 3
+      - errorCode: 529
+        keywords: [overloaded, api is at capacity, the api is at capacity, selected model is at capacity]
+        durationMinutes: 3
+  oauthEconomics:
+    excludedAccountIds: [999999]
+    idealApiUsdPerAccount:
+      free: 3.8
+      k12: 20
+      plus: 135
+      team: 140
+  rechargeDenominationsCny: [10, 20, 50]
+  planTtlMinutes: 30
+  auditLimit: 200
+  priorityVerificationTimeoutMs: 15000
+  priorityVerificationPollMs: 500
+  automationPollMs: 1000
+  automationRunTimeoutMs: 600000
+  automationFailureBackoffMaxMs: 60000
+  automationFailureRetryLimit: 3
+  automationFailureCooldownMs: 1800000
+  automationJitterPercent: 0.1
+  automationSafety:
+    maximumScoreQueryDurationMs: 3000
+  priorityWrite:
+    batchSize: 3
+    requestTimeoutMs: 30000
+    interBatchMinimumDelayMs: 1000
+    interBatchMaximumDelayMs: 2000
+    maximumRetries: 3
+    retryInitialDelayMs: 2000
+    retryJitterPercent: 0.2
+
+temporal:
+  addressEnv: API2BUSINESS_TEMPORAL_ADDRESS
+  namespace: unidesk
+  taskQueue: api2business
+  scoreScheduleWorkflowId: api2business-score-refresh-schedule
+  submissionTimeoutMs: 10000
+  workflowExecutionTimeout: 12m
+  activityStartToCloseTimeout: 10m
+  retry:
+    maximumAttempts: 1
+
+runtime:
+  secretsRoot: /etc/api2business/secrets
+  secretSourcePaths:
+    secrets/admin-password.txt: /etc/api2business/secrets/admin-password.txt
+    secrets/sub2api.env: /etc/api2business/secrets/sub2api.env
+    secrets/api2business.env: /etc/api2business/secrets/api2business.env
+    secrets/database.env: /etc/api2business/secrets/database.env
+  defaultCliTarget: local
+  overApiTarget: native-api
+  cliTargets:
+    local:
+      mode: embedded
+      databasePath: .state/api2business.sqlite
+      scoreCachePath: .state/account-scores.json
+      monitorWorkDir: /workspace/unidesk
+      temporalTaskQueue: api2business-native
+    production:
+      mode: http
+      baseUrl: https://api2business.example.com
+      adminToken:
+        sourceRef: secrets/api2business.env
+        sourceKey: API2BUSINESS_API_KEY
+    native-api:
+      mode: http
+      baseUrl: http://127.0.0.1:8080
+      adminToken:
+        sourceRef: secrets/api2business.env
+        sourceKey: API2BUSINESS_API_KEY
+  native:
+    mode: docker-compose
+    composeFile: compose.yaml
+    composeProject: api2business-l1
+    composeEnvFile: .state/compose/api2business.env
+    stateDir: .state/native
+    temporalServiceRef:
+      executionPlane: route
+      route: EXAMPLE:k3s
+      kubeconfig: /etc/rancher/k3s/k3s.yaml
+      namespace: temporal
+      service: temporal-frontend
+      portName: grpc
+      resolutionTimeoutMs: 30000
+    env:
+      API2BUSINESS_WEB_PASSWORD:
+        sourceRef: secrets/admin-password.txt
+        sourceKey: contents
+      API2BUSINESS_API_KEY:
+        sourceRef: secrets/api2business.env
+        sourceKey: API2BUSINESS_API_KEY
+      API2BUSINESS_SESSION_SECRET:
+        sourceRef: secrets/api2business.env
+        sourceKey: API2BUSINESS_SESSION_SECRET
+      SUB2API_ADMIN_EMAIL:
+        sourceRef: secrets/sub2api.env
+        sourceKey: ADMIN_EMAIL
+      SUB2API_ADMIN_PASSWORD:
+        sourceRef: secrets/sub2api.env
+        sourceKey: ADMIN_PASSWORD
+      DATABASE_URL:
+        sourceRef: secrets/sub2api.env
+        sourceKey: DATABASE_URL
+      API2BUSINESS_DATABASE_URL:
+        sourceRef: secrets/database.env
+        sourceKey: API2BUSINESS_DATABASE_URL
+    services:
+      api:
+        envKeys:
+          - API2BUSINESS_WEB_PASSWORD
+          - API2BUSINESS_API_KEY
+          - API2BUSINESS_SESSION_SECRET
+          - SUB2API_ADMIN_EMAIL
+          - SUB2API_ADMIN_PASSWORD
+          - DATABASE_URL
+          - API2BUSINESS_DATABASE_URL
+          - API2BUSINESS_TEMPORAL_ADDRESS
+        command:
+          - bun
+          - src/api.ts
+          - --config
+          - config/api2business.example.yaml
+          - --runtime
+          - native
+        pidFile: api.pid
+        logFile: api.log
+      worker:
+        envKeys:
+          - API2BUSINESS_TEMPORAL_ADDRESS
+        command:
+          - bun
+          - src/worker.ts
+          - --config
+          - config/api2business.example.yaml
+          - --runtime
+          - native
+        pidFile: worker.pid
+        logFile: worker.log
+      web:
+        envKeys: []
+        command:
+          - bunx
+          - vite
+          - --config
+          - vite.config.ts
+        pidFile: web.pid
+        logFile: web.log
+  serverTargets:
+    compose:
+      listenHost: 127.0.0.1
+      listenPort: 8080
+      workerHealthHost: 127.0.0.1
+      workerHealthPort: 8081
+      webListenHost: 127.0.0.1
+      webListenPort: 15173
+      webAllowedHosts: [api2business.example.com]
+      webApiBaseUrl: http://127.0.0.1:8080
+      secureCookies: false
+      databasePath: .state/api2business.sqlite
+      scoreCachePath: .state/account-scores.json
+      monitorWorkDir: /workspace/unidesk
+      temporalTaskQueue: api2business-compose
+      scoreScheduleWorkflowId: api2business-compose-score-refresh-schedule
+      adminTokenEnv: API2BUSINESS_API_KEY
+      sub2apiAdminEmailEnv: SUB2API_ADMIN_EMAIL
+      sub2apiAdminPasswordEnv: SUB2API_ADMIN_PASSWORD
+      scoreDatabaseUrlEnv: DATABASE_URL
+      webPasswordEnv: API2BUSINESS_WEB_PASSWORD
+      apiKeyEnv: API2BUSINESS_API_KEY
+      sessionSecretEnv: API2BUSINESS_SESSION_SECRET
+    native:
+      listenHost: 127.0.0.1
+      listenPort: 8080
+      workerHealthHost: 127.0.0.1
+      workerHealthPort: 8081
+      webListenHost: 127.0.0.1
+      webListenPort: 15173
+      webAllowedHosts:
+        - api2business.example.com
+      webApiBaseUrl: http://127.0.0.1:8080
+      secureCookies: false
+      databasePath: .state/api2business.sqlite
+      scoreCachePath: .state/account-scores.json
+      monitorWorkDir: /workspace/unidesk
+      temporalTaskQueue: api2business-native
+      scoreScheduleWorkflowId: api2business-native-score-refresh-schedule
+      adminTokenEnv: API2BUSINESS_API_KEY
+      sub2apiAdminEmailEnv: SUB2API_ADMIN_EMAIL
+      sub2apiAdminPasswordEnv: SUB2API_ADMIN_PASSWORD
+      scoreDatabaseUrlEnv: DATABASE_URL
+      webPasswordEnv: API2BUSINESS_WEB_PASSWORD
+      apiKeyEnv: API2BUSINESS_API_KEY
+      sessionSecretEnv: API2BUSINESS_SESSION_SECRET

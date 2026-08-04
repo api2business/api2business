@@ -43,7 +43,7 @@ test("runtime upstream settings validate priority, capacity, and pool selection"
 });
 
 test("failover template uses the Sub2API native error_code schema", async () => {
-  const config = await Bun.file(new URL("../config/sub2rank.yaml", import.meta.url)).text();
+  const config = await Bun.file(new URL("../config/api2business.example.yaml", import.meta.url)).text();
   expect(config).toContain("errorCode: 502");
   expect(config).toContain("errorCode: 524");
   expect(config).toContain("input exceeds the context window of this model");
@@ -56,7 +56,7 @@ test("usage target discovery uses one queued database read", async () => {
   let databaseQueries = 0;
   globalThis.fetch = (async () => new Response(JSON.stringify({ mode: "unrestricted", usage: { total_tokens: 5 } }))) as unknown as typeof fetch;
   try {
-    const config = loadConfig("config/sub2rank.yaml");
+    const config = loadConfig("config/api2business.example.yaml");
     const reads = {
       async query() {
         databaseQueries += 1;

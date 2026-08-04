@@ -38,7 +38,7 @@ export function emitOAuthEconomics(value: Record<string, unknown>, json: boolean
     return;
   }
   const health = record(value.health) ?? {};
-  console.log(`APISTATE OAUTH POOL ECONOMICS complete=${String(value.complete)} usageScope=${String(value.usageScope)} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)}`);
+  console.log(`API2BUSINESS OAUTH POOL ECONOMICS complete=${String(value.complete)} usageScope=${String(value.usageScope)} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)}`);
   const exclusions = record(value.exclusions) ?? {};
   console.log(`EXCLUSIONS count=${String(exclusions.count ?? 0)} accountIds=${Array.isArray(exclusions.accountIds) ? exclusions.accountIds.join(",") : ""}`);
   const warnings = Array.isArray(value.warnings) ? value.warnings : [];

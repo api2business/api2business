@@ -82,7 +82,7 @@ class FakeClient {
 }
 
 function fixture() {
-  const rootDirectory = mkdtempSync(join(tmpdir(), "apistate-probe-isolation-"));
+  const rootDirectory = mkdtempSync(join(tmpdir(), "api2business-probe-isolation-"));
   const state: FakeState = {
     groups: [],
     users: [],
@@ -100,8 +100,8 @@ function fixture() {
         roundTimeoutSeconds: 50,
         isolation: {
           enabled: true,
-          gatewayBaseUrl: "https://api.example.com/v1",
-          groupNamePrefix: "apistate-probe-",
+          gatewayBaseUrl: "https://gateway.example.com/v1",
+          groupNamePrefix: "api2business-probe-",
           groupRateMultiplier: 1,
           userBalance: 100,
           secretFile: ".state/idle-probe/probe-keys.json",
@@ -129,12 +129,12 @@ test("probe isolation creates one private internal-ID group and redacts every se
   expect(result).toEqual({ accountId: 42, groupId: 51, keyCreated: true });
   expect(JSON.stringify(result)).not.toMatch(/apiKey|email|password|sk-/u);
   expect(state.groupCreates).toEqual([expect.objectContaining({
-    name: "apistate-probe-42",
+    name: "api2business-probe-42",
     is_exclusive: true,
     rate_multiplier: 1,
   })]);
-  expect(String(state.groupCreates[0]?.name)).not.toContain("hwpod.com");
-  expect(state.keyCreates).toEqual([expect.objectContaining({ name: "apistate-probe-42", group_id: 51 })]);
+  expect(String(state.groupCreates[0]?.name)).not.toContain("gateway.example.com");
+  expect(state.keyCreates).toEqual([expect.objectContaining({ name: "api2business-probe-42", group_id: 51 })]);
   expect(state.users).toEqual([expect.objectContaining({
     email: "monitor-user@sub2api.platform-infra.local",
     username: "monitor-user",
@@ -147,7 +147,7 @@ test("probe isolation creates one private internal-ID group and redacts every se
   const secretPath = join(rootDirectory, ".state/idle-probe/probe-keys.json");
   expect(statSync(secretPath).mode & 0o777).toBe(0o600);
   const secret = JSON.parse(readFileSync(secretPath, "utf8")) as Row;
-  expect(JSON.stringify(secret)).toContain("sk-apistate-probe-");
+  expect(JSON.stringify(secret)).toContain("sk-api2business-probe-");
 });
 
 test("concurrent ensure calls are idempotent and keep the target as the only group member", async () => {
@@ -207,7 +207,7 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     await service.ensure(42);
     const result = await service.probe(42, "gpt-5.5", 1000);
     expect(result).toMatchObject({ accountId: 42, groupId: 51, classification: "alive", ordinaryLogRecorded: true });
-    expect(requestUrl).toBe("https://api.example.com/v1/responses");
+    expect(requestUrl).toBe("https://gateway.example.com/v1/responses");
     expect(requestUrl).not.toContain("/admin/accounts/");
     expect(JSON.parse(requestBody)).toMatchObject({ model: "gpt-5.5", stream: false });
   } finally {
@@ -272,7 +272,7 @@ test("probe isolation persists generated credentials before a remote credential-
   expect(statSync(secretPath).mode & 0o777).toBe(0o600);
   const secret = JSON.parse(readFileSync(secretPath, "utf8")) as { records: Record<string, Row> };
   expect(secret.records["42"]).toMatchObject({ accountId: 42, groupId: 51, userId: 0 });
-  expect(String(secret.records["42"]?.apiKey)).toStartWith("sk-apistate-probe-");
+  expect(String(secret.records["42"]?.apiKey)).toStartWith("sk-api2business-probe-");
   expect(service.get(42)).toBeNull();
 });
 

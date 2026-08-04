@@ -12,8 +12,8 @@ const config = {
       provisionCandidateLimit: 1, provisionTimeoutSeconds: 120,
       isolation: {
         enabled: true,
-        gatewayBaseUrl: "https://api.example.com/v1",
-        groupNamePrefix: "apistate-probe-",
+        gatewayBaseUrl: "https://gateway.example.com/v1",
+        groupNamePrefix: "api2business-probe-",
         groupRateMultiplier: 1,
         userBalance: 100,
         secretFile: ".state/idle-probe/probe-keys.json",

@@ -209,7 +209,7 @@ test("manual priority plans read once and persist only changed non-OAuth account
     status() { return {}; },
   } as unknown as Sub2ApiReadClient;
   const config = {
-    monitor: { target: "NC01-DOCKER" },
+    monitor: { target: "example-runtime" },
     operations: {
       planTtlMinutes: 15,
       priorityWrite: { batchSize: 3 },
@@ -256,7 +256,7 @@ test("manual priority plans reject OAuth and missing accounts before persistence
     async createPlan() { createCount += 1; },
   } as unknown as OperationsStore;
   const config = {
-    monitor: { target: "NC01-DOCKER" },
+    monitor: { target: "example-runtime" },
     operations: { planTtlMinutes: 15, priorityWrite: { batchSize: 3 } },
   } as AppConfig;
   let rows: Array<Record<string, unknown>> = [];

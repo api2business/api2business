@@ -28,7 +28,7 @@ export class OperationsStore {
 
   async migrate(): Promise<void> {
     await this.sql.unsafe(`
-      CREATE TABLE IF NOT EXISTS apistate_cash_entries (
+      CREATE TABLE IF NOT EXISTS api2business_cash_entries (
         id uuid PRIMARY KEY,
         occurred_on date NOT NULL,
         direction text NOT NULL CHECK (direction IN ('income','expense')),
@@ -41,7 +41,7 @@ export class OperationsStore {
         voided_by text,
         void_reason text
       );
-      CREATE TABLE IF NOT EXISTS apistate_priority_plans (
+      CREATE TABLE IF NOT EXISTS api2business_priority_plans (
         id uuid PRIMARY KEY,
         created_at timestamptz NOT NULL DEFAULT now(),
         expires_at timestamptz NOT NULL,
@@ -53,13 +53,13 @@ export class OperationsStore {
         applied_at timestamptz,
         apply_result jsonb
       );
-      ALTER TABLE apistate_priority_plans
+      ALTER TABLE api2business_priority_plans
         ADD COLUMN IF NOT EXISTS trigger_type text NOT NULL DEFAULT 'manual';
-      ALTER TABLE apistate_priority_plans
+      ALTER TABLE api2business_priority_plans
         ADD COLUMN IF NOT EXISTS completed_at timestamptz;
-      ALTER TABLE apistate_priority_plans
+      ALTER TABLE api2business_priority_plans
         ADD COLUMN IF NOT EXISTS execution_started_at timestamptz;
-      CREATE TABLE IF NOT EXISTS apistate_priority_automation (
+      CREATE TABLE IF NOT EXISTS api2business_priority_automation (
         id text PRIMARY KEY CHECK (id='default'),
         enabled boolean NOT NULL,
         interval_seconds integer NOT NULL CHECK (interval_seconds BETWEEN 5 AND 86400),
@@ -69,17 +69,17 @@ export class OperationsStore {
         updated_at timestamptz NOT NULL DEFAULT now(),
         updated_by text NOT NULL
       );
-      ALTER TABLE apistate_priority_automation
+      ALTER TABLE api2business_priority_automation
         ADD COLUMN IF NOT EXISTS run_id uuid;
-      ALTER TABLE apistate_priority_automation
+      ALTER TABLE api2business_priority_automation
         ADD COLUMN IF NOT EXISTS run_started_at timestamptz;
-      ALTER TABLE apistate_priority_automation
+      ALTER TABLE api2business_priority_automation
         ADD COLUMN IF NOT EXISTS run_claimed_at timestamptz;
-      ALTER TABLE apistate_priority_automation
+      ALTER TABLE api2business_priority_automation
         ADD COLUMN IF NOT EXISTS last_completed_at timestamptz;
-      ALTER TABLE apistate_priority_automation
+      ALTER TABLE api2business_priority_automation
         ADD COLUMN IF NOT EXISTS last_run_status text;
-      CREATE TABLE IF NOT EXISTS apistate_operation_audit (
+      CREATE TABLE IF NOT EXISTS api2business_operation_audit (
         id uuid PRIMARY KEY,
         action text NOT NULL,
         status text NOT NULL,
@@ -88,29 +88,29 @@ export class OperationsStore {
         result_summary jsonb NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now()
       );
-      CREATE TABLE IF NOT EXISTS apistate_api_cache (
+      CREATE TABLE IF NOT EXISTS api2business_api_cache (
         cache_key text PRIMARY KEY,
         status integer NOT NULL,
         headers jsonb NOT NULL,
         body text NOT NULL,
         cached_at timestamptz NOT NULL DEFAULT now()
       );
-      CREATE TABLE IF NOT EXISTS apistate_upstream_usage_cache (
+      CREATE TABLE IF NOT EXISTS api2business_upstream_usage_cache (
         account_id bigint PRIMARY KEY,
         result jsonb NOT NULL,
         queried_at timestamptz NOT NULL DEFAULT now(),
         last_success_result jsonb,
         last_success_at timestamptz
       );
-      ALTER TABLE apistate_upstream_usage_cache
+      ALTER TABLE api2business_upstream_usage_cache
         ADD COLUMN IF NOT EXISTS last_success_result jsonb;
-      ALTER TABLE apistate_upstream_usage_cache
+      ALTER TABLE api2business_upstream_usage_cache
         ADD COLUMN IF NOT EXISTS last_success_at timestamptz;
-      UPDATE apistate_upstream_usage_cache
+      UPDATE api2business_upstream_usage_cache
       SET last_success_result=result, last_success_at=queried_at
       WHERE last_success_result IS NULL
         AND COALESCE((result->>'ok')::boolean, false);
-      CREATE TABLE IF NOT EXISTS apistate_upstream_quota_samples (
+      CREATE TABLE IF NOT EXISTS api2business_upstream_quota_samples (
         sampled_at timestamptz NOT NULL,
         wallet_key text NOT NULL,
         account_id bigint NOT NULL,
@@ -126,13 +126,13 @@ export class OperationsStore {
         wallet_api_amount_usd_total numeric,
         PRIMARY KEY (sampled_at, wallet_key)
       );
-      ALTER TABLE apistate_upstream_quota_samples
+      ALTER TABLE api2business_upstream_quota_samples
         ADD COLUMN IF NOT EXISTS api_amount_usd_total numeric;
-      ALTER TABLE apistate_upstream_quota_samples
+      ALTER TABLE api2business_upstream_quota_samples
         ADD COLUMN IF NOT EXISTS wallet_api_amount_usd_total numeric;
-      CREATE INDEX IF NOT EXISTS apistate_upstream_quota_samples_wallet_time_idx
-        ON apistate_upstream_quota_samples(wallet_key, sampled_at DESC);
-      CREATE TABLE IF NOT EXISTS apistate_oauth_runtime_samples (
+      CREATE INDEX IF NOT EXISTS api2business_upstream_quota_samples_wallet_time_idx
+        ON api2business_upstream_quota_samples(wallet_key, sampled_at DESC);
+      CREATE TABLE IF NOT EXISTS api2business_oauth_runtime_samples (
         sampled_at timestamptz NOT NULL,
         profile text NOT NULL CHECK (profile IN ('codex','grok')),
         api_amount_usd_total numeric NOT NULL,
@@ -144,9 +144,9 @@ export class OperationsStore {
         error_count integer NOT NULL,
         PRIMARY KEY (sampled_at, profile)
       );
-      CREATE INDEX IF NOT EXISTS apistate_oauth_runtime_samples_profile_time_idx
-        ON apistate_oauth_runtime_samples(profile, sampled_at DESC);
-      CREATE TABLE IF NOT EXISTS apistate_pool_quality_samples (
+      CREATE INDEX IF NOT EXISTS api2business_oauth_runtime_samples_profile_time_idx
+        ON api2business_oauth_runtime_samples(profile, sampled_at DESC);
+      CREATE TABLE IF NOT EXISTS api2business_pool_quality_samples (
         sampled_at timestamptz PRIMARY KEY,
         score numeric,
         grade text NOT NULL,
@@ -160,9 +160,9 @@ export class OperationsStore {
         first_token_samples integer NOT NULL,
         participation jsonb NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS apistate_pool_quality_samples_time_idx
-        ON apistate_pool_quality_samples(sampled_at DESC);
-      CREATE TABLE IF NOT EXISTS apistate_idle_probe_rounds (
+      CREATE INDEX IF NOT EXISTS api2business_pool_quality_samples_time_idx
+        ON api2business_pool_quality_samples(sampled_at DESC);
+      CREATE TABLE IF NOT EXISTS api2business_idle_probe_rounds (
         id uuid PRIMARY KEY,
         operation_id text NOT NULL UNIQUE,
         trigger_type text NOT NULL CHECK (trigger_type IN ('manual','automatic')),
@@ -178,12 +178,12 @@ export class OperationsStore {
         duration_ms integer NOT NULL,
         error_summary text
       );
-      CREATE INDEX IF NOT EXISTS apistate_idle_probe_rounds_started_at_idx
-        ON apistate_idle_probe_rounds(started_at DESC);
-      CREATE INDEX IF NOT EXISTS apistate_cash_entries_occurred_on_idx
-        ON apistate_cash_entries(occurred_on DESC, created_at DESC);
-      CREATE INDEX IF NOT EXISTS apistate_operation_audit_created_at_idx
-        ON apistate_operation_audit(created_at DESC);
+      CREATE INDEX IF NOT EXISTS api2business_idle_probe_rounds_started_at_idx
+        ON api2business_idle_probe_rounds(started_at DESC);
+      CREATE INDEX IF NOT EXISTS api2business_cash_entries_occurred_on_idx
+        ON api2business_cash_entries(occurred_on DESC, created_at DESC);
+      CREATE INDEX IF NOT EXISTS api2business_operation_audit_created_at_idx
+        ON api2business_operation_audit(created_at DESC);
     `);
   }
 
@@ -194,14 +194,14 @@ export class OperationsStore {
   async getApiCache(key: string) {
     const [row] = await this.sql`
       SELECT cache_key, status, headers, body, cached_at
-      FROM apistate_api_cache WHERE cache_key=${key}
+      FROM api2business_api_cache WHERE cache_key=${key}
     `;
     return row ?? null;
   }
 
   async setApiCache(key: string, status: number, headers: Record<string, string>, body: string) {
     await this.sql`
-      INSERT INTO apistate_api_cache (cache_key, status, headers, body, cached_at)
+      INSERT INTO api2business_api_cache (cache_key, status, headers, body, cached_at)
       VALUES (${key}, ${status}, ${headers}::jsonb, ${body}, now())
       ON CONFLICT (cache_key) DO UPDATE SET
         status=EXCLUDED.status, headers=EXCLUDED.headers, body=EXCLUDED.body, cached_at=now()
@@ -211,12 +211,12 @@ export class OperationsStore {
   async getUpstreamUsageCache(accountIds: number[]) {
     if (!accountIds.length) return await this.sql`
       SELECT account_id, result, queried_at, last_success_result, last_success_at
-      FROM apistate_upstream_usage_cache ORDER BY account_id
+      FROM api2business_upstream_usage_cache ORDER BY account_id
     `;
     const accountIdArray = postgresBigintArrayLiteral(accountIds);
     return await this.sql`
       SELECT account_id, result, queried_at, last_success_result, last_success_at
-      FROM apistate_upstream_usage_cache
+      FROM api2business_upstream_usage_cache
       WHERE account_id = ANY(${accountIdArray}::bigint[]) ORDER BY account_id
     `;
   }
@@ -227,7 +227,7 @@ export class OperationsStore {
         const accountId = Number(result.accountId);
         if (!Number.isSafeInteger(accountId) || accountId <= 0) continue;
         await tx`
-          INSERT INTO apistate_upstream_usage_cache (
+          INSERT INTO api2business_upstream_usage_cache (
             account_id, result, queried_at, last_success_result, last_success_at
           ) VALUES (
             ${accountId}, ${result}::jsonb, now(),
@@ -239,17 +239,17 @@ export class OperationsStore {
             queried_at=now(),
             last_success_result=CASE
               WHEN COALESCE((EXCLUDED.result->>'ok')::boolean, false) THEN EXCLUDED.result
-              ELSE apistate_upstream_usage_cache.last_success_result
+              ELSE api2business_upstream_usage_cache.last_success_result
             END,
             last_success_at=CASE
               WHEN COALESCE((EXCLUDED.result->>'ok')::boolean, false) THEN now()
-              ELSE apistate_upstream_usage_cache.last_success_at
+              ELSE api2business_upstream_usage_cache.last_success_at
             END
         `;
       }
       for (const sample of samples) {
         await tx`
-          INSERT INTO apistate_upstream_quota_samples (
+          INSERT INTO api2business_upstream_quota_samples (
             sampled_at, wallet_key, account_id, schedulable, status, provider,
             probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at,
             api_amount_usd_total, wallet_api_amount_usd_total
@@ -268,11 +268,11 @@ export class OperationsStore {
       SELECT sampled_at, wallet_key, account_id, schedulable, status, provider,
         probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at,
         api_amount_usd_total, wallet_api_amount_usd_total
-      FROM apistate_upstream_quota_samples
+      FROM api2business_upstream_quota_samples
       WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
          OR sampled_at IN (
            SELECT sampled_at FROM (
-             SELECT DISTINCT sampled_at FROM apistate_upstream_quota_samples
+             SELECT DISTINCT sampled_at FROM api2business_upstream_quota_samples
              ORDER BY sampled_at DESC LIMIT 13
            ) recent
          )
@@ -284,7 +284,7 @@ export class OperationsStore {
     await this.sql.begin(async (tx) => {
       for (const sample of samples) {
         await tx`
-          INSERT INTO apistate_oauth_runtime_samples (
+          INSERT INTO api2business_oauth_runtime_samples (
             sampled_at, profile, api_amount_usd_total, expected_api_amount_usd,
             remaining_expected_api_amount_usd, account_count, normal_count,
             rate_limited_count, error_count
@@ -302,11 +302,11 @@ export class OperationsStore {
       SELECT sampled_at, profile, api_amount_usd_total, expected_api_amount_usd,
         remaining_expected_api_amount_usd, account_count, normal_count,
         rate_limited_count, error_count
-      FROM apistate_oauth_runtime_samples
+      FROM api2business_oauth_runtime_samples
       WHERE profile=${profile}
         AND (sampled_at >= now() - (${hours}::text || ' hours')::interval
           OR sampled_at IN (
-            SELECT sampled_at FROM apistate_oauth_runtime_samples
+            SELECT sampled_at FROM api2business_oauth_runtime_samples
             WHERE profile=${profile} ORDER BY sampled_at DESC LIMIT 13
           ))
       ORDER BY sampled_at
@@ -315,7 +315,7 @@ export class OperationsStore {
 
   async addPoolQualitySample(sample: import("./pool-quality-monitor").PoolQualitySample) {
     await this.sql`
-      INSERT INTO apistate_pool_quality_samples (
+      INSERT INTO api2business_pool_quality_samples (
         sampled_at, score, grade, observed_attempts, success_requests, failure_requests,
         failure_rate, failover_requests, failover_recovered, ttft_p95_ms,
         first_token_samples, participation
@@ -332,10 +332,10 @@ export class OperationsStore {
       SELECT sampled_at, score, grade, observed_attempts, success_requests,
         failure_requests, failure_rate, failover_requests, failover_recovered,
         ttft_p95_ms, first_token_samples, participation
-      FROM apistate_pool_quality_samples
+      FROM api2business_pool_quality_samples
       WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
          OR sampled_at IN (
-           SELECT sampled_at FROM apistate_pool_quality_samples
+           SELECT sampled_at FROM api2business_pool_quality_samples
            ORDER BY sampled_at DESC LIMIT 13
          )
       ORDER BY sampled_at
@@ -358,7 +358,7 @@ export class OperationsStore {
     errorSummary: string | null;
   }) {
     await this.sql`
-      INSERT INTO apistate_idle_probe_rounds (
+      INSERT INTO api2business_idle_probe_rounds (
         id, operation_id, trigger_type, started_at, completed_at, status,
         planned_count, ready_count, attempted_count, succeeded_count,
         failed_count, unready_count, duration_ms, error_summary
@@ -376,7 +376,7 @@ export class OperationsStore {
         planned_count, ready_count, attempted_count, succeeded_count,
         failed_count, unready_count, duration_ms, error_summary,
         COUNT(*) OVER()::int AS total_count
-      FROM apistate_idle_probe_rounds
+      FROM api2business_idle_probe_rounds
       ORDER BY started_at DESC, id DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -384,7 +384,7 @@ export class OperationsStore {
 
   async restoreUpstreamUsageSuccess(accountId: number, result: Record<string, unknown>) {
     await this.sql`
-      INSERT INTO apistate_upstream_usage_cache (
+      INSERT INTO api2business_upstream_usage_cache (
         account_id, result, queried_at, last_success_result, last_success_at
       ) VALUES (${accountId}, ${result}::jsonb, now(), ${result}::jsonb, now())
       ON CONFLICT (account_id) DO UPDATE SET
@@ -404,7 +404,7 @@ export class OperationsStore {
     try {
       await connection`
         SELECT pg_advisory_lock(
-          hashtext(${"apistate"}),
+          hashtext(${"api2business"}),
           hashtext(${"priority-optimization-global"})
         )
       `;
@@ -421,7 +421,7 @@ export class OperationsStore {
         try {
           await connection`
             SELECT pg_advisory_unlock(
-              hashtext(${"apistate"}),
+              hashtext(${"api2business"}),
               hashtext(${"priority-optimization-global"})
             )
           `;
@@ -437,7 +437,7 @@ export class OperationsStore {
   async addCash(input: { occurredOn: string; direction: CashDirection; category: string; amountCny: number; description: string; operator: string }) {
     const id = crypto.randomUUID();
     const [row] = await this.sql`
-      INSERT INTO apistate_cash_entries
+      INSERT INTO api2business_cash_entries
         (id, occurred_on, direction, category, amount_cny, description, operator)
       VALUES (${id}, ${input.occurredOn}, ${input.direction}, ${input.category},
         ${input.amountCny}, ${input.description}, ${input.operator})
@@ -449,7 +449,7 @@ export class OperationsStore {
 
   async voidCash(id: string, operator: string, reason: string) {
     const [row] = await this.sql`
-      UPDATE apistate_cash_entries
+      UPDATE api2business_cash_entries
       SET voided_at=now(), voided_by=${operator}, void_reason=${reason}
       WHERE id=${id} AND voided_at IS NULL
       RETURNING id, occurred_on, direction, category, amount_cny, description,
@@ -465,7 +465,7 @@ export class OperationsStore {
         COUNT(*)::int AS total_count,
         COALESCE(SUM(amount_cny) FILTER (WHERE direction='income' AND voided_at IS NULL AND to_char(occurred_on, 'YYYY-MM')=${period}), 0) AS income_cny,
         COALESCE(SUM(amount_cny) FILTER (WHERE direction='expense' AND voided_at IS NULL AND to_char(occurred_on, 'YYYY-MM')=${period}), 0) AS expense_cny
-      FROM apistate_cash_entries
+      FROM api2business_cash_entries
     `;
     return row ?? { income_cny: 0, expense_cny: 0 };
   }
@@ -476,7 +476,7 @@ export class OperationsStore {
         COUNT(*) FILTER (WHERE voided_at IS NULL)::int AS total_count,
         COALESCE(SUM(amount_cny) FILTER (WHERE direction='income' AND voided_at IS NULL), 0) AS income_cny,
         COALESCE(SUM(amount_cny) FILTER (WHERE direction='expense' AND voided_at IS NULL), 0) AS expense_cny
-      FROM apistate_cash_entries
+      FROM api2business_cash_entries
       WHERE occurred_on=${day}
     `;
     return row ?? { total_count: 0, income_cny: 0, expense_cny: 0 };
@@ -487,7 +487,7 @@ export class OperationsStore {
       SELECT id, occurred_on, direction, category, amount_cny, description,
         operator, created_at, voided_at, voided_by, void_reason,
         COUNT(*) OVER()::int AS total_count
-      FROM apistate_cash_entries ORDER BY occurred_on DESC, created_at DESC
+      FROM api2business_cash_entries ORDER BY occurred_on DESC, created_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
   }
@@ -504,7 +504,7 @@ export class OperationsStore {
     const id = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + input.ttlMinutes * 60_000);
     await this.sql`
-      INSERT INTO apistate_priority_plans
+      INSERT INTO api2business_priority_plans
         (id, expires_at, created_by, status, recent_call_limit, priorities, result,
           trigger_type, execution_started_at)
       VALUES (${id}, ${expiresAt}, ${input.operator}, 'pending',
@@ -520,7 +520,7 @@ export class OperationsStore {
       SELECT id, created_at, expires_at, created_by, status, recent_call_limit,
         priorities, result, applied_at, apply_result, trigger_type, completed_at,
         execution_started_at
-      FROM apistate_priority_plans WHERE id=${id}
+      FROM api2business_priority_plans WHERE id=${id}
     `;
     if (!row) throw new Error("priority plan does not exist");
     const plan = row as Record<string, unknown>;
@@ -534,7 +534,7 @@ export class OperationsStore {
 
   async markPlanExecutionStarted(id: string) {
     const [row] = await this.sql`
-      UPDATE apistate_priority_plans
+      UPDATE api2business_priority_plans
       SET execution_started_at=COALESCE(execution_started_at, now())
       WHERE id=${id} AND status='pending'
       RETURNING execution_started_at
@@ -551,7 +551,7 @@ export class OperationsStore {
   ) {
     return await this.sql.begin(async (tx) => {
       const [plan] = await tx`
-        UPDATE apistate_priority_plans
+        UPDATE api2business_priority_plans
         SET status=${status}, applied_at=now(), completed_at=now(),
           execution_started_at=COALESCE(execution_started_at, now()),
           apply_result=${result}::jsonb
@@ -564,7 +564,7 @@ export class OperationsStore {
       if (plan.trigger_type === "manual") {
         const [automation] = await tx`
           SELECT interval_seconds
-          FROM apistate_priority_automation
+          FROM api2business_priority_automation
           WHERE id='default'
           FOR UPDATE
         `;
@@ -574,7 +574,7 @@ export class OperationsStore {
             jitterPercent,
           );
           const [updated] = await tx`
-            UPDATE apistate_priority_automation
+            UPDATE api2business_priority_automation
             SET next_run_at=now() + make_interval(secs => ${nextDelay}),
               updated_at=now()
             WHERE id='default'
@@ -600,7 +600,7 @@ export class OperationsStore {
             completed_at - COALESCE(execution_started_at, created_at)
           )) * 1000
         END AS duration_ms
-      FROM apistate_priority_plans
+      FROM api2business_priority_plans
       ORDER BY created_at DESC LIMIT ${limit}
     `;
   }
@@ -610,7 +610,7 @@ export class OperationsStore {
       SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at,
         created_at, updated_at, updated_by, run_id, run_claimed_at, run_started_at,
         last_completed_at, last_run_status
-      FROM apistate_priority_automation WHERE id='default'
+      FROM api2business_priority_automation WHERE id='default'
     `;
     return row ?? null;
   }
@@ -618,7 +618,7 @@ export class OperationsStore {
   async createAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string; jitterPercent: number }) {
     const nextDelay = jitteredIntervalSeconds(input.intervalSeconds, input.jitterPercent);
     const [row] = await this.sql`
-      INSERT INTO apistate_priority_automation
+      INSERT INTO api2business_priority_automation
         (id, enabled, interval_seconds, recent_call_limit, next_run_at, updated_by)
       VALUES ('default', ${input.enabled}, ${input.intervalSeconds}, ${input.recentCallLimit},
         now() + make_interval(secs => ${nextDelay}), ${input.operator})
@@ -630,7 +630,7 @@ export class OperationsStore {
   async updateAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string; jitterPercent: number }) {
     const nextDelay = jitteredIntervalSeconds(input.intervalSeconds, input.jitterPercent);
     const [row] = await this.sql`
-      UPDATE apistate_priority_automation
+      UPDATE api2business_priority_automation
       SET enabled=${input.enabled}, interval_seconds=${input.intervalSeconds},
         recent_call_limit=${input.recentCallLimit},
         next_run_at=CASE WHEN run_id IS NULL
@@ -645,7 +645,7 @@ export class OperationsStore {
 
   async deleteAutomation() {
     const [row] = await this.sql`
-      DELETE FROM apistate_priority_automation WHERE id='default' RETURNING id
+      DELETE FROM api2business_priority_automation WHERE id='default' RETURNING id
     `;
     if (!row) throw new Error("priority automation does not exist");
     return row;
@@ -659,7 +659,7 @@ export class OperationsStore {
           next_run_at <= now() AS due,
           COALESCE(run_started_at, run_claimed_at, updated_at)
             <= now() - (${runTimeoutMs} * interval '1 millisecond') AS run_expired
-        FROM apistate_priority_automation
+        FROM api2business_priority_automation
         WHERE id='default'
         FOR UPDATE SKIP LOCKED
       `;
@@ -668,7 +668,7 @@ export class OperationsStore {
         if (row.run_expired !== true) return null;
         const runId = String(row.run_id);
         const [pendingPlan] = await tx`
-          SELECT id FROM apistate_priority_plans
+          SELECT id FROM api2business_priority_plans
           WHERE trigger_type='automatic' AND status='pending'
             AND execution_started_at=${row.run_started_at ?? null}
           ORDER BY created_at DESC LIMIT 1
@@ -682,7 +682,7 @@ export class OperationsStore {
         };
         if (pendingPlan) {
           await tx`
-            UPDATE apistate_priority_plans
+            UPDATE api2business_priority_plans
             SET status='failed', applied_at=now(), completed_at=now(),
               apply_result=${recoveryResult}::jsonb
             WHERE id=${pendingPlan.id}
@@ -690,7 +690,7 @@ export class OperationsStore {
         }
         const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
         const [recovered] = await tx`
-          UPDATE apistate_priority_automation
+          UPDATE api2business_priority_automation
           SET run_id=NULL, run_claimed_at=NULL, run_started_at=NULL,
             last_completed_at=now(), last_run_status='failed',
             next_run_at=now() + make_interval(secs => ${nextDelay}), updated_at=now()
@@ -698,7 +698,7 @@ export class OperationsStore {
           RETURNING next_run_at, last_completed_at
         `;
         await tx`
-          INSERT INTO apistate_operation_audit
+          INSERT INTO api2business_operation_audit
             (id, action, status, operator, input_summary, result_summary)
           VALUES (${crypto.randomUUID()}, 'priority.automation.run', 'failed', 'scheduler',
             ${{ runTimeoutMs }}::jsonb,
@@ -715,7 +715,7 @@ export class OperationsStore {
       if (row.enabled !== true || row.due !== true) return null;
       const runId = crypto.randomUUID();
       const [claimed] = await tx`
-        UPDATE apistate_priority_automation
+        UPDATE api2business_priority_automation
         SET run_id=${runId}, run_claimed_at=now(), run_started_at=NULL,
           updated_at=now()
         WHERE id='default'
@@ -728,7 +728,7 @@ export class OperationsStore {
 
   async markAutomationRunStarted(runId: string) {
     const [row] = await this.sql`
-      UPDATE apistate_priority_automation
+      UPDATE api2business_priority_automation
       SET run_started_at=COALESCE(run_started_at, now()), updated_at=now()
       WHERE id='default' AND run_id=${runId}
       RETURNING id, run_id, run_started_at
@@ -741,14 +741,14 @@ export class OperationsStore {
     return await this.sql.begin(async (tx) => {
       const [row] = await tx`
         SELECT interval_seconds
-        FROM apistate_priority_automation
+        FROM api2business_priority_automation
         WHERE id='default' AND run_id=${runId}
         FOR UPDATE
       `;
       if (!row) return null;
       const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
       const [completed] = await tx`
-        UPDATE apistate_priority_automation
+        UPDATE api2business_priority_automation
         SET run_id=NULL, run_claimed_at=NULL, run_started_at=NULL, last_completed_at=now(),
           last_run_status=${status},
           next_run_at=now() + make_interval(secs => ${nextDelay}),
@@ -763,7 +763,7 @@ export class OperationsStore {
 
   async audit(action: string, status: string, operator: string, input: unknown, result: unknown) {
     await this.sql`
-      INSERT INTO apistate_operation_audit
+      INSERT INTO api2business_operation_audit
         (id, action, status, operator, input_summary, result_summary)
       VALUES (${crypto.randomUUID()}, ${action}, ${status}, ${operator},
         ${input}::jsonb, ${result}::jsonb)
@@ -774,12 +774,12 @@ export class OperationsStore {
     return await this.sql`
       SELECT id, action, status, operator, input_summary, result_summary, created_at,
         COUNT(*) OVER()::int AS total_count
-      FROM apistate_operation_audit ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
+      FROM api2business_operation_audit ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
     `;
   }
 
   async auditCount() {
-    const [row] = await this.sql`SELECT COUNT(*)::int AS total_count FROM apistate_operation_audit`;
+    const [row] = await this.sql`SELECT COUNT(*)::int AS total_count FROM api2business_operation_audit`;
     return Number(row?.total_count ?? 0);
   }
 }

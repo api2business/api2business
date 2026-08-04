@@ -24,7 +24,7 @@ function decimal(value: unknown, digits = 1): string {
 
 export function renderPriorityPlanLines(value: Row): string[] {
   const lines = [
-    `APISTATE PRIORITY PLAN calls=${String(value.recentCallLimit)} eligible=${String(value.eligibleCount)} changed=${String(value.changedCount)}`,
+    `API2BUSINESS PRIORITY PLAN calls=${String(value.recentCallLimit)} eligible=${String(value.eligibleCount)} changed=${String(value.changedCount)}`,
   ];
   const changes = rows(value.changes).filter((row) => row.change === "update");
   if (changes.length > 0) {

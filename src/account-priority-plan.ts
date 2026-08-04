@@ -406,7 +406,7 @@ function buildPriorityProfile(
     changes: [...fixedChanges, ...dynamicChanges, ...tailChanges],
     procurementAdvice,
     apply: {
-      through: "apistate-priority-plan-confirm",
+      through: "api2business-priority-plan-confirm",
       target: config.monitor.target,
       writeMode: "backend-api-paced",
       batchSize: config.operations.priorityWrite.batchSize,

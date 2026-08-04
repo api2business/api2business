@@ -49,7 +49,7 @@ test("settlement keeps its confirmed candidates when a worker snapshot omits the
 });
 
 test("includes YAML acquisition entries so manually recorded OAuth accounts enter lifecycle detection", () => {
-  const root = mkdtempSync(join(tmpdir(), "apistate-lifecycle-yaml-"));
+  const root = mkdtempSync(join(tmpdir(), "api2business-lifecycle-yaml-"));
   const ledger = join(root, "pool.yaml");
   writeFileSync(ledger, [
     "profit:",

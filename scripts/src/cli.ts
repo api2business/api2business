@@ -177,7 +177,7 @@ function parseArgs(args: string[]): Parsed {
 function help(): Record<string, unknown> {
   return {
     ok: true,
-    usage: "bun scripts/apistate-cli.ts --config config/sub2rank.yaml [--over-api] [--target <id>] <command>",
+    usage: "bun scripts/api2business-cli.ts --config config/api2business.example.yaml [--over-api] [--target <id>] <command>",
     commands: [
       "config validate",
       "backend check",
@@ -239,7 +239,7 @@ function help(): Record<string, unknown> {
 function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
   if (json) return emit(value, true);
   const accounts = Array.isArray(value.accounts) ? value.accounts.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
-  console.log(`APISTATE ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)} totalDurationMs=${String(value.totalDurationMs)}`);
+  console.log(`API2BUSINESS ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)} totalDurationMs=${String(value.totalDurationMs)}`);
   console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%  SWITCH%  TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
   for (const row of accounts) {
     const failureRate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
@@ -267,7 +267,7 @@ function emit(value: Record<string, unknown>, json: boolean): void {
     console.log(JSON.stringify(value, null, 2));
     return;
   }
-  console.log("APISTATE RESULT");
+  console.log("API2BUSINESS RESULT");
   console.log("FIELD                 VALUE");
   console.log("--------------------  ------------------------------------------------------------");
   for (const [key, item] of Object.entries(value)) {
@@ -726,7 +726,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const refreshed = await client.workflowSubmit({ kind: "scores.refresh" });
     return {
       ok: status.ok === true && scores.ok === true && refreshed.ok === true && ranking.ok === true && lottery.ok === true,
-      action: "apistate-api-smoke",
+      action: "api2business-api-smoke",
       checks: { status: status.ok === true, scores: scores.ok === true, refreshSubmitted: refreshed.ok === true, ranking: ranking.ok === true, lottery: lottery.ok === true },
       workflowId: refreshed.workflowId,
       runId: refreshed.runId,

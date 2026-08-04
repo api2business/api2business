@@ -52,7 +52,7 @@ test("excludes administrators and deleted users without exposing identity", () =
   expect(userBalanceLiabilityQuery).toContain("LOWER(COALESCE(u.role, '')) <> 'admin'");
   expect(userBalanceLiabilityQuery).toContain("SUM(GREATEST(u.balance, 0))");
   expect(userBalanceLiabilityQuery).toContain("SUM(LEAST(u.balance, 0))");
-  expect(userBalanceLiabilityQuery).toContain("u.email NOT LIKE 'apistate-probe-%@sub2api.platform-infra.local'");
+  expect(userBalanceLiabilityQuery).toContain("u.email NOT LIKE 'api2business-probe-%@sub2api.platform-infra.local'");
   expect(userBalanceLiabilityQuery).toContain("u.email <> 'monitor-user@sub2api.platform-infra.local'");
   expect(userBalanceLiabilityQuery).not.toContain("u.email,");
   expect(userBalanceLiabilityQuery).not.toContain("password_hash");

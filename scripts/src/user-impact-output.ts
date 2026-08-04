@@ -14,7 +14,7 @@ export function emitUserImpact(value: Record<string, unknown>, json: boolean): v
     : [];
   const window = record(value.window) ?? {};
   console.log([
-    `APISTATE USER IMPACT mode=${String(value.mode)}`,
+    `API2BUSINESS USER IMPACT mode=${String(value.mode)}`,
     `users=${String(value.userCount)}`,
     `active=${String(value.activeUserCount)}`,
     `affected=${String(value.affectedUserCount)}`,

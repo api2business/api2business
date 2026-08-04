@@ -43,7 +43,7 @@ function identity(value: unknown): string {
 
 export function runtimeImportIdempotencyKey(operationKey: string, value: unknown): string {
   if (!operationKey.trim()) throw new Error("runtime import operation key is required");
-  return `apistate-runtime-import-${identity({ operationKey, value })}`;
+  return `api2business-runtime-import-${identity({ operationKey, value })}`;
 }
 
 export class Sub2ApiRuntimeService {
@@ -172,7 +172,7 @@ export class Sub2ApiRuntimeService {
     }
     return {
       ok: failures.length === 0,
-      action: "apistate-sub2api-runtime-import",
+      action: "api2business-sub2api-runtime-import",
       mode: "confirmed",
       mutation: createdCount + createdIds.length + updatedIds.length > 0,
       result: {

@@ -50,7 +50,7 @@ const server = Bun.serve({
 
 console.log(JSON.stringify({
   ok: true,
-  component: "apistate-api",
+  component: "api2business-api",
   runtime: runtimeId,
   listen: server.url.toString(),
   temporalNamespace: temporal ? config.temporal.namespace : null,

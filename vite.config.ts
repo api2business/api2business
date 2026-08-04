@@ -1,10 +1,10 @@
 import { defineConfig } from "vite";
 import { loadConfig } from "./src/config";
 
-const configPath = process.env.APISTATE_CONFIG_PATH;
-const runtimeId = process.env.APISTATE_RUNTIME_ID;
-if (!configPath) throw new Error("Vite requires APISTATE_CONFIG_PATH");
-if (!runtimeId) throw new Error("Vite requires APISTATE_RUNTIME_ID");
+const configPath = process.env.API2BUSINESS_CONFIG_PATH;
+const runtimeId = process.env.API2BUSINESS_RUNTIME_ID;
+if (!configPath) throw new Error("Vite requires API2BUSINESS_CONFIG_PATH");
+if (!runtimeId) throw new Error("Vite requires API2BUSINESS_RUNTIME_ID");
 
 const config = loadConfig(configPath);
 const target = config.runtime.serverTargets[runtimeId];

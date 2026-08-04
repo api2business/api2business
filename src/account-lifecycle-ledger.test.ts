@@ -8,7 +8,7 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 test("records one idempotent OAuth lifecycle settlement without credentials", () => {
-  const root = mkdtempSync(join(tmpdir(), "apistate-lifecycle-ledger-"));
+  const root = mkdtempSync(join(tmpdir(), "api2business-lifecycle-ledger-"));
   roots.push(root);
   const path = join(root, "ledger.jsonl");
   const input = {

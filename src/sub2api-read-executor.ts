@@ -26,7 +26,7 @@ export interface Sub2ApiReadResult<Row extends Record<string, unknown>> {
 
 export interface Sub2ApiReadStatus {
   owner: "native-api";
-  applicationName: "apistate-read-broker";
+  applicationName: "api2business-read-broker";
   connectionLimit: 1;
   queueDepth: number;
   manualQueueDepth: number;
@@ -221,7 +221,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
   status(): Sub2ApiReadStatus {
     return {
       owner: "native-api",
-      applicationName: "apistate-read-broker",
+      applicationName: "api2business-read-broker",
       connectionLimit: 1,
       queueDepth: this.manualQueue.length + this.automaticQueue.length,
       manualQueueDepth: this.manualQueue.length,
@@ -411,7 +411,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
   private createDatabase(databaseUrl: string): ScoreDatabaseLike {
     return new SQL(databaseUrl, {
       max: 1,
-      connection: { application_name: "apistate-read-broker" },
+      connection: { application_name: "api2business-read-broker" },
     }) as unknown as ScoreDatabaseLike;
   }
 

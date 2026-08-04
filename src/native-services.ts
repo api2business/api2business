@@ -106,8 +106,8 @@ function nativeEnvironment(
   if (nativeComponentRequiresTemporalAddress(config, component)) {
     env[config.temporal.addressEnv] = resolveTemporalAddress(config);
   }
-  env.APISTATE_CONFIG_PATH = config.configPath;
-  env.APISTATE_RUNTIME_ID = "native";
+  env.API2BUSINESS_CONFIG_PATH = config.configPath;
+  env.API2BUSINESS_RUNTIME_ID = "native";
   return env;
 }
 

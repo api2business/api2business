@@ -14,7 +14,7 @@ export interface Sub2ApiReadTransport {
 export class RemoteSub2ApiReadClient implements Sub2ApiReadClient {
   private latest: Sub2ApiReadStatus = {
     owner: "native-api",
-    applicationName: "apistate-read-broker",
+    applicationName: "api2business-read-broker",
     connectionLimit: 1,
     queueDepth: 0,
     manualQueueDepth: 0,

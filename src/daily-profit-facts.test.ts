@@ -6,7 +6,7 @@ test("reconstructs opening and closing positive balances in one uncached query",
   let captured: Record<string, unknown> | null = null;
   const result = await collectDailyProfitFacts({
     monitor: { timezone: "Asia/Shanghai" },
-    operations: { accountImportLedgerPath: "/tmp/apistate-test-missing-import-costs.jsonl" },
+    operations: { accountImportLedgerPath: "/tmp/api2business-test-missing-import-costs.jsonl" },
   } as never, {
     query: async (input: Record<string, unknown>) => {
       captured = input;

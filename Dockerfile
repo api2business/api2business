@@ -19,4 +19,4 @@ COPY vite.config.ts ./vite.config.ts
 ENV NODE_ENV=production
 EXPOSE 8080
 
-CMD ["bun", "src/api.ts", "--config", "config/sub2rank.yaml", "--runtime", "k8s"]
+CMD ["bun", "src/api.ts", "--config", "config/api2business.example.yaml", "--runtime", "k8s"]

@@ -32,7 +32,7 @@ test("aggregates completed Alipay revenue through one queued query", async () =>
     },
   } as unknown as Sub2ApiReadClient;
   const result = await collectAlipayRevenue(
-    { monitor: { timezone: "Asia/Shanghai" }, operations: { accountImportLedgerPath: "/tmp/apistate-test-missing-import-costs.jsonl" } } as AppConfig,
+    { monitor: { timezone: "Asia/Shanghai" }, operations: { accountImportLedgerPath: "/tmp/api2business-test-missing-import-costs.jsonl" } } as AppConfig,
     reads,
     { day: "2026-07-29" },
   );

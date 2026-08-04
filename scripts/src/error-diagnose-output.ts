@@ -15,7 +15,7 @@ export function emitErrorDiagnosis(value: Row, json: boolean): void {
     ? value.summary as Row
     : {};
   console.log(
-    `APISTATE ERROR DIAGNOSIS rows=${String(summary.sampledErrorRows ?? 0)}`
+    `API2BUSINESS ERROR DIAGNOSIS rows=${String(summary.sampledErrorRows ?? 0)}`
     + ` requests=${String(summary.distinctRequests ?? 0)}`
     + ` visible=${String(summary.customerVisibleRequests ?? 0)}`
     + ` recovered=${String(summary.recoveredRequests ?? 0)}`

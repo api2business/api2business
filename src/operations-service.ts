@@ -666,7 +666,7 @@ export class OperationsService {
         queryDurationMs: read.queryDurationMs,
         totalDurationMs: read.totalDurationMs,
         apply: {
-          through: "apistate-priority-plan-confirm",
+          through: "api2business-priority-plan-confirm",
           target: this.config.monitor.target,
           writeMode: "backend-api-paced",
           batchSize: this.config.operations.priorityWrite.batchSize,
@@ -853,7 +853,7 @@ export class OperationsService {
   }
 
   private async writePriorityBatch(priorities: Record<string, number>) {
-    if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+    if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
     const startedAt = Date.now();
     try {
       await this.runtime.updatePriorities(

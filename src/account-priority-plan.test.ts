@@ -4,7 +4,7 @@ import type { AppConfig } from "./config";
 
 const config = {
   monitor: {
-    target: "NC01-DOCKER",
+    target: "example-runtime",
   },
   operations: {
     priorityWrite: {

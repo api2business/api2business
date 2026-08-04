@@ -87,7 +87,7 @@ async function requestJson(target: UpstreamUsageTarget, path: string, timeoutMs:
     headers: {
       authorization: `Bearer ${target.apiKey}`,
       accept: "application/json",
-      "user-agent": "ApiState-Upstream-Usage/1.0",
+      "user-agent": "Api2Business-Upstream-Usage/1.0",
     },
     signal: AbortSignal.timeout(timeoutMs),
   });

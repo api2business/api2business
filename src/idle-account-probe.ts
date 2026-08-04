@@ -92,7 +92,7 @@ WITH probe_keys AS (
   WHERE owner.email = 'monitor-user@sub2api.platform-infra.local'
     AND owner.deleted_at IS NULL
     AND k.deleted_at IS NULL
-    AND k.name LIKE 'apistate-probe-%'
+    AND k.name LIKE 'api2business-probe-%'
 ), usage AS (
   SELECT COUNT(*)::int AS success_requests,
     COALESCE(SUM(u.actual_cost), 0)::numeric AS consumed_api_amount_usd,

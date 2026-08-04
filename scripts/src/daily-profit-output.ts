@@ -26,7 +26,7 @@ export function emitDailyProfit(value: Record<string, unknown>, json: boolean): 
   const capital = row(value.capitalAdjusted);
   const coverage = row(capital.coverage);
   const replay = row(value.replay);
-  console.log(`APISTATE DAILY PROFIT day=${String(value.selector)} complete=${String(value.dayComplete)} asOf=${String(value.asOf)} databaseQueries=${String(value.databaseQueries)}`);
+  console.log(`API2BUSINESS DAILY PROFIT day=${String(value.selector)} complete=${String(value.dayComplete)} asOf=${String(value.asOf)} databaseQueries=${String(value.databaseQueries)}`);
   console.log(`REVENUE alipay=${cny(revenue.alipayCny)} manual=${cny(revenue.manualCny)} yaml=${cny(revenue.yamlCny)} total=${cny(revenue.totalCny)}`);
   console.log(`DIRECT_COST accountImport=${cny(costs.accountImportCny)} upstreamRecharge=${cny(costs.upstreamRechargeCny)} upstreamCapital=${cny(costs.upstreamCapitalCny)} upstreamConsumed=${cny(costs.upstreamConsumedCny)} manual=${cny(costs.manualExpenseCny)} yaml=${cny(costs.yamlCostCny)} procurementRefund=${cny(costs.procurementRefundCny)} total=${cny(costs.totalCny)}`);
   console.log(`CASH_GROSS_PROFIT ${cny(value.cashGrossProfitCny)}`);

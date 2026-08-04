@@ -182,7 +182,7 @@ const health = Bun.serve({
   port: target.workerHealthPort,
   fetch: () => Response.json({
     ok: state === "ready",
-    component: "apistate-worker",
+    component: "api2business-worker",
     state,
     workflowMode: workflowEnabled ? "temporal" : "disabled",
     namespace: workflowEnabled ? config.temporal.namespace : null,
@@ -195,7 +195,7 @@ const health = Bun.serve({
 
 console.log(JSON.stringify({
   ok: true,
-  component: "apistate-worker",
+  component: "api2business-worker",
   runtime: runtimeId,
   health: health.url.toString(),
   workflowMode: workflowEnabled ? "temporal" : "disabled",
@@ -271,5 +271,5 @@ try {
   await operations.close();
   if (temporal) await temporal.close();
   if (connection) await connection.close();
-  console.log(JSON.stringify({ ok: true, component: "apistate-worker", state: "stopped", valuesPrinted: false }));
+  console.log(JSON.stringify({ ok: true, component: "api2business-worker", state: "stopped", valuesPrinted: false }));
 }

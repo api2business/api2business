@@ -7,5 +7,6 @@ node_modules/
 *.sqlite-wal
 dist/
 .env
+/config/api2business.yaml
 *.log
 logs/

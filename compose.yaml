@@ -3,46 +3,38 @@ services:
     build: .
     restart: unless-stopped
     network_mode: host
-    env_file: .state/compose/apistate.env
+    env_file: .state/compose/api2business.env
     volumes:
       - ./config:/app/config:ro
-      - /workspace/unidesk:/workspace/unidesk:ro
-      - /root/apistate/.state/ledger:/root/apistate/.state/ledger
-      - /root/apistate/.state/account-imports:/root/apistate/.state/account-imports
-      - /root/apistate/.state/idle-probe:/app/.state/idle-probe
+      - ${UNIDESK_ROOT:-/workspace/unidesk}:${UNIDESK_ROOT:-/workspace/unidesk}:ro
+      - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
+      - /var/lib/api2business/.state/idle-probe:/app/.state/idle-probe
       - /opt/unidesk/platform-infra/sub2api-nc01:/opt/unidesk/platform-infra/sub2api-nc01:ro
-      - /etc/apistate/secrets/unified-admin-password.txt:/etc/apistate/secrets/unified-admin-password.txt:ro
-      - /etc/apistate/secrets/apistate/sub2api.env:/etc/apistate/secrets/apistate/sub2api.env:ro
-      - /etc/apistate/secrets/apistate/apistate.env:/etc/apistate/secrets/apistate/apistate.env:ro
-      - /etc/apistate/secrets/apistate/apistate-nc01-l1-db.env:/etc/apistate/secrets/apistate/apistate-nc01-l1-db.env:ro
-    command: ["bun", "src/api.ts", "--config", "config/sub2rank.yaml", "--runtime", "compose"]
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
+    command: ["bun", "src/api.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}", "--runtime", "compose"]
   worker:
     build: .
     restart: unless-stopped
     network_mode: host
-    env_file: .state/compose/apistate.env
+    env_file: .state/compose/api2business.env
     volumes:
       - ./config:/app/config:ro
-      - /workspace/unidesk:/workspace/unidesk:ro
-      - /root/apistate/.state/ledger:/root/apistate/.state/ledger
-      - /root/apistate/.state/account-imports:/root/apistate/.state/account-imports
-      - /root/apistate/.state/idle-probe:/app/.state/idle-probe
+      - ${UNIDESK_ROOT:-/workspace/unidesk}:${UNIDESK_ROOT:-/workspace/unidesk}:ro
+      - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
+      - /var/lib/api2business/.state/idle-probe:/app/.state/idle-probe
       - /opt/unidesk/platform-infra/sub2api-nc01:/opt/unidesk/platform-infra/sub2api-nc01:ro
-      - /etc/apistate/secrets/unified-admin-password.txt:/etc/apistate/secrets/unified-admin-password.txt:ro
-      - /etc/apistate/secrets/apistate/sub2api.env:/etc/apistate/secrets/apistate/sub2api.env:ro
-      - /etc/apistate/secrets/apistate/apistate.env:/etc/apistate/secrets/apistate/apistate.env:ro
-      - /etc/apistate/secrets/apistate/apistate-nc01-l1-db.env:/etc/apistate/secrets/apistate/apistate-nc01-l1-db.env:ro
-    command: ["bun", "src/worker.ts", "--config", "config/sub2rank.yaml", "--runtime", "compose"]
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
+    command: ["bun", "src/worker.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}", "--runtime", "compose"]
     depends_on: [api]
   web:
     build: .
     restart: unless-stopped
     network_mode: host
-    env_file: .state/compose/apistate.env
+    env_file: .state/compose/api2business.env
     volumes:
       - ./config:/app/config:ro
     environment:
-      APISTATE_CONFIG_PATH: config/sub2rank.yaml
-      APISTATE_RUNTIME_ID: compose
+      API2BUSINESS_CONFIG_PATH: ${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}
+      API2BUSINESS_RUNTIME_ID: compose
     command: ["bunx", "vite", "--config", "vite.config.ts", "--host", "0.0.0.0"]
     depends_on: [api]

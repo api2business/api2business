@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { accountImportBatchId, readAccountImportCosts, recordAccountImportCosts, recordAccountImportPlanTypeCorrections } from "./account-import-cost-ledger";
 
 test("records CNY account costs once per stable account id", () => {
-  const directory = mkdtempSync(join(tmpdir(), "apistate-cost-ledger-"));
+  const directory = mkdtempSync(join(tmpdir(), "api2business-cost-ledger-"));
   const path = join(directory, "costs.jsonl");
   try {
     const first = recordAccountImportCosts({
@@ -37,7 +37,7 @@ test("records CNY account costs once per stable account id", () => {
 });
 
 test("preserves Free as an import label in the CNY ledger", () => {
-  const directory = mkdtempSync(join(tmpdir(), "apistate-cost-ledger-free-"));
+  const directory = mkdtempSync(join(tmpdir(), "api2business-cost-ledger-free-"));
   const path = join(directory, "costs.jsonl");
   try {
     recordAccountImportCosts({
@@ -57,7 +57,7 @@ test("preserves Free as an import label in the CNY ledger", () => {
 });
 
 test("preserves Team as an import label in the CNY ledger", () => {
-  const directory = mkdtempSync(join(tmpdir(), "apistate-cost-ledger-team-"));
+  const directory = mkdtempSync(join(tmpdir(), "api2business-cost-ledger-team-"));
   const path = join(directory, "costs.jsonl");
   try {
     recordAccountImportCosts({
@@ -77,7 +77,7 @@ test("preserves Team as an import label in the CNY ledger", () => {
 });
 
 test("corrects an imported plan type without changing acquisition cost", () => {
-  const directory = mkdtempSync(join(tmpdir(), "apistate-cost-ledger-correction-"));
+  const directory = mkdtempSync(join(tmpdir(), "api2business-cost-ledger-correction-"));
   const path = join(directory, "costs.jsonl");
   try {
     recordAccountImportCosts({

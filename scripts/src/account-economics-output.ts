@@ -16,7 +16,7 @@ export function emitAccountEconomics(value: Record<string, unknown>, json: boole
   }
   const window = record(value.window) ?? {};
   console.log([
-    `APISTATE ACCOUNT ECONOMICS complete=${String(value.complete)}`,
+    `API2BUSINESS ACCOUNT ECONOMICS complete=${String(value.complete)}`,
     `selected=${String(value.selectedAccountCount)}`,
     `matched=${String(value.matchedAccountCount)}`,
     `withUsage=${String(value.usageAccountCount)}`,
@@ -35,7 +35,7 @@ export function emitAccountImportEconomics(value: Record<string, unknown>, json:
     console.log(JSON.stringify(value, null, 2));
     return;
   }
-  console.log(`APISTATE IMPORT ECONOMICS complete=${String(value.complete)} day=${String(value.day)} databaseQueries=${String(value.databaseQueries)}`);
+  console.log(`API2BUSINESS IMPORT ECONOMICS complete=${String(value.complete)} day=${String(value.day)} databaseQueries=${String(value.databaseQueries)}`);
   const groups = Array.isArray(value.groups) ? value.groups : [];
   for (const item of groups) {
     const group = record(item) ?? {};

@@ -11,7 +11,7 @@ export function emitErrorAggregate(value: Row, json: boolean): void {
     console.log(JSON.stringify(value, null, 2));
     return;
   }
-  console.log(`APISTATE ERROR AGGREGATE limit=${String(value.limit)} requests=${String(value.distinctRequests)} visible=${String(value.customerVisibleRequests)} recovered=${String(value.recoveredRequests)} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)}`);
+  console.log(`API2BUSINESS ERROR AGGREGATE limit=${String(value.limit)} requests=${String(value.distinctRequests)} visible=${String(value.customerVisibleRequests)} recovered=${String(value.recoveredRequests)} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)}`);
   const dimensions = typeof value.dimensions === "object" && value.dimensions !== null
     ? value.dimensions as Row
     : {};

@@ -166,7 +166,7 @@ export class ProbeIsolationService {
     const existingId = id(existing?.id);
     const groupId = existingId ?? id((await this.admin.mutate<Row>("POST", "/admin/groups", {
       name,
-      description: "ApiState 上游账号探活私有分组",
+      description: "Api2Business 上游账号探活私有分组",
       platform: "openai",
       rate_multiplier: isolation.groupRateMultiplier,
       is_exclusive: true,
@@ -190,7 +190,7 @@ export class ProbeIsolationService {
   }
 
   private async ensureMonitorUser(file: ProbeKeyFile, groupId: number, deadline?: number): Promise<MonitorUserRecord> {
-    const password = file.monitor?.password ?? generatedSecret("ApistateMonitor-");
+    const password = file.monitor?.password ?? generatedSecret("Api2BusinessMonitor-");
     const listed = await this.admin.request<Paginated<Row>>(`/admin/users?search=${encodeURIComponent(MONITOR_EMAIL)}&page=1&page_size=100`, {}, true, this.remainingTimeout(deadline));
     let user = pageItems(listed).find((item) => String(item.email ?? "") === MONITOR_EMAIL);
     let userId = id(user?.id);
@@ -200,7 +200,7 @@ export class ProbeIsolationService {
         email: MONITOR_EMAIL,
         password,
         username: MONITOR_USERNAME,
-        notes: "ApiState 内部探活共享主体",
+        notes: "Api2Business 内部探活共享主体",
         role: "user",
         balance: this.config.sub2api.idleProbe.isolation.userBalance,
         concurrency: this.config.sub2api.idleProbe.concurrency,
@@ -229,10 +229,10 @@ export class ProbeIsolationService {
 
   private async ensureUserAndKey(accountId: number, groupId: number, stored: ProbeKeyRecord | undefined, file: ProbeKeyFile, deadline?: number): Promise<{ record: ProbeKeyRecord; keyCreated: boolean }> {
     const { email, password, userId } = await this.ensureMonitorUser(file, groupId, deadline);
-    const keyName = `apistate-probe-${accountId}`;
+    const keyName = `api2business-probe-${accountId}`;
     const storedApiKey = stored?.policyVersion === POLICY_VERSION && stored.email === MONITOR_EMAIL
       ? stored.apiKey
-      : generatedSecret("sk-apistate-probe-");
+      : generatedSecret("sk-api2business-probe-");
     const verifiedUser = row(await this.admin.request<Row>(`/admin/users/${userId}`, {}, true, this.remainingTimeout(deadline)));
     if (!ids(verifiedUser.allowed_groups).includes(groupId)) throw new Error(`monitor-user ${userId} 未绑定私有分组 ${groupId}`);
 
@@ -293,9 +293,9 @@ export class ProbeIsolationService {
         accountId,
         groupId,
         userId: 0,
-        email: `apistate-probe-${accountId}@sub2api.platform-infra.local`,
-        password: generatedSecret("ApistateProbe-"),
-        apiKey: generatedSecret("sk-apistate-probe-"),
+        email: `api2business-probe-${accountId}@sub2api.platform-infra.local`,
+        password: generatedSecret("Api2BusinessProbe-"),
+        apiKey: generatedSecret("sk-api2business-probe-"),
         ready: false,
       };
       file.records[String(accountId)] = existing;

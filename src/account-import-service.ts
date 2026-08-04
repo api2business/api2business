@@ -232,7 +232,7 @@ export class AccountImportService {
 
   private async run(job: ImportJob, content: string): Promise<void> {
     try {
-      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+      if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
       job.state = "running"; this.log(job, "job", "start", `开始处理 ${job.accountCount} 个账号`); await this.persistWorkerJob(job);
       let plan = await accountImportPreflight(content, {
         ...job.settings,
@@ -402,7 +402,7 @@ export class AccountImportService {
 function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan, correctedAccountIds: number[] = []): Record<string, unknown> {
   return {
     ok: true,
-    action: "apistate-sub2api-runtime-import",
+    action: "api2business-sub2api-runtime-import",
     mode: "confirmed",
     mutation: correctedAccountIds.length > 0,
     file: { fingerprint: job.fingerprint, accountCount: job.accountCount, valuesPrinted: false },
@@ -443,7 +443,7 @@ export function recoveredImportOutput(
   }
   return {
     ok: true,
-    action: "apistate-sub2api-runtime-import",
+    action: "api2business-sub2api-runtime-import",
     mode: "confirmed",
     mutation: createdIds.length + updatedIds.length > 0,
     recoveredAfterTimeout: true,

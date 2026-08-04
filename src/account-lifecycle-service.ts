@@ -363,7 +363,7 @@ export class AccountLifecycleService {
       this.log(job, "candidates", "done", `候选 ${accountIds.length} 个，开始原生连接检测`);
       await this.persistWorkerJob(job);
       const tests: unknown[] = [];
-      if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+      if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
       const batchSize = this.config.operations.accountLifecycle.testBatchSize;
       for (let offset = 0; offset < accountIds.length; offset += batchSize) {
         const batch = accountIds.slice(offset, offset + batchSize);
@@ -436,7 +436,7 @@ export class AccountLifecycleService {
       let deletion: Row | null = null;
       let deletionError: string | null = null;
       try {
-        if (!this.runtime) throw new Error("ApiState Sub2API runtime mutation service 不可用");
+        if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
         const deleted = [];
         for (const accountId of expectedIds) {
           await this.runtime.deleteAccount(accountId);

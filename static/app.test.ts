@@ -70,7 +70,7 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(html).toContain('class="page-head upstream-slim-head"');
   expect(html).toContain('class="metric-strip upstream-metrics"');
   expect(html).toContain('id="upstream-quota-refresh-interval"');
-  expect(app).toContain("apistate.operations.upstream-quota-refresh-interval.v1");
+  expect(app).toContain("api2business.operations.upstream-quota-refresh-interval.v1");
   expect(html).toContain('id="quota-realtime-cost"');
   expect(html).toContain('id="quota-sample-speed"');
   expect(html).toContain('id="quota-rolling-speed"');
@@ -323,7 +323,7 @@ test("OAuth runtime monitoring reuses the upstream history chart component", asy
   expect(html).toContain('/app.js?v=idle-probe-v1');
   expect(html).toContain('class="page-head live-compact-head oauth-compact-head"');
   expect(html).toContain('class="table-toolbar live-section-toolbar"');
-  expect(app).toContain("apistate.operations.oauth-refresh-interval.v2");
+  expect(app).toContain("api2business.operations.oauth-refresh-interval.v2");
   expect(html).toContain('class="oauth-head-controls"');
   expect(html).toContain('class="live-head-kpis oauth-runtime-kpis"');
   expect(html).not.toContain('id="oauth-runtime-title"');
