@@ -32,6 +32,12 @@ test("pool retirement treats free and plus rate limits as dead but retains rate-
   expect(lifecycleRetirementReason({ planType: "plus", stateBucket: "normal" }, "database-dead")).toBeNull();
 });
 
+test("full pool retirement includes normal, rate-limited, and error OAuth accounts", () => {
+  expect(lifecycleRetirementReason({ planType: "k12", stateBucket: "normal" }, "database-all")).toBe("database-all");
+  expect(lifecycleRetirementReason({ planType: "k12", stateBucket: "rate_limited" }, "database-all")).toBe("database-all");
+  expect(lifecycleRetirementReason({ planType: "k12", stateBucket: "error" }, "database-all")).toBe("database-all");
+});
+
 test("settlement keeps its confirmed candidates when a worker snapshot omits them", async () => {
   const patches: Array<Record<string, unknown>> = [];
   const job = {

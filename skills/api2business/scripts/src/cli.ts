@@ -603,7 +603,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
         const scope = parsed.scope ?? "pool";
         if (scope !== "pool" && scope !== "day") throw new Error("--scope must be pool or day");
         const day = parsed.day ?? new Date().toLocaleDateString("sv-SE", { timeZone: config.monitor.timezone });
-        return await client.accountLifecycleDetect({ day, planType: "all", scope, selectionMode: "database-error", confirm: false });
+        return await client.accountLifecycleDetect({ day, planType: "all", scope, selectionMode: "database-all", confirm: false });
       }
       if (!parsed.id) throw new Error(`accounts lifecycle retire ${phase ?? ""} requires --id`);
       if (phase === "status") return await client.accountLifecycleStatus(parsed.id);
@@ -613,7 +613,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
         const status = await client.accountLifecycleStatus(parsed.id);
         const job = record(status.job);
         const settings = record(job?.settings);
-        if (!job || (settings?.selectionMode !== "database-error" && settings?.selectionMode !== "database-dead")) throw new Error("retire confirm requires a database retirement plan");
+        if (!job || (settings?.selectionMode !== "database-error" && settings?.selectionMode !== "database-dead" && settings?.selectionMode !== "database-all")) throw new Error("retire confirm requires a database retirement plan");
         if (job.state !== "succeeded") throw new Error(`retirement plan must be succeeded before confirm; current state is ${String(job.state)}`);
         return await client.accountLifecycleSettle(parsed.id);
       }

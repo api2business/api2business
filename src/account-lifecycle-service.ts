@@ -11,7 +11,7 @@ import { parse } from "yaml";
 
 type PlanType = "k12" | "plus" | "free" | "team" | "all";
 type LifecycleScope = "day" | "pool";
-type SelectionMode = "probe" | "database-error" | "database-dead";
+type SelectionMode = "probe" | "database-error" | "database-dead" | "database-all";
 type JobState = "queued" | "running" | "succeeded" | "settling" | "settled" | "failed";
 type Row = Record<string, unknown>;
 
@@ -122,6 +122,7 @@ export function readLifecycleAcquisitionCosts(config: AppConfig, day: string | n
 export function lifecycleRetirementReason(row: Row, selectionMode: SelectionMode): string | null {
   const state = String(row.stateBucket ?? "error");
   const planType = String(row.planType ?? "unknown");
+  if (selectionMode === "database-all") return "database-all";
   if (selectionMode === "database-error") return state === "error" ? "database-error" : null;
   if (selectionMode !== "database-dead") return null;
   if (state === "error") return "database-error";
@@ -173,7 +174,7 @@ export class AccountLifecycleService {
     parseAccountEconomicsWindow({ day: input.day }, this.config.monitor.timezone);
     if (!["k12", "plus", "free", "team", "all"].includes(input.planType)) throw new Error("planType is invalid");
     const selectionMode = input.selectionMode ?? "probe";
-    if (selectionMode !== "probe" && selectionMode !== "database-error" && selectionMode !== "database-dead") throw new Error("selectionMode is invalid");
+    if (selectionMode !== "probe" && selectionMode !== "database-error" && selectionMode !== "database-dead" && selectionMode !== "database-all") throw new Error("selectionMode is invalid");
     const scope = input.scope ?? "day";
     if (scope !== "day" && scope !== "pool") throw new Error("scope is invalid");
     const model = input.model?.trim() || this.config.operations.accountLifecycle.defaultModel;
@@ -333,7 +334,7 @@ export class AccountLifecycleService {
       const rows = await this.facts(job.settings.day, job.settings.scope);
       const eligible = rows.filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth"
         && (job.settings.planType === "all" || row.planType === job.settings.planType));
-      if (job.settings.selectionMode === "database-error" || job.settings.selectionMode === "database-dead") {
+      if (job.settings.selectionMode === "database-error" || job.settings.selectionMode === "database-dead" || job.settings.selectionMode === "database-all") {
         const rateLimited = eligible.filter((row) => row.stateBucket === "rate_limited");
         job.candidates = eligible.filter((row) => lifecycleRetirementReason(row, job.settings.selectionMode) !== null);
         if (job.candidates.length === 0) throw new Error("没有匹配当前退役策略的账号");
@@ -409,7 +410,7 @@ export class AccountLifecycleService {
       const currentEligible = (await this.facts(job.settings.day, job.settings.scope))
         .filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth"
           && (job.settings.planType === "all" || row.planType === job.settings.planType));
-      const current = job.settings.selectionMode === "database-error" || job.settings.selectionMode === "database-dead"
+      const current = job.settings.selectionMode === "database-error" || job.settings.selectionMode === "database-dead" || job.settings.selectionMode === "database-all"
         ? currentEligible.filter((row) => lifecycleRetirementReason(row, job.settings.selectionMode) !== null) : currentEligible;
       const currentIds = [...new Set(current.map((row) => number(row.accountId)))].sort((left, right) => left - right);
       const expectedIds = [...new Set(job.candidates.map((row) => number(row.accountId)))].sort((left, right) => left - right);
