@@ -42,6 +42,30 @@ YAML-first 配置、排队数据库读取和 Temporal 长流程完成日常运�
 
 ![OAuth 分类型成本核算](docs/images/oauth-plan-economics.png)
 
+### 上游资产与综合质量
+
+资产、实时成本、综合质量和最近调用参与比例使用同一套持久化采样口径。
+
+| 资产与实时成本 | 质量趋势与参与比例 |
+| --- | --- |
+| ![上游资产与实时成本](docs/images/upstream-assets.png) | ![综合质量趋势与上游参与比例](docs/images/pool-quality-participation.png) |
+
+### 账号评分与探活
+
+账号总表汇总评分、余额、成本、产出和失败率；探活记录按轮展示计划、成功、失败和耗时。
+
+| 上游账号评分与排序 | 自动探活记录 |
+| --- | --- |
+| ![上游账号评分与排序](docs/images/upstream-ranking.png) | ![自动探活轮次记录](docs/images/probe-rounds.png) |
+
+### 导入作业与经营台账
+
+批量导入保留校验和记账证据，经营页统一汇总自动收入、手工收支和毛利事实。
+
+| 账号导入作业结果 | 经营管理与收支账本 |
+| --- | --- |
+| ![账号导入作业结果](docs/images/account-import-job.png) | ![经营管理与收支账本](docs/images/operations-ledger.png) |
+
 ## 架构
 
 ```text

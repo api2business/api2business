@@ -14,6 +14,49 @@ description: >-
 - 使用 `config/api2business.yaml` 保存本地配置；该文件不得提交。
 - 使用 `scripts/api2business-cli.ts` 执行业务和生命周期操作。
 
+## 从零部署（Bootstrap）
+
+1. 准备 Git、Bun、PostgreSQL、Temporal 和可访问的 Sub2API 管理面。
+2. 克隆仓库并进入工作区：
+
+   ```bash
+   git clone https://github.com/api2business/api2business.git
+   cd api2business
+   ```
+
+3. 从克隆后的仓库加载 `skills/api2business/SKILL.md`，再读取
+   `docs/reference/deployment.md`；不得从其他仓库或运行容器复制部署逻辑。
+4. 安装依赖并创建不提交的本机配置：
+
+   ```bash
+   bun install --frozen-lockfile
+   cp config/api2business.example.yaml config/api2business.yaml
+   ```
+
+5. 在仓库外准备 Secret 和持久化状态目录：
+   - Secret 文件仅允许 owner 读取；
+   - 配置只保存 `sourceRef`、环境变量名或挂载路径；
+   - PostgreSQL 经营数据、账本、缓存和采样不得写入 Git 工作区。
+6. 根据目标环境填写 `config/api2business.yaml`，再执行：
+
+   ```bash
+   bun scripts/api2business-cli.ts \
+     --config config/api2business.yaml \
+     config validate
+   bun run deploy:validate
+   bun scripts/api2business-cli.ts \
+     --config config/api2business.yaml \
+     native start --component all
+   bun scripts/api2business-cli.ts \
+     --config config/api2business.yaml \
+     native status --component all --json
+   ```
+
+7. 按“验收”章节完成检查：
+   - 检查登录、主要数据页和至少一个异步作业；
+   - 检查重启后的账本、缓存、采样和作业状态；
+   - 任一步失败时停止在首个断点，不跳过配置或 Secret 校验。
+
 ## 部署
 
 - 先读取 `docs/reference/deployment.md`。
