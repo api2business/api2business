@@ -58,6 +58,23 @@ test("idle probe usage follows monitor-user owned API keys", () => {
   expect(idleProbeRollingUsageSql).toContain("JOIN probe_keys p ON p.id = o.api_key_id");
 });
 
+test("automatic idle probe planning uses one queued database query", async () => {
+  let queries = 0;
+  const client = reads([]);
+  const query = client.query.bind(client);
+  client.query = async (request) => {
+    queries += 1;
+    return await query(request);
+  };
+  const service = new IdleAccountProbeService(config, client, null);
+
+  expect(await service.plan([], "automatic")).toMatchObject({
+    databaseQueries: 1,
+    rolling24Hours: null,
+  });
+  expect(queries).toBe(1);
+});
+
 test("idle probe request jitter includes both configured boundaries", () => {
   expect(idleProbeRequestJitterMs(1000, 3000, () => 0)).toBe(1000);
   expect(idleProbeRequestJitterMs(1000, 3000, () => 0.999999)).toBe(3000);

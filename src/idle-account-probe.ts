@@ -122,7 +122,8 @@ export class IdleAccountProbeService {
         || row.overload_until != null
         || row.temp_unschedulable_until != null,
     } satisfies IdleProbeCandidate));
-    const rolling24Hours = await this.rollingUsage(priority);
+    const includeRollingUsage = priority !== "automatic";
+    const rolling24Hours = includeRollingUsage ? await this.rollingUsage(priority) : null;
     return {
       ok: true,
       mutation: false,
@@ -131,7 +132,7 @@ export class IdleAccountProbeService {
       candidateLimit: policy.candidateLimit,
       candidates,
       rolling24Hours,
-      databaseQueries: 2,
+      databaseQueries: includeRollingUsage ? 2 : 1,
       queueDurationMs: result.queueDurationMs,
       queryDurationMs: result.queryDurationMs,
       valuesPrinted: false,
