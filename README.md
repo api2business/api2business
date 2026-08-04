@@ -107,10 +107,12 @@ chmod 600 /path/to/secrets/*.env
 
 ## 部署
 
-部署不绑定特定平台。仓库提供容器镜像、Compose 配置和 Kubernetes 基础模板，其他
-运行环境也可以复用同一镜像与配置合同。完整流程见
+部署统一先克隆本仓库，再加载仓内
+[`skills/api2business/SKILL.md`](skills/api2business/SKILL.md) 选择并执行部署方式。
+部署不绑定特定平台；仓库提供容器镜像、Compose 配置和 Kubernetes 基础模板，其他
+运行环境也可以复用同一镜像与配置合同。稳定部署合同见
 [部署参考](docs/reference/deployment.md)，自动化代理入口见
-[`skills/api2business/SKILL.md`](skills/api2business/SKILL.md)。
+上述 skill。
 
 ```bash
 bun run deploy:validate

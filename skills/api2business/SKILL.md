@@ -9,6 +9,7 @@ description: >-
 
 ## 工作区
 
+- 新部署先克隆 `https://github.com/api2business/api2business.git`，再从克隆后的仓库加载本 skill。
 - 从当前 Api2Business 仓库根目录执行命令。
 - 使用 `config/api2business.yaml` 保存本地配置；该文件不得提交。
 - 使用 `scripts/api2business-cli.ts` 执行业务和生命周期操作。
@@ -16,6 +17,7 @@ description: >-
 ## 部署
 
 - 先读取 `docs/reference/deployment.md`。
+- 确认当前目录是已克隆的 Api2Business Git 工作区，不从运行容器或其他仓库拼装部署资产。
 - 根据目标环境选择 Compose、Kubernetes、systemd、托管容器或其他部署方式。
 - 不假定特定 CI/CD、代码托管、集群、主机名或网络入口。
 - 发布前执行 `bun run deploy:validate`。
