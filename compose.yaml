@@ -5,6 +5,7 @@ services:
     network_mode: host
     env_file: .state/compose/apistate.env
     volumes:
+      - ./config:/app/config:ro
       - /workspace/unidesk:/workspace/unidesk:ro
       - /root/apistate/.state/ledger:/root/apistate/.state/ledger
       - /root/apistate/.state/account-imports:/root/apistate/.state/account-imports
@@ -18,6 +19,7 @@ services:
     network_mode: host
     env_file: .state/compose/apistate.env
     volumes:
+      - ./config:/app/config:ro
       - /workspace/unidesk:/workspace/unidesk:ro
       - /root/apistate/.state/ledger:/root/apistate/.state/ledger
       - /root/apistate/.state/account-imports:/root/apistate/.state/account-imports
@@ -31,6 +33,8 @@ services:
     restart: unless-stopped
     network_mode: host
     env_file: .state/compose/apistate.env
+    volumes:
+      - ./config:/app/config:ro
     environment:
       APISTATE_CONFIG_PATH: config/sub2rank.yaml
       APISTATE_RUNTIME_ID: compose
