@@ -127,3 +127,7 @@ bun test
 
 项目当前仍处于快速迭代阶段。生产部署前应根据实际 Sub2API 版本校对管理 API、数据库
 字段和 failover 规则，并使用最小权限的独立凭据。
+
+## 许可协议
+
+本项目采用 [MIT License](LICENSE)。

@@ -2,6 +2,7 @@
   "name": "api2business",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "cli": "bun scripts/api2business-cli.ts --config config/api2business.yaml",
