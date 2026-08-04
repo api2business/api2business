@@ -34,10 +34,10 @@ function reads(rows: Array<Record<string, unknown>>): Sub2ApiReadClient {
   };
 }
 
-test("idle probe selects ordinary-log-idle API-key accounts regardless of runtime state", async () => {
+test("idle probe selects only normal schedulable API-key accounts", async () => {
   expect(idleProbeCandidatesSql).toContain("LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'");
-  expect(idleProbeCandidatesSql).not.toContain("a.status = 'active'");
-  expect(idleProbeCandidatesSql).not.toContain("a.schedulable = true");
+  expect(idleProbeCandidatesSql).toContain("a.status = 'active'");
+  expect(idleProbeCandidatesSql).toContain("COALESCE(a.schedulable, false) = true");
   expect(idleProbeCandidatesSql).toContain("FROM usage_logs");
   expect(idleProbeCandidatesSql).toContain("FROM ops_error_logs");
   expect(idleProbeCandidatesSql).toContain("available_sample_count < 100");
@@ -45,14 +45,14 @@ test("idle probe selects ordinary-log-idle API-key accounts regardless of runtim
   expect(idleProbeCandidatesSql).toContain("o.upstream_error_detail");
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
-    account_status: "error", schedulable: false, temp_unschedulable_until: "2026-08-04T08:00:00Z",
+    account_status: "active", schedulable: true, temp_unschedulable_until: null,
     available_sample_count: 4,
   }]), null);
   const plan = await service.plan();
   expect(plan.databaseQueries).toBe(2);
   expect(plan.candidates).toEqual([{
     accountId: 369, accountName: "upstream plus 0.05", platform: "openai", priority: 300,
-    status: "error", schedulable: false, hadRuntimeBlock: true, availableSampleCount: 4,
+    status: "active", schedulable: true, hadRuntimeBlock: false, availableSampleCount: 4,
   }]);
 });
 
@@ -86,17 +86,16 @@ test("idle probe request jitter includes both configured boundaries", () => {
 
 test("idle probe skips a concurrent round and never retries inside one account attempt", async () => {
   let calls = 0;
-  const recoveryPlans: number[][] = [];
   let release = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => { calls += 1; await gate; return { classification: "alive", ordinaryLogRecorded: true }; },
   };
-  const runtime = { recoverAccounts: async (accountIds: number[]) => { recoveryPlans.push(accountIds); } };
+  const runtime = {};
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
-    account_status: "error", schedulable: false,
+    account_status: "active", schedulable: true,
   }]), runtime as never, isolation as never);
   const first = service.run([369], 1);
   await Bun.sleep(1);
@@ -113,7 +112,6 @@ test("idle probe skips a concurrent round and never retries inside one account a
     ordinaryLogRecorded: true,
   });
   expect(calls).toBe(1);
-  expect(recoveryPlans).toEqual([[369]]);
 });
 
 test("idle probe does not claim an ordinary log when the gateway never responds", async () => {
@@ -136,9 +134,9 @@ test("idle probe does not claim an ordinary log when the gateway never responds"
   });
 });
 
-test("idle probe does not send requests when planned bulk recovery fails", async () => {
+test("idle probe skips blocked accounts even when an explicit plan is stale", async () => {
   let probes = 0;
-  const runtime = { recoverAccounts: async () => { throw new Error("restore failed"); } };
+  const runtime = {};
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => { probes += 1; return { classification: "alive", ordinaryLogRecorded: true }; },
@@ -148,12 +146,7 @@ test("idle probe does not send requests when planned bulk recovery fails", async
     account_status: "error", schedulable: false,
   }]), runtime as never, isolation as never);
 
-  expect(await service.run([369], 1)).toMatchObject({
-    ok: false,
-    attempted: 0,
-    bulkRecoveryFailures: 1,
-    results: [{ skipped: true, reason: "bulk-recovery-failed", accountIds: [369], error: "restore failed" }],
-  });
+  expect(await service.run([369], 1)).toMatchObject({ ok: true, attempted: 0, planned: 0, ready: 0 });
   expect(probes).toBe(0);
 });
 

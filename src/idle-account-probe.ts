@@ -39,6 +39,8 @@ CROSS JOIN LATERAL (
 ) sample_stats
 WHERE a.deleted_at IS NULL
   AND LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'
+  AND a.status = 'active'
+  AND COALESCE(a.schedulable, false) = true
   AND a.platform = $1
   AND EXISTS (
     SELECT 1 FROM account_groups ag
@@ -141,7 +143,9 @@ export class IdleAccountProbeService {
       priority,
       cacheMode: "bypass-cache",
     });
-    const candidates = result.rows.map((row) => ({
+    const candidates = result.rows
+      .filter((row) => row.account_status === "active" && row.schedulable === true)
+      .map((row) => ({
       accountId: Number(row.account_id),
       accountName: String(row.account_name),
       platform: String(row.platform),
@@ -152,7 +156,7 @@ export class IdleAccountProbeService {
         || row.overload_until != null
         || row.temp_unschedulable_until != null,
       availableSampleCount: Number(row.available_sample_count ?? 0),
-    } satisfies IdleProbeCandidate));
+      } satisfies IdleProbeCandidate));
     const includeRollingUsage = priority !== "automatic";
     const rolling24Hours = includeRollingUsage ? await this.rollingUsage(priority) : null;
     return {
@@ -232,14 +236,12 @@ export class IdleAccountProbeService {
 
   async run(accountIds: number[] = [], rounds = 1): Promise<Record<string, unknown>> {
     if (!this.isolation) throw new Error("idle probe execution requires isolated probe API key");
-    if (!this.runtime) throw new Error("idle probe execution requires Sub2API runtime recovery service");
     if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10) throw new Error("idle probe rounds must be an integer from 1 to 10");
     if (this.running) return { ok: true, skipped: true, reason: "in-flight", valuesPrinted: false };
     this.running = true;
     const startedAt = Date.now();
     const policy = this.config.sub2api.idleProbe;
     const results: Array<Record<string, unknown>> = [];
-    let bulkRecoveryFailures = 0;
     let planned = 0;
     let ready = 0;
     const unreadyAccountIds = new Set<number>();
@@ -252,30 +254,14 @@ export class IdleAccountProbeService {
         const plan = await this.plan(accountIds, "automatic");
         const plannedCandidates = plan.candidates as IdleProbeCandidate[];
         const candidates = plannedCandidates
+          .filter((candidate) => candidate.status === "active" && candidate.schedulable === true)
           .filter((candidate) => this.isolation!.get(candidate.accountId) !== null);
         planned += plannedCandidates.length;
         ready += candidates.length;
         for (const candidate of plannedCandidates) {
           if (this.isolation!.get(candidate.accountId) === null) unreadyAccountIds.add(candidate.accountId);
         }
-        if (candidates.length > 0) {
-          try {
-            await this.runtime.recoverAccounts(
-              candidates.map((candidate) => candidate.accountId),
-              policy.accountTimeoutMs,
-            );
-          } catch (error) {
-            bulkRecoveryFailures += 1;
-            results.push({
-              round,
-              skipped: true,
-              reason: "bulk-recovery-failed",
-              accountIds: candidates.map((candidate) => candidate.accountId),
-              error: error instanceof Error ? error.message : String(error),
-            });
-            continue;
-          }
-        }
+        // 探活只执行计划中的 active + schedulable 账号，不改变账号运行状态。
         const settled = await Promise.all(candidates.map(async (candidate) => {
             try {
               const jitterMs = idleProbeRequestJitterMs(policy.requestJitterMinMs, policy.requestJitterMaxMs);
@@ -314,14 +300,13 @@ export class IdleAccountProbeService {
           && (response as Record<string, unknown>).ordinaryLogRecorded === true;
       });
       return {
-        ok: failed === 0 && bulkRecoveryFailures === 0,
+        ok: failed === 0,
         skipped: false,
         model: policy.model,
         rounds,
         attempted: succeeded + failed,
         succeeded,
         failed,
-        bulkRecoveryFailures,
         planned,
         ready,
         unreadyAccountIds: [...unreadyAccountIds].sort((left, right) => left - right),
