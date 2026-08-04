@@ -716,7 +716,7 @@ export function loadConfig(path: string): AppConfig {
         idleSeconds: integerValue(idleProbe, "idleSeconds", "sub2api.idleProbe", 10, 86400),
         model: stringValue(idleProbe, "model", "sub2api.idleProbe"),
         candidateLimit: integerValue(idleProbe, "candidateLimit", "sub2api.idleProbe", 1, 100),
-        concurrency: integerValue(idleProbe, "concurrency", "sub2api.idleProbe", 1, 20),
+        concurrency: integerValue(idleProbe, "concurrency", "sub2api.idleProbe", 1, 1000),
         accountTimeoutMs: integerValue(idleProbe, "accountTimeoutMs", "sub2api.idleProbe", 1000, 120000),
         requestJitterMinMs,
         requestJitterMaxMs,
