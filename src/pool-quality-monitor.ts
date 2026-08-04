@@ -21,7 +21,6 @@ WITH internal_probe_keys AS (
   WHERE owner.email = 'monitor-user@sub2api.platform-infra.local'
     AND owner.deleted_at IS NULL
     AND k.deleted_at IS NULL
-    AND k.name LIKE 'api2business-probe-%'
 ), target_accounts AS (
   SELECT a.id, a.name, RTRIM(COALESCE(a.credentials->>'base_url', ''), '/') AS base_url
   FROM accounts a

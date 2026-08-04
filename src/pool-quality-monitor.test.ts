@@ -32,9 +32,9 @@ test("pool quality uses one queued query and separates exact upstream accounts",
   ]);
 });
 
-test("pool quality excludes monitor-user probe keys without changing account scoring", () => {
+test("pool quality excludes every monitor-user key without changing account scoring", () => {
   expect(poolQualitySql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
-  expect(poolQualitySql).toContain("k.name LIKE 'api2business-probe-%'");
+  expect(poolQualitySql).not.toContain("k.name LIKE");
   expect(poolQualitySql).toContain("p.id = u.api_key_id");
   expect(poolQualitySql).toContain("p.id = o.api_key_id");
   expect(poolQualitySql).toContain("PARTITION BY event.request_id");
