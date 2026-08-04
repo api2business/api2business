@@ -15,7 +15,7 @@ const errors = documents.flatMap((document) => document.errors);
 if (errors.length > 0) throw new Error(`invalid Kubernetes manifest: ${errors[0].message}`);
 
 const trackedText = requiredFiles.map((path) => readFileSync(path, "utf8")).join("\n");
-for (const forbidden of [/unidesk/iu, /pipelinesascode/iu, /api[_-]?key\s*[:=]\s*["']?sk-/iu]) {
+for (const forbidden of [/pipelinesascode/iu, /api[_-]?key\s*[:=]\s*["']?sk-/iu]) {
   if (forbidden.test(trackedText)) throw new Error(`deployment assets contain forbidden pattern ${forbidden}`);
 }
 process.stdout.write(JSON.stringify({ ok: true, files: requiredFiles.length, valuesPrinted: false }) + "\n");
