@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "cli": "bun scripts/api2business-cli.ts --config config/api2business.yaml",
+    "cli": "bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml",
     "api": "bun --hot src/api.ts --config config/api2business.yaml --runtime native",
     "worker": "bun src/worker.ts --config config/api2business.yaml --runtime native",
     "dev:web": "API2BUSINESS_CONFIG_PATH=config/api2business.yaml API2BUSINESS_RUNTIME_ID=native bunx vite --config vite.config.ts",

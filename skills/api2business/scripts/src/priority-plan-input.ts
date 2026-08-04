@@ -1,7 +1,7 @@
 import {
   normalizeManualPriorityAssignments,
   type ManualPriorityAssignments,
-} from "../../src/manual-priority-plan";
+} from "../../../../src/manual-priority-plan";
 
 export function parseManualPriorityAssignments(input: string): ManualPriorityAssignments {
   const priorities: Record<string, number> = {};

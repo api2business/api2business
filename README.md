@@ -93,13 +93,13 @@ Sub2API PostgreSQL ------- 排队单连接只读查询
 ```bash
 bun install
 cp config/api2business.example.yaml config/api2business.yaml
-bun scripts/api2business-cli.ts \
+bun skills/api2business/scripts/api2business-cli.ts \
   --config config/api2business.yaml \
   config validate
-bun scripts/api2business-cli.ts \
+bun skills/api2business/scripts/api2business-cli.ts \
   --config config/api2business.yaml \
   native start --component all
-bun scripts/api2business-cli.ts \
+bun skills/api2business/scripts/api2business-cli.ts \
   --config config/api2business.yaml \
   native status --component all --json
 ```
@@ -107,7 +107,7 @@ bun scripts/api2business-cli.ts \
 停止全部本机组件：
 
 ```bash
-bun scripts/api2business-cli.ts \
+bun skills/api2business/scripts/api2business-cli.ts \
   --config config/api2business.yaml \
   native stop --component all
 ```

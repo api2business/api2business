@@ -225,7 +225,7 @@ test("uses the bounded successful-result cache without a second database query",
 test("worker and CLI keep the Sub2API database owner in the API read broker", () => {
   const worker = readFileSync(new URL("./worker.ts", import.meta.url), "utf8");
   const cli = readFileSync(
-    new URL("../scripts/src/cli.ts", import.meta.url),
+    new URL("../skills/api2business/scripts/src/cli.ts", import.meta.url),
     "utf8",
   );
 

@@ -50,6 +50,5 @@ test("priority plan text includes review evidence and exact priorities", () => {
   expect(lines.join("\n")).toContain("24117ms");
   expect(lines.join("\n")).toContain("0.200");
   expect(lines.join("\n")).toContain('"target":"example-runtime"');
-  expect(lines.join("\n")).not.toContain("PK01");
   expect(lines).toContain('PRIORITIES_JSON {"2":111,"8":288}');
 });

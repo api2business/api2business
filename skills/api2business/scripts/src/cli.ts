@@ -1,13 +1,13 @@
-import { AdminHttpClient } from "../../src/admin-http-client";
+import { AdminHttpClient } from "../../../../src/admin-http-client";
 import { readFileSync } from "node:fs";
-import { mergeAccountScores } from "../../src/account-score-aggregation";
-import { createEmbeddedContext } from "../../src/bootstrap";
-import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServiceId } from "../../src/config";
-import type { AppCommand } from "../../src/contracts";
-import { usesWorkflow } from "../../src/contracts";
-import { ApplicationDispatcher } from "../../src/dispatcher";
-import { nativeAll, nativeLogs, nativeStart, nativeStatus, nativeStop } from "../../src/native-services";
-import { TemporalGateway } from "../../src/temporal-client";
+import { mergeAccountScores } from "../../../../src/account-score-aggregation";
+import { createEmbeddedContext } from "../../../../src/bootstrap";
+import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServiceId } from "../../../../src/config";
+import type { AppCommand } from "../../../../src/contracts";
+import { usesWorkflow } from "../../../../src/contracts";
+import { ApplicationDispatcher } from "../../../../src/dispatcher";
+import { nativeAll, nativeLogs, nativeStart, nativeStatus, nativeStop } from "../../../../src/native-services";
+import { TemporalGateway } from "../../../../src/temporal-client";
 import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
 import { emitErrorDiagnosis } from "./error-diagnose-output";
@@ -15,8 +15,8 @@ import { emitPriorityPlan } from "./priority-plan-output";
 import { emitAccountEconomics, emitAccountImportEconomics } from "./account-economics-output";
 import { emitOAuthEconomics } from "./oauth-economics-output";
 import { emitDailyProfit } from "./daily-profit-output";
-import { parseAccountIdSelector } from "../../src/account-batch-economics";
-import { runBoundedProcess } from "../../src/bounded-process";
+import { parseAccountIdSelector } from "../../../../src/account-batch-economics";
+import { runBoundedProcess } from "../../../../src/bounded-process";
 import { parseManualPriorityAssignments } from "./priority-plan-input";
 
 type Row = Record<string, unknown>;
@@ -177,7 +177,7 @@ function parseArgs(args: string[]): Parsed {
 function help(): Record<string, unknown> {
   return {
     ok: true,
-    usage: "bun scripts/api2business-cli.ts --config config/api2business.example.yaml [--over-api] [--target <id>] <command>",
+    usage: "bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.example.yaml [--over-api] [--target <id>] <command>",
     commands: [
       "config validate",
       "backend check",

@@ -12,7 +12,7 @@ description: >-
 - 新部署先克隆 `https://github.com/api2business/api2business.git`，再从克隆后的仓库加载本 skill。
 - 从当前 Api2Business 仓库根目录执行命令。
 - 使用 `config/api2business.yaml` 保存本地配置；该文件不得提交。
-- 使用 `scripts/api2business-cli.ts` 执行业务和生命周期操作。
+- 使用 `skills/api2business/scripts/api2business-cli.ts` 执行业务和生命周期操作。
 
 ## 从零部署（Bootstrap）
 
@@ -40,14 +40,14 @@ description: >-
 6. 根据目标环境填写 `config/api2business.yaml`，再执行：
 
    ```bash
-   bun scripts/api2business-cli.ts \
+   bun skills/api2business/scripts/api2business-cli.ts \
      --config config/api2business.yaml \
      config validate
    bun run deploy:validate
-   bun scripts/api2business-cli.ts \
+   bun skills/api2business/scripts/api2business-cli.ts \
      --config config/api2business.yaml \
      native start --component all
-   bun scripts/api2business-cli.ts \
+   bun skills/api2business/scripts/api2business-cli.ts \
      --config config/api2business.yaml \
      native status --component all --json
    ```
@@ -75,10 +75,10 @@ description: >-
 ## 生命周期
 
 ```bash
-bun scripts/api2business-cli.ts --config config/api2business.yaml native start --component all
-bun scripts/api2business-cli.ts --config config/api2business.yaml native status --component all
-bun scripts/api2business-cli.ts --config config/api2business.yaml native logs --component all --tail 100
-bun scripts/api2business-cli.ts --config config/api2business.yaml native stop --component all
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml native start --component all
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml native status --component all
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml native logs --component all --tail 100
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml native stop --component all
 ```
 
 - `native` 是统一生命周期入口，实际运行方式由配置选择。

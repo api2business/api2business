@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 test("account import supports Team manual selection and three price-inferred types", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
-  const cli = await Bun.file(new URL("../scripts/src/cli.ts", import.meta.url)).text();
+  const cli = await Bun.file(new URL("../skills/api2business/scripts/src/cli.ts", import.meta.url)).text();
   expect(html).toContain('id="import-plan-type"');
   expect(html).toContain('id="import-plan-confirm-dialog"');
   expect(html).toContain('id="import-confirm-types"');

@@ -12,6 +12,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY config ./config
 COPY scripts ./scripts
+COPY skills ./skills
 COPY src ./src
 COPY static ./static
 COPY vite.config.ts ./vite.config.ts
