@@ -369,7 +369,7 @@ test("score toolbar refresh uses the queue-backed manual ranking path", async ()
   const end = app.indexOf("const [initial] = await Promise.all([", start);
   const handler = app.slice(start, end);
 
-  expect(handler).toContain("await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage(), loadPriorityHistory()])");
+  expect(handler).toContain("await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])");
   expect(handler).not.toContain("/api/scores/refresh");
 });
 
@@ -411,7 +411,7 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
-  expect(html).toContain('/app.js?v=priority-history-refresh-v1');
+  expect(html).toContain('/app.js?v=idle-probe-round-history-v1');
   expect(html).toContain('/styles.css?v=refresh-latency-v1');
   expect(app).toContain("key: 'rollingScore'");
   expect(html).toContain('id="score-create-upstream"');
@@ -425,9 +425,11 @@ test("scores and upstream assets share one sortable operations table", async () 
   const quotaIndex = html.indexOf('class="quota-monitor unified-quota-monitor"');
   const tableIndex = html.indexOf('class="data-table unified-upstream-table"');
   const historyIndex = html.indexOf('id="priority-history-body"');
+  const probeHistoryIndex = html.indexOf('id="idle-probe-history-body"');
   expect(quotaIndex).toBeGreaterThan(0);
   expect(tableIndex).toBeGreaterThan(quotaIndex);
   expect(historyIndex).toBeGreaterThan(tableIndex);
+  expect(probeHistoryIndex).toBeGreaterThan(historyIndex);
   expect(html).toContain('aria-label="上游账号资产、评分与实时成本总表"');
   expect(html).toContain('data-score-sort="score" aria-sort="descending"');
   expect(html).toContain('data-score-sort="balance"');

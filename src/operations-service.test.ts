@@ -969,3 +969,26 @@ test("an expired automatic cycle is recovered without starting another optimizat
   });
   expect(events).toEqual(["claim:600000:0.1"]);
 });
+
+test("探活记录按轮次分页，不展开普通请求明细", async () => {
+  let query: [number, number] | null = null;
+  const store = {
+    async idleProbeHistoryPage(limit: number, offset: number) {
+      query = [limit, offset];
+      return [{
+        operation_id: "probe-round-2", trigger_type: "automatic",
+        started_at: "2026-08-04T10:00:00Z", completed_at: "2026-08-04T10:00:12Z",
+        status: "partial", planned_count: 10, ready_count: 9, attempted_count: 9,
+        succeeded_count: 8, failed_count: 1, unready_count: 1, duration_ms: 12000,
+        error_summary: null, total_count: 11,
+      }];
+    },
+  } as unknown as OperationsStore;
+  const service = new OperationsService({} as AppConfig, store, unusedReads);
+  const result = await service.idleProbeHistory(2, 10);
+  expect(query).toEqual([10, 10]);
+  expect(result).toMatchObject({
+    records: [{ planned: 10, ready: 9, succeeded: 8, failed: 1, durationMs: 12000 }],
+    pagination: { page: 2, pageSize: 10, total: 11, totalPages: 2 },
+  });
+});

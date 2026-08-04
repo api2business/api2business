@@ -420,6 +420,9 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/summary") {
         return json({ ok: true, rolling24Hours: await operations.idleProbeRollingUsage() });
       }
+      if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/history") {
+        return json(await operations.idleProbeHistory(pageNumber(url), 10));
+      }
       if (request.method === "POST" && url.pathname === "/api/operations/idle-probe") {
         const input = await body(request);
         const accountIds = Array.isArray(input.accountIds) && input.accountIds.length > 0

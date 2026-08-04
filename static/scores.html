@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111412" />
   <title>上游资产与实时成本 | ApiState</title>
   <link rel="stylesheet" href="/styles.css?v=refresh-latency-v1" />
-  <script src="/app.js?v=priority-history-refresh-v1" type="module"></script>
+  <script src="/app.js?v=idle-probe-round-history-v1" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -83,6 +83,18 @@
         </div>
       </div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>调优池</th><th>开始时间</th><th>方式</th><th>状态</th><th>操作者</th><th>样本</th><th>调整数</th><th>完成时间</th><th>耗时</th></tr></thead><tbody id="priority-history-body"><tr><td colspan="9" class="empty">正在读取调整记录</td></tr></tbody></table></div>
+    </section>
+    <section class="table-section">
+      <div class="table-toolbar">
+        <h2>探活记录</h2>
+        <div class="score-query-controls">
+          <button id="probe-history-prev" class="query-command" type="button" disabled>上一页</button>
+          <span id="probe-history-page-state" class="section-state" aria-live="polite">正在读取…</span>
+          <button id="probe-history-next" class="query-command" type="button" disabled>下一页</button>
+          <button id="refresh-probe-history" class="query-command" type="button">刷新记录</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>开始时间</th><th>方式</th><th>状态</th><th>计划</th><th>就绪</th><th>成功</th><th>失败</th><th>未就绪</th><th>完成时间</th><th>耗时</th></tr></thead><tbody id="idle-probe-history-body"><tr><td colspan="10" class="empty">正在读取探活记录</td></tr></tbody></table></div>
     </section>
     <section class="table-section automation-section">
       <div class="table-toolbar"><h2>定时自动调整</h2></div>

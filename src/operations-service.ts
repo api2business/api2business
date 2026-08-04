@@ -159,8 +159,81 @@ export class OperationsService {
     return await this.idleProbe.rollingUsage("manual");
   }
 
-  async runIdleProbe(accountIds: number[] = [], rounds = 1) {
-    return await this.idleProbe.run(accountIds, rounds);
+  async idleProbeHistory(page = 1, pageSize = 10) {
+    if (!Number.isInteger(page) || page < 1) throw new Error("idle probe history page must be a positive integer");
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new Error("idle probe history page size must be from 1 to 100");
+    const rows = await this.store.idleProbeHistoryPage(pageSize, (page - 1) * pageSize) as Array<Record<string, unknown>>;
+    const total = Number(rows[0]?.total_count ?? 0);
+    return {
+      ok: true,
+      records: rows.map((row) => ({
+        operationId: row.operation_id,
+        triggerType: row.trigger_type,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+        status: row.status,
+        planned: Number(row.planned_count),
+        ready: Number(row.ready_count),
+        attempted: Number(row.attempted_count),
+        succeeded: Number(row.succeeded_count),
+        failed: Number(row.failed_count),
+        unready: Number(row.unready_count),
+        durationMs: Number(row.duration_ms),
+        errorSummary: row.error_summary,
+      })),
+      pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+      valuesPrinted: false,
+    };
+  }
+
+  async runIdleProbe(accountIds: number[] = [], rounds = 1, context?: {
+    operationId: string;
+    triggerType: "manual" | "automatic";
+  }) {
+    const startedAt = new Date();
+    try {
+      const result = await this.idleProbe.run(accountIds, rounds) as Record<string, unknown>;
+      if (context) {
+        const failed = Number(result.failed ?? 0);
+        const attempted = Number(result.attempted ?? 0);
+        const skipped = result.skipped === true;
+        await this.store.addIdleProbeRound({
+          operationId: context.operationId,
+          triggerType: context.triggerType,
+          startedAt: startedAt.toISOString(),
+          completedAt: new Date().toISOString(),
+          status: skipped ? "skipped" : failed === 0 && result.ok === true ? "succeeded" : attempted > failed ? "partial" : "failed",
+          plannedCount: Number(result.planned ?? 0),
+          readyCount: Number(result.ready ?? 0),
+          attemptedCount: attempted,
+          succeededCount: Number(result.succeeded ?? 0),
+          failedCount: failed,
+          unreadyCount: Array.isArray(result.unreadyAccountIds) ? result.unreadyAccountIds.length : 0,
+          durationMs: Number(result.durationMs ?? Date.now() - startedAt.getTime()),
+          errorSummary: null,
+        });
+      }
+      return result;
+    } catch (error) {
+      if (context) {
+        await this.store.addIdleProbeRound({
+          operationId: context.operationId,
+          triggerType: context.triggerType,
+          startedAt: startedAt.toISOString(),
+          completedAt: new Date().toISOString(),
+          status: "failed",
+          plannedCount: 0,
+          readyCount: 0,
+          attemptedCount: 0,
+          succeededCount: 0,
+          failedCount: 0,
+          unreadyCount: 0,
+          durationMs: Date.now() - startedAt.getTime(),
+          errorSummary: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+        });
+      }
+      throw error;
+    }
   }
 
   async initialize(): Promise<void> {

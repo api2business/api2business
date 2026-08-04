@@ -87,7 +87,10 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     return { ok: true, sampled: result.targetCount, succeeded: result.succeeded, failed: result.failed, oauth, quality };
   }
   if (command.kind === "account.idle-probe.run") {
-    return await operations.runIdleProbe(command.accountIds, command.rounds);
+    return await operations.runIdleProbe(command.accountIds, command.rounds, {
+      operationId: operation.operationId,
+      triggerType: operation.operationId.includes(":idle-probe:") ? "automatic" : "manual",
+    });
   }
   if (command.kind === "account.idle-probe.reconcile") {
     return await operations.reconcileIdleProbe(command.accountIds);

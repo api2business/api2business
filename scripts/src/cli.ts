@@ -210,6 +210,7 @@ function help(): Record<string, unknown> {
       "accounts oauth-economics [--profile codex|grok] [--over-api]",
       "accounts oauth-runtime [--profile codex|grok] [--over-api]",
       "accounts idle-probe plan [--accounts <id-or-range,...>] --over-api",
+      "accounts idle-probe history [--page N] --over-api",
       "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--confirm] --over-api",
       "accounts idle-probe run [--accounts <id-or-range,...>] [--rounds 1..10] [--confirm] --over-api",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
@@ -541,6 +542,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const verb = parsed.command[2];
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     if (verb === "plan") return await client.idleProbePlan(accountIds);
+    if (verb === "history") return await client.idleProbeHistory(parsed.page ?? 1);
     if (verb === "reconcile") {
       if (!parsed.confirm) return {
         ok: true,
@@ -564,7 +566,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       };
       return await client.idleProbeRun(accountIds, rounds);
     }
-    throw new Error("accounts idle-probe requires plan or run");
+    throw new Error("accounts idle-probe requires plan, history, reconcile, or run");
   }
   if (group === "accounts" && action === "delete") {
     if (!parsed.accounts) throw new Error("accounts delete requires --accounts");

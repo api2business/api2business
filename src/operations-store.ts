@@ -162,6 +162,24 @@ export class OperationsStore {
       );
       CREATE INDEX IF NOT EXISTS apistate_pool_quality_samples_time_idx
         ON apistate_pool_quality_samples(sampled_at DESC);
+      CREATE TABLE IF NOT EXISTS apistate_idle_probe_rounds (
+        id uuid PRIMARY KEY,
+        operation_id text NOT NULL UNIQUE,
+        trigger_type text NOT NULL CHECK (trigger_type IN ('manual','automatic')),
+        started_at timestamptz NOT NULL,
+        completed_at timestamptz NOT NULL,
+        status text NOT NULL CHECK (status IN ('succeeded','partial','failed','skipped')),
+        planned_count integer NOT NULL,
+        ready_count integer NOT NULL,
+        attempted_count integer NOT NULL,
+        succeeded_count integer NOT NULL,
+        failed_count integer NOT NULL,
+        unready_count integer NOT NULL,
+        duration_ms integer NOT NULL,
+        error_summary text
+      );
+      CREATE INDEX IF NOT EXISTS apistate_idle_probe_rounds_started_at_idx
+        ON apistate_idle_probe_rounds(started_at DESC);
       CREATE INDEX IF NOT EXISTS apistate_cash_entries_occurred_on_idx
         ON apistate_cash_entries(occurred_on DESC, created_at DESC);
       CREATE INDEX IF NOT EXISTS apistate_operation_audit_created_at_idx
@@ -321,6 +339,46 @@ export class OperationsStore {
            ORDER BY sampled_at DESC LIMIT 13
          )
       ORDER BY sampled_at
+    `;
+  }
+
+  async addIdleProbeRound(input: {
+    operationId: string;
+    triggerType: "manual" | "automatic";
+    startedAt: string;
+    completedAt: string;
+    status: "succeeded" | "partial" | "failed" | "skipped";
+    plannedCount: number;
+    readyCount: number;
+    attemptedCount: number;
+    succeededCount: number;
+    failedCount: number;
+    unreadyCount: number;
+    durationMs: number;
+    errorSummary: string | null;
+  }) {
+    await this.sql`
+      INSERT INTO apistate_idle_probe_rounds (
+        id, operation_id, trigger_type, started_at, completed_at, status,
+        planned_count, ready_count, attempted_count, succeeded_count,
+        failed_count, unready_count, duration_ms, error_summary
+      ) VALUES (${crypto.randomUUID()}, ${input.operationId}, ${input.triggerType},
+        ${input.startedAt}, ${input.completedAt}, ${input.status}, ${input.plannedCount},
+        ${input.readyCount}, ${input.attemptedCount}, ${input.succeededCount},
+        ${input.failedCount}, ${input.unreadyCount}, ${input.durationMs}, ${input.errorSummary})
+      ON CONFLICT (operation_id) DO NOTHING
+    `;
+  }
+
+  async idleProbeHistoryPage(limit: number, offset: number) {
+    return await this.sql`
+      SELECT operation_id, trigger_type, started_at, completed_at, status,
+        planned_count, ready_count, attempted_count, succeeded_count,
+        failed_count, unready_count, duration_ms, error_summary,
+        COUNT(*) OVER()::int AS total_count
+      FROM apistate_idle_probe_rounds
+      ORDER BY started_at DESC, id DESC
+      LIMIT ${limit} OFFSET ${offset}
     `;
   }
 

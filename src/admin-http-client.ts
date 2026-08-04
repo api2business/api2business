@@ -63,6 +63,9 @@ export class AdminHttpClient {
     const query = accountIds.length > 0 ? `?accountIds=${encodeURIComponent(accountIds.join(","))}` : "";
     return this.request(`/api/operations/idle-probe${query}`);
   }
+  idleProbeHistory(page: number): Promise<Record<string, unknown>> {
+    return this.request(`/api/operations/idle-probe/history?page=${page}`);
+  }
   idleProbeRun(accountIds: number[], rounds: number): Promise<Record<string, unknown>> {
     return this.request("/api/operations/idle-probe", {
       method: "POST",

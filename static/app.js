@@ -205,6 +205,7 @@ function scheduleScoreRefresh() {
       loadUnifiedQuotaSummary(),
       loadPoolQuality(),
       loadPriorityHistory(),
+      loadIdleProbeHistory(),
     ])
     scheduleScoreRefresh()
   }, interval * 1000)
@@ -711,12 +712,13 @@ async function scoresPage() {
     loadPoolQuality(),
     loadIdleProbeRollingUsage(),
     loadPriorityHistory(),
+    loadIdleProbeHistory(),
   ]))
   $('#refresh-scores').addEventListener('click', async () => {
     const button = $('#refresh-scores')
     button.disabled = true
     try {
-      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage(), loadPriorityHistory()])
+      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])
     }
     catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }
@@ -883,6 +885,8 @@ let priorityHistoryRecords = []
 let priorityHistoryPage = 1
 const priorityHistoryPageSize = 10
 let priorityHistoryInFlight = null
+let idleProbeHistoryPage = 1
+let idleProbeHistoryInFlight = null
 const operationsSnapshotKey = 'apistate.operations.snapshot.v1'
 let cashPage = 1
 let auditPage = 1
@@ -1045,6 +1049,45 @@ async function loadPriorityHistory() {
   }
 }
 
+function renderIdleProbeHistory(data) {
+  const rows = data.records ?? []
+  const pagination = data.pagination ?? { page: 1, totalPages: 1, total: 0 }
+  idleProbeHistoryPage = Number(pagination.page ?? 1)
+  const statusLabel = { succeeded: '成功', partial: '部分成功', failed: '失败', skipped: '已跳过' }
+  $('#idle-probe-history-body').innerHTML = rows.length ? rows.map((row) => `<tr>
+    <td>${time(row.startedAt)}</td>
+    <td>${row.triggerType === 'automatic' ? '自动' : '手动'}</td>
+    <td><b>${escapeHtml(statusLabel[row.status] ?? row.status)}</b>${row.errorSummary ? `<small>${escapeHtml(row.errorSummary)}</small>` : ''}</td>
+    <td>${number(row.planned)}</td><td>${number(row.ready)}</td>
+    <td>${number(row.succeeded)}</td><td>${number(row.failed)}</td><td>${number(row.unready)}</td>
+    <td>${time(row.completedAt)}</td><td>${number(Number(row.durationMs) / 1000, 1)} 秒</td>
+  </tr>`).join('') : '<tr><td colspan="10" class="empty">暂无探活记录</td></tr>'
+  $('#probe-history-page-state').textContent = pagination.total ? `${pagination.page} / ${pagination.totalPages} · 共 ${number(pagination.total)} 轮` : '0 轮'
+  $('#probe-history-prev').disabled = pagination.page <= 1
+  $('#probe-history-next').disabled = pagination.page >= pagination.totalPages
+}
+
+async function loadIdleProbeHistory(page = idleProbeHistoryPage) {
+  if (idleProbeHistoryInFlight !== null) return await idleProbeHistoryInFlight
+  const button = $('#refresh-probe-history')
+  button.disabled = true
+  button.classList.add('is-loading')
+  button.setAttribute('aria-busy', 'true')
+  $('#probe-history-page-state').textContent = '正在刷新记录…'
+  idleProbeHistoryInFlight = requestJson(`/api/operations/idle-probe/history?page=${page}`, { cache: 'no-store' })
+    .then((data) => { renderIdleProbeHistory(data); return data })
+  try { return await idleProbeHistoryInFlight }
+  catch (error) {
+    $('#probe-history-page-state').textContent = `刷新失败：${error instanceof Error ? error.message : String(error)}`
+    throw error
+  } finally {
+    idleProbeHistoryInFlight = null
+    button.disabled = false
+    button.classList.remove('is-loading')
+    button.removeAttribute('aria-busy')
+  }
+}
+
 async function loadPriorityAutomation() {
   const data = await requestJson('/api/operations/priority-automation')
   const policy = data.automation
@@ -1069,6 +1112,9 @@ async function setupPriorityPanel(options) {
     clearPriorityPlan('样本档位已变化，请刷新当前状态或生成新计划')
   })
   $('#refresh-history').addEventListener('click', () => void loadPriorityHistory().catch(() => undefined))
+  $('#refresh-probe-history').addEventListener('click', () => void loadIdleProbeHistory().catch(() => undefined))
+  $('#probe-history-prev').addEventListener('click', () => void loadIdleProbeHistory(idleProbeHistoryPage - 1).catch(() => undefined))
+  $('#probe-history-next').addEventListener('click', () => void loadIdleProbeHistory(idleProbeHistoryPage + 1).catch(() => undefined))
   $('#history-prev').addEventListener('click', () => {
     priorityHistoryPage -= 1
     renderPriorityHistoryPage()
@@ -1137,6 +1183,7 @@ async function setupPriorityPanel(options) {
   })
   await Promise.all([
     loadPriorityHistory(),
+    loadIdleProbeHistory(),
     loadPriorityAutomation(),
   ])
 }
