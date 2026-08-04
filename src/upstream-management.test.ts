@@ -46,7 +46,8 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   const config = await Bun.file(new URL("../config/api2business.example.yaml", import.meta.url)).text();
   expect(config).toContain("errorCode: 502");
   expect(config).toContain("errorCode: 524");
-  expect(config).toContain("input exceeds the context window of this model");
+  expect(config).not.toContain("input exceeds the context window of this model");
+  expect(config).not.toContain("model_not_found");
   expect(config).not.toMatch(/errorCode: 404\n/u);
   expect(config).not.toContain("statusCode:");
 });

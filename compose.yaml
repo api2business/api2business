@@ -3,12 +3,14 @@ services:
     build: .
     restart: unless-stopped
     network_mode: host
-    env_file: .state/compose/api2business.env
+    env_file:
+      - path: .state/compose/api2business.env
+        required: false
     volumes:
       - ./config:/app/config:ro
       - ${UNIDESK_ROOT:-/workspace/unidesk}:${UNIDESK_ROOT:-/workspace/unidesk}:ro
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
-      - /var/lib/api2business/.state/idle-probe:/app/.state/idle-probe
+      - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
       - /opt/unidesk/platform-infra/sub2api-nc01:/opt/unidesk/platform-infra/sub2api-nc01:ro
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
     command: ["bun", "src/api.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}", "--runtime", "compose"]
@@ -16,12 +18,14 @@ services:
     build: .
     restart: unless-stopped
     network_mode: host
-    env_file: .state/compose/api2business.env
+    env_file:
+      - path: .state/compose/api2business.env
+        required: false
     volumes:
       - ./config:/app/config:ro
       - ${UNIDESK_ROOT:-/workspace/unidesk}:${UNIDESK_ROOT:-/workspace/unidesk}:ro
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
-      - /var/lib/api2business/.state/idle-probe:/app/.state/idle-probe
+      - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
       - /opt/unidesk/platform-infra/sub2api-nc01:/opt/unidesk/platform-infra/sub2api-nc01:ro
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
     command: ["bun", "src/worker.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}", "--runtime", "compose"]
@@ -30,7 +34,9 @@ services:
     build: .
     restart: unless-stopped
     network_mode: host
-    env_file: .state/compose/api2business.env
+    env_file:
+      - path: .state/compose/api2business.env
+        required: false
     volumes:
       - ./config:/app/config:ro
     environment:
