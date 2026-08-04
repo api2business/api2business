@@ -61,11 +61,6 @@ export async function idleAccountProbeScheduleWorkflow(input: ScheduledIdleProbe
     scheduleToCloseTimeout: input.roundTimeoutMs,
     retry: { maximumAttempts: 1 },
   });
-  const provisionActivity = proxyActivities<Activities>({
-    startToCloseTimeout: input.provisionTimeoutMs,
-    scheduleToCloseTimeout: input.provisionTimeoutMs,
-    retry: { maximumAttempts: 1 },
-  });
   for (let iteration = 0; iteration < 500; iteration += 1) {
     const roundStartedAt = Date.now();
     try {
@@ -76,15 +71,28 @@ export async function idleAccountProbeScheduleWorkflow(input: ScheduledIdleProbe
     } catch {
       // 单轮失败直接跳过，下一分钟重新选择仍无请求的账号。
     }
+    await sleep(remainingScheduleDelayMs(input.intervalMs, Date.now() - roundStartedAt));
+  }
+  await continueAsNew<typeof idleAccountProbeScheduleWorkflow>(input);
+}
+
+export async function idleAccountProvisionScheduleWorkflow(input: ScheduledIdleProbeInput): Promise<void> {
+  const activity = proxyActivities<Activities>({
+    startToCloseTimeout: input.provisionTimeoutMs,
+    scheduleToCloseTimeout: input.provisionTimeoutMs,
+    retry: { maximumAttempts: 1 },
+  });
+  for (let iteration = 0; iteration < 500; iteration += 1) {
+    const roundStartedAt = Date.now();
     try {
-      await provisionActivity.executeOperation({
+      await activity.executeOperation({
         operationId: `${workflowInfo().runId}:idle-probe-reconcile:${iteration}`,
         command: { kind: "account.idle-probe.reconcile", accountIds: [] },
       });
     } catch {
-      // 慢初始化放在探活之后，失败不影响本轮已有账号采样。
+      // 单轮初始化失败直接跳过，不影响独立的探活周期。
     }
     await sleep(remainingScheduleDelayMs(input.intervalMs, Date.now() - roundStartedAt));
   }
-  await continueAsNew<typeof idleAccountProbeScheduleWorkflow>(input);
+  await continueAsNew<typeof idleAccountProvisionScheduleWorkflow>(input);
 }

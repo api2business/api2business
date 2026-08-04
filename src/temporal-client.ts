@@ -146,25 +146,42 @@ export class TemporalGateway {
     }
   }
 
-  async ensureIdleProbeSchedule(): Promise<{ started: boolean; workflowId: string }> {
-    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-probe-v3`;
+  async ensureIdleProbeSchedule(): Promise<{ started: boolean; workflowId: string; provisionWorkflowId: string }> {
+    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-probe-v4`;
+    const provisionWorkflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-provision-v1`;
+    for (const legacySuffix of ["idle-account-probe-v2", "idle-account-probe-v3"]) {
+      try {
+        const legacy = this.client.workflow.getHandle(`${this.runtime.scoreScheduleWorkflowId}-${legacySuffix}`);
+        const description = await legacy.describe();
+        if (description.status.name === "RUNNING") await legacy.terminate("migrated to independent probe and provision workflows");
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
+      }
+    }
+    const input = {
+      intervalMs: this.config.sub2api.idleProbe.intervalSeconds * 1000,
+      roundTimeoutMs: this.config.sub2api.idleProbe.roundTimeoutSeconds * 1000,
+      provisionTimeoutMs: this.config.sub2api.idleProbe.provisionTimeoutSeconds * 1000,
+      activityStartToCloseTimeout: `${this.config.sub2api.idleProbe.roundTimeoutSeconds}s`,
+      maximumAttempts: 1,
+    };
     try {
       await this.client.workflow.start("idleAccountProbeScheduleWorkflow", {
         taskQueue: this.runtime.taskQueue,
         workflowId,
-        args: [{
-          intervalMs: this.config.sub2api.idleProbe.intervalSeconds * 1000,
-          roundTimeoutMs: this.config.sub2api.idleProbe.roundTimeoutSeconds * 1000,
-          provisionTimeoutMs: this.config.sub2api.idleProbe.provisionTimeoutSeconds * 1000,
-          activityStartToCloseTimeout: `${this.config.sub2api.idleProbe.roundTimeoutSeconds}s`,
-          maximumAttempts: 1,
-        }],
+        args: [input],
       });
-      return { started: true, workflowId };
     } catch (error) {
-      if (error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError") return { started: false, workflowId };
-      throw error;
+      if (!(error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError")) throw error;
     }
+    try {
+      await this.client.workflow.start("idleAccountProvisionScheduleWorkflow", {
+        taskQueue: this.runtime.taskQueue, workflowId: provisionWorkflowId, args: [input],
+      });
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError")) throw error;
+    }
+    return { started: true, workflowId, provisionWorkflowId };
   }
 
   async close(): Promise<void> {
