@@ -970,6 +970,40 @@ test("an expired automatic cycle is recovered without starting another optimizat
   expect(events).toEqual(["claim:600000:0.1"]);
 });
 
+test("a Temporal dispatch failure advances only the unclaimed due cycle", async () => {
+  const events: unknown[] = [];
+  const store = {
+    async getAutomation() {
+      return {
+        enabled: true,
+        next_run_at: "2026-08-05T00:10:00.000Z",
+        run_id: null,
+        run_claimed_at: null,
+        run_started_at: null,
+      };
+    },
+    async deferDueAutomationAfterDispatchFailure(jitterPercent: number, error: string) {
+      events.push({ jitterPercent, error });
+      return { next_run_at: "2026-08-05T00:20:00.000Z", last_run_status: "dispatch-failed" };
+    },
+  } as unknown as OperationsStore;
+  const config = { operations: { automationJitterPercent: 0.1 } } as AppConfig;
+  const service = new OperationsService(config, store, unusedReads);
+
+  expect(await service.priorityAutomationDispatchState()).toEqual({
+    enabled: true,
+    nextRunAt: "2026-08-05T00:10:00.000Z",
+    runId: null,
+    runClaimedAt: null,
+    runStartedAt: null,
+  });
+  expect(await service.deferPriorityAutomationAfterDispatchFailure(new Error("Temporal unavailable"))).toEqual({
+    next_run_at: "2026-08-05T00:20:00.000Z",
+    last_run_status: "dispatch-failed",
+  });
+  expect(events).toEqual([{ jitterPercent: 0.1, error: "Temporal unavailable" }]);
+});
+
 test("探活记录按轮次分页，不展开普通请求明细", async () => {
   let query: [number, number] | null = null;
   const store = {

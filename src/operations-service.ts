@@ -1244,6 +1244,26 @@ export class OperationsService {
     return { ok: true, deleted: true };
   }
 
+  async priorityAutomationDispatchState() {
+    const row = await this.store.getAutomation();
+    if (!row) return null;
+    return {
+      enabled: row.enabled === true,
+      nextRunAt: row.next_run_at ?? null,
+      runId: row.run_id === null || row.run_id === undefined ? null : String(row.run_id),
+      runClaimedAt: row.run_claimed_at ?? null,
+      runStartedAt: row.run_started_at ?? null,
+    };
+  }
+
+  async deferPriorityAutomationAfterDispatchFailure(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return await this.store.deferDueAutomationAfterDispatchFailure(
+      this.config.operations.automationJitterPercent,
+      message.slice(0, 500),
+    );
+  }
+
   async runDueAutomation() {
     const policy = await this.store.claimDueAutomation(
       this.config.operations.automationRunTimeoutMs,

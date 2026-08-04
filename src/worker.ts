@@ -3,6 +3,7 @@ import { NativeConnection, Worker } from "@temporalio/worker";
 import { loadConfig } from "./config";
 import { AdminHttpClient } from "./admin-http-client";
 import { automationPollDelayMs } from "./automation-poll-backoff";
+import { automationDispatchDelayMs } from "./priority-automation-dispatch";
 import type { OperationRequest } from "./contracts";
 import { requiredOption } from "./runtime-args";
 import { temporalAddress, TemporalGateway } from "./temporal-client";
@@ -212,37 +213,51 @@ let stopping = false;
 let consecutiveAutomationFailures = 0;
 const automationLoop = (async () => {
   while (!stopping) {
+    let nextDelayMs = config.operations.automationPollMs;
     try {
+      const dispatch = automationDispatchDelayMs(
+        await operations.priorityAutomationDispatchState(),
+        Date.now(),
+        config.operations.automationRunTimeoutMs,
+        config.operations.automationFailureBackoffMaxMs,
+      );
+      if (!dispatch.due) {
+        consecutiveAutomationFailures = 0;
+        nextDelayMs = dispatch.delayMs;
+        if (!stopping) await Bun.sleep(nextDelayMs);
+        continue;
+      }
       const result = temporal
         ? await temporal.execute({ kind: "priority.automation.run" }) as Awaited<ReturnType<OperationsService["runDueAutomation"]>>
         : await operations.runDueAutomation();
       consecutiveAutomationFailures = 0;
+      nextDelayMs = config.operations.automationPollMs;
       if (result.due || (result as Record<string, unknown>).recovered === true) {
         console.log(JSON.stringify({ component: "priority-automation", ...result, valuesPrinted: false }));
       }
     } catch (error) {
       consecutiveAutomationFailures += 1;
-      console.error(JSON.stringify({
-        ok: false, component: "priority-automation",
-        error: error instanceof Error ? error.message : String(error), valuesPrinted: false,
-        consecutiveFailures: consecutiveAutomationFailures,
-        nextPollDelayMs: automationPollDelayMs(
+      const deferred = await operations.deferPriorityAutomationAfterDispatchFailure(error).catch(() => null);
+      nextDelayMs = deferred
+        ? config.operations.automationPollMs
+        : automationPollDelayMs(
           config.operations.automationPollMs,
           config.operations.automationFailureBackoffMaxMs,
           consecutiveAutomationFailures,
           config.operations.automationFailureRetryLimit,
           config.operations.automationFailureCooldownMs,
-        ),
+        );
+      console.error(JSON.stringify({
+        ok: false, component: "priority-automation",
+        error: error instanceof Error ? error.message : String(error), valuesPrinted: false,
+        consecutiveFailures: consecutiveAutomationFailures,
+        deferredToNextCycle: deferred !== null,
+        nextRunAt: deferred?.next_run_at ?? null,
+        nextPollDelayMs: nextDelayMs,
       }));
     }
     if (!stopping) {
-      await Bun.sleep(automationPollDelayMs(
-        config.operations.automationPollMs,
-        config.operations.automationFailureBackoffMaxMs,
-        consecutiveAutomationFailures,
-        config.operations.automationFailureRetryLimit,
-        config.operations.automationFailureCooldownMs,
-      ));
+      await Bun.sleep(nextDelayMs);
     }
   }
 })();

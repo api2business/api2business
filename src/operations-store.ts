@@ -761,6 +761,35 @@ export class OperationsStore {
     });
   }
 
+  async deferDueAutomationAfterDispatchFailure(jitterPercent: number, error: string) {
+    return await this.sql.begin(async (tx) => {
+      const [row] = await tx`
+        SELECT interval_seconds
+        FROM api2business_priority_automation
+        WHERE id='default' AND enabled=true AND run_id IS NULL AND next_run_at <= now()
+        FOR UPDATE SKIP LOCKED
+      `;
+      if (!row) return null;
+      const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
+      const [deferred] = await tx`
+        UPDATE api2business_priority_automation
+        SET last_completed_at=now(), last_run_status='dispatch-failed',
+          next_run_at=now() + make_interval(secs => ${nextDelay}), updated_at=now()
+        WHERE id='default' AND run_id IS NULL
+        RETURNING id, interval_seconds, recent_call_limit, next_run_at,
+          last_completed_at, last_run_status
+      `;
+      await tx`
+        INSERT INTO api2business_operation_audit
+          (id, action, status, operator, input_summary, result_summary)
+        VALUES (${crypto.randomUUID()}, 'priority.automation.run', 'failed', 'scheduler',
+          ${{ stage: "temporal-dispatch" }}::jsonb,
+          ${{ reason: "temporal-dispatch-failed", error }}::jsonb)
+      `;
+      return deferred ?? null;
+    });
+  }
+
   async audit(action: string, status: string, operator: string, input: unknown, result: unknown) {
     await this.sql`
       INSERT INTO api2business_operation_audit
