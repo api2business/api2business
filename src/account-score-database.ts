@@ -55,30 +55,34 @@ account_stats AS (
   SELECT
     a.account_id,
     COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage'), 0)::numeric AS success_requests,
-    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.request_id IS NOT NULL), 0)::numeric AS attributed_requests,
     COALESCE(SUM(e.sample_weight) FILTER (
-      WHERE e.request_id IS NOT NULL AND f.triggered
+      WHERE e.request_id IS NOT NULL AND (e.kind = 'usage' OR e.scoreable)
+    ), 0)::numeric AS attributed_requests,
+    COALESCE(SUM(e.sample_weight) FILTER (
+      WHERE e.request_id IS NOT NULL AND (e.kind = 'usage' OR e.scoreable) AND f.triggered
     ), 0)::numeric AS failover_requests,
     COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.request_id IS NOT NULL
         AND f.triggered
+        AND e.scoreable
         AND e.kind = 'error'
         AND e.client_status_code BETWEEN 200 AND 399
     ), 0)::numeric AS failover_recovered,
     COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.request_id IS NOT NULL
         AND f.triggered
+        AND e.scoreable
         AND e.kind = 'error'
         AND e.client_status_code >= 400
     ), 0)::numeric AS failover_failed,
     COALESCE(SUM(e.sample_weight) FILTER (
-      WHERE e.request_id IS NOT NULL AND f.aborted
+      WHERE e.request_id IS NOT NULL AND (e.kind = 'usage' OR e.scoreable) AND f.aborted
     ), 0)::numeric AS failover_aborted,
     COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.kind = 'error' AND e.scoreable AND e.request_id IS NOT NULL
     ), 0)::numeric AS failure_requests,
     COALESCE(SUM(e.sample_weight) FILTER (
-      WHERE e.recent_rank <= $4
+      WHERE e.recent_rank <= $4 AND (e.kind = 'usage' OR e.scoreable)
     ), 0)::numeric AS burst_attempts,
     COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.recent_rank <= $4
@@ -152,6 +156,14 @@ account_stats AS (
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%context window%'
               OR LOWER(COALESCE(o.error_message, '')) LIKE '%context_length_exceeded%' THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%input must be a list%' THEN false
+            WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
+              o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (ARRAY[
+              '%insufficient_balance%',
+              '%insufficient account balance%',
+              '%balance is insufficient%',
+              '%余额不足%',
+              '%额度不足%'
+            ]) THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%not supported by any configured account%'
               OR LOWER(COALESCE(o.error_message, '')) LIKE '%no available channel for model%' THEN false
             WHEN LOWER(COALESCE(o.error_phase, '')) IN ('internal', 'client', 'business') THEN false

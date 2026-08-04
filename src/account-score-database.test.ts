@@ -30,6 +30,11 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).not.toContain("openai.request_completed");
   expect(recentAccountAggregateQuery).toContain("AS failover_recovered");
   expect(recentAccountAggregateQuery).toContain("AS failover_failed");
+  expect(recentAccountAggregateQuery).toContain("%insufficient_balance%");
+  expect(recentAccountAggregateQuery).toContain("%insufficient account balance%");
+  expect(recentAccountAggregateQuery).toContain("%余额不足%");
+  expect(recentAccountAggregateQuery).toContain("o.upstream_error_detail");
+  expect(recentAccountAggregateQuery).toContain("e.kind = 'usage' OR e.scoreable");
   expect(recentAccountAggregateQuery).not.toContain("start_time");
 
   const row = scoreRecentDatabaseRow({
@@ -64,6 +69,40 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(row.currentStateScoreImpact).toBe("none");
   expect(row.priority).toBe(5);
   expect(row.accountType).toBeNull();
+});
+
+test("账务额度不足样本保留审计但不参与质量评分", () => {
+  const row = scoreRecentDatabaseRow({
+    account_id: 370,
+    account_name: "https://quality.example.com pro 0.1",
+    status: "active",
+    schedulable: true,
+    priority: 205,
+    group_ids: [2, 3, 10],
+    group_names: ["pool", "self", "probe"],
+    success_requests: 4,
+    failure_requests: 2,
+    customer_error_requests: 38,
+    excluded_error_requests: 36,
+    attributed_requests: 6,
+    failover_requests: 0,
+    failover_recovered: 0,
+    failover_failed: 0,
+    burst_attempts: 6,
+    burst_failure_requests: 2,
+    stream_success_requests: 0,
+    first_token_samples: 0,
+    duration_p95_ms: 19598,
+    selected_calls: 40,
+  }, 1000, scorePolicy);
+
+  expect(row.customerErrorRequests).toBe(38);
+  expect(row.excludedNonUpstreamErrorRequests).toBe(36);
+  expect(row.observedAttempts).toBe(6);
+  expect(row.failureRequests).toBe(2);
+  expect(row.failoverRequests).toBe(0);
+  expect(row.score).toBe(30.8);
+  expect(row.grade).toBe("E");
 });
 
 test("unavailable reasons distinguish weekly quota, billing, authentication, and missing evidence", () => {

@@ -6,8 +6,37 @@ import type { ProbeIsolationService } from "./probe-isolation";
 const idleProbeCandidatesSql = `
 SELECT a.id::int AS account_id, a.name AS account_name, a.platform, a.priority::int AS priority,
   a.status AS account_status, a.schedulable,
-  a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until
+  a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until,
+  sample_stats.available_sample_count
 FROM accounts a
+CROSS JOIN LATERAL (
+  SELECT COUNT(*)::int AS available_sample_count
+  FROM (
+    SELECT u.id
+    FROM usage_logs u
+    WHERE u.account_id = a.id
+      AND u.created_at >= NOW() - INTERVAL '8 hours'
+    UNION ALL
+    SELECT o.id
+    FROM ops_error_logs o
+    WHERE o.account_id = a.id
+      AND o.created_at >= NOW() - INTERVAL '8 hours'
+      AND (
+        LOWER(COALESCE(o.error_message, '')) LIKE ANY (ARRAY[
+          '%upstream service temporarily unavailable%', '%upstream request failed%',
+          '%bad gateway%', '%gateway timeout%', '%error code: 502%',
+          '%error code: 503%', '%error code: 504%', '%error code: 524%'
+        ])
+        OR o.error_phase = 'upstream'
+        OR LOWER(COALESCE(o.error_type, '')) LIKE '%upstream%'
+      )
+      AND NOT (LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
+        o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (ARRAY[
+        '%insufficient_balance%', '%insufficient account balance%',
+        '%balance is insufficient%', '%余额不足%', '%额度不足%'
+      ]))
+  ) available_samples
+) sample_stats
 WHERE a.deleted_at IS NULL
   AND LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'
   AND a.platform = $1
@@ -17,12 +46,12 @@ WHERE a.deleted_at IS NULL
       AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
   )
   AND ($5::text IS NULL OR a.id = ANY(string_to_array($5, ',')::bigint[]))
-  AND ($6::boolean OR NOT EXISTS (
+  AND ($6::boolean OR sample_stats.available_sample_count < 100 OR NOT EXISTS (
     SELECT 1 FROM usage_logs u
     WHERE u.account_id = a.id
       AND u.created_at >= NOW() - ($3::int * INTERVAL '1 second')
   ))
-  AND ($6::boolean OR NOT EXISTS (
+  AND ($6::boolean OR sample_stats.available_sample_count < 100 OR NOT EXISTS (
     SELECT 1 FROM ops_error_logs o
     WHERE o.account_id = a.id
       AND o.created_at >= NOW() - ($3::int * INTERVAL '1 second')
@@ -50,6 +79,7 @@ export interface IdleProbeCandidate {
   status: string;
   schedulable: boolean;
   hadRuntimeBlock: boolean;
+  availableSampleCount: number;
 }
 
 export const idleProbeRollingUsageSql = `
@@ -121,6 +151,7 @@ export class IdleAccountProbeService {
       hadRuntimeBlock: row.rate_limit_reset_at != null
         || row.overload_until != null
         || row.temp_unschedulable_until != null,
+      availableSampleCount: Number(row.available_sample_count ?? 0),
     } satisfies IdleProbeCandidate));
     const includeRollingUsage = priority !== "automatic";
     const rolling24Hours = includeRollingUsage ? await this.rollingUsage(priority) : null;

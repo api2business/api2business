@@ -40,15 +40,19 @@ test("idle probe selects ordinary-log-idle API-key accounts regardless of runtim
   expect(idleProbeCandidatesSql).not.toContain("a.schedulable = true");
   expect(idleProbeCandidatesSql).toContain("FROM usage_logs");
   expect(idleProbeCandidatesSql).toContain("FROM ops_error_logs");
+  expect(idleProbeCandidatesSql).toContain("available_sample_count < 100");
+  expect(idleProbeCandidatesSql).toContain("insufficient_balance");
+  expect(idleProbeCandidatesSql).toContain("o.upstream_error_detail");
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
     account_status: "error", schedulable: false, temp_unschedulable_until: "2026-08-04T08:00:00Z",
+    available_sample_count: 4,
   }]), null);
   const plan = await service.plan();
   expect(plan.databaseQueries).toBe(2);
   expect(plan.candidates).toEqual([{
     accountId: 369, accountName: "upstream plus 0.05", platform: "openai", priority: 300,
-    status: "error", schedulable: false, hadRuntimeBlock: true,
+    status: "error", schedulable: false, hadRuntimeBlock: true, availableSampleCount: 4,
   }]);
 });
 
