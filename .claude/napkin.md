@@ -33,6 +33,8 @@
 | 2026-08-03 | self | 为核对 Compose 挂载误用 `docker inspect .Config.Env`，导致诊断输出包含运行面 Secret | 容器诊断只查询 `WorkingDir`、`Mounts`、状态和脱敏路径；禁止输出完整 `.Config.Env`，环境字段只经受控状态接口核对 presence/fingerprint |
 | 2026-08-03 | runtime | 探活工作流超时后被误判为普通网关请求超时，但 Secret 未落盘且账号未绑定隔离组，实际失败发生在隔离初始化阶段 | 隔离初始化按分组、专用凭据、账号绑定和 Secret 持久化分阶段返回脱敏错误；只有收到网关 HTTP 响应才能将普通日志标记为已记录候选 |
 | 2026-08-03 | self | ApiState `web-probe product-smoke` 误把页面内的 PK01 后端标签当成 Web target，并误用通用 profile | ApiState Web 使用 owning target `NC01`；上游资产页使用 profile `scores`，PK01 只表示 Sub2API 后端目标 |
+| 2026-08-04 | tool | ApiState 经营页拆出 OAuth 成本、上游页合并到评分页后，UniDesk operations smoke 仍等待旧 DOM 和旧独立页面 | Web 架构调整后同步更新 owning smoke 页面清单与只读请求分类；经营页只验账本、审计和经营摘要，`POST /api/scores/rank` 视为只读计算 |
+| 2026-08-04 | runtime | 评分页移动端仍使用固定 `210 + 104 + 360px` 质量面板列宽和 stretch 对齐，造成横向裁切与超高空白 | 900px 以下改为有界单列页头，质量摘要使用弹性两列、指标使用三等分列；移动 smoke 必须断言 `documentWidth <= viewportWidth` |
 | 2026-08-03 | self | 账号导入页升级静态资源缓存版本后，遗漏同步 ZIP 预览测试里的版本断言 | 每次修改 HTML 的 `app.js?v=` 或 `styles.css?v=` 时，同步检索并更新所有静态测试中的缓存版本断言 |
 | 2026-08-03 | runtime | 上游实时成本用已知 wallet 的余额消耗除以全部 API-key 产出，且图表把成本空值延续为旧异常值，导致采样恢复后成本严重低估并长期贴住展示上限 | 成本分子和分母必须按同一 wallet、同一余额变化锚点配对；未知 wallet 产出不进入成本分母，空值在图表中断开且顶部不回填旧值 |
 | 2026-08-03 | runtime | Worker 冷启动后优先级 bulk-update 与登录共用 20 秒全局预算，登录消耗后更新在约 15 秒处临界超时，触发 15 秒回读和整轮重试 | 优先级写入使用 owning YAML 的独立请求预算；仍让认证和操作共享一次总预算，但为正常登录加批量更新预留足够余量 |
