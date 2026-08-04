@@ -32,13 +32,13 @@ WITH internal_probe_keys AS (
       SELECT 1 FROM account_groups ag
       WHERE ag.account_id = a.id AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
     )
-), recent_events AS (
-  SELECT * FROM (
+), raw_events AS (
     SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at, u.account_id,
       a.name AS account_name, a.base_url, u.stream, u.first_token_ms::bigint,
       u.duration_ms::bigint, false AS scoreable, NULL::int AS client_status_code
     FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
-    WHERE NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
+    WHERE u.request_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
     UNION ALL
     SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at, o.account_id,
       a.name AS account_name, a.base_url, o.stream, o.time_to_first_token_ms::bigint,
@@ -65,8 +65,22 @@ WITH internal_probe_keys AS (
       OR COALESCE(o.upstream_status_code, 0) >= 400
       OR o.error_type = 'cyber_policy'
     )
+      AND o.request_id IS NOT NULL
+      AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
+      AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
+        '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
+      )
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = o.api_key_id)
-  ) combined
+), final_events AS (
+  SELECT event.*,
+    ROW_NUMBER() OVER (
+      PARTITION BY event.request_id
+      ORDER BY (event.kind = 'usage') DESC, event.created_at DESC, event.id DESC
+    ) AS request_rank
+  FROM raw_events event
+), recent_events AS (
+  SELECT * FROM final_events
+  WHERE request_rank = 1
   ORDER BY created_at DESC, id DESC
   LIMIT $1
 )
@@ -122,7 +136,7 @@ export async function collectPoolQualitySample(
   const successes = rows.filter((row) => row.kind === "usage");
   const failures = rows.filter((row) => row.kind === "error" && row.scoreable === true);
   const failovers = rows.filter((row) => row.failover_triggered === true);
-  const recovered = failovers.filter((row) => row.kind === "error" && Number(row.client_status_code) >= 200 && Number(row.client_status_code) < 400);
+  const recovered = failovers.filter((row) => row.kind === "usage");
   const ttft = successes.map((row) => Number(row.first_token_ms)).filter((value) => Number.isFinite(value) && value >= 0);
   const accounts = new Map<number, { accountName: string; baseUrl: string; attempts: number }>();
   for (const row of rows) {
@@ -149,7 +163,7 @@ export async function collectPoolQualitySample(
     duration_p95_ms: percentile(successes.map((row) => Number(row.duration_ms)).filter(Number.isFinite), 0.95),
     customer_error_requests: failures.length, excluded_error_requests: rows.filter((row) => row.kind === "error" && row.scoreable !== true).length,
     token_count: 0, api_amount_usd: 0,
-  }, recentCallLimit, config.sub2api.scorePolicy);
+  }, recentCallLimit, config.sub2api.poolScorePolicy);
   const total = rows.length;
   return {
     sampledAt,

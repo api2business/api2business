@@ -58,18 +58,33 @@ export function summarizeOAuthRuntimeSamples(samples: OAuthRuntimeSample[], wind
   };
   const cutoff = Date.parse(latest.sampledAt) - windowHours * 3_600_000;
   const window = ordered.filter((sample) => Date.parse(sample.sampledAt) >= cutoff);
-  const first = window[0];
-  const elapsedHours = first ? Math.max(0, (Date.parse(latest.sampledAt) - Date.parse(first.sampledAt)) / 3_600_000) : 0;
-  const consumed = first && window.length >= 2
-    ? Math.max(0, latest.apiAmountUsdTotal - first.apiAmountUsdTotal)
-    : null;
-  const rate = consumed !== null && consumed > 0 && elapsedHours > 0 ? consumed / elapsedHours : null;
+  let consumed = 0;
+  let elapsedHours = 0;
+  let validIntervals = 0;
+  let resetIntervals = 0;
+  for (let index = 1; index < window.length; index += 1) {
+    const previous = window[index - 1]!;
+    const current = window[index]!;
+    const intervalHours = (Date.parse(current.sampledAt) - Date.parse(previous.sampledAt)) / 3_600_000;
+    const delta = current.apiAmountUsdTotal - previous.apiAmountUsdTotal;
+    // 号池成员变化会重写累计投影；将该区间视为基线重置，避免导入或退役虚增、抹除产出。
+    if (intervalHours <= 0 || current.accountCount !== previous.accountCount || delta < 0) {
+      resetIntervals += 1;
+      continue;
+    }
+    consumed += delta;
+    elapsedHours += intervalHours;
+    validIntervals += 1;
+  }
+  const hasRate = validIntervals > 0 && elapsedHours > 0;
+  const consumedValue = hasRate ? consumed : null;
+  const rate = hasRate ? consumed / elapsedHours : null;
   return {
     sampledAt: latest.sampledAt,
     apiAmountUsdTotal: latest.apiAmountUsdTotal,
     expectedApiAmountUsd: latest.expectedApiAmountUsd,
     remainingExpectedApiAmountUsd: latest.remainingExpectedApiAmountUsd,
-    consumedApiAmountUsd: consumed,
+    consumedApiAmountUsd: consumedValue,
     apiAmountUsdPerHour: rate,
     burnWindowHours: elapsedHours,
     estimatedAvailableHours: latest.remainingExpectedApiAmountUsd !== null && latest.remainingExpectedApiAmountUsd <= 0
@@ -81,9 +96,13 @@ export function summarizeOAuthRuntimeSamples(samples: OAuthRuntimeSample[], wind
     normalCount: latest.normalCount,
     rateLimitedCount: latest.rateLimitedCount,
     errorCount: latest.errorCount,
-    warning: window.length < 2
+    warning: window.length < 2 || !hasRate
       ? "最近一小时有效样本不足，暂不可估算消耗"
-      : rate === null ? "最近一小时没有可计算的 API 消耗" : null,
+      : consumed === 0
+        ? "最近一小时有效区间内没有 API 消耗"
+        : resetIntervals > 0
+          ? `最近一小时发生 ${resetIntervals} 次号池基线变化，速率仅按稳定区间计算`
+          : null,
   };
 }
 

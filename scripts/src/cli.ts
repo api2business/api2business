@@ -603,7 +603,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
         const scope = parsed.scope ?? "pool";
         if (scope !== "pool" && scope !== "day") throw new Error("--scope must be pool or day");
         const day = parsed.day ?? new Date().toLocaleDateString("sv-SE", { timeZone: config.monitor.timezone });
-        return await client.accountLifecycleDetect({ day, planType: "all", scope, selectionMode: "database-dead", confirm: false });
+        return await client.accountLifecycleDetect({ day, planType: "all", scope, selectionMode: "database-error", confirm: false });
       }
       if (!parsed.id) throw new Error(`accounts lifecycle retire ${phase ?? ""} requires --id`);
       if (phase === "status") return await client.accountLifecycleStatus(parsed.id);
@@ -744,7 +744,7 @@ function aggregateSmoke(): Record<string, unknown> {
     successRequests, failureRequests, observedAttempts: successRequests + failureRequests, streamSuccessRequests: successRequests,
     firstTokenSamples: successRequests, ttftP95Ms, usage: { requestCount: successRequests, tokenCount: successRequests * 1000, apiAmountUsd },
   });
-  const rows = mergeAccountScores([account(3, "自用", 100, 0, 10_591, 1), account(2, "unidesk-codex-pool", 50, 1, 13_206, 0.5)]);
+  const rows = mergeAccountScores([account(3, "自用", 100, 0, 10_591, 1), account(2, "混合池", 50, 1, 13_206, 0.5)]);
   const row = rows[0] ?? {};
   const checks = {
     uniqueAccount: rows.length === 1,

@@ -28,6 +28,11 @@ interface BulkUpdateResult {
   failed_ids?: unknown;
 }
 
+interface BatchDeleteResult extends BulkUpdateResult {
+  total?: unknown;
+  errors?: unknown;
+}
+
 function record(value: unknown): Row | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
 }
@@ -35,6 +40,13 @@ function record(value: unknown): Row | null {
 function positiveInteger(value: unknown): number | null {
   const number = Number(value);
   return Number.isSafeInteger(number) && number > 0 ? number : null;
+}
+
+function supportsDirectOpenAICreate(account: Row): boolean {
+  const credentials = record(account.credentials) ?? {};
+  const refreshToken = typeof credentials.refresh_token === "string" ? credentials.refresh_token.trim() : "";
+  const authMode = typeof credentials.auth_mode === "string" ? credentials.auth_mode.trim().toLowerCase() : "";
+  return refreshToken.length > 0 || authMode === "agent_identity";
 }
 
 function identity(value: unknown): string {
@@ -71,6 +83,7 @@ export class Sub2ApiRuntimeService {
     proxyId: number;
     proxyCandidateIds: number[];
     perAccountProxy: boolean;
+    createOnly?: boolean;
   }): Promise<Record<string, unknown>> {
     const payload = JSON.parse(input.content) as Row;
     const accounts = Array.isArray(payload.accounts) ? payload.accounts.map(record).filter((item): item is Row => item !== null) : [];
@@ -133,6 +146,42 @@ export class Sub2ApiRuntimeService {
       const failed = Number(result.account_failed ?? 0);
       if (failed > 0 || createdCount !== accounts.length) {
         failures.push({ index: 0, reason: `Sub2API data import created ${createdCount}/${accounts.length}, failed ${failed}` });
+      }
+    } else if (input.createOnly === true && accounts.every(supportsDirectOpenAICreate)) {
+      const prepared = accounts.map((account) => {
+        const credentials = record(account.credentials) ?? {};
+        const accessToken = typeof credentials.access_token === "string" ? credentials.access_token : "";
+        return {
+          ...account,
+          platform: "openai",
+          type: "oauth",
+          credentials,
+          extra: {
+            ...(record(account.extra) ?? {}),
+            ...(accessToken ? { access_token_sha256: createHash("sha256").update(accessToken).digest("hex") } : {}),
+            import_source: "api2business-batch",
+          },
+          priority: input.priority,
+          concurrency: input.capacity,
+          proxy_id: input.proxyId,
+          group_ids: input.groupIds,
+          confirm_mixed_channel_risk: true,
+        };
+      });
+      const result = await this.client.mutate<BatchCreateResult>("POST", "/admin/accounts/batch", {
+        accounts: prepared,
+      }, requestKey, input.importTimeoutMs);
+      const items = Array.isArray(result.results) ? result.results : [];
+      for (let offset = 0; offset < items.length; offset += 1) {
+        const item = record(items[offset]);
+        const accountId = positiveInteger(item?.id);
+        if (item?.success === true && accountId) createdIds.push(accountId);
+        else failures.push({ index: offset + 1, reason: String(item?.error ?? "Sub2API OpenAI batch import failed") });
+      }
+      if (Number(result.success ?? 0) !== createdIds.length
+        || Number(result.failed ?? 0) !== failures.length
+        || items.length !== accounts.length) {
+        failures.push({ index: 0, reason: `Sub2API OpenAI batch result mismatch: items ${items.length}/${accounts.length}` });
       }
     } else {
       const credentials = accounts.map((account) => JSON.stringify(record(account.credentials) ?? {}));
@@ -221,6 +270,22 @@ export class Sub2ApiRuntimeService {
     return await this.updateAccount(accountId, {
       credentials: this.apiKeyCredentials(account.credentials),
     });
+  }
+
+  async applyApiKeyFailoverTemplates(accountIds: number[]): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+      throw new Error("bulk API-key template requires stable positive account IDs");
+    }
+    const result = await this.client.mutate<Record<string, unknown>>("POST", "/admin/accounts/bulk-update", {
+      account_ids: ids,
+      credentials: {
+        pool_mode: false,
+        temp_unschedulable_enabled: true,
+        temp_unschedulable_rules: this.apiKeyFailoverRules,
+      },
+    });
+    return { accountIds: ids, result };
   }
 
   async setSchedulable(accountId: number, schedulable: boolean, timeoutMs?: number): Promise<unknown> {
@@ -323,5 +388,26 @@ export class Sub2ApiRuntimeService {
 
   async deleteAccount(accountId: number): Promise<unknown> {
     return await this.client.mutate("DELETE", `/admin/accounts/${accountId}`);
+  }
+
+  async deleteAccounts(accountIds: number[], timeoutMs?: number): Promise<Record<string, unknown>> {
+    const normalized = [...new Set(accountIds.filter((accountId) => Number.isSafeInteger(accountId) && accountId > 0))]
+      .sort((left, right) => left - right);
+    if (normalized.length === 0) throw new Error("Sub2API batch delete requires account IDs");
+    const result = await this.client.mutate<BatchDeleteResult>(
+      "POST",
+      "/admin/accounts/batch-delete",
+      { account_ids: normalized },
+      undefined,
+      timeoutMs,
+    );
+    const successIds = Array.isArray(result.success_ids) ? result.success_ids.map(Number).filter(Number.isSafeInteger) : [];
+    const failedIds = Array.isArray(result.failed_ids) ? result.failed_ids.map(Number).filter(Number.isSafeInteger) : [];
+    const reportedSuccess = Number(result.success ?? successIds.length);
+    const reportedFailed = Number(result.failed ?? failedIds.length);
+    if (reportedSuccess !== normalized.length || reportedFailed > 0 || successIds.length !== normalized.length) {
+      throw new Error(`Sub2API batch delete failed for accounts ${failedIds.join(",") || "unknown"}`);
+    }
+    return { deleted: reportedSuccess, accountIds: successIds.sort((left, right) => left - right) };
   }
 }

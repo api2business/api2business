@@ -1,6 +1,5 @@
 import { continueAsNew, proxyActivities, sleep, workflowInfo } from "@temporalio/workflow";
 import type { OperationRequest, ScheduledIdleProbeInput, ScheduledScoreRefreshInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
-import { remainingScheduleDelayMs } from "./schedule-cadence";
 
 export interface Activities {
   executeOperation(request: OperationRequest): Promise<unknown>;
@@ -41,7 +40,6 @@ export async function upstreamQuotaScheduleWorkflow(input: ScheduledUpstreamQuot
     retry: { maximumAttempts: 1 },
   });
   for (let iteration = 0; iteration < 500; iteration += 1) {
-    const roundStartedAt = Date.now();
     try {
       await activity.executeOperation({
         operationId: `${workflowInfo().runId}:upstream-quota:${iteration}`,
@@ -50,7 +48,7 @@ export async function upstreamQuotaScheduleWorkflow(input: ScheduledUpstreamQuot
     } catch {
       // API 短暂重载不能终止长期采样循环。
     }
-    await sleep(remainingScheduleDelayMs(input.intervalMs, Date.now() - roundStartedAt));
+    await sleep(input.intervalMs);
   }
   await continueAsNew<typeof upstreamQuotaScheduleWorkflow>(input);
 }
@@ -62,7 +60,6 @@ export async function idleAccountProbeScheduleWorkflow(input: ScheduledIdleProbe
     retry: { maximumAttempts: 1 },
   });
   for (let iteration = 0; iteration < 500; iteration += 1) {
-    const roundStartedAt = Date.now();
     try {
       await probeActivity.executeOperation({
         operationId: `${workflowInfo().runId}:idle-probe:${iteration}`,
@@ -71,7 +68,7 @@ export async function idleAccountProbeScheduleWorkflow(input: ScheduledIdleProbe
     } catch {
       // 单轮失败直接跳过，下一分钟重新选择仍无请求的账号。
     }
-    await sleep(remainingScheduleDelayMs(input.intervalMs, Date.now() - roundStartedAt));
+    await sleep(input.intervalMs);
   }
   await continueAsNew<typeof idleAccountProbeScheduleWorkflow>(input);
 }
@@ -83,7 +80,6 @@ export async function idleAccountProvisionScheduleWorkflow(input: ScheduledIdleP
     retry: { maximumAttempts: 1 },
   });
   for (let iteration = 0; iteration < 500; iteration += 1) {
-    const roundStartedAt = Date.now();
     try {
       await activity.executeOperation({
         operationId: `${workflowInfo().runId}:idle-probe-reconcile:${iteration}`,
@@ -92,7 +88,7 @@ export async function idleAccountProvisionScheduleWorkflow(input: ScheduledIdleP
     } catch {
       // 单轮初始化失败直接跳过，不影响独立的探活周期。
     }
-    await sleep(remainingScheduleDelayMs(input.intervalMs, Date.now() - roundStartedAt));
+    await sleep(input.intervalMs);
   }
   await continueAsNew<typeof idleAccountProvisionScheduleWorkflow>(input);
 }

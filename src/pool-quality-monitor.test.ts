@@ -37,6 +37,18 @@ test("pool quality excludes monitor-user probe keys without changing account sco
   expect(poolQualitySql).toContain("k.name LIKE 'api2business-probe-%'");
   expect(poolQualitySql).toContain("p.id = u.api_key_id");
   expect(poolQualitySql).toContain("p.id = o.api_key_id");
+  expect(poolQualitySql).toContain("PARTITION BY event.request_id");
+  expect(poolQualitySql).toContain("(event.kind = 'usage') DESC");
+  expect(poolQualitySql).toContain("'/responses/compact'");
+  expect(poolQualitySql).toContain("'/v1/responses/compact'");
+  expect(poolQualitySql).not.toContain("FROM ops_error_logs o\n        WHERE");
+});
+
+test("pool quality has an independent YAML score policy without failover points", () => {
+  const config = loadConfig("config/api2business.yaml");
+  expect(config.sub2api.poolScorePolicy.failoverWeight).toBe(0);
+  expect(config.sub2api.poolScorePolicy.reliabilityWeight).toBe(58);
+  expect(config.sub2api.scorePolicy.failoverWeight).toBe(10);
 });
 
 test("pool quality history preserves bounded chart fields", () => {

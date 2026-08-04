@@ -46,10 +46,13 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   const config = await Bun.file(new URL("../config/api2business.example.yaml", import.meta.url)).text();
   expect(config).toContain("errorCode: 502");
   expect(config).toContain("errorCode: 524");
+  expect(config).not.toContain("input must be a list");
   expect(config).not.toContain("input exceeds the context window of this model");
+  expect(config).not.toContain("openai_error");
   expect(config).not.toContain("model_not_found");
   expect(config).not.toMatch(/errorCode: 404\n/u);
   expect(config).not.toContain("statusCode:");
+  expect(config).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
 });
 
 test("usage target discovery uses one queued database read", async () => {
@@ -98,15 +101,16 @@ test("template application verifies persisted runtime fields through the queued 
   expect(source).toContain("verifiedCount");
 });
 
-test("upstream creation requires probe isolation and verifies the failover template before success", async () => {
+test("upstream creation keeps the created account successful when post-processing is incomplete", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   const createBody = source.slice(source.indexOf("  async create(input:"), source.indexOf("  async update(id:"));
   expect(createBody).toContain("await this.applyTemplate([resolvedAccountId])");
   expect(createBody).toContain("await this.probeIsolation.ensure(resolvedAccountId)");
-  expect(createBody).toContain('operation: "probe-isolation", partial: true');
-  expect(createBody).toContain('operation: "template", partial: true');
-  expect(createBody).toContain("template: { applied: true, verified: true }");
-  expect(createBody).toContain("probeIsolation: { enabled: true");
+  expect(createBody).toContain("const postProcess = async () =>");
+  expect(createBody).toContain("void postProcess();");
+  expect(createBody).toContain('status: "pending"');
+  expect(createBody).toContain("后台后处理");
+  expect(createBody).not.toContain("上游账号已创建，但 Codex 通用切号模板未通过校验");
 });
 
 test("recharge recovery covers every API-key account in the normalized wallet", async () => {

@@ -307,8 +307,8 @@ export function createHandler(
         const input = await body(request);
         const accountIds = normalizeAccountIds(input.accountIds);
         if (input.confirm !== true) return json({ ok: true, mutation: false, accountIds, hint: "confirm=true 才会执行删除" });
-        for (const accountId of accountIds) await runtime.deleteAccount(accountId);
-        return json({ ok: true, mutation: true, deleted: accountIds.length, accountIds });
+        const result = await runtime.deleteAccounts(accountIds, config.operations.accountLifecycle.deleteTimeoutMs);
+        return json({ ok: true, mutation: true, ...result });
       }
       if (request.method === "POST" && url.pathname === "/api/internal/sub2api-read") {
         const input = await body(request);

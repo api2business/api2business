@@ -137,7 +137,7 @@ export class AccountImportService {
 
   options() {
     return { ok: true, currency: "CNY", inputFormats: ["json", "zip"], planTypes: [{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }, { id: "team", name: "Team" }, { id: "free", name: "Free" }], initialExpectedApiUsdPerAccount: { ...this.config.operations.oauthEconomics.idealApiUsdPerAccount }, defaults: { ...this.config.operations.accountImportDefaults, unitCostCny: null }, groups: [
-      { id: 2, name: "混池（unidesk-codex-pool）" }, { id: 3, name: "自用" }, { id: 6, name: "Grok" },
+      { id: 2, name: "混合池" }, { id: 3, name: "自用" }, { id: 6, name: "Grok" },
     ] };
   }
 
@@ -295,6 +295,7 @@ export class AccountImportService {
           proxyId: plan.initialProxyId,
           proxyCandidateIds: plan.proxyCandidateIds,
           perAccountProxy: job.settings.perAccountProxy === true,
+          createOnly: plan.pendingExisting.length === 0,
         });
       } catch (error) {
         if (!isTimeoutError(error)) throw error;

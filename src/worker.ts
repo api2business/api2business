@@ -77,12 +77,13 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
   const command = operation.command;
   if (command.kind === "scores.refresh") return await scores.refresh();
   if (command.kind === "upstream.quota.sample") {
+    // 先持久化本地 OAuth 快照，避免单个外部钱包缓慢或故障造成 OAuth 曲线同步断点。
+    const oauth = await operations.sampleOAuthRuntime();
     const result = await upstreams.usage([]);
     if (Array.isArray(result.results)) await internal.upstreamUsageCache(
       result.results as Array<Record<string, unknown>>, Number(result.apiAmountUsdTotal),
       true,
     );
-    const oauth = await operations.sampleOAuthRuntime();
     const quality = await operations.samplePoolQuality();
     return { ok: true, sampled: result.targetCount, succeeded: result.succeeded, failed: result.failed, oauth, quality };
   }
@@ -173,7 +174,7 @@ const schedule = temporal
     workflowId: target.scoreScheduleWorkflowId,
   };
 const quotaSchedule = temporal ? await temporal.ensureUpstreamQuotaSchedule() : { started: false, workflowId: null };
-const idleProbeSchedule = temporal && config.sub2api.idleProbe.enabled
+const idleProbeSchedule = temporal
   ? await temporal.ensureIdleProbeSchedule()
   : { started: false, workflowId: null };
 let state: "ready" | "stopping" = "ready";

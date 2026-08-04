@@ -56,6 +56,38 @@ test("clamps a cumulative output rollback to zero sample speed", () => {
   expect(history[1]?.sampleApiAmountUsdPerHour).toBe(0);
 });
 
+test("keeps rolling speed after a cumulative reset caused by account retirement", () => {
+  const base: OAuthRuntimeSample = {
+    sampledAt: "2026-08-02T01:00:00Z", profile: "codex", apiAmountUsdTotal: 100,
+    expectedApiAmountUsd: 160, remainingExpectedApiAmountUsd: 60,
+    accountCount: 10, normalCount: 10, rateLimitedCount: 0, errorCount: 0,
+  };
+  const summary = summarizeOAuthRuntimeSamples([
+    base,
+    { ...base, sampledAt: "2026-08-02T01:20:00Z", apiAmountUsdTotal: 110 },
+    { ...base, sampledAt: "2026-08-02T01:40:00Z", apiAmountUsdTotal: 70, accountCount: 8 },
+    { ...base, sampledAt: "2026-08-02T02:00:00Z", apiAmountUsdTotal: 80, accountCount: 8 },
+  ]);
+  expect(summary.consumedApiAmountUsd).toBe(20);
+  expect(summary.apiAmountUsdPerHour).toBeCloseTo(30);
+  expect(summary.warning).toContain("号池基线变化");
+});
+
+test("distinguishes a measured zero rate from missing samples", () => {
+  const base: OAuthRuntimeSample = {
+    sampledAt: "2026-08-02T01:00:00Z", profile: "codex", apiAmountUsdTotal: 100,
+    expectedApiAmountUsd: 160, remainingExpectedApiAmountUsd: 60,
+    accountCount: 10, normalCount: 10, rateLimitedCount: 0, errorCount: 0,
+  };
+  const summary = summarizeOAuthRuntimeSamples([
+    base,
+    { ...base, sampledAt: "2026-08-02T02:00:00Z" },
+  ]);
+  expect(summary.consumedApiAmountUsd).toBe(0);
+  expect(summary.apiAmountUsdPerHour).toBe(0);
+  expect(summary.warning).toContain("没有 API 消耗");
+});
+
 test("missing intermediate samples does not change the rolling result", () => {
   const base: OAuthRuntimeSample = {
     sampledAt: "2026-08-02T01:00:00Z", profile: "codex", apiAmountUsdTotal: 80,

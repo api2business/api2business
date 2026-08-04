@@ -116,6 +116,7 @@ export interface AppConfig {
       cacheMaxEntries: number;
     };
     scorePolicy: ScorePolicy;
+    poolScorePolicy: ScorePolicy;
     grokScorePolicy: ScorePolicy;
     scoreSamplePolicy: {
       retentionHours: number;
@@ -697,6 +698,7 @@ export function loadConfig(path: string): AppConfig {
         cacheMaxEntries: integerValue(scoreDatabase, "cacheMaxEntries", "sub2api.scoreDatabase", 1, 1000),
       },
       scorePolicy: readScorePolicy(sub2api.scorePolicy, "sub2api.scorePolicy"),
+      poolScorePolicy: readScorePolicy(sub2api.poolScorePolicy, "sub2api.poolScorePolicy"),
       grokScorePolicy: readScorePolicy(sub2api.grokScorePolicy, "sub2api.grokScorePolicy"),
       scoreSamplePolicy: {
         retentionHours: integerValue(scoreSamplePolicy, "retentionHours", "sub2api.scoreSamplePolicy", 1, 168),

@@ -419,7 +419,7 @@ export class UpstreamManagementService {
         groupIds: [...settings.groupIds],
       },
       groups: [
-        { id: 2, name: "混池（unidesk-codex-pool）" },
+        { id: 2, name: "混合池" },
         { id: 3, name: "自用" },
         { id: 6, name: "Grok" },
       ],
@@ -851,15 +851,12 @@ export class UpstreamManagementService {
       parameters: [accountIds.join(","), ","],
     });
     const ids = query.rows.map((item) => Number(item.id)).filter((id) => positiveInteger(id) !== null);
-    const applied: number[] = [];
+    const applied = ids;
     const failed: Array<{ accountId: number; error: string }> = [];
-    for (const accountId of ids) {
-      try {
-        await this.runtime.applyApiKeyFailoverTemplate(accountId);
-        applied.push(accountId);
-      } catch (error) {
-        failed.push({ accountId, error: safeMessage(error instanceof Error ? error.message : String(error)) });
-      }
+    try {
+      await this.runtime.applyApiKeyFailoverTemplates(ids);
+    } catch (error) {
+      failed.push(...ids.map((accountId) => ({ accountId, error: safeMessage(error instanceof Error ? error.message : String(error)) })));
     }
     const verify = applied.length ? await this.reads.query<Row>({
       key: `upstream-template-verify:${applied.join(",")}`,
@@ -987,7 +984,6 @@ export class UpstreamManagementService {
     operationId?: string | null;
     description?: string;
   }): Promise<Record<string, unknown>> {
-    if (!this.probeIsolation) throw new Error("Api2Business 上游探活隔离服务不可用");
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const suffix = validateSuffix(input.suffix);
     const rate = validateRate(input.rateCnyPerApiUsd);
@@ -1036,39 +1032,26 @@ export class UpstreamManagementService {
     }
     if (createError !== null) recovered = true;
     const resolvedAccountId = account.id;
-    let probeBinding: Awaited<ReturnType<ProbeIsolationService["ensure"]>>;
-    try {
-      probeBinding = await this.probeIsolation.ensure(resolvedAccountId);
-    } catch (error) {
-      throw new UpstreamManagementError(
-        `上游账号已创建，但私有探活分组和专用 API Key 未完成：${safeMessage(error instanceof Error ? error.message : String(error))}`,
-        502,
-        { operation: "probe-isolation", partial: true, accountId: resolvedAccountId },
-      );
-    }
-    const effectiveGroupIds = [...new Set([...groupIds, probeBinding.groupId])];
-    const desiredGroupIds = [...effectiveGroupIds].sort((left, right) => left - right);
-    const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
-    if (account.priority !== priority || account.capacity !== capacity || account.proxyId !== settings.proxyId
-      || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds)) {
-      if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
-      await this.runtime.updateAccount(resolvedAccountId, { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId });
-      const configured = await this.accountQuery(resolvedAccountId);
-      if (!configured) throw new UpstreamManagementError("运行设置已提交但排队查询未找到账号", 502, {
-        operation: "settings", partial: true, accountId: resolvedAccountId,
-      });
-      account = configured;
-    }
-    // Template application is part of upstream creation, so creation cannot be
-    // reported as complete until the persisted failover policy is verified.
-    const templateResult = await this.applyTemplate([resolvedAccountId]);
-    if (templateResult.ok !== true) {
-      throw new UpstreamManagementError(
-        "上游账号已创建，但 Codex 通用切号模板未通过校验；请从上游列表重试模板作业",
-        502,
-        { operation: "template", partial: true, accountId: resolvedAccountId },
-      );
-    }
+    // 创建终态只依赖稳定账号 ID；探活隔离、运行设置和模板在后台尽力完成，
+    // 避免 Sub2API 后处理超时把已经创建成功的账号伪装成导入失败。
+    const postProcess = async () => {
+      try {
+        if (!this.probeIsolation) throw new Error("探活隔离服务不可用");
+        const probeBinding = await this.probeIsolation.ensure(resolvedAccountId);
+        const effectiveGroupIds = [...new Set([...groupIds, probeBinding.groupId])];
+        const desiredGroupIds = [...effectiveGroupIds].sort((left, right) => left - right);
+        const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
+        if (account.priority !== priority || account.capacity !== capacity || account.proxyId !== settings.proxyId
+          || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds)) {
+          if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
+          await this.runtime.updateAccount(resolvedAccountId, { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId });
+        }
+        await this.applyTemplate([resolvedAccountId]);
+      } catch (error) {
+        console.warn(`[upstream-create:${resolvedAccountId}] 后处理未完成：${safeMessage(error instanceof Error ? error.message : String(error))}`);
+      }
+    };
+    void postProcess();
     let accounting: Record<string, unknown> | null = null;
     if (recharge !== null) {
       try {
@@ -1096,8 +1079,9 @@ export class UpstreamManagementService {
       operation: recovered ? "create-recovered" : "create",
       recovered,
       account,
-      template: { applied: true, verified: true },
-      probeIsolation: { enabled: true, groupId: probeBinding.groupId, keyCreated: probeBinding.keyCreated },
+      template: { applied: false, verified: false, status: "pending" },
+      probeIsolation: { enabled: false, status: "pending" },
+      warnings: ["探活隔离、运行设置和切号模板已转为后台后处理"],
       accounting,
     };
   }

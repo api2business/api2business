@@ -183,6 +183,9 @@ account_stats AS (
         FROM ops_error_logs o
         WHERE o.account_id = a.account_id
           AND o.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
+          AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
+            '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
+          )
           AND (
             COALESCE(o.status_code, 0) >= 400
             OR COALESCE(o.upstream_status_code, 0) >= 400

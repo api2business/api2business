@@ -40,6 +40,58 @@ test("keeps OpenAI OAuth on the codex-session import endpoint", async () => {
   })]);
 });
 
+test("uses native batch create when OpenAI preflight proves every account is new", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown>; timeoutMs?: number }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>, _key?: string, timeoutMs?: number) => {
+    calls.push({ path, body, timeoutMs });
+    return { success: 1, failed: 0, results: [{ id: 453, success: true }] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  const output = await runtime.importAccounts({
+    operationKey: "openai-create-only-test",
+    importTimeoutMs: 120000,
+    content: JSON.stringify({ accounts: [{
+      name: "codex-new", platform: "openai", type: "oauth",
+      credentials: { access_token: "token", refresh_token: "refresh", chatgpt_user_id: "user-new" },
+    }] }),
+    priority: 1, capacity: 16, groupIds: [2, 3], proxyId: 14,
+    proxyCandidateIds: [14], perAccountProxy: false, createOnly: true,
+  });
+  expect(calls).toEqual([expect.objectContaining({
+    path: "/admin/accounts/batch",
+    body: { accounts: [expect.objectContaining({
+      platform: "openai", type: "oauth", priority: 1, concurrency: 16,
+      proxy_id: 14, group_ids: [2, 3], confirm_mixed_channel_risk: true,
+      extra: expect.objectContaining({ access_token_sha256: expect.any(String), import_source: "api2business-batch" }),
+    })] },
+    timeoutMs: 120000,
+  })]);
+  expect(output).toEqual(expect.objectContaining({
+    ok: true,
+    result: expect.objectContaining({ createdIds: [453], createdCount: 1, failed: 0 }),
+  }));
+});
+
+test("keeps access-token-only OpenAI imports on the session normalization path", async () => {
+  const calls: string[] = [];
+  const client = { mutate: async (_method: string, path: string) => {
+    calls.push(path);
+    return { failed: 0, items: [{ index: 1, account_id: 454, action: "created" }] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  await runtime.importAccounts({
+    operationKey: "openai-access-only-test",
+    importTimeoutMs: 120000,
+    content: JSON.stringify({ accounts: [{
+      name: "codex-access-only", platform: "openai", type: "oauth",
+      credentials: { access_token: "token", chatgpt_user_id: "user-access-only" },
+    }] }),
+    priority: 1, capacity: 16, groupIds: [2, 3], proxyId: 14,
+    proxyCandidateIds: [14], perAccountProxy: false, createOnly: true,
+  });
+  expect(calls).toEqual(["/admin/accounts/import/codex-session"]);
+});
+
 test("corrects account plan types with one native bulk credentials merge", async () => {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
   const client = { mutate: async (method: string, path: string, body: Record<string, unknown>) => {
@@ -68,6 +120,24 @@ test("recovers a planned account batch with one native bulk request", async () =
     method: "POST",
     path: "/admin/accounts/bulk-update",
     body: { account_ids: [7, 8, 9], status: "active", schedulable: true },
+  }]);
+});
+
+test("deletes accounts with one native batch request", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const runtime = new Sub2ApiRuntimeService({
+    mutate: async (method: string, path: string, body: unknown, _key: string | undefined, timeoutMs: number | undefined) => {
+      calls.push({ method, path, body, timeoutMs });
+      return { total: 3, success: 3, failed: 0, success_ids: [9, 7, 8], failed_ids: [] };
+    },
+  } as never);
+
+  expect(await runtime.deleteAccounts([9, 7, 8, 9], 60000)).toEqual({ deleted: 3, accountIds: [7, 8, 9] });
+  expect(calls).toEqual([{
+    method: "POST",
+    path: "/admin/accounts/batch-delete",
+    body: { account_ids: [7, 8, 9] },
+    timeoutMs: 60000,
   }]);
 });
 

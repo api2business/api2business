@@ -149,6 +149,18 @@ export class TemporalGateway {
   async ensureIdleProbeSchedule(): Promise<{ started: boolean; workflowId: string; provisionWorkflowId: string }> {
     const workflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-probe-v4`;
     const provisionWorkflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-provision-v1`;
+    if (!this.config.sub2api.idleProbe.enabled) {
+      for (const id of [workflowId, provisionWorkflowId]) {
+        try {
+          const handle = this.client.workflow.getHandle(id);
+          const description = await handle.describe();
+          if (description.status.name === "RUNNING") await handle.terminate("idle probe disabled by configuration");
+        } catch (error) {
+          if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
+        }
+      }
+      return { started: false, workflowId, provisionWorkflowId };
+    }
     for (const legacySuffix of ["idle-account-probe-v2", "idle-account-probe-v3"]) {
       try {
         const legacy = this.client.workflow.getHandle(`${this.runtime.scoreScheduleWorkflowId}-${legacySuffix}`);

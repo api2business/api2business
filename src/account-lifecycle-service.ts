@@ -437,12 +437,11 @@ export class AccountLifecycleService {
       let deletionError: string | null = null;
       try {
         if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
-        const deleted = [];
-        for (const accountId of expectedIds) {
-          await this.runtime.deleteAccount(accountId);
-          deleted.push(accountId);
-        }
-        deletion = { ok: true, operation: "account-delete", deletedIds: deleted, valuesPrinted: false };
+        const deleted = await this.runtime.deleteAccounts(
+          expectedIds,
+          this.config.operations.accountLifecycle.deleteTimeoutMs,
+        );
+        deletion = { ok: true, operation: "account-batch-delete", ...deleted, valuesPrinted: false };
       } catch (error) {
         deletionError = safeMessage(errorMessage(error));
         this.log(job, "deletion", "verify", `删除命令结果回收失败，转入终态回读：${deletionError}`);
