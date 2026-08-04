@@ -424,6 +424,12 @@ export class UpstreamManagementService {
         { id: 6, name: "Grok" },
       ],
       valuation: readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath),
+      benchmark: {
+        enabled: this.config.operations.upstreamBenchmark.enabled,
+        provider: this.config.operations.upstreamBenchmark.provider,
+        benchmarkVersion: this.config.operations.upstreamBenchmark.benchmarkVersion,
+        model: this.config.operations.upstreamBenchmark.model,
+      },
       valuesRedacted: true,
     };
   }

@@ -197,6 +197,13 @@ export interface AppConfig {
       plusCostThresholdCny: number;
     };
     upstreamManagement: UpstreamManagementConfig;
+    upstreamBenchmark: {
+      enabled: boolean;
+      provider: string;
+      benchmarkVersion: string;
+      model: string;
+      requestTimeoutMs: number;
+    };
     oauthEconomics: {
       excludedAccountIds: number[];
       idealApiUsdPerAccount: OAuthIdealApiUsdPerAccount;
@@ -513,6 +520,7 @@ export function loadConfig(path: string): AppConfig {
   const accountLifecycle = object(operations.accountLifecycle, "operations.accountLifecycle");
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
   const upstreamManagement = object(operations.upstreamManagement, "operations.upstreamManagement");
+  const upstreamBenchmark = object(operations.upstreamBenchmark, "operations.upstreamBenchmark");
   const upstreamFailoverRulesValue = upstreamManagement.failoverRules;
   if (!Array.isArray(upstreamFailoverRulesValue) || upstreamFailoverRulesValue.length === 0) {
     throw new Error("operations.upstreamManagement.failoverRules must be a non-empty array");
@@ -839,6 +847,13 @@ export function loadConfig(path: string): AppConfig {
         quotaSampleIntervalSeconds,
         quotaSampleTimeoutSeconds,
         failoverRules: upstreamFailoverRules,
+      },
+      upstreamBenchmark: {
+        enabled: booleanValue(upstreamBenchmark, "enabled", "operations.upstreamBenchmark"),
+        provider: stringValue(upstreamBenchmark, "provider", "operations.upstreamBenchmark"),
+        benchmarkVersion: stringValue(upstreamBenchmark, "benchmarkVersion", "operations.upstreamBenchmark"),
+        model: stringValue(upstreamBenchmark, "model", "operations.upstreamBenchmark"),
+        requestTimeoutMs: integerValue(upstreamBenchmark, "requestTimeoutMs", "operations.upstreamBenchmark", 1000, 300000),
       },
       oauthEconomics: {
         excludedAccountIds: integers(oauthEconomics, "excludedAccountIds", "operations.oauthEconomics", 1, Number.MAX_SAFE_INTEGER),

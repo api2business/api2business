@@ -123,6 +123,16 @@
       <footer><button class="text-command" data-dialog-close type="button">取消</button><button id="score-upstream-edit-submit" class="primary-command" type="submit">保存调整</button></footer>
     </form>
   </dialog>
+  <dialog id="score-benchmark-dialog" class="upstream-dialog benchmark-dialog">
+    <form id="score-benchmark-form" method="dialog">
+      <header><div><p class="eyebrow">MANUAL INTELLIGENCE TEST <span id="score-benchmark-id">#—</span></p><h2>智商评测</h2></div><button class="icon-command" data-dialog-close type="button" title="关闭" aria-label="关闭">×</button></header>
+      <p id="score-benchmark-summary" class="dialog-state">—</p>
+      <div class="upstream-form-grid"><label class="wide-field"><span>评测模型</span><input id="score-benchmark-model" required /></label></div>
+      <section id="score-benchmark-result" class="benchmark-result"><p class="empty">尚未运行评测</p></section>
+      <p id="score-benchmark-state" class="dialog-state">只在点击开始后运行，不会自动跑分，也不会轮换探活 API Key。</p>
+      <footer><button class="text-command" data-dialog-close type="button">取消</button><button id="score-benchmark-submit" class="primary-command" type="submit">开始评测</button></footer>
+    </form>
+  </dialog>
   <dialog id="score-upstream-create-dialog" class="upstream-dialog">
     <form id="score-upstream-create-form" method="dialog">
       <header><div><p class="eyebrow">RUNTIME CREATE</p><h2>新增 API-key 上游</h2></div><button class="icon-command" data-dialog-close type="button" title="关闭" aria-label="关闭">×</button></header>

@@ -221,6 +221,7 @@ function help(): Record<string, unknown> {
       "upstreams usage [--accounts <id-or-range,...>] --over-api",
       "upstreams usage-cache [--accounts <id-or-range,...>] --over-api",
       "upstreams quota-summary --over-api",
+      "upstreams benchmark [--id <account-id> --model <id> --confirm] --over-api",
       "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
@@ -430,6 +431,14 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await client.upstreamUsageCacheRead(accountIds);
   }
   if (group === "upstreams" && action === "quota-summary") return await client.upstreamQuotaSummary();
+  if (group === "upstreams" && action === "benchmark") {
+    if (!parsed.id) return await client.upstreamBenchmarks();
+    const id = Number(parsed.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error("upstreams benchmark requires a positive --id");
+    const model = parsed.model ?? config.operations.upstreamBenchmark.model;
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-benchmark", accountId: id, model, provider: config.operations.upstreamBenchmark.provider, hint: "add --confirm to execute" };
+    return await client.upstreamBenchmark(id, model);
+  }
   if (group === "upstreams" && action === "template") {
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-template", accountIds, scope: accountIds.length ? "selected" : "all-api-key", hint: "add --confirm to execute" };

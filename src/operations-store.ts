@@ -178,6 +178,23 @@ export class OperationsStore {
         duration_ms integer NOT NULL,
         error_summary text
       );
+      CREATE TABLE IF NOT EXISTS api2business_upstream_benchmark_runs (
+        id uuid PRIMARY KEY,
+        account_id bigint NOT NULL,
+        provider text NOT NULL,
+        benchmark_version text NOT NULL,
+        model text NOT NULL,
+        state text NOT NULL CHECK (state IN ('running','succeeded','failed')),
+        score numeric(6,2),
+        dimensions jsonb NOT NULL DEFAULT '{}'::jsonb,
+        probes jsonb NOT NULL DEFAULT '[]'::jsonb,
+        requested_at timestamptz NOT NULL DEFAULT now(),
+        completed_at timestamptz,
+        duration_ms integer,
+        error_summary text
+      );
+      CREATE INDEX IF NOT EXISTS api2business_upstream_benchmark_account_time
+        ON api2business_upstream_benchmark_runs (account_id, requested_at DESC);
       CREATE INDEX IF NOT EXISTS api2business_idle_probe_rounds_started_at_idx
         ON api2business_idle_probe_rounds(started_at DESC);
       CREATE INDEX IF NOT EXISTS api2business_cash_entries_occurred_on_idx
@@ -379,6 +396,41 @@ export class OperationsStore {
       FROM api2business_idle_probe_rounds
       ORDER BY started_at DESC, id DESC
       LIMIT ${limit} OFFSET ${offset}
+    `;
+  }
+
+  async startUpstreamBenchmark(input: { accountId: number; provider: string; benchmarkVersion: string; model: string }) {
+    const id = crypto.randomUUID();
+    await this.sql`
+      INSERT INTO api2business_upstream_benchmark_runs
+        (id, account_id, provider, benchmark_version, model, state)
+      VALUES (${id}, ${input.accountId}, ${input.provider}, ${input.benchmarkVersion}, ${input.model}, 'running')
+    `;
+    return id;
+  }
+
+  async finishUpstreamBenchmark(id: string, input: { state: "succeeded" | "failed"; score: number | null; dimensions: Record<string, unknown>; probes: unknown[]; durationMs: number; errorSummary: string | null }) {
+    await this.sql`
+      UPDATE api2business_upstream_benchmark_runs SET
+        state=${input.state}, score=${input.score}, dimensions=${input.dimensions}::jsonb,
+        probes=${input.probes}::jsonb, completed_at=now(), duration_ms=${input.durationMs},
+        error_summary=${input.errorSummary}
+      WHERE id=${id}
+    `;
+  }
+
+  async latestUpstreamBenchmarks(accountIds: number[] = []) {
+    if (!accountIds.length) return await this.sql`
+      SELECT DISTINCT ON (account_id) id, account_id, provider, benchmark_version, model,
+        state, score, dimensions, probes, requested_at, completed_at, duration_ms, error_summary
+      FROM api2business_upstream_benchmark_runs ORDER BY account_id, requested_at DESC
+    `;
+    const values = postgresBigintArrayLiteral(accountIds);
+    return await this.sql`
+      SELECT DISTINCT ON (account_id) id, account_id, provider, benchmark_version, model,
+        state, score, dimensions, probes, requested_at, completed_at, duration_ms, error_summary
+      FROM api2business_upstream_benchmark_runs
+      WHERE account_id = ANY(${values}::bigint[]) ORDER BY account_id, requested_at DESC
     `;
   }
 

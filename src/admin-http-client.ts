@@ -115,6 +115,13 @@ export class AdminHttpClient {
   upstreamJob(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/upstreams/jobs/${encodeURIComponent(id)}`);
   }
+  upstreamBenchmarks(accountIds: number[] = []): Promise<Record<string, unknown>> {
+    const query = accountIds.length ? `?accountIds=${encodeURIComponent(accountIds.join(","))}` : "";
+    return this.request(`/api/upstreams/benchmarks${query}`);
+  }
+  upstreamBenchmark(id: number, model: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/upstreams/${id}/benchmark`, { method: "POST", body: JSON.stringify({ model }) });
+  }
   upstreamUsage(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/usage", {
       method: "POST",

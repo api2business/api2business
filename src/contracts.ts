@@ -14,6 +14,7 @@ export type AppCommand =
   | { kind: "credit.test"; execute: boolean }
   | { kind: "upstream.operation"; operationId: string }
   | { kind: "upstream.quota.sample" }
+  | { kind: "upstream.benchmark"; accountId: number; model: string }
   | { kind: "account.idle-probe.run"; accountIds: number[]; rounds: number }
   | { kind: "account.idle-probe.reconcile"; accountIds: number[] }
   | { kind: "account.import"; jobId: string }
@@ -56,6 +57,7 @@ export function usesWorkflow(command: AppCommand): boolean {
     || (command.kind === "credit.test" && command.execute)
     || command.kind === "upstream.operation"
     || command.kind === "upstream.quota.sample"
+    || command.kind === "upstream.benchmark"
     || command.kind === "account.idle-probe.run"
     || command.kind === "account.idle-probe.reconcile"
     || command.kind === "account.import"

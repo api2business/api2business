@@ -153,6 +153,21 @@ export function createHandler(
         const page = pageNumber(url);
         return json(await upstreams.list(page, url.searchParams.get("search")));
       }
+      if (request.method === "GET" && url.pathname === "/api/upstreams/benchmarks") {
+        const selector = url.searchParams.get("accountIds");
+        const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
+        return json(await operations.upstreamBenchmarks(accountIds));
+      }
+      if (request.method === "POST" && /^\/api\/upstreams\/\d+\/benchmark$/u.test(url.pathname)) {
+        const accountId = Number(url.pathname.split("/")[3]);
+        if (!Number.isSafeInteger(accountId) || accountId <= 0) return json({ ok: false, error: "account id is invalid" }, 400);
+        const input = await body(request);
+        const model = typeof input.model === "string" && input.model.trim()
+          ? input.model.trim()
+          : config.operations.upstreamBenchmark.model;
+        const submitted = await dispatcher.submit({ kind: "upstream.benchmark", accountId, model });
+        return json(submitted, 202);
+      }
       if (request.method === "GET" && url.pathname === "/api/upstreams/usage-cache") {
         const selector = url.searchParams.get("accountIds");
         const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];

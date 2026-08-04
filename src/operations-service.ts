@@ -64,6 +64,7 @@ import {
 import { collectPoolQualitySample, poolQualityHistory } from "./pool-quality-monitor";
 import { IdleAccountProbeService } from "./idle-account-probe";
 import type { ProbeIsolationService } from "./probe-isolation";
+import { UpstreamBenchmarkService } from "./upstream-benchmark";
 import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
 
 export { normalizeUpstreamWallet, upstreamBalanceRateByWallet } from "./upstream-valuation";
@@ -136,6 +137,7 @@ function object(value: unknown): Record<string, unknown> {
 
 export class OperationsService {
   private readonly idleProbe: IdleAccountProbeService;
+  private readonly upstreamBenchmark: UpstreamBenchmarkService;
 
   constructor(
     private readonly config: AppConfig,
@@ -145,6 +147,22 @@ export class OperationsService {
     private readonly probeIsolation: ProbeIsolationService | null = null,
   ) {
     this.idleProbe = new IdleAccountProbeService(config, reads, runtime, probeIsolation);
+    this.upstreamBenchmark = new UpstreamBenchmarkService(config, store, probeIsolation);
+  }
+
+  async runUpstreamBenchmark(accountId: number, model: string) {
+    return await this.upstreamBenchmark.run(accountId, model);
+  }
+
+  async upstreamBenchmarks(accountIds: number[] = []) {
+    const rows = await this.store.latestUpstreamBenchmarks(accountIds) as Array<Record<string, unknown>>;
+    return { ok: true, results: rows.map((row) => ({
+      id: row.id, accountId: Number(row.account_id), provider: row.provider,
+      benchmarkVersion: row.benchmark_version, model: row.model, state: row.state,
+      score: row.score === null ? null : Number(row.score), dimensions: row.dimensions,
+      probes: row.probes, requestedAt: row.requested_at, completedAt: row.completed_at,
+      durationMs: row.duration_ms === null ? null : Number(row.duration_ms), error: row.error_summary,
+    })), valuesPrinted: false };
   }
 
   async idleProbePlan(accountIds: number[] = []) {

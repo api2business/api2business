@@ -14,6 +14,7 @@ function number(value, digits = 0) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—'
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits })
 }
+function duration(value) { return Number.isFinite(Number(value)) ? `${number(Number(value) / 1000, 1)}s` : '—' }
 
 function usd(value, digits = 3) {
   const numeric = Number(value)
@@ -112,6 +113,8 @@ async function loginPage() {
 let scoreRows = []
 let scoreUpstreamsById = new Map()
 let scoreUsageById = new Map()
+let scoreBenchmarksById = new Map()
+let scoreBenchmarkOptions = null
 let scoreSort = { key: 'score', direction: 'desc' }
 let scoreRefreshedAt = null
 let scoreNextRefreshAt = null
@@ -314,7 +317,7 @@ function renderScoreRows() {
         <small>未触发 ${number(row.failoverNotTriggered)}</small>
       </td>
       <td>${groupLabels(row)}</td>
-      <td>${upstream ? `<button class="text-command table-action" type="button" data-score-upstream-edit="${escapeHtml(row.accountId)}">调整</button>` : '—'}</td>
+      <td>${upstream ? `<div class="table-row-actions"><button class="icon-command" type="button" data-score-benchmark="${escapeHtml(row.accountId)}" title="智商评测" aria-label="智商评测">⌁</button><button class="text-command table-action" type="button" data-score-upstream-edit="${escapeHtml(row.accountId)}">调整</button></div>${scoreBenchmarksById.has(Number(row.accountId)) ? `<small class="benchmark-inline">智商 ${number(scoreBenchmarksById.get(Number(row.accountId)).score, 1)} · ${escapeHtml(scoreBenchmarksById.get(Number(row.accountId)).state)}</small>` : ''}` : '—'}</td>
     </tr>`
   }).join('') : '<tr><td colspan="14" class="empty">没有匹配的账号</td></tr>'
   const range = filteredRows.length === 0 ? '0 条' : `${start + 1}-${Math.min(start + scorePageSize, filteredRows.length)} / ${number(filteredRows.length)} 条`
@@ -363,11 +366,14 @@ function renderScores(data) {
 async function loadUnifiedUpstreamAssets() {
   if (upstreamAssetsInFlight !== null) return await upstreamAssetsInFlight
   upstreamAssetsInFlight = (async () => {
-    const [first, options] = await Promise.all([
+    const [first, options, benchmarks] = await Promise.all([
       requestJson('/api/upstreams?page=1'),
       requestJson('/api/upstreams/options'),
+      requestJson('/api/upstreams/benchmarks'),
     ])
     upstreamValuationPolicy = options.valuation ?? upstreamValuationPolicy
+    scoreBenchmarkOptions = options.benchmark ?? scoreBenchmarkOptions
+    scoreBenchmarksById = new Map((benchmarks.results ?? []).map((row) => [Number(row.accountId), row]))
     const pageCount = Math.max(1, Number(first.totalPages ?? 1))
     const rest = pageCount > 1
       ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => requestJson(`/api/upstreams?page=${index + 2}`)))
@@ -544,7 +550,12 @@ async function scoresPage() {
     renderScoreRows()
   })
   const editDialog = $('#score-upstream-edit-dialog')
+  const benchmarkDialog = $('#score-benchmark-dialog')
   const createDialog = $('#score-upstream-create-dialog')
+  let activeBenchmarkAccount = null
+  const benchmarkMarkup = (row) => row ? `<dl class="benchmark-metrics"><div><dt>综合分</dt><dd>${row.score == null ? '—' : number(row.score, 1)}</dd></div><div><dt>状态</dt><dd>${escapeHtml(row.state)}</dd></div><div><dt>模型</dt><dd>${escapeHtml(row.model)}</dd></div><div><dt>耗时</dt><dd>${row.durationMs == null ? '—' : duration(row.durationMs)}</dd></div></dl><small>${escapeHtml(row.benchmarkVersion ?? '')}${row.completedAt ? ` · ${time(row.completedAt)}` : ''}</small>${row.error ? `<p class="dialog-state" data-state="error">${escapeHtml(row.error)}</p>` : ''}` : '<p class="empty">尚未运行评测</p>'
+  benchmarkDialog.querySelectorAll('[data-dialog-close]').forEach((button) => button.addEventListener('click', () => benchmarkDialog.close()))
+  benchmarkDialog.addEventListener('click', (event) => { if (event.target === benchmarkDialog) benchmarkDialog.close() })
   let createOperationId = null
   const createLog = (stage, message, state = '') => {
     const logs = $('#score-upstream-create-logs')
@@ -628,10 +639,41 @@ async function scoresPage() {
     editDialog.showModal()
   }
   $('#score-body').addEventListener('click', (event) => {
+    const benchmarkButton = event.target.closest('[data-score-benchmark]')
+    if (benchmarkButton) {
+      const row = scoreUpstreamsById.get(Number(benchmarkButton.dataset.scoreBenchmark))
+      if (!row) return
+      activeBenchmarkAccount = row
+      $('#score-benchmark-id').textContent = `#${row.id}`
+      $('#score-benchmark-summary').textContent = `${row.name} · ${row.baseUrl} · ${scoreBenchmarkOptions?.provider ?? 'apitest.work compatible'}`
+      $('#score-benchmark-model').value = scoreBenchmarkOptions?.model ?? ''
+      $('#score-benchmark-result').innerHTML = benchmarkMarkup(scoreBenchmarksById.get(Number(row.id)))
+      $('#score-benchmark-state').textContent = '只在点击开始后运行，不会自动跑分，也不会轮换探活 API Key。'
+      benchmarkDialog.showModal()
+      return
+    }
     const button = event.target.closest('[data-score-upstream-edit]')
     if (!button) return
     const row = scoreUpstreamsById.get(Number(button.dataset.scoreUpstreamEdit))
     if (row) openScoreEdit(row)
+  })
+  $('#score-benchmark-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    if (!activeBenchmarkAccount) return
+    const button = $('#score-benchmark-submit')
+    button.disabled = true
+    $('#score-benchmark-state').textContent = 'Temporal 已接收，正在通过探活专用 API Key 逐题评测…'
+    try {
+      const submitted = await requestJson(`/api/upstreams/${activeBenchmarkAccount.id}/benchmark`, { method: 'POST', body: JSON.stringify({ model: $('#score-benchmark-model').value }) })
+      const completed = await waitUpstreamJob(submitted.workflowId, (status) => { $('#score-benchmark-state').textContent = `评测 ${status.state ?? 'running'}…` }, 1000000)
+      scoreBenchmarksById.set(Number(activeBenchmarkAccount.id), completed)
+      $('#score-benchmark-result').innerHTML = benchmarkMarkup(completed)
+      $('#score-benchmark-state').textContent = `评测完成，综合分 ${number(completed.score, 1)}。`
+      renderScoreRows()
+    } catch (error) {
+      $('#score-benchmark-state').textContent = error instanceof Error ? error.message : String(error)
+      $('#score-benchmark-state').dataset.state = 'error'
+    } finally { button.disabled = false }
   })
   $('#score-upstream-edit-usage').addEventListener('click', async () => {
     if (!activeScoreUpstream) return

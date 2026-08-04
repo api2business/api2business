@@ -299,6 +299,12 @@ operations:
       - errorCode: 529
         keywords: [overloaded, api is at capacity, the api is at capacity, selected model is at capacity]
         durationMinutes: 3
+  upstreamBenchmark:
+    enabled: true
+    provider: https://apitest.work/
+    benchmarkVersion: acceptance-2026.07-compatible-v1
+    model: gpt-5.6-luna
+    requestTimeoutMs: 75000
   oauthEconomics:
     excludedAccountIds: [999999]
     idealApiUsdPerAccount:

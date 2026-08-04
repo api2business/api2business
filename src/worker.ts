@@ -88,6 +88,9 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     const quality = await operations.samplePoolQuality();
     return { ok: true, sampled: result.targetCount, succeeded: result.succeeded, failed: result.failed, oauth, quality };
   }
+  if (command.kind === "upstream.benchmark") {
+    return await operations.runUpstreamBenchmark(command.accountId, command.model);
+  }
   if (command.kind === "account.idle-probe.run") {
     return await operations.runIdleProbe(command.accountIds, command.rounds, {
       operationId: operation.operationId,

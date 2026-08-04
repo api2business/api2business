@@ -418,6 +418,16 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(html).toContain('id="score-upstream-create-dialog"');
 });
 
+test("upstream intelligence benchmark is manual and reuses the persisted probe identity", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+  expect(html).toContain('id="score-benchmark-dialog"');
+  expect(html).toContain('id="score-benchmark-submit"');
+  expect(app).toContain("data-score-benchmark");
+  expect(app).toContain("/benchmark");
+  expect(app).toContain("不会自动跑分，也不会轮换探活 API Key");
+});
+
 test("scores and upstream assets share one sortable operations table", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();

@@ -344,6 +344,27 @@ export class ProbeIsolationService {
     return { accountId, groupId: record.groupId, keyCreated: false };
   }
 
+  async request(accountId: number, input: string, model: string, maxOutputTokens: number, timeoutMs: number): Promise<Record<string, unknown>> {
+    const stored = this.readFile().records[String(accountId)];
+    if (!stored || !readyRecord(stored)) throw new Error(`账号 ${accountId} 的探活隔离凭据尚未就绪`);
+    const response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}/responses`, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        authorization: `Bearer ${stored.apiKey}`,
+      },
+      body: JSON.stringify({ model, input, max_output_tokens: maxOutputTokens, stream: false }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`评测请求失败：HTTP ${response.status}`);
+    let payload: Record<string, unknown>;
+    try { payload = JSON.parse(text) as Record<string, unknown>; }
+    catch { throw new Error("评测响应不是有效 JSON"); }
+    return payload;
+  }
+
   async probe(accountId: number, model: string, timeoutMs: number): Promise<Record<string, unknown>> {
     const startedAt = Date.now();
     const roundBudgetMs = Math.max(1_000, this.config.sub2api.idleProbe.roundTimeoutSeconds * 1_000 - 1_000);
