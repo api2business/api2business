@@ -4,6 +4,8 @@ Api2Business 是面向 Sub2API 运行面的经营分析与调度控制台。它�
 上游、用户用量、采购成本、余额资产和请求质量放在同一套可审计的数据口径中，并通过
 YAML-first 配置、排队数据库读取和 Temporal 长流程完成日常运维。
 
+# 交流群：2160077056
+
 ![OAuth 实时成本总览](docs/images/oauth-live-economics.png)
 
 ## 核心能力
