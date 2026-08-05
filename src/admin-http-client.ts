@@ -122,6 +122,14 @@ export class AdminHttpClient {
   upstreamBenchmark(id: number, model: string): Promise<Record<string, unknown>> {
     return this.request(`/api/upstreams/${id}/benchmark`, { method: "POST", body: JSON.stringify({ model }) });
   }
+
+  upstreamBenchmarkDetail(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/upstreams/benchmarks/${encodeURIComponent(id)}`);
+  }
+
+  upstreamBenchmarkHistory(id: number, limit = 20): Promise<Record<string, unknown>> {
+    return this.request(`/api/upstreams/${id}/benchmarks?limit=${limit}`);
+  }
   upstreamUsage(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/usage", {
       method: "POST",

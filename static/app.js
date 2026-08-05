@@ -317,7 +317,7 @@ function renderScoreRows() {
         <small>未触发 ${number(row.failoverNotTriggered)}</small>
       </td>
       <td>${groupLabels(row)}</td>
-      <td>${upstream ? `<div class="table-row-actions"><button class="icon-command" type="button" data-score-benchmark="${escapeHtml(row.accountId)}" title="智商评测" aria-label="智商评测">⌁</button><button class="text-command table-action" type="button" data-score-upstream-edit="${escapeHtml(row.accountId)}">调整</button></div>${scoreBenchmarksById.has(Number(row.accountId)) ? `<small class="benchmark-inline">智商 ${number(scoreBenchmarksById.get(Number(row.accountId)).score, 1)} · ${escapeHtml(scoreBenchmarksById.get(Number(row.accountId)).state)}</small>` : ''}` : '—'}</td>
+      <td>${upstream ? `<div class="table-row-actions"><button class="icon-command benchmark-trigger${scoreBenchmarksById.get(Number(row.accountId))?.state === 'running' ? ' is-running' : ''}" type="button" data-score-benchmark="${escapeHtml(row.accountId)}" title="智商评测" aria-label="智商评测"><span>⌁</span></button><button class="text-command table-action" type="button" data-score-upstream-edit="${escapeHtml(row.accountId)}">调整</button></div>${scoreBenchmarksById.has(Number(row.accountId)) ? `<small class="benchmark-inline">${scoreBenchmarksById.get(Number(row.accountId)).state === 'running' ? '评测中' : `智商 ${scoreBenchmarksById.get(Number(row.accountId)).score == null ? '—' : number(scoreBenchmarksById.get(Number(row.accountId)).score, 1)}`} · ${escapeHtml(scoreBenchmarksById.get(Number(row.accountId)).state)}</small>` : ''}` : '—'}</td>
     </tr>`
   }).join('') : '<tr><td colspan="14" class="empty">没有匹配的账号</td></tr>'
   const range = filteredRows.length === 0 ? '0 条' : `${start + 1}-${Math.min(start + scorePageSize, filteredRows.length)} / ${number(filteredRows.length)} 条`
@@ -554,6 +554,47 @@ async function scoresPage() {
   const createDialog = $('#score-upstream-create-dialog')
   let activeBenchmarkAccount = null
   const benchmarkMarkup = (row) => row ? `<dl class="benchmark-metrics"><div><dt>综合分</dt><dd>${row.score == null ? '—' : number(row.score, 1)}</dd></div><div><dt>状态</dt><dd>${escapeHtml(row.state)}</dd></div><div><dt>模型</dt><dd>${escapeHtml(row.model)}</dd></div><div><dt>耗时</dt><dd>${row.durationMs == null ? '—' : duration(row.durationMs)}</dd></div></dl><small>${escapeHtml(row.benchmarkVersion ?? '')}${row.completedAt ? ` · ${time(row.completedAt)}` : ''}</small>${row.error ? `<p class="dialog-state" data-state="error">${escapeHtml(row.error)}</p>` : ''}` : '<p class="empty">尚未运行评测</p>'
+  const benchmarkEventsMarkup = (events = []) => events.length ? events.map((item) => `<li data-state="${item.level === 'error' ? 'failed' : item.level === 'success' ? 'completed' : 'running'}"><time>${time(item.occurredAt)}</time><b>${escapeHtml(item.stage)}</b><span>${escapeHtml(item.message)}${item.durationMs == null ? '' : ` · ${duration(item.durationMs)}`}</span></li>`).join('') : '<li class="empty">等待 Worker 事件</li>'
+  const benchmarkHistoryMarkup = (records = []) => records.length ? records.map((item) => `<tr data-benchmark-history="${escapeHtml(item.id)}"><td>${time(item.requestedAt)}</td><td>${escapeHtml(item.model)}</td><td>${escapeHtml(item.state)}</td><td>${item.score == null ? '—' : number(item.score, 1)}</td><td>${item.durationMs == null ? '—' : duration(item.durationMs)}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">暂无历史评测</td></tr>'
+  const showBenchmarkDetail = (detail) => {
+    if (!detail?.run) return
+    const run = detail.run
+    scoreBenchmarksById.set(Number(run.accountId), run)
+    $('#score-benchmark-result').innerHTML = benchmarkMarkup(run)
+    $('#score-benchmark-run').textContent = `RUN ${run.id}`
+    $('#score-benchmark-logs').innerHTML = benchmarkEventsMarkup(detail.events)
+    const completed = (detail.events ?? []).filter((item) => item.stage === 'probe-succeeded' || item.stage === 'probe-failed').length
+    $('#score-benchmark-progress').value = completed
+    $('#score-benchmark-progress-label').textContent = run.state === 'running' ? `${completed} / 6 题完成` : run.state === 'succeeded' ? '6 / 6 题完成' : `${completed} / 6 题完成 · 已失败`
+    $('#score-benchmark-state').textContent = run.state === 'running' ? '评测运行中，可关闭窗口后继续。' : run.state === 'succeeded' ? `评测完成，综合分 ${number(run.score, 1)}。` : (run.error ?? '评测失败')
+    $('#score-benchmark-submit').disabled = run.state === 'running'
+    renderScoreRows()
+  }
+  const loadBenchmarkHistory = async (accountId) => {
+    const history = await requestJson(`/api/upstreams/${accountId}/benchmarks?limit=20`)
+    $('#score-benchmark-history').innerHTML = benchmarkHistoryMarkup(history.records)
+    return history.records ?? []
+  }
+  const pollBenchmark = async (benchmarkRunId, workflowId, accountId) => {
+    try {
+      for (;;) {
+        const detail = await requestJson(`/api/upstreams/benchmarks/${encodeURIComponent(benchmarkRunId)}`, {}, 20000)
+        if (activeBenchmarkAccount?.id === accountId && benchmarkDialog.open) showBenchmarkDetail(detail)
+        else if (detail.run) { scoreBenchmarksById.set(Number(accountId), detail.run); renderScoreRows() }
+        if (detail.run?.state !== 'running') {
+          if (activeBenchmarkAccount?.id === accountId) await loadBenchmarkHistory(accountId).catch(() => {})
+          return detail
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200))
+      }
+    } catch (error) {
+      const status = await requestJson(`/api/upstreams/jobs/${encodeURIComponent(workflowId)}`).catch(() => null)
+      if (activeBenchmarkAccount?.id === accountId && benchmarkDialog.open) {
+        $('#score-benchmark-state').textContent = status?.error ?? (error instanceof Error ? error.message : String(error))
+        $('#score-benchmark-state').dataset.state = 'error'
+      }
+    }
+  }
   benchmarkDialog.querySelectorAll('[data-dialog-close]').forEach((button) => button.addEventListener('click', () => benchmarkDialog.close()))
   benchmarkDialog.addEventListener('click', (event) => { if (event.target === benchmarkDialog) benchmarkDialog.close() })
   let createOperationId = null
@@ -647,9 +688,19 @@ async function scoresPage() {
       $('#score-benchmark-id').textContent = `#${row.id}`
       $('#score-benchmark-summary').textContent = `${row.name} · ${row.baseUrl} · ${scoreBenchmarkOptions?.provider ?? 'apitest.work compatible'}`
       $('#score-benchmark-model').value = scoreBenchmarkOptions?.model ?? ''
-      $('#score-benchmark-result').innerHTML = benchmarkMarkup(scoreBenchmarksById.get(Number(row.id)))
+      const latest = scoreBenchmarksById.get(Number(row.id))
+      $('#score-benchmark-result').innerHTML = benchmarkMarkup(latest)
       $('#score-benchmark-state').textContent = '只在点击开始后运行，不会自动跑分，也不会轮换探活 API Key。'
+      $('#score-benchmark-run').textContent = latest?.id ? `RUN ${latest.id}` : 'RUN —'
+      $('#score-benchmark-logs').innerHTML = '<li class="empty">正在加载运行记录</li>'
+      $('#score-benchmark-progress').value = 0
+      $('#score-benchmark-progress-label').textContent = '等待启动'
+      $('#score-benchmark-history').innerHTML = '<tr><td colspan="5" class="empty">正在加载</td></tr>'
       benchmarkDialog.showModal()
+      loadBenchmarkHistory(row.id).then((records) => {
+        const current = records[0]
+        if (current?.id) requestJson(`/api/upstreams/benchmarks/${encodeURIComponent(current.id)}`).then(showBenchmarkDetail).catch(() => {})
+      }).catch((error) => { $('#score-benchmark-history').innerHTML = `<tr><td colspan="5" class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</td></tr>` })
       return
     }
     const button = event.target.closest('[data-score-upstream-edit]')
@@ -662,18 +713,27 @@ async function scoresPage() {
     if (!activeBenchmarkAccount) return
     const button = $('#score-benchmark-submit')
     button.disabled = true
-    $('#score-benchmark-state').textContent = 'Temporal 已接收，正在通过探活专用 API Key 逐题评测…'
+    $('#score-benchmark-state').textContent = '正在提交 Temporal…'
     try {
       const submitted = await requestJson(`/api/upstreams/${activeBenchmarkAccount.id}/benchmark`, { method: 'POST', body: JSON.stringify({ model: $('#score-benchmark-model').value }) })
-      const completed = await waitUpstreamJob(submitted.workflowId, (status) => { $('#score-benchmark-state').textContent = `评测 ${status.state ?? 'running'}…` }, 1000000)
-      scoreBenchmarksById.set(Number(activeBenchmarkAccount.id), completed)
-      $('#score-benchmark-result').innerHTML = benchmarkMarkup(completed)
-      $('#score-benchmark-state').textContent = `评测完成，综合分 ${number(completed.score, 1)}。`
+      const accountId = Number(activeBenchmarkAccount.id)
+      scoreBenchmarksById.set(accountId, { id: submitted.benchmarkRunId, accountId, model: $('#score-benchmark-model').value, state: 'running', score: null })
       renderScoreRows()
+      benchmarkDialog.close()
+      void pollBenchmark(submitted.benchmarkRunId, submitted.workflowId, accountId)
     } catch (error) {
       $('#score-benchmark-state').textContent = error instanceof Error ? error.message : String(error)
       $('#score-benchmark-state').dataset.state = 'error'
     } finally { button.disabled = false }
+  })
+  $('#score-benchmark-history').addEventListener('click', async (event) => {
+    const row = event.target.closest('[data-benchmark-history]')
+    if (!row) return
+    try { showBenchmarkDetail(await requestJson(`/api/upstreams/benchmarks/${encodeURIComponent(row.dataset.benchmarkHistory)}`)) }
+    catch (error) {
+      $('#score-benchmark-state').textContent = error instanceof Error ? error.message : String(error)
+      $('#score-benchmark-state').dataset.state = 'error'
+    }
   })
   $('#score-upstream-edit-usage').addEventListener('click', async () => {
     if (!activeScoreUpstream) return

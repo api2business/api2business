@@ -150,8 +150,22 @@ export class OperationsService {
     this.upstreamBenchmark = new UpstreamBenchmarkService(config, store, probeIsolation);
   }
 
-  async runUpstreamBenchmark(accountId: number, model: string) {
-    return await this.upstreamBenchmark.run(accountId, model);
+  async createUpstreamBenchmark(accountId: number, model: string) {
+    const policy = this.config.operations.upstreamBenchmark;
+    const selectedModel = model.trim() || policy.model;
+    const runId = await this.store.startUpstreamBenchmark({ accountId, provider: policy.provider, benchmarkVersion: policy.benchmarkVersion, model: selectedModel });
+    await this.store.addUpstreamBenchmarkEvent(runId, { stage: "submitted", message: "评测请求已创建，正在提交 Temporal" });
+    return { runId, model: selectedModel };
+  }
+
+  async failUpstreamBenchmarkSubmission(runId: string, error: unknown) {
+    const message = (error instanceof Error ? error.message : String(error)).replace(/sk-[A-Za-z0-9_-]+/gu, "[REDACTED]").slice(0, 500);
+    await this.store.finishUpstreamBenchmark(runId, { state: "failed", score: null, dimensions: {}, probes: [], durationMs: 0, errorSummary: message });
+    await this.store.addUpstreamBenchmarkEvent(runId, { stage: "submission-failed", level: "error", message });
+  }
+
+  async runUpstreamBenchmark(runId: string, accountId: number, model: string) {
+    return await this.upstreamBenchmark.run(runId, accountId, model);
   }
 
   async upstreamBenchmarks(accountIds: number[] = []) {
@@ -163,6 +177,32 @@ export class OperationsService {
       probes: row.probes, requestedAt: row.requested_at, completedAt: row.completed_at,
       durationMs: row.duration_ms === null ? null : Number(row.duration_ms), error: row.error_summary,
     })), valuesPrinted: false };
+  }
+
+  async upstreamBenchmarkDetail(runId: string) {
+    const row = await this.store.upstreamBenchmarkRun(runId) as Record<string, unknown> | null;
+    if (!row) return { ok: false, error: "benchmark run does not exist", runId, valuesPrinted: false };
+    const events = await this.store.upstreamBenchmarkEvents(runId);
+    return { ok: true, run: this.benchmarkRow(row), events: events.map((event: Record<string, unknown>) => ({
+      sequence: Number(event.sequence), occurredAt: event.occurred_at, stage: event.stage,
+      probeId: event.probe_id, level: event.level, message: event.message,
+      durationMs: event.duration_ms === null ? null : Number(event.duration_ms), details: event.details,
+    })), valuesPrinted: false };
+  }
+
+  async upstreamBenchmarkHistory(accountId: number, limit = 20) {
+    const rows = await this.store.upstreamBenchmarkHistory(accountId, limit) as Array<Record<string, unknown>>;
+    return { ok: true, accountId, records: rows.map((row) => this.benchmarkRow(row)), valuesPrinted: false };
+  }
+
+  private benchmarkRow(row: Record<string, unknown>) {
+    return {
+      id: row.id, accountId: Number(row.account_id), provider: row.provider,
+      benchmarkVersion: row.benchmark_version, model: row.model, state: row.state,
+      score: row.score === null ? null : Number(row.score), dimensions: row.dimensions,
+      probes: row.probes, requestedAt: row.requested_at, completedAt: row.completed_at,
+      durationMs: row.duration_ms === null ? null : Number(row.duration_ms), error: row.error_summary,
+    };
   }
 
   async idleProbePlan(accountIds: number[] = []) {

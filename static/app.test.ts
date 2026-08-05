@@ -426,6 +426,12 @@ test("upstream intelligence benchmark is manual and reuses the persisted probe i
   expect(app).toContain("data-score-benchmark");
   expect(app).toContain("/benchmark");
   expect(app).toContain("不会自动跑分，也不会轮换探活 API Key");
+  expect(html).toContain('id="score-benchmark-logs"');
+  expect(html).toContain('id="score-benchmark-history"');
+  expect(app).toContain("benchmarkDialog.close()");
+  expect(app).toContain("benchmark-trigger");
+  expect(app).toContain("/api/upstreams/benchmarks/");
+  expect(app).toContain("/benchmarks?limit=20");
 });
 
 test("scores and upstream assets share one sortable operations table", async () => {

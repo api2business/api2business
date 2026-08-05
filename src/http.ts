@@ -111,7 +111,7 @@ export function createHandler(
   const cacheKey = (request: Request) => createHash("sha256").update(`${request.method} ${new URL(request.url).pathname}${new URL(request.url).search}`).digest("hex");
   const cacheable = (request: Request) => request.method === "GET"
     && new URL(request.url).pathname.startsWith("/api/")
-    && !/\/jobs(?:\/|$)|\/workflows(?:\/|$)|\/status$|\/health$/u.test(new URL(request.url).pathname);
+    && !/\/jobs(?:\/|$)|\/workflows(?:\/|$)|\/benchmarks(?:\/|$)|\/status$|\/health$/u.test(new URL(request.url).pathname);
   const cacheRefreshes = new Set<string>();
   const handle = async (request: Request) => {
     const url = new URL(request.url);
@@ -158,6 +158,15 @@ export function createHandler(
         const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
         return json(await operations.upstreamBenchmarks(accountIds));
       }
+      if (request.method === "GET" && /^\/api\/upstreams\/benchmarks\/[^/]+$/u.test(url.pathname)) {
+        return json(await operations.upstreamBenchmarkDetail(decodeURIComponent(url.pathname.split("/")[4]!)));
+      }
+      if (request.method === "GET" && /^\/api\/upstreams\/\d+\/benchmarks$/u.test(url.pathname)) {
+        const accountId = Number(url.pathname.split("/")[3]);
+        const limit = positiveInteger(url.searchParams.get("limit"), 20);
+        if (!Number.isSafeInteger(accountId) || accountId <= 0 || limit === null || limit > 100) return json({ ok: false, error: "invalid benchmark history query" }, 400);
+        return json(await operations.upstreamBenchmarkHistory(accountId, limit));
+      }
       if (request.method === "POST" && /^\/api\/upstreams\/\d+\/benchmark$/u.test(url.pathname)) {
         const accountId = Number(url.pathname.split("/")[3]);
         if (!Number.isSafeInteger(accountId) || accountId <= 0) return json({ ok: false, error: "account id is invalid" }, 400);
@@ -165,8 +174,14 @@ export function createHandler(
         const model = typeof input.model === "string" && input.model.trim()
           ? input.model.trim()
           : config.operations.upstreamBenchmark.model;
-        const submitted = await dispatcher.submit({ kind: "upstream.benchmark", accountId, model });
-        return json(submitted, 202);
+        const created = await operations.createUpstreamBenchmark(accountId, model);
+        try {
+          const submitted = await dispatcher.submit({ kind: "upstream.benchmark", benchmarkRunId: created.runId, accountId, model: created.model });
+          return json({ ...submitted as Record<string, unknown>, benchmarkRunId: created.runId }, 202);
+        } catch (error) {
+          await operations.failUpstreamBenchmarkSubmission(created.runId, error);
+          throw error;
+        }
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/usage-cache") {
         const selector = url.searchParams.get("accountIds");

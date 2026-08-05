@@ -222,6 +222,8 @@ function help(): Record<string, unknown> {
       "upstreams usage-cache [--accounts <id-or-range,...>] --over-api",
       "upstreams quota-summary --over-api",
       "upstreams benchmark [--id <account-id> --model <id> --confirm] --over-api",
+      "upstreams benchmark-status --id <benchmark-run-id> --over-api",
+      "upstreams benchmark-history --id <account-id> [--limit 20] --over-api",
       "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
@@ -438,6 +440,15 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const model = parsed.model ?? config.operations.upstreamBenchmark.model;
     if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-benchmark", accountId: id, model, provider: config.operations.upstreamBenchmark.provider, hint: "add --confirm to execute" };
     return await client.upstreamBenchmark(id, model);
+  }
+  if (group === "upstreams" && action === "benchmark-status") {
+    if (!parsed.id) throw new Error("upstreams benchmark-status requires --id");
+    return await client.upstreamBenchmarkDetail(parsed.id);
+  }
+  if (group === "upstreams" && action === "benchmark-history") {
+    const id = Number(parsed.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error("upstreams benchmark-history requires a positive --id");
+    return await client.upstreamBenchmarkHistory(id, parsed.limit ?? 20);
   }
   if (group === "upstreams" && action === "template") {
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];

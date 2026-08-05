@@ -195,6 +195,21 @@ export class OperationsStore {
       );
       CREATE INDEX IF NOT EXISTS api2business_upstream_benchmark_account_time
         ON api2business_upstream_benchmark_runs (account_id, requested_at DESC);
+      CREATE TABLE IF NOT EXISTS api2business_upstream_benchmark_events (
+        id bigserial PRIMARY KEY,
+        run_id uuid NOT NULL REFERENCES api2business_upstream_benchmark_runs(id) ON DELETE CASCADE,
+        sequence integer NOT NULL,
+        occurred_at timestamptz NOT NULL DEFAULT now(),
+        stage text NOT NULL,
+        probe_id text,
+        level text NOT NULL CHECK (level IN ('info','success','error')),
+        message text NOT NULL,
+        duration_ms integer,
+        details jsonb NOT NULL DEFAULT '{}'::jsonb,
+        UNIQUE (run_id, sequence)
+      );
+      CREATE INDEX IF NOT EXISTS api2business_upstream_benchmark_events_run_sequence
+        ON api2business_upstream_benchmark_events (run_id, sequence);
       CREATE INDEX IF NOT EXISTS api2business_idle_probe_rounds_started_at_idx
         ON api2business_idle_probe_rounds(started_at DESC);
       CREATE INDEX IF NOT EXISTS api2business_cash_entries_occurred_on_idx
@@ -409,6 +424,17 @@ export class OperationsStore {
     return id;
   }
 
+  async addUpstreamBenchmarkEvent(runId: string, input: { stage: string; probeId?: string | null; level?: "info" | "success" | "error"; message: string; durationMs?: number | null; details?: Record<string, unknown> }) {
+    await this.sql`
+      INSERT INTO api2business_upstream_benchmark_events
+        (run_id, sequence, stage, probe_id, level, message, duration_ms, details)
+      SELECT ${runId}, COALESCE(MAX(sequence), 0) + 1, ${input.stage}, ${input.probeId ?? null},
+        ${input.level ?? "info"}, ${input.message.slice(0, 500)}, ${input.durationMs ?? null},
+        ${input.details ?? {}}::jsonb
+      FROM api2business_upstream_benchmark_events WHERE run_id=${runId}
+    `;
+  }
+
   async finishUpstreamBenchmark(id: string, input: { state: "succeeded" | "failed"; score: number | null; dimensions: Record<string, unknown>; probes: unknown[]; durationMs: number; errorSummary: string | null }) {
     await this.sql`
       UPDATE api2business_upstream_benchmark_runs SET
@@ -431,6 +457,32 @@ export class OperationsStore {
         state, score, dimensions, probes, requested_at, completed_at, duration_ms, error_summary
       FROM api2business_upstream_benchmark_runs
       WHERE account_id = ANY(${values}::bigint[]) ORDER BY account_id, requested_at DESC
+    `;
+  }
+
+  async upstreamBenchmarkRun(id: string) {
+    const [row] = await this.sql`
+      SELECT id, account_id, provider, benchmark_version, model, state, score, dimensions,
+        probes, requested_at, completed_at, duration_ms, error_summary
+      FROM api2business_upstream_benchmark_runs WHERE id=${id}
+    `;
+    return row ?? null;
+  }
+
+  async upstreamBenchmarkEvents(id: string, limit = 100) {
+    return await this.sql`
+      SELECT sequence, occurred_at, stage, probe_id, level, message, duration_ms, details
+      FROM api2business_upstream_benchmark_events WHERE run_id=${id}
+      ORDER BY sequence ASC LIMIT ${limit}
+    `;
+  }
+
+  async upstreamBenchmarkHistory(accountId: number, limit = 20) {
+    return await this.sql`
+      SELECT id, account_id, provider, benchmark_version, model, state, score, dimensions,
+        probes, requested_at, completed_at, duration_ms, error_summary
+      FROM api2business_upstream_benchmark_runs WHERE account_id=${accountId}
+      ORDER BY requested_at DESC LIMIT ${limit}
     `;
   }
 

@@ -90,6 +90,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
 - 上游、评分和优先级读取 `references/upstream-scheduling.md`。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
+- 上游智商评测：
+  - 提交：`upstreams benchmark --id <account-id> --model <model> --confirm --over-api`；
+  - 进度与日志：`upstreams benchmark-status --id <benchmark-run-id> --over-api`；
+  - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api`；
+  - 评测只复用持久化探活专用 API Key，不读取供应商原始 Key，也不轮换探活 Key。
 
 ## 验收
 
