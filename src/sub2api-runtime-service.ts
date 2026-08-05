@@ -239,11 +239,11 @@ export class Sub2ApiRuntimeService {
     };
   }
 
-  async createApiKeyAccount(account: Row, idempotencyKey: string): Promise<Record<string, unknown>> {
+  async createApiKeyAccount(account: Row, idempotencyKey: string, timeoutMs?: number): Promise<Record<string, unknown>> {
     return await this.client.mutate("POST", "/admin/accounts/data", {
       data: { accounts: [{ ...account, credentials: this.apiKeyCredentials(account.credentials) }], proxies: [] },
       skip_default_group_bind: true,
-    }, idempotencyKey);
+    }, idempotencyKey, timeoutMs);
   }
 
   async updateAccount(accountId: number, patch: Row, timeoutMs?: number): Promise<unknown> {

@@ -92,6 +92,17 @@ test("keeps access-token-only OpenAI imports on the session normalization path",
   expect(calls).toEqual(["/admin/accounts/import/codex-session"]);
 });
 
+test("API-key creation uses the YAML-owned mutation timeout", async () => {
+  const calls: Array<{ path: string; timeoutMs?: number }> = [];
+  const client = { mutate: async (_method: string, path: string, _body: unknown, _key?: string, timeoutMs?: number) => {
+    calls.push({ path, timeoutMs });
+    return { id: 455 };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  await runtime.createApiKeyAccount({ credentials: { api_key: "redacted" } }, "create-key", 120000);
+  expect(calls).toEqual([{ path: "/admin/accounts/data", timeoutMs: 120000 }]);
+});
+
 test("corrects account plan types with one native bulk credentials merge", async () => {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
   const client = { mutate: async (method: string, path: string, body: Record<string, unknown>) => {

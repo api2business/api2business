@@ -107,6 +107,7 @@ test("upstream creation keeps the created account successful when post-processin
   expect(createBody).toContain("await this.applyTemplate([resolvedAccountId])");
   expect(createBody).toContain("await this.probeIsolation.ensure(resolvedAccountId)");
   expect(createBody).toContain("const postProcess = async () =>");
+  expect(createBody).toContain("settings.mutationTimeoutMs");
   expect(createBody).toContain("void postProcess();");
   expect(createBody).toContain('status: "pending"');
   expect(createBody).toContain("后台后处理");

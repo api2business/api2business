@@ -1017,7 +1017,7 @@ export class UpstreamManagementService {
           credentials: { base_url: baseUrl, api_key: input.apiKey.trim() },
           extra: {}, priority, concurrency: capacity, proxy_id: settings.proxyId,
           group_ids: groupIds, auto_pause_on_expired: true, schedulable: true,
-        }, operationId(input.operationId, `upstream-create-${name.replace(/[^A-Za-z0-9]+/gu, "-").slice(0, 48)}`));
+        }, operationId(input.operationId, `upstream-create-${name.replace(/[^A-Za-z0-9]+/gu, "-").slice(0, 48)}`), settings.mutationTimeoutMs);
         createResult = result;
       } catch (error) {
         if (isAlreadyExistsError(error)) recovered = true;
