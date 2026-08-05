@@ -860,7 +860,7 @@ export class UpstreamManagementService {
     const applied = ids;
     const failed: Array<{ accountId: number; error: string }> = [];
     try {
-      await this.runtime.applyApiKeyFailoverTemplates(ids);
+      await this.runtime.applyApiKeyFailoverTemplates(ids, this.config.operations.upstreamManagement.mutationTimeoutMs);
     } catch (error) {
       failed.push(...ids.map((accountId) => ({ accountId, error: safeMessage(error instanceof Error ? error.message : String(error)) })));
     }
@@ -1050,7 +1050,11 @@ export class UpstreamManagementService {
         if (account.priority !== priority || account.capacity !== capacity || account.proxyId !== settings.proxyId
           || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds)) {
           if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
-          await this.runtime.updateAccount(resolvedAccountId, { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId });
+          await this.runtime.updateAccount(
+            resolvedAccountId,
+            { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId },
+            settings.mutationTimeoutMs,
+          );
         }
         await this.applyTemplate([resolvedAccountId]);
       } catch (error) {

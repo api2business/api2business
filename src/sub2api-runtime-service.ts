@@ -262,17 +262,17 @@ export class Sub2ApiRuntimeService {
     return { accountIds: ids, planType, result };
   }
 
-  async applyApiKeyFailoverTemplate(accountId: number): Promise<unknown> {
-    const account = await this.client.getAccount(accountId);
+  async applyApiKeyFailoverTemplate(accountId: number, timeoutMs?: number): Promise<unknown> {
+    const account = await this.client.getAccount(accountId, timeoutMs);
     if (String(account.type ?? "").toLowerCase() !== "apikey") {
       throw new Error(`account ${accountId} is not an API-key account`);
     }
     return await this.updateAccount(accountId, {
       credentials: this.apiKeyCredentials(account.credentials),
-    });
+    }, timeoutMs);
   }
 
-  async applyApiKeyFailoverTemplates(accountIds: number[]): Promise<Record<string, unknown>> {
+  async applyApiKeyFailoverTemplates(accountIds: number[], timeoutMs?: number): Promise<Record<string, unknown>> {
     const ids = [...new Set(accountIds)].sort((left, right) => left - right);
     if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
       throw new Error("bulk API-key template requires stable positive account IDs");
@@ -284,7 +284,7 @@ export class Sub2ApiRuntimeService {
         temp_unschedulable_enabled: true,
         temp_unschedulable_rules: this.apiKeyFailoverRules,
       },
-    });
+    }, undefined, timeoutMs);
     return { accountIds: ids, result };
   }
 
