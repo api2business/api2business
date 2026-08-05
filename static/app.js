@@ -559,6 +559,7 @@ async function scoresPage() {
   const showBenchmarkDetail = (detail) => {
     if (!detail?.run) return
     const run = detail.run
+    if (Number(run.accountId) !== Number(activeBenchmarkAccount?.id)) return
     scoreBenchmarksById.set(Number(run.accountId), run)
     $('#score-benchmark-result').innerHTML = benchmarkMarkup(run)
     $('#score-benchmark-run').textContent = `RUN ${run.id}`
@@ -572,7 +573,7 @@ async function scoresPage() {
   }
   const loadBenchmarkHistory = async (accountId) => {
     const history = await requestJson(`/api/upstreams/${accountId}/benchmarks?limit=20`)
-    $('#score-benchmark-history').innerHTML = benchmarkHistoryMarkup(history.records)
+    if (Number(activeBenchmarkAccount?.id) === Number(accountId)) $('#score-benchmark-history').innerHTML = benchmarkHistoryMarkup(history.records)
     return history.records ?? []
   }
   const pollBenchmark = async (benchmarkRunId, workflowId, accountId) => {
@@ -685,22 +686,29 @@ async function scoresPage() {
       const row = scoreUpstreamsById.get(Number(benchmarkButton.dataset.scoreBenchmark))
       if (!row) return
       activeBenchmarkAccount = row
+      const accountId = Number(row.id)
       $('#score-benchmark-id').textContent = `#${row.id}`
       $('#score-benchmark-summary').textContent = `${row.name} · ${row.baseUrl} · ${scoreBenchmarkOptions?.provider ?? 'apitest.work compatible'}`
       $('#score-benchmark-model').value = scoreBenchmarkOptions?.model ?? ''
       const latest = scoreBenchmarksById.get(Number(row.id))
       $('#score-benchmark-result').innerHTML = benchmarkMarkup(latest)
-      $('#score-benchmark-state').textContent = '只在点击开始后运行，不会自动跑分，也不会轮换探活 API Key。'
+      $('#score-benchmark-state').textContent = latest?.state === 'running' ? '该账号正在评测，可关闭窗口后继续。' : '只在点击开始后运行，不会自动跑分，也不会轮换探活 API Key。'
+      $('#score-benchmark-state').dataset.state = latest?.state === 'failed' ? 'error' : ''
+      $('#score-benchmark-submit').disabled = latest?.state === 'running'
       $('#score-benchmark-run').textContent = latest?.id ? `RUN ${latest.id}` : 'RUN —'
       $('#score-benchmark-logs').innerHTML = '<li class="empty">正在加载运行记录</li>'
       $('#score-benchmark-progress').value = 0
       $('#score-benchmark-progress-label').textContent = '等待启动'
       $('#score-benchmark-history').innerHTML = '<tr><td colspan="5" class="empty">正在加载</td></tr>'
       benchmarkDialog.showModal()
-      loadBenchmarkHistory(row.id).then((records) => {
+      benchmarkDialog.querySelector('form').scrollTop = 0
+      loadBenchmarkHistory(accountId).then((records) => {
+        if (Number(activeBenchmarkAccount?.id) !== accountId) return
         const current = records[0]
         if (current?.id) requestJson(`/api/upstreams/benchmarks/${encodeURIComponent(current.id)}`).then(showBenchmarkDetail).catch(() => {})
-      }).catch((error) => { $('#score-benchmark-history').innerHTML = `<tr><td colspan="5" class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</td></tr>` })
+      }).catch((error) => {
+        if (Number(activeBenchmarkAccount?.id) === accountId) $('#score-benchmark-history').innerHTML = `<tr><td colspan="5" class="empty">${escapeHtml(error instanceof Error ? error.message : String(error))}</td></tr>`
+      })
       return
     }
     const button = event.target.closest('[data-score-upstream-edit]')
@@ -711,13 +719,14 @@ async function scoresPage() {
   $('#score-benchmark-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     if (!activeBenchmarkAccount) return
+    const accountId = Number(activeBenchmarkAccount.id)
+    const model = $('#score-benchmark-model').value
     const button = $('#score-benchmark-submit')
     button.disabled = true
     $('#score-benchmark-state').textContent = '正在提交 Temporal…'
     try {
-      const submitted = await requestJson(`/api/upstreams/${activeBenchmarkAccount.id}/benchmark`, { method: 'POST', body: JSON.stringify({ model: $('#score-benchmark-model').value }) })
-      const accountId = Number(activeBenchmarkAccount.id)
-      scoreBenchmarksById.set(accountId, { id: submitted.benchmarkRunId, accountId, model: $('#score-benchmark-model').value, state: 'running', score: null })
+      const submitted = await requestJson(`/api/upstreams/${accountId}/benchmark`, { method: 'POST', body: JSON.stringify({ model }) })
+      scoreBenchmarksById.set(accountId, { id: submitted.benchmarkRunId, accountId, model, state: 'running', score: null })
       renderScoreRows()
       benchmarkDialog.close()
       void pollBenchmark(submitted.benchmarkRunId, submitted.workflowId, accountId)
