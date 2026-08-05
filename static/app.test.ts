@@ -519,7 +519,7 @@ test("pool quality is sampled separately above the account table with participat
   expect(source).toContain("最近 ${number(data.recentCallLimit)} 次");
 });
 
-test("user usage shows balance and recharge with a default 60 second refresh", async () => {
+test("user usage shows balance and recharge with a default 30 second refresh", async () => {
   const html = await Bun.file(new URL("./ranking.html", import.meta.url)).text();
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   expect(html).toContain('id="ranking-balance"');
@@ -529,7 +529,7 @@ test("user usage shows balance and recharge with a default 60 second refresh", a
   expect(html).toContain('>今日充值</th>');
   expect(app).toContain('ranking-user');
   expect(app).not.toContain('maskEmail');
-  expect(html).toContain('<option value="60" selected>60 秒</option>');
+  expect(html).toContain('<option value="30" selected>30 秒</option>');
   expect(html).toContain('id="ranking-refresh"');
   expect(html).toContain('id="ranking-refresh-countdown"');
   expect(app).toContain("scheduleRankingRefresh()");
