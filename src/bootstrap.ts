@@ -8,6 +8,7 @@ import { AccountScoreService } from "./account-score-service";
 import type { WebAuthSecrets } from "./web-auth";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
+import type { ScoreSnapshotStore } from "./account-score-service";
 
 export interface AppContext {
   service: LotteryService;
@@ -36,6 +37,7 @@ export function createServerContext(
   config: AppConfig,
   target: ServerTarget,
   reads: Sub2ApiReadClient,
+  snapshotStore: ScoreSnapshotStore,
 ): AppContext {
   const email = process.env[target.sub2apiAdminEmailEnv];
   const password = process.env[target.sub2apiAdminPasswordEnv];
@@ -52,6 +54,7 @@ export function createServerContext(
     resolveDataPath(config, target.scoreCachePath),
     client,
     reads,
+    snapshotStore,
   );
   return {
     service: new LotteryService(config, store, client, reads),

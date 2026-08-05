@@ -101,7 +101,17 @@ export class TemporalGateway {
   }
 
   async ensureScoreSchedule(): Promise<{ started: boolean; workflowId: string }> {
-    const workflowId = this.runtime.scoreScheduleWorkflowId;
+    const legacyWorkflowId = this.runtime.scoreScheduleWorkflowId;
+    const workflowId = `${legacyWorkflowId}-snapshot-${this.config.monitor.refreshIntervalMinutes}m-v1`;
+    try {
+      const legacy = this.client.workflow.getHandle(legacyWorkflowId);
+      const description = await legacy.describe();
+      if (description.status.name === "RUNNING") {
+        await legacy.terminate("migrated to versioned PostgreSQL snapshot schedule");
+      }
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
+    }
     try {
       await this.client.workflow.start("scoreRefreshScheduleWorkflow", {
         taskQueue: this.runtime.taskQueue,

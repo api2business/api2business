@@ -22,7 +22,15 @@ interface ScoreSnapshot {
   collection?: Record<string, unknown>;
 }
 
+export interface ScoreSnapshotStore {
+  getSnapshot(key: string): Promise<Record<string, unknown> | null>;
+  beginSnapshotRefresh(key: string, schemaVersion: string, startedAt: string): Promise<void>;
+  completeSnapshot(key: string, schemaVersion: string, payload: Record<string, unknown>, capturedAt: string): Promise<void>;
+  failSnapshotRefresh(key: string, schemaVersion: string, error: string): Promise<void>;
+}
+
 const scoreCacheVersion = "api-key-only-v1";
+const scoreSnapshotKey = "account-scores";
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -42,6 +50,7 @@ export class AccountScoreService {
     private readonly cachePath: string,
     private readonly sub2api: Sub2ApiClient,
     private readonly reads: Sub2ApiReadClient | null = null,
+    private readonly snapshotStore: ScoreSnapshotStore | null = null,
   ) {
     this.snapshot = this.readCache();
   }
@@ -86,8 +95,9 @@ export class AccountScoreService {
     if (this.timer) clearInterval(this.timer);
   }
 
-  state(): ScoreSnapshot {
-    if (!this.inFlight && existsSync(this.cachePath)) this.snapshot = this.readCache();
+  async state(): Promise<ScoreSnapshot> {
+    if (this.snapshotStore) await this.readPersistentSnapshot();
+    else if (!this.inFlight && existsSync(this.cachePath)) this.snapshot = this.readCache();
     const nextRefreshAt = this.snapshot.nextRefreshAt ? Date.parse(this.snapshot.nextRefreshAt) : Number.NaN;
     const status = this.inFlight
       ? "refreshing"
@@ -110,6 +120,7 @@ export class AccountScoreService {
   private async performRefresh(): Promise<ScoreSnapshot> {
     const startedAt = new Date();
     this.snapshot = { ...this.snapshot, status: "refreshing", refreshStartedAt: startedAt.toISOString(), error: null };
+    if (this.snapshotStore) await this.snapshotStore.beginSnapshotRefresh(scoreSnapshotKey, scoreCacheVersion, startedAt.toISOString());
     try {
       if (!this.reads) throw new Error("scores.refresh requires the Native API read executor");
       const collected = await collectRecentCallScoresFromDatabase(
@@ -143,18 +154,49 @@ export class AccountScoreService {
           queryDurationMs: collected.queryDurationMs,
         },
       };
-      this.writeCache(this.snapshot);
+      if (this.snapshotStore) await this.snapshotStore.completeSnapshot(scoreSnapshotKey, scoreCacheVersion, this.snapshot as unknown as Record<string, unknown>, refreshedAt.toISOString());
+      else this.writeCache(this.snapshot);
       return this.snapshot;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.snapshotStore) {
+        await this.snapshotStore.failSnapshotRefresh(scoreSnapshotKey, scoreCacheVersion, message);
+        await this.readPersistentSnapshot();
+      }
       this.snapshot = {
         ...this.snapshot,
         ok: this.snapshot.refreshedAt !== null,
         status: this.snapshot.refreshedAt === null ? "unavailable" : "stale",
         refreshStartedAt: startedAt.toISOString(),
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       };
-      this.writeCache(this.snapshot);
+      if (!this.snapshotStore) this.writeCache(this.snapshot);
       return this.snapshot;
+    }
+  }
+
+  private async readPersistentSnapshot(): Promise<void> {
+    if (!this.snapshotStore) return;
+    const row = await this.snapshotStore.getSnapshot(scoreSnapshotKey);
+    const payload = record(row?.payload);
+    if (payload && row?.schema_version === scoreCacheVersion && payload.cacheVersion === scoreCacheVersion) {
+      const cached = payload as unknown as ScoreSnapshot;
+      this.snapshot = {
+        ...cached,
+        status: row?.refresh_started_at ? "refreshing" : row?.last_error ? "stale" : cached.status,
+        accounts: this.poolAccounts(mergeAccountScores(records(cached.accounts))),
+        refreshStartedAt: row?.refresh_started_at ? String(row.refresh_started_at) : null,
+        error: row?.last_error ? String(row.last_error) : null,
+      };
+      return;
+    }
+    if (row?.refresh_started_at || row?.last_error) {
+      this.snapshot = {
+        ...this.snapshot,
+        status: row.refresh_started_at ? "refreshing" : "unavailable",
+        refreshStartedAt: row.refresh_started_at ? String(row.refresh_started_at) : null,
+        error: row.last_error ? String(row.last_error) : null,
+      };
     }
   }
 

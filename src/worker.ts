@@ -64,7 +64,8 @@ const accountLifecycle = new AccountLifecycleService(config, remoteReads, null, 
 }, runtime);
 const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
 if (!operationsDatabaseUrl) throw new Error(`worker requires env ${config.operations.databaseUrlEnv}`);
-const operations = new OperationsService(config, new OperationsStore(operationsDatabaseUrl), remoteReads, runtime, probeIsolation);
+const operationsStore = new OperationsStore(operationsDatabaseUrl);
+const operations = new OperationsService(config, operationsStore, remoteReads, runtime, probeIsolation);
 await operations.initialize();
 const upstreams = new UpstreamManagementService(config, remoteReads, null, runtime, probeIsolation);
 const scores = new AccountScoreService(
@@ -72,6 +73,7 @@ const scores = new AccountScoreService(
   resolveDataPath(config, target.scoreCachePath),
   sub2apiClient,
   remoteReads,
+  operationsStore,
 );
 
 async function executeWorkerOperation(operation: OperationRequest): Promise<unknown> {

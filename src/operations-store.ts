@@ -95,6 +95,15 @@ export class OperationsStore {
         body text NOT NULL,
         cached_at timestamptz NOT NULL DEFAULT now()
       );
+      CREATE TABLE IF NOT EXISTS api2business_snapshots (
+        snapshot_key text PRIMARY KEY,
+        schema_version text NOT NULL,
+        payload jsonb,
+        captured_at timestamptz,
+        refresh_started_at timestamptz,
+        last_error text,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      );
       CREATE TABLE IF NOT EXISTS api2business_upstream_usage_cache (
         account_id bigint PRIMARY KEY,
         result jsonb NOT NULL,
@@ -237,6 +246,56 @@ export class OperationsStore {
       VALUES (${key}, ${status}, ${headers}::jsonb, ${body}, now())
       ON CONFLICT (cache_key) DO UPDATE SET
         status=EXCLUDED.status, headers=EXCLUDED.headers, body=EXCLUDED.body, cached_at=now()
+    `;
+  }
+
+  async getSnapshot(key: string) {
+    const [row] = await this.sql`
+      SELECT snapshot_key, schema_version, payload, captured_at, refresh_started_at,
+        last_error, updated_at
+      FROM api2business_snapshots WHERE snapshot_key=${key}
+    `;
+    return row ?? null;
+  }
+
+  async beginSnapshotRefresh(key: string, schemaVersion: string, startedAt: string) {
+    await this.sql`
+      INSERT INTO api2business_snapshots
+        (snapshot_key, schema_version, refresh_started_at, last_error, updated_at)
+      VALUES (${key}, ${schemaVersion}, ${startedAt}, NULL, now())
+      ON CONFLICT (snapshot_key) DO UPDATE SET
+        schema_version=EXCLUDED.schema_version,
+        refresh_started_at=EXCLUDED.refresh_started_at,
+        last_error=NULL,
+        updated_at=now()
+    `;
+  }
+
+  async completeSnapshot(key: string, schemaVersion: string, payload: Record<string, unknown>, capturedAt: string) {
+    await this.sql`
+      INSERT INTO api2business_snapshots
+        (snapshot_key, schema_version, payload, captured_at, refresh_started_at, last_error, updated_at)
+      VALUES (${key}, ${schemaVersion}, ${payload}::jsonb, ${capturedAt}, NULL, NULL, now())
+      ON CONFLICT (snapshot_key) DO UPDATE SET
+        schema_version=EXCLUDED.schema_version,
+        payload=EXCLUDED.payload,
+        captured_at=EXCLUDED.captured_at,
+        refresh_started_at=NULL,
+        last_error=NULL,
+        updated_at=now()
+    `;
+  }
+
+  async failSnapshotRefresh(key: string, schemaVersion: string, error: string) {
+    await this.sql`
+      INSERT INTO api2business_snapshots
+        (snapshot_key, schema_version, refresh_started_at, last_error, updated_at)
+      VALUES (${key}, ${schemaVersion}, NULL, ${error.slice(0, 500)}, now())
+      ON CONFLICT (snapshot_key) DO UPDATE SET
+        schema_version=EXCLUDED.schema_version,
+        refresh_started_at=NULL,
+        last_error=EXCLUDED.last_error,
+        updated_at=now()
     `;
   }
 

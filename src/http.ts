@@ -111,7 +111,7 @@ export function createHandler(
   const cacheKey = (request: Request) => createHash("sha256").update(`${request.method} ${new URL(request.url).pathname}${new URL(request.url).search}`).digest("hex");
   const cacheable = (request: Request) => request.method === "GET"
     && new URL(request.url).pathname.startsWith("/api/")
-    && !/\/jobs(?:\/|$)|\/workflows(?:\/|$)|\/benchmarks(?:\/|$)|\/status$|\/health$/u.test(new URL(request.url).pathname);
+    && !/\/jobs(?:\/|$)|\/workflows(?:\/|$)|\/benchmarks(?:\/|$)|\/scores(?:\/|$)|\/status$|\/health$/u.test(new URL(request.url).pathname);
   const cacheRefreshes = new Set<string>();
   const handle = async (request: Request) => {
     const url = new URL(request.url);

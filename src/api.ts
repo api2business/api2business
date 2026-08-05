@@ -24,21 +24,22 @@ const reads = new SingleConnectionSub2ApiReadExecutor(
   scoreDatabaseUrl,
   config.sub2api.scoreDatabase,
 );
-const context = createServerContext(config, target, reads);
+const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
+if (!operationsDatabaseUrl) throw new Error(`server target requires env ${config.operations.databaseUrlEnv}`);
+const operationsStore = new OperationsStore(operationsDatabaseUrl);
+await operationsStore.migrate();
+const context = createServerContext(config, target, reads, operationsStore);
 const temporalAddress = process.env[config.temporal.addressEnv];
 const temporal = temporalAddress
   ? await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId })
   : null;
 const dispatcher = new ApplicationDispatcher({ lottery: context.service, scores: context.monitor }, temporal);
-const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
-if (!operationsDatabaseUrl) throw new Error(`server target requires env ${config.operations.databaseUrlEnv}`);
 const operations = new OperationsService(
   config,
-  new OperationsStore(operationsDatabaseUrl),
+  operationsStore,
   reads,
   context.runtime,
 );
-await operations.initialize();
 const imports = new AccountImportService(config, reads, temporal, null, context.runtime);
 const lifecycle = new AccountLifecycleService(config, reads, temporal, null, context.runtime);
 const upstreams = new UpstreamManagementService(config, reads, temporal, context.runtime);

@@ -7,9 +7,9 @@ metadata:
 
 monitor:
   timezone: Asia/Shanghai
-  refreshIntervalMinutes: 10
+  refreshIntervalMinutes: 5
   automaticRefresh:
-    enabled: false
+    enabled: true
   recentCallLimit: 1000
   errorAggregateLimit: 1000
   errorAggregateTop: 20

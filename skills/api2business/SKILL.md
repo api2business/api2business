@@ -90,6 +90,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
 - 上游、评分和优先级读取 `references/upstream-scheduling.md`。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
+- 页面数据快照统一写入 host PostgreSQL：
+  - API 与 Worker 按稳定快照键共享成功载荷；
+  - 快照型 API 不再叠加通用 HTTP 响应缓存；
+  - 成功后原子替换，失败保留上一份成功快照；
+  - 账号评分默认每 5 分钟刷新，并在进程重启后优先回显持久化快照。
 - 上游智商评测：
   - 提交：`upstreams benchmark --id <account-id> --model <model> --confirm --over-api`；
   - 进度与日志：`upstreams benchmark-status --id <benchmark-run-id> --over-api`；

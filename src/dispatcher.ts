@@ -11,7 +11,7 @@ export interface DispatcherServices {
 
 export async function dispatchDirect(services: DispatcherServices, command: AppCommand): Promise<unknown> {
   if (command.kind === "backend.check") return await services.lottery.status(true);
-  if (command.kind === "scores.get") return services.scores.state();
+  if (command.kind === "scores.get") return await services.scores.state();
   if (command.kind === "scores.refresh") return await services.scores.refresh();
   if (command.kind === "scores.rank") return await services.scores.rank(command.recentCallLimit, command.accountSelector, command.groupSelector);
   if (command.kind === "ranking.get") return await services.lottery.ranking();
