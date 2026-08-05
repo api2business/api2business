@@ -1057,7 +1057,7 @@ export class UpstreamManagementService {
         console.warn(`[upstream-create:${resolvedAccountId}] 后处理未完成：${safeMessage(error instanceof Error ? error.message : String(error))}`);
       }
     };
-    void postProcess();
+    await postProcess();
     let accounting: Record<string, unknown> | null = null;
     if (recharge !== null) {
       try {
