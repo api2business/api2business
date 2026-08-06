@@ -64,9 +64,7 @@ account_stats AS (
     COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.request_id IS NOT NULL
         AND f.triggered
-        AND e.scoreable
-        AND e.kind = 'error'
-        AND e.client_status_code BETWEEN 200 AND 399
+        AND e.kind = 'usage'
     ), 0)::numeric AS failover_recovered,
     COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.request_id IS NOT NULL
@@ -115,9 +113,15 @@ account_stats AS (
     SELECT ranked.*,
       GREATEST($8::numeric, 1 - FLOOR((ranked.recent_rank - 1)::numeric / $6::numeric) * $7::numeric) AS sample_weight
     FROM (
-      SELECT candidate.*,
-        ROW_NUMBER() OVER (ORDER BY candidate.created_at DESC, candidate.id DESC) AS recent_rank
+      SELECT deduplicated.*,
+        ROW_NUMBER() OVER (ORDER BY deduplicated.created_at DESC, deduplicated.id DESC) AS recent_rank
       FROM (
+        SELECT candidate.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY COALESCE(candidate.request_id::text, CONCAT('row:', candidate.id::text))
+            ORDER BY (candidate.kind = 'usage') DESC, candidate.created_at DESC, candidate.id DESC
+          ) AS request_rank
+        FROM (
       (
         SELECT
           'usage'::text AS kind,
@@ -131,6 +135,7 @@ account_stats AS (
           u.output_tokens::bigint,
           u.actual_cost::numeric,
           NULL::int AS client_status_code,
+          NULL::int AS upstream_status_code,
           false AS scoreable
         FROM usage_logs u
         WHERE u.account_id = a.account_id
@@ -152,7 +157,9 @@ account_stats AS (
           0::bigint,
           0::numeric,
           o.status_code::int AS client_status_code,
+          o.upstream_status_code::int AS upstream_status_code,
           CASE
+            WHEN COALESCE(o.status_code, 0) BETWEEN 200 AND 399 THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%context window%'
               OR LOWER(COALESCE(o.error_message, '')) LIKE '%context_length_exceeded%' THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%input must be a list%' THEN false
@@ -191,11 +198,14 @@ account_stats AS (
             OR COALESCE(o.upstream_status_code, 0) >= 400
             OR o.error_type = 'cyber_policy'
           )
+          AND NOT (COALESCE(o.status_code, 0) BETWEEN 200 AND 399)
         ORDER BY o.created_at DESC
         LIMIT $1
       )
-      ) candidate
-      ORDER BY candidate.created_at DESC
+        ) candidate
+      ) deduplicated
+      WHERE deduplicated.request_rank = 1
+      ORDER BY deduplicated.created_at DESC
       LIMIT $1
     ) ranked
   ) e ON true

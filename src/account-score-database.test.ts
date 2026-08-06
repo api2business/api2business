@@ -24,9 +24,13 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'");
   expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.name = $3::text");
-  expect(recentAccountAggregateQuery).toContain("e.client_status_code BETWEEN 200 AND 399");
+  expect(recentAccountAggregateQuery).toContain("AND e.kind = 'usage'");
   expect(recentAccountAggregateQuery).toContain("e.client_status_code >= 400");
   expect(recentAccountAggregateQuery).toContain("o.status_code::int AS client_status_code");
+  expect(recentAccountAggregateQuery).toContain("o.upstream_status_code::int AS upstream_status_code");
+  expect(recentAccountAggregateQuery).toContain("AND NOT (COALESCE(o.status_code, 0) BETWEEN 200 AND 399)");
+  expect(recentAccountAggregateQuery).toContain("PARTITION BY COALESCE(candidate.request_id::text");
+  expect(recentAccountAggregateQuery).toContain("ORDER BY (candidate.kind = 'usage') DESC");
   expect(recentAccountAggregateQuery).not.toContain("openai.request_completed");
   expect(recentAccountAggregateQuery).toContain("AS failover_recovered");
   expect(recentAccountAggregateQuery).toContain("AS failover_failed");
