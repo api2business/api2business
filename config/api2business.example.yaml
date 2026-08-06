@@ -103,12 +103,12 @@ sub2api:
     eligibleGroupIds: [2, 3]
     requiredConfidence: high
     requireCurrentAvailable: true
-    qualityWeight: 58
-    costWeight: 17
+    qualityWeight: 45
+    costWeight: 35
     explorationWeight: 8
     explorationTargetAttempts: 50
     explorationQualityPrior: 25
-    balanceWeight: 17
+    balanceWeight: 12
     dynamicQualityFeedback:
       targetQualityScore: 85
       coefficient: 2

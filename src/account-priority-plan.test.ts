@@ -155,6 +155,38 @@ test("Codex economic ranking keeps the highest-cost quality leader below better-
   expect(ranked.at(-1)).toMatchObject({ accountId: 1, rank: 5, costRateCnyPerApiUsd: 0.18 });
 });
 
+test("Codex default weights keep a similar-quality low-cost account ahead of a funded expensive account", () => {
+  const weightedConfig = structuredClone(config);
+  weightedConfig.sub2api.priorityPlan.qualityWeight = 45;
+  weightedConfig.sub2api.priorityPlan.costWeight = 35;
+  weightedConfig.sub2api.priorityPlan.explorationWeight = 8;
+  weightedConfig.sub2api.priorityPlan.balanceWeight = 12;
+  weightedConfig.sub2api.priorityPlan.dynamicQualityFeedback = { targetQualityScore: 85, coefficient: 2 };
+  const economicAccount = (id: number, name: string, score: number, cost: number, balance: number) => ({
+    ...account(id, name, score),
+    detectedCostRateCnyPerApiUsd: cost,
+    accountBalanceCny: balance,
+  });
+  const plan = buildAccountPriorityPlan({
+    recentCallLimit: 1000,
+    poolQualityScore: 94.1,
+    accounts: [
+      economicAccount(307, "https://hyue.example plus 0.08", 91.7, 0.08, 70.14),
+      economicAccount(308, "https://hyue.example pro 0.2", 92.1, 0.2, 70.14),
+      economicAccount(37, "https://economy.example plus 0.05", 91.2, 0.05, 46.28),
+      economicAccount(901, "https://cost-floor.example plus 0.01", 20, 0.01, 0),
+      economicAccount(902, "https://cost-ceiling.example pro 1", 20, 1, 0),
+    ],
+  }, weightedConfig);
+  const ranked = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => [307, 308, 37].includes(Number(row.accountId)))
+    .sort((left, right) => Number(left.rank) - Number(right.rank));
+
+  expect(ranked.map((row) => row.accountId)).toEqual([307, 37, 308]);
+  expect(ranked.find((row) => row.accountId === 37)?.combinedScore)
+    .toBeGreaterThan(Number(ranked.find((row) => row.accountId === 308)?.combinedScore));
+});
+
 test("reserve policy dynamically lowers priority as weekly quota is depleted", () => {
   const reserveConfig = structuredClone(config);
   reserveConfig.sub2api.priorityPlan.reservePolicies = {
