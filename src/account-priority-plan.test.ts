@@ -155,7 +155,7 @@ test("Codex economic ranking keeps the highest-cost quality leader below better-
   expect(ranked.at(-1)).toMatchObject({ accountId: 1, rank: 5, costRateCnyPerApiUsd: 0.18 });
 });
 
-test("Codex default weights keep a similar-quality low-cost account ahead of a funded expensive account", () => {
+test("Codex robust cost normalization puts the highest-quality low-cost account first", () => {
   const weightedConfig = structuredClone(config);
   weightedConfig.sub2api.priorityPlan.qualityWeight = 45;
   weightedConfig.sub2api.priorityPlan.costWeight = 35;
@@ -176,15 +176,29 @@ test("Codex default weights keep a similar-quality low-cost account ahead of a f
       economicAccount(37, "https://economy.example plus 0.05", 91.2, 0.05, 46.28),
       economicAccount(901, "https://cost-floor.example plus 0.01", 20, 0.01, 0),
       economicAccount(902, "https://cost-ceiling.example pro 1", 20, 1, 0),
+      economicAccount(903, "https://sample-1.example plus 0.05", 20, 0.05, 0),
+      economicAccount(904, "https://sample-2.example plus 0.06", 20, 0.06, 0),
+      economicAccount(905, "https://sample-3.example plus 0.07", 20, 0.07, 0),
+      economicAccount(906, "https://sample-4.example plus 0.08", 20, 0.08, 0),
+      economicAccount(907, "https://sample-5.example plus 0.09", 20, 0.09, 0),
+      economicAccount(908, "https://sample-6.example plus 0.1", 20, 0.1, 0),
+      economicAccount(909, "https://sample-7.example pro 0.12", 20, 0.12, 0),
+      economicAccount(910, "https://sample-8.example pro 0.15", 20, 0.15, 0),
     ],
   }, weightedConfig);
   const ranked = (plan.changes as Array<Record<string, unknown>>)
     .filter((row) => [307, 308, 37].includes(Number(row.accountId)))
     .sort((left, right) => Number(left.rank) - Number(right.rank));
 
-  expect(ranked.map((row) => row.accountId)).toEqual([307, 37, 308]);
+  expect(ranked.map((row) => row.accountId)).toEqual([37, 307, 308]);
   expect(ranked.find((row) => row.accountId === 37)?.combinedScore)
     .toBeGreaterThan(Number(ranked.find((row) => row.accountId === 308)?.combinedScore));
+  expect(plan.costNormalizationRange).toEqual({
+    lowerPercentile: 0.1,
+    upperPercentile: 0.9,
+    minimumCostRateCnyPerApiUsd: 0.05,
+    maximumCostRateCnyPerApiUsd: 0.2,
+  });
 });
 
 test("reserve policy dynamically lowers priority as weekly quota is depleted", () => {

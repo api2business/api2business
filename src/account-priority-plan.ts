@@ -28,6 +28,18 @@ function costRate(row: ScoreRow): number | null {
   return number((row.usage as ScoreRow).costRateCnyPerApiUsd);
 }
 
+function percentile(sorted: number[], ratio: number): number {
+  if (sorted.length === 0) throw new Error("percentile requires evidence");
+  const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1));
+  return sorted[index]!;
+}
+
+function normalizedCostScore(cost: number, minimumCost: number, maximumCost: number): number {
+  if (maximumCost === minimumCost) return 100;
+  return 100 * (maximumCost - Math.min(maximumCost, Math.max(minimumCost, cost)))
+    / (maximumCost - minimumCost);
+}
+
 function buildStableRankPriorities(
   ranked: Array<{ row: ScoreRow; combinedScore: number }>,
   policy: PriorityPlanPolicy,
@@ -223,6 +235,9 @@ function buildPriorityProfile(
   }
   const minimumCost = Math.min(...costEvidence);
   const maximumCost = Math.max(...costEvidence);
+  const sortedCosts = [...costEvidence].sort((left, right) => left - right);
+  const normalizationMinimumCost = percentile(sortedCosts, 0.1);
+  const normalizationMaximumCost = percentile(sortedCosts, 0.9);
   const knownBalances = eligible.map((row) => number(row.accountBalanceCny)).filter((value): value is number => value !== null);
   const minimumBalance = knownBalances.length ? Math.min(...knownBalances) : null;
   const maximumBalance = knownBalances.length ? Math.max(...knownBalances) : null;
@@ -234,7 +249,7 @@ function buildPriorityProfile(
   const baseEconomicScore = (row: ScoreRow): number => {
     const quality = number(row.score) ?? policy.explorationQualityPrior;
     const cost = costRate(row)!;
-    const costScore = maximumCost === minimumCost ? 100 : 100 * (maximumCost - cost) / (maximumCost - minimumCost);
+    const costScore = normalizedCostScore(cost, normalizationMinimumCost, normalizationMaximumCost);
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
     const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
     return (quality * policy.qualityWeight
@@ -270,7 +285,7 @@ function buildPriorityProfile(
     const accountId = number(row.accountId);
     const score = number(row.score);
     const cost = costRate(row)!;
-    const costScore = maximumCost === minimumCost ? 100 : 100 * (maximumCost - cost) / (maximumCost - minimumCost);
+    const costScore = normalizedCostScore(cost, normalizationMinimumCost, normalizationMaximumCost);
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
     const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
     const weightedBalanceScore = balanceScore(row);
@@ -399,6 +414,12 @@ function buildPriorityProfile(
     currentPoolQualityScore,
     priorityReferenceScore,
     costRange: { minimumCostRateCnyPerApiUsd: minimumCost, maximumCostRateCnyPerApiUsd: maximumCost },
+    costNormalizationRange: {
+      lowerPercentile: 0.1,
+      upperPercentile: 0.9,
+      minimumCostRateCnyPerApiUsd: normalizationMinimumCost,
+      maximumCostRateCnyPerApiUsd: normalizationMaximumCost,
+    },
     eligibleCount: eligible.length,
     fixedCount: fixedChanges.length,
     changedCount: Object.keys(priorities).length,
