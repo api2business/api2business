@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Api2Business">
+  <rect width="64" height="64" rx="12" fill="#111412"/>
+  <path d="M15 45 27 17h10l12 28h-9l-2.3-6H25.9l-2.3 6H15Zm13.7-13h6.2l-3.1-8.2L28.7 32Z" fill="#d7ff45"/>
+  <circle cx="51" cy="18" r="4" fill="#f3f5ee"/>
+  <circle cx="51" cy="46" r="4" fill="#f3f5ee"/>
+  <path d="M46.5 20.5 40 25v14l6.5 4.5" fill="none" stroke="#f3f5ee" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
