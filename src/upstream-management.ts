@@ -1145,14 +1145,22 @@ export class UpstreamManagementService {
     const account = await this.accountQuery(id);
     if (!account) throw new UpstreamManagementError("上游账号不存在", 404, { operation: "update", accountId: id });
     if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
+    let name: string | undefined;
     if (input.suffix !== undefined || input.rateCnyPerApiUsd !== undefined) {
       const suffix = input.suffix === undefined ? account.suffix : validateSuffix(String(input.suffix));
       const rate = input.rateCnyPerApiUsd === undefined ? account.rateCnyPerApiUsd : validateRate(input.rateCnyPerApiUsd);
       if (!suffix || rate === null) throw new Error("当前账号缺少可解析的后缀或费率，请同时填写后缀和费率");
-      const name = formatUpstreamName(account.baseUrl, suffix, rate);
-      if (name !== account.name) await this.runtime.updateAccount(id, { name });
+      name = formatUpstreamName(account.baseUrl, suffix, rate);
     }
-    await this.runtime.applyApiKeyFailoverTemplate(id);
+    // 名称和切号模板一次性写入，避免更新费率时产生两次远程 mutation。
+    await this.runtime.configureApiKeyAccounts([id], {
+      ...(name && name !== account.name ? { name } : {}),
+      credentials: {
+        pool_mode: false,
+        temp_unschedulable_enabled: true,
+        temp_unschedulable_rules: this.config.operations.upstreamManagement.failoverRules,
+      },
+    }, this.config.operations.upstreamManagement.mutationTimeoutMs);
     const updated = await this.accountQuery(id);
     if (!updated) throw new UpstreamManagementError("runtime 改名完成但排队查询未找到账号", 502, { operation: "update", accountId: id });
     return { ok: true, operation: "update", account: updated };

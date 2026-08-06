@@ -199,3 +199,13 @@ test("new upstream runtime settings and failover template use one bulk update", 
   expect(postProcess).toContain("temp_unschedulable_rules");
   expect(postProcess).not.toContain("applyApiKeyFailoverTemplates");
 });
+
+test("upstream update merges rename and failover template into one bulk update", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const updateBody = source.slice(source.indexOf("  async update(id:"), source.indexOf("  async recharge(id:"));
+  expect(updateBody).toContain("await this.runtime.configureApiKeyAccounts([id]");
+  expect(updateBody).toContain("...(name && name !== account.name ? { name } : {})");
+  expect(updateBody).toContain("temp_unschedulable_rules");
+  expect(updateBody).not.toContain("this.runtime.updateAccount(id");
+  expect(updateBody).not.toContain("applyApiKeyFailoverTemplate(id");
+});
