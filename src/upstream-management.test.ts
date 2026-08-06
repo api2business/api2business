@@ -179,6 +179,23 @@ test("recharge recovery covers every API-key account in the normalized wallet", 
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   const rechargeBody = source.slice(source.indexOf("  async recharge(id:"), source.lastIndexOf("\n}"));
   expect(rechargeBody).toContain("await this.walletAccounts(account.baseUrl)");
-  expect(rechargeBody).toContain("recoveredAccountIds.push(candidate.id)");
+  expect(rechargeBody).toContain("recoveredAccountIds.push(...recoveryTargets.map((candidate) => candidate.id))");
   expect(rechargeBody).toContain("walletAccountIds: walletAccounts.map");
+  expect(rechargeBody).toContain("await this.runtime!.recoverAccounts(");
+  expect(rechargeBody).not.toContain("await this.runtime!.recoverAccount(candidate.id)");
+});
+
+test("wallet recovery query filters the normalized wallet in SQL", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const wallet = source.slice(source.indexOf("  private async walletAccounts("), source.indexOf("  private async resolveCreatedAccount("));
+  expect(wallet).toContain("RTRIM(a.credentials->>'base_url', '/') = RTRIM($1::text, '/')");
+  expect(wallet).toContain("parameters: [normalizeUpstreamWallet(baseUrl)]");
+});
+
+test("new upstream runtime settings and failover template use one bulk update", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const postProcess = source.slice(source.indexOf("    const postProcess = async () =>"), source.indexOf("    await postProcess();"));
+  expect(postProcess).toContain("await this.runtime.configureApiKeyAccounts(");
+  expect(postProcess).toContain("temp_unschedulable_rules");
+  expect(postProcess).not.toContain("applyApiKeyFailoverTemplates");
 });

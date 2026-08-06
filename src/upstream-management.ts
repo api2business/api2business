@@ -640,9 +640,10 @@ export class UpstreamManagementService {
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
           AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
+          AND RTRIM(a.credentials->>'base_url', '/') = RTRIM($1::text, '/')
         GROUP BY a.id
         ORDER BY a.id`,
-      parameters: [],
+      parameters: [normalizeUpstreamWallet(baseUrl)],
     });
     const wallet = normalizeUpstreamWallet(baseUrl);
     const entries = this.readLedger();
@@ -1083,16 +1084,21 @@ export class UpstreamManagementService {
         const desiredGroupIds = [...effectiveGroupIds].sort((left, right) => left - right);
         const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
         if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
-        if (account.priority !== priority || account.capacity !== capacity || account.proxyId !== settings.proxyId
-          || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds)) {
-          await this.runtime.configureApiKeyAccounts(
-            [resolvedAccountId],
-            { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId },
-            settings.mutationTimeoutMs,
-          );
-        } else {
-          await this.runtime.applyApiKeyFailoverTemplates([resolvedAccountId], settings.mutationTimeoutMs);
-        }
+        const needsRuntimeSettings = account.priority !== priority || account.capacity !== capacity
+          || account.proxyId !== settings.proxyId || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds);
+        // Sub2API 原生批量更新同时写运行参数和切号模板，避免创建流程产生两次远程 mutation。
+        await this.runtime.configureApiKeyAccounts(
+          [resolvedAccountId],
+          {
+            ...(needsRuntimeSettings ? { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId } : {}),
+            credentials: {
+              pool_mode: false,
+              temp_unschedulable_enabled: true,
+              temp_unschedulable_rules: this.config.operations.upstreamManagement.failoverRules,
+            },
+          },
+          settings.mutationTimeoutMs,
+        );
       } catch (error) {
         console.warn(`[upstream-create:${resolvedAccountId}] 后处理未完成：${safeMessage(error instanceof Error ? error.message : String(error))}`);
       }
@@ -1175,12 +1181,15 @@ export class UpstreamManagementService {
       502,
       { operation: "recovery", partial: true, accountId: id, accounting },
     );
-    for (const candidate of recoveryTargets) {
+    if (recoveryTargets.length) {
       try {
-        await this.runtime!.recoverAccount(candidate.id);
-        recoveredAccountIds.push(candidate.id);
+        await this.runtime!.recoverAccounts(
+          recoveryTargets.map((candidate) => candidate.id),
+          this.config.operations.upstreamManagement.mutationTimeoutMs,
+        );
+        recoveredAccountIds.push(...recoveryTargets.map((candidate) => candidate.id));
       } catch (error) {
-        recoveryErrors.push(`#${candidate.id}: ${error instanceof Error ? error.message : String(error)}`);
+        recoveryErrors.push(error instanceof Error ? error.message : String(error));
       }
     }
     if (recoveryErrors.length) throw new UpstreamManagementError(
