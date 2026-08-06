@@ -64,7 +64,7 @@ WITH internal_probe_keys AS (
       AND o.request_id IS NOT NULL
       AND o.created_at <= $3::timestamptz
       -- 上游失败但入站已成功的 failover 中间事件不是用户错误。
-      AND NOT (COALESCE(o.status_code, 0) BETWEEN 200 AND 399)
+      AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
       AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
       AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
         '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
@@ -159,7 +159,7 @@ export const poolQualityErrorsSql = `${poolQualityEventsSql}, filtered_errors AS
     ) AS failover_triggered
   FROM recent_events e
   WHERE e.kind = 'error'
-    AND NOT (COALESCE(e.client_status_code, 0) BETWEEN 200 AND 399)
+    AND NOT (COALESCE(e.client_status_code, e.upstream_status_code, 0) BETWEEN 200 AND 399)
     AND ($4::text = 'all'
       OR ($4::text = 'scoreable' AND e.scoreable = true)
       OR ($4::text = 'excluded' AND e.scoreable = false))

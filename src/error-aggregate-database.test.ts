@@ -12,7 +12,7 @@ test("error aggregate is one bounded database query with recovered request detec
   expect(errorAggregateQuery).not.toContain("o.*");
   expect(errorAggregateQuery).toContain("e.status_code IN (502, 503, 504, 524)");
   expect(errorAggregateQuery).toContain("e.upstream_status_code IN (502, 503, 504, 524)");
-  expect(errorAggregateQuery).toContain("AND NOT (COALESCE(o.status_code, 0) BETWEEN 200 AND 399)");
+  expect(errorAggregateQuery).toContain("AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)");
   expect(errorAggregateQuery).not.toContain("error_body");
   expect(errorAggregateQuery).not.toContain("api_key_prefix");
 });

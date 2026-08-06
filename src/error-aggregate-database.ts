@@ -44,7 +44,7 @@ selected_errors AS (
   FROM ops_error_logs o
   LEFT JOIN target_accounts a ON a.id = o.account_id
   WHERE (($2::text IS NULL AND $3::text IS NULL) OR a.id IS NOT NULL)
-    AND NOT (COALESCE(o.status_code, 0) BETWEEN 200 AND 399)
+    AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
   ORDER BY o.created_at DESC, o.id DESC
   LIMIT $1
 ),

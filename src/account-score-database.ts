@@ -159,7 +159,7 @@ account_stats AS (
           o.status_code::int AS client_status_code,
           o.upstream_status_code::int AS upstream_status_code,
           CASE
-            WHEN COALESCE(o.status_code, 0) BETWEEN 200 AND 399 THEN false
+            WHEN COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399 THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%context window%'
               OR LOWER(COALESCE(o.error_message, '')) LIKE '%context_length_exceeded%' THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%input must be a list%' THEN false
@@ -198,7 +198,7 @@ account_stats AS (
             OR COALESCE(o.upstream_status_code, 0) >= 400
             OR o.error_type = 'cyber_policy'
           )
-          AND NOT (COALESCE(o.status_code, 0) BETWEEN 200 AND 399)
+          AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
         ORDER BY o.created_at DESC
         LIMIT $1
       )
