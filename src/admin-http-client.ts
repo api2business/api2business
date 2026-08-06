@@ -290,9 +290,10 @@ export class AdminHttpClient {
       60000,
     );
   }
-  ledger(period?: string): Promise<Record<string, unknown>> {
-    const query = period ? `?period=${encodeURIComponent(period)}` : "";
-    return this.request(`/api/operations/ledger${query}`, {}, 60000);
+  ledger(period?: string, page = 1): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ page: String(page) });
+    if (period) query.set("period", period);
+    return this.request(`/api/operations/ledger?${query.toString()}`, {}, 60000);
   }
   readStatus(): Promise<Record<string, unknown>> {
     return this.request("/api/admin/read-status");

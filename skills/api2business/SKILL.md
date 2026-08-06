@@ -89,12 +89,16 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
 - 上游、评分和优先级读取 `references/upstream-scheduling.md`。
+- 新增上游时省略 `--rate`，由 YAML 提供创建占位费率；worker 创建成功后自动探测额度与有效倍率，并将有效倍率同步为最终费率。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
+- 手工收入明细使用 `cash ledger --period YYYY-MM --over-api`，汇总使用 `profit daily`。
 - 页面数据快照统一写入 host PostgreSQL：
   - API 与 Worker 按稳定快照键共享成功载荷；
   - 快照型 API 不再叠加通用 HTTP 响应缓存；
   - 成功后原子替换，失败保留上一份成功快照；
   - 账号评分默认每 5 分钟刷新，并在进程重启后优先回显持久化快照。
+- 账号导入成功后异步触发一次 OAuth 实时成本采样；该采样独立于导入作业，不延长导入终态，失败只作为采样作业失败记录。
+- 手动验证同一采样路径使用 `accounts oauth-runtime-sample --over-api`，返回独立 Temporal workflow ID。
 - 上游智商评测：
   - 提交：`upstreams benchmark --id <account-id> --model <model> --confirm --over-api`；
   - 进度与日志：`upstreams benchmark-status --id <benchmark-run-id> --over-api`；

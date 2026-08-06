@@ -15,6 +15,7 @@ export interface UpstreamManagementConfig {
   priority: number;
   capacity: number;
   proxyId: number;
+  createBootstrapRateCnyPerApiUsd: number;
   mutationTimeoutMs: number;
   usageConcurrency: number;
   usageTimeoutMs: number;
@@ -840,6 +841,13 @@ export function loadConfig(path: string): AppConfig {
         priority: integerValue(upstreamManagement, "priority", "operations.upstreamManagement", 1, 1000),
         capacity: integerValue(upstreamManagement, "capacity", "operations.upstreamManagement", 1, 100000),
         proxyId: integerValue(upstreamManagement, "proxyId", "operations.upstreamManagement", 1),
+        createBootstrapRateCnyPerApiUsd: numberValue(
+          upstreamManagement,
+          "createBootstrapRateCnyPerApiUsd",
+          "operations.upstreamManagement",
+          0.000001,
+          1000,
+        ),
         mutationTimeoutMs: integerValue(upstreamManagement, "mutationTimeoutMs", "operations.upstreamManagement", 1000, 120000),
         usageConcurrency: integerValue(upstreamManagement, "usageConcurrency", "operations.upstreamManagement", 1, 100),
         usageTimeoutMs: integerValue(upstreamManagement, "usageTimeoutMs", "operations.upstreamManagement", 1000, 120000),

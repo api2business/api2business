@@ -201,6 +201,20 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality") {
         return json(await operations.poolQualitySummary());
       }
+      if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality/errors") {
+        const page = pageNumber(url);
+        const pageSize = positiveInteger(url.searchParams.get("pageSize"), 20);
+        const filter = url.searchParams.get("filter") ?? "scoreable";
+        if (pageSize === null || pageSize > 100 || !["scoreable", "excluded", "all"].includes(filter)) {
+          return json({ ok: false, error: "invalid pool quality error query" }, 400);
+        }
+        return json(await operations.poolQualityErrors({
+          page,
+          pageSize,
+          filter: filter as "scoreable" | "excluded" | "all",
+          sampledAt: url.searchParams.get("sampledAt"),
+        }));
+      }
       if (request.method === "GET" && url.pathname === "/api/oauth/runtime-summary") {
         const profile = url.searchParams.get("profile") ?? "codex";
         if (profile !== "codex" && profile !== "grok") {
@@ -773,8 +787,12 @@ export function createHandler(
       if (request.method === "POST" && url.pathname === "/api/admin/workflows") {
         const input = await body(request);
         const command = input.command as Record<string, unknown> | undefined;
-        if (command?.kind !== "scores.refresh") return json({ ok: false, error: "command.kind must be scores.refresh" }, 400);
-        return json(await dispatcher.submit({ kind: "scores.refresh" }));
+        if (command?.kind !== "scores.refresh" && command?.kind !== "oauth.runtime.sample") {
+          return json({ ok: false, error: "command.kind must be scores.refresh or oauth.runtime.sample" }, 400);
+        }
+        return json(await dispatcher.submit(command.kind === "scores.refresh"
+          ? { kind: "scores.refresh" }
+          : { kind: "oauth.runtime.sample" }));
       }
       if (request.method === "GET" && url.pathname.startsWith("/api/admin/workflows/")) {
         const workflowId = decodeURIComponent(url.pathname.slice("/api/admin/workflows/".length));

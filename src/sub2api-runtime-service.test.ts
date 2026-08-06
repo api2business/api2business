@@ -92,15 +92,44 @@ test("keeps access-token-only OpenAI imports on the session normalization path",
   expect(calls).toEqual(["/admin/accounts/import/codex-session"]);
 });
 
-test("API-key creation uses the YAML-owned mutation timeout", async () => {
-  const calls: Array<{ path: string; timeoutMs?: number }> = [];
-  const client = { mutate: async (_method: string, path: string, _body: unknown, _key?: string, timeoutMs?: number) => {
-    calls.push({ path, timeoutMs });
+test("API-key creation uses the native batch endpoint and YAML-owned mutation timeout", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown>; timeoutMs?: number }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>, _key?: string, timeoutMs?: number) => {
+    calls.push({ path, body, timeoutMs });
     return { id: 455 };
   } } as unknown as Sub2ApiClient;
   const runtime = new Sub2ApiRuntimeService(client);
   await runtime.createApiKeyAccount({ credentials: { api_key: "redacted" } }, "create-key", 120000);
-  expect(calls).toEqual([{ path: "/admin/accounts/data", timeoutMs: 120000 }]);
+  expect(calls).toEqual([{ path: "/admin/accounts/batch", body: {
+    accounts: [expect.objectContaining({
+      confirm_mixed_channel_risk: true,
+      credentials: expect.objectContaining({ api_key: "redacted", temp_unschedulable_enabled: true }),
+    })],
+  }, timeoutMs: 120000 }]);
+});
+
+test("bulk API-key configuration combines runtime settings and failover template", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {
+    calls.push({ path, body });
+    return { success: 2, failed: 0, success_ids: [486, 487] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client, [{ error_code: 503, keywords: ["overloaded"], duration_minutes: 3 }]);
+  await runtime.configureApiKeyAccounts([487, 486], {
+    priority: 1,
+    concurrency: 16,
+    proxy_id: 3,
+    group_ids: [2, 3],
+  }, 120000);
+  expect(calls).toEqual([{ path: "/admin/accounts/bulk-update", body: expect.objectContaining({
+    account_ids: [486, 487],
+    priority: 1,
+    concurrency: 16,
+    proxy_id: 3,
+    group_ids: [2, 3],
+    confirm_mixed_channel_risk: true,
+    credentials: expect.objectContaining({ temp_unschedulable_enabled: true }),
+  }) }]);
 });
 
 test("bulk API-key template uses the YAML-owned mutation timeout", async () => {

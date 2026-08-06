@@ -61,7 +61,12 @@ import {
   summarizeOAuthRuntimeSamples,
   type OAuthRuntimeProfile,
 } from "./oauth-runtime-monitor";
-import { collectPoolQualitySample, poolQualityHistory } from "./pool-quality-monitor";
+import {
+  collectPoolQualityErrors,
+  collectPoolQualitySample,
+  poolQualityHistory,
+  type PoolQualityErrorFilter,
+} from "./pool-quality-monitor";
 import { IdleAccountProbeService } from "./idle-account-probe";
 import type { ProbeIsolationService } from "./probe-isolation";
 import { UpstreamBenchmarkService } from "./upstream-benchmark";
@@ -430,6 +435,24 @@ export class OperationsService {
       history: poolQualityHistory(rows),
       valuesPrinted: false,
     };
+  }
+
+  async poolQualityErrors(input: {
+    page: number;
+    pageSize: number;
+    filter: PoolQualityErrorFilter;
+    sampledAt?: string | null;
+  }) {
+    const samples = await this.store.getPoolQualitySamples(8) as Array<Record<string, unknown>>;
+    const latest = samples.at(-1);
+    const sampledAt = input.sampledAt
+      ?? (latest?.sampled_at ? new Date(String(latest.sampled_at)).toISOString() : new Date().toISOString());
+    return await collectPoolQualityErrors(this.config, this.reads, {
+      sampledAt,
+      page: input.page,
+      pageSize: input.pageSize,
+      filter: input.filter,
+    });
   }
 
   async oauthRuntimeSummary(profile: OAuthRuntimeProfile) {

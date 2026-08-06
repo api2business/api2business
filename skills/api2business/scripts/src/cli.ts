@@ -209,6 +209,7 @@ function help(): Record<string, unknown> {
       "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
       "accounts oauth-economics [--profile codex|grok] [--over-api]",
       "accounts oauth-runtime [--profile codex|grok] [--over-api]",
+      "accounts oauth-runtime-sample --over-api",
       "accounts idle-probe plan [--accounts <id-or-range,...>] --over-api",
       "accounts idle-probe history [--page N] --over-api",
       "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--confirm] --over-api",
@@ -227,11 +228,12 @@ function help(): Record<string, unknown> {
       "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
-      "upstreams create --base-url <https-url> --suffix <name> --rate <CNY/API_USD> [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
+      "upstreams create --base-url <https-url> --suffix <name> [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
       "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--template-only] [--confirm] --over-api",
       "upstreams recharge --id <account-id> --recharge-cny <CNY> [--confirm] --over-api",
       "upstreams status --id <workflow-id> --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
+      "cash ledger [--period YYYY-MM --page N] --over-api",
       "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
@@ -466,12 +468,25 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await client.upstreamJob(parsed.id);
   }
   if (group === "upstreams" && action === "create") {
-    if (!parsed.baseUrl || !parsed.suffix || parsed.rate === null) throw new Error("upstreams create requires --base-url, --suffix, and --rate");
+    if (!parsed.baseUrl || !parsed.suffix) throw new Error("upstreams create requires --base-url and --suffix");
     if (!parsed.apiKeyStdin) throw new Error("upstreams create requires --api-key-stdin; API keys are never accepted in argv");
-    const input = { baseUrl: parsed.baseUrl, suffix: parsed.suffix, rateCnyPerApiUsd: parsed.rate,
+    const input = { baseUrl: parsed.baseUrl, suffix: parsed.suffix,
+      ...(parsed.rate === null ? {} : { rateCnyPerApiUsd: parsed.rate }),
       priority: parsed.priority ?? 1, capacity: parsed.capacity ?? 16,
       groupIds: (parsed.groups ?? "2,3").split(",").map(Number), rechargeCny: parsed.rechargeCny };
-    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-create", plan: { ...input, apiKey: "stdin:redacted" }, hint: "add --confirm to execute" };
+    if (!parsed.confirm) return {
+      ok: true,
+      mutation: false,
+      action: "upstream-create",
+      plan: {
+        ...input,
+        rateSource: parsed.rate === null
+          ? "operations.upstreamManagement.createBootstrapRateCnyPerApiUsd; create 后自动探测并同步"
+          : "explicit-temporary; create 后自动探测并同步",
+        apiKey: "stdin:redacted",
+      },
+      hint: "add --confirm to execute",
+    };
     const apiKey = (await Bun.stdin.text()).trim();
     if (!apiKey) throw new Error("--api-key-stdin received empty stdin");
     return await client.upstreamCreate({ ...input, apiKey }, `upstream-create-${crypto.randomUUID()}`);
@@ -517,6 +532,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       description: parsed.description.trim(),
     });
   }
+  if (group === "cash" && action === "ledger") {
+    return await client.ledger(parsed.period ?? undefined, parsed.page ?? 1);
+  }
   if (group === "users" && action === "balance-liability") {
     return await client.userBalanceLiability();
   }
@@ -557,6 +575,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const profile = parsed.profile ?? "codex";
     if (profile !== "codex" && profile !== "grok") throw new Error("--profile must be codex or grok");
     return await client.oauthRuntimeSummary(profile);
+  }
+  if (group === "accounts" && action === "oauth-runtime-sample") {
+    return await client.workflowSubmit({ kind: "oauth.runtime.sample" });
   }
   if (group === "accounts" && action === "idle-probe") {
     const verb = parsed.command[2];

@@ -1,6 +1,20 @@
 # 上游与调度
 
 - 上游创建、调整、充值、额度查询和评分统一使用 Api2Business CLI 或 API。
+- 新增上游的费率处理：
+  - CLI 的 `upstreams create` 默认不要求 `--rate`；
+  - 创建所需占位费率只读取 owning YAML 的 `operations.upstreamManagement.createBootstrapRateCnyPerApiUsd`；
+  - worker 在账号落库后自动探测额度和有效倍率，并同步最终费率；
+  - 同步成功必须以排队数据库写后回读一致为准，禁止只凭管理 API 成功响应判定；
+  - 探测失败不得把创建标为失败，必须返回 warning 并由后续采样重试；
+  - 用户显式传入 `--rate` 时，该值也只作为探测前的临时值。
+- 新增上游的性能路径：
+  - API-key 账号创建使用 Sub2API 原生 `/admin/accounts/batch`；
+  - 创建后的分组、Proxy、并发、优先级和切号模板使用一次 `/admin/accounts/bulk-update`；
+  - 写后校验通过排队单连接数据库合并读取，禁止为每个字段分别查询；
+  - 同一规范化 URL 与后缀的账号身份不依赖临时费率，重试不得因倍率已同步而重复创建；
+  - 已有持久化且 ready 的私有探活绑定直接复用，恢复任务不得重复创建或完整校验探活资源；
+  - URL、后缀、分组、Proxy、并发和探活绑定均已对齐的恢复请求走幂等快速返回，不重复 mutation、探测或缓存写入；
 - 同一规范化 `base_url` 视为同一充值钱包；规范化只去除末尾 `/`，不按账号平台区分，因此 Codex 与 Grok 账号均属于同一恢复范围。
 - 充值完成后，批量恢复该规范化 URL 下所有状态异常或不可调度的账号，写入 `status=active` 和 `schedulable=true`，再排队回读验证可以立即参与调度。
 - API key 只通过标准输入或受控请求传入，不进入 argv、日志和账本。

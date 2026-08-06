@@ -132,6 +132,9 @@ let scoreRefreshInFlight = null
 let upstreamAssetsInFlight = null
 let quotaSummaryInFlight = null
 let poolQualityInFlight = null
+let poolErrorPage = 1
+const poolErrorPageSize = 20
+let poolErrorInFlight = null
 
 function scoreProfile(row) {
   return String(row.platform ?? '').toLowerCase() === 'grok' ? 'grok' : 'codex'
@@ -529,6 +532,74 @@ async function loadPoolQuality() {
   try { return await poolQualityInFlight } finally { poolQualityInFlight = null }
 }
 
+function poolErrorMessage(row) {
+  return row.upstreamErrorMessage || row.errorMessage || row.upstreamErrorDetail || '无错误正文'
+}
+
+function renderPoolQualityErrors(data) {
+  const rows = Array.isArray(data.rows) ? data.rows : []
+  const pagination = data.pagination ?? { page: 1, totalPages: 1, total: 0 }
+  poolErrorPage = Number(pagination.page ?? 1)
+  const filterLabel = ({ scoreable: '计分失败', excluded: '已排除', all: '全部错误' })[data.filter] ?? data.filter
+  $('#pool-error-state').textContent = `${time(data.sampledAt)} 采样 · 最近 ${number(data.recentCallLimit)} 次调用 · ${filterLabel} ${number(pagination.total)} 条`
+  const models = Array.isArray(data.modelDistribution) ? data.modelDistribution : []
+  $('#pool-error-models').textContent = models.length
+    ? `模型分布：${models.map((item) => `${item.model || 'unknown'} ${number(item.count)}`).join(' · ')}`
+    : '模型分布：当前口径无错误'
+  $('#pool-error-body').innerHTML = rows.length ? rows.map((row, index) => {
+    const message = poolErrorMessage(row)
+    const requestId = String(row.requestId ?? '—')
+    const endpoint = `${row.inboundEndpoint ?? '—'} → ${row.upstreamEndpoint ?? '—'}`
+    const detail = [
+      ['请求 ID', requestId],
+      ['模型', `${row.model ?? 'unknown'}${row.upstreamModel && row.upstreamModel !== row.model ? ` → ${row.upstreamModel}` : ''}`],
+      ['账号', `${row.accountName ?? '—'} #${row.accountId ?? '—'}`],
+      ['状态', `记录 ${row.clientStatusCode ?? '—'} / 上游 ${row.upstreamStatusCode ?? '—'}`],
+      ['端点', endpoint],
+      ['分类', row.scoreable ? '计分失败' : `已排除 · ${row.exclusionReason ?? '未分类'}`],
+      ['错误类型', `${row.errorPhase ?? '—'} / ${row.errorType ?? '—'}`],
+      ['对外错误', row.errorMessage ?? '—'],
+      ['上游错误', row.upstreamErrorMessage ?? '—'],
+      ['上游详情', row.upstreamErrorDetail ?? '—'],
+    ]
+    return `<tr class="pool-error-row" data-pool-error-row="${index}" tabindex="0" aria-expanded="false"><td><time>${time(row.createdAt)}</time></td><td class="pool-error-model"><b>${escapeHtml(row.model ?? 'unknown')}</b>${row.upstreamModel && row.upstreamModel !== row.model ? `<small>→ ${escapeHtml(row.upstreamModel)}</small>` : ''}</td><td class="account-cell"><b>${escapeHtml(row.accountName ?? '—')}</b><small>#${number(row.accountId)}</small></td><td class="pool-error-status"><b>${escapeHtml(row.clientStatusCode ?? '—')}</b><span>/</span><b>${escapeHtml(row.upstreamStatusCode ?? '—')}</b></td><td class="pool-error-endpoint">${escapeHtml(endpoint)}</td><td>${row.stream ? '流式' : '同步'}${row.failoverTriggered ? '<small class="pool-error-failover">触发切号</small>' : ''}</td><td class="pool-error-summary" title="${escapeHtml(message)}">${escapeHtml(message)}</td></tr><tr class="pool-error-detail" data-pool-error-detail="${index}" hidden><td colspan="7"><dl>${detail.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl></td></tr>`
+  }).join('') : '<tr><td colspan="7" class="empty">当前口径没有错误记录</td></tr>'
+  $('#pool-error-page').textContent = `${number(pagination.page)} / ${number(pagination.totalPages)} · ${number(pagination.total)} 条`
+  $('#pool-error-prev').disabled = pagination.page <= 1
+  $('#pool-error-next').disabled = pagination.page >= pagination.totalPages
+  document.querySelectorAll('[data-pool-error-row]').forEach((row) => {
+    const toggle = () => {
+      const detail = document.querySelector(`[data-pool-error-detail="${row.dataset.poolErrorRow}"]`)
+      const expanded = row.getAttribute('aria-expanded') !== 'true'
+      row.setAttribute('aria-expanded', String(expanded))
+      detail.hidden = !expanded
+    }
+    row.addEventListener('click', toggle)
+    row.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle() }
+    })
+  })
+}
+
+async function loadPoolQualityErrors() {
+  if (poolErrorInFlight !== null) return await poolErrorInFlight
+  const button = $('#refresh-pool-errors')
+  const filter = $('#pool-error-filter').value
+  button.disabled = true
+  button.classList.add('is-loading')
+  $('#pool-error-state').textContent = '正在通过单连接队列读取错误证据…'
+  poolErrorInFlight = requestJson(`/api/upstreams/pool-quality/errors?page=${poolErrorPage}&pageSize=${poolErrorPageSize}&filter=${encodeURIComponent(filter)}`, {}, 60000).then(renderPoolQualityErrors)
+  try { return await poolErrorInFlight }
+  catch (error) {
+    $('#pool-error-state').textContent = `错误记录读取失败：${error instanceof Error ? error.message : String(error)}`
+    throw error
+  } finally {
+    poolErrorInFlight = null
+    button.disabled = false
+    button.classList.remove('is-loading')
+  }
+}
+
 async function scoresPage() {
   const select = $('#score-call-limit')
   const refreshInterval = $('#score-refresh-interval')
@@ -549,6 +620,10 @@ async function scoresPage() {
     scorePage += 1
     renderScoreRows()
   })
+  $('#pool-error-filter').addEventListener('change', () => { poolErrorPage = 1; void loadPoolQualityErrors() })
+  $('#refresh-pool-errors').addEventListener('click', () => void loadPoolQualityErrors())
+  $('#pool-error-prev').addEventListener('click', () => { poolErrorPage = Math.max(1, poolErrorPage - 1); void loadPoolQualityErrors() })
+  $('#pool-error-next').addEventListener('click', () => { poolErrorPage += 1; void loadPoolQualityErrors() })
   const editDialog = $('#score-upstream-edit-dialog')
   const benchmarkDialog = $('#score-benchmark-dialog')
   const createDialog = $('#score-upstream-create-dialog')
@@ -821,6 +896,7 @@ async function scoresPage() {
     loadUnifiedUpstreamAssets(),
     loadUnifiedQuotaSummary(),
     loadPoolQuality(),
+    loadPoolQualityErrors(),
     loadIdleProbeRollingUsage(),
     loadPriorityHistory(),
     loadIdleProbeHistory(),
@@ -829,7 +905,7 @@ async function scoresPage() {
     const button = $('#refresh-scores')
     button.disabled = true
     try {
-      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])
+      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadPoolQualityErrors(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])
     }
     catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }
@@ -844,6 +920,9 @@ async function scoresPage() {
     }),
     loadPoolQuality().catch((error) => {
       $('#pool-quality-state').textContent = `质量采样读取失败：${error instanceof Error ? error.message : String(error)}`
+    }),
+    loadPoolQualityErrors().catch((error) => {
+      $('#pool-error-state').textContent = `错误记录读取失败：${error instanceof Error ? error.message : String(error)}`
     }),
     loadIdleProbeRollingUsage().catch((error) => {
       $('#idle-probe-rolling').textContent = `探活 24h：读取失败 · ${error instanceof Error ? error.message : String(error)}`
@@ -861,6 +940,7 @@ async function scoresPage() {
         requestJson('/api/scores'),
         loadUnifiedQuotaSummary(),
         loadPoolQuality(),
+        loadPoolQualityErrors(),
         loadIdleProbeRollingUsage(),
       ])
       if (scores.status === 'fulfilled') renderScores(scores.value)

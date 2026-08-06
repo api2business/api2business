@@ -122,3 +122,26 @@ test("excludes output from wallets without balance evidence from realtime cost",
   expect(summary.costApiAmountUsd).toBe(10);
   expect(summary.realtimeCostCnyPerApiUsd).toBeCloseTo(0.1);
 });
+
+test("resets wallet burn and cost anchors when the balance conversion rate changes", () => {
+  const base = {
+    walletKey: "wallet", accountId: 1, schedulable: true, status: "active",
+    provider: "sub2api", probeOk: true, sourceQueriedAt: null,
+  };
+  const samples = [
+    { ...base, sampledAt: "2026-08-02T00:00:00Z", remainingUsd: 400, cnyPerUsd: 1, remainingCny: 400, apiAmountUsdTotal: 100, walletApiAmountUsdTotal: 100 },
+    { ...base, sampledAt: "2026-08-02T00:30:00Z", remainingUsd: 399, cnyPerUsd: 1, remainingCny: 399, apiAmountUsdTotal: 110, walletApiAmountUsdTotal: 110 },
+    { ...base, sampledAt: "2026-08-02T01:00:00Z", remainingUsd: 399, cnyPerUsd: 0.05, remainingCny: 19.95, apiAmountUsdTotal: 120, walletApiAmountUsdTotal: 120 },
+  ];
+  const firstNewRate = summarizeQuotaSamples(samples);
+  expect(firstNewRate.consumedCny).toBeNull();
+  expect(firstNewRate.estimatedAvailableHours).toBeNull();
+  expect(firstNewRate.realtimeCostCnyPerApiUsd).toBeCloseTo(0.1);
+
+  const stableNewRate = summarizeQuotaSamples([
+    ...samples,
+    { ...base, sampledAt: "2026-08-02T01:30:00Z", remainingUsd: 398, cnyPerUsd: 0.05, remainingCny: 19.9, apiAmountUsdTotal: 130, walletApiAmountUsdTotal: 130 },
+  ], 0.5);
+  expect(stableNewRate.consumedCny).toBeCloseTo(0.05);
+  expect(stableNewRate.realtimeCostCnyPerApiUsd).toBeCloseTo(0.005);
+});

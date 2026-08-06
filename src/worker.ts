@@ -37,6 +37,7 @@ const workflowEnabled = Boolean(temporalAddressValue);
 const connection = workflowEnabled
   ? await NativeConnection.connect({ address: temporalAddress(config) })
   : null;
+let temporalGateway: TemporalGateway | null = null;
 const remoteReads = new RemoteSub2ApiReadClient(internal);
 const email = process.env[target.sub2apiAdminEmailEnv];
 const password = process.env[target.sub2apiAdminPasswordEnv];
@@ -90,6 +91,9 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     const quality = await operations.samplePoolQuality();
     return { ok: true, sampled: result.targetCount, succeeded: result.succeeded, failed: result.failed, oauth, quality };
   }
+  if (command.kind === "oauth.runtime.sample") {
+    return await operations.sampleOAuthRuntime();
+  }
   if (command.kind === "upstream.benchmark") {
     return await operations.runUpstreamBenchmark(command.benchmarkRunId, command.accountId, command.model);
   }
@@ -114,7 +118,18 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
   if (command.kind === "priority.automation.run") return await operations.runDueAutomation();
   if (command.kind === "account.import") {
     const job = await accountImports.runWorker(command.jobId);
-    return { ok: true, jobId: job.id, state: job.state, valuesPrinted: false };
+    let postImportOAuthSample: Record<string, unknown> | null = null;
+    if (job.state === "succeeded" && temporalGateway) {
+      try {
+        postImportOAuthSample = await temporalGateway.submit({ kind: "oauth.runtime.sample" });
+      } catch (error) {
+        postImportOAuthSample = {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    return { ok: true, jobId: job.id, state: job.state, postImportOAuthSample, valuesPrinted: false };
   }
   if (command.kind === "account.lifecycle.detect") {
     const job = await accountLifecycle.runDetectWorker(command.jobId);
@@ -129,8 +144,37 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     const pending = response.operation as UpstreamWorkerOperation | undefined;
     if (!pending) throw new Error("上游 Temporal 作业缺少有效操作内容");
     let result: Record<string, unknown>;
-    if (pending.action === "create") result = await upstreams.create(pending.input);
-    else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
+    if (pending.action === "create") {
+      result = await upstreams.create(pending.input);
+      const createdAccount = result.account as { id?: unknown } | undefined;
+      const accountId = Number(createdAccount?.id);
+      if (result.skipDetection !== true && Number.isSafeInteger(accountId) && accountId > 0) {
+        try {
+          const detected = await upstreams.usage([accountId]);
+          if (Array.isArray(detected.results)) {
+            detected.rateSynchronization = await upstreams.synchronizeDetectedRates(
+              detected.results as UpstreamUsageResult[],
+            );
+            await internal.upstreamUsageCache(
+              detected.results as Array<Record<string, unknown>>,
+              Number.isFinite(Number(detected.apiAmountUsdTotal)) ? Number(detected.apiAmountUsdTotal) : null,
+              false,
+            );
+          }
+          result.detection = detected;
+        } catch (error) {
+          result.detection = {
+            ok: false,
+            accountId,
+            error: error instanceof Error ? error.message : String(error),
+          };
+          result.warnings = [
+            ...(Array.isArray(result.warnings) ? result.warnings : []),
+            "账号已创建，但额度或倍率探测失败；保留 YAML 声明的创建占位费率，下一轮采样将重试",
+          ];
+        }
+      }
+    } else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
     else if (pending.action === "recharge") result = await upstreams.recharge(pending.input.id, pending.input);
     else if (pending.action === "isolation") result = await upstreams.ensureProbeIsolation(pending.input.accountIds);
     else if (pending.action === "template") result = await upstreams.applyTemplate(pending.input.accountIds);
@@ -165,23 +209,23 @@ const worker = connection
     },
   })
   : null;
-const temporal = workflowEnabled
+temporalGateway = workflowEnabled
   ? await TemporalGateway.connect(config, {
     taskQueue: target.temporalTaskQueue,
     scoreScheduleWorkflowId: target.scoreScheduleWorkflowId,
   })
   : null;
-const schedule = temporal
+const schedule = temporalGateway
   && config.monitor.automaticRefresh.enabled
-  ? await temporal.ensureScoreSchedule()
+  ? await temporalGateway.ensureScoreSchedule()
   : {
     enabled: config.monitor.automaticRefresh.enabled,
     started: false,
     workflowId: target.scoreScheduleWorkflowId,
   };
-const quotaSchedule = temporal ? await temporal.ensureUpstreamQuotaSchedule() : { started: false, workflowId: null };
-const idleProbeSchedule = temporal
-  ? await temporal.ensureIdleProbeSchedule()
+const quotaSchedule = temporalGateway ? await temporalGateway.ensureUpstreamQuotaSchedule() : { started: false, workflowId: null };
+const idleProbeSchedule = temporalGateway
+  ? await temporalGateway.ensureIdleProbeSchedule()
   : { started: false, workflowId: null };
 let state: "ready" | "stopping" = "ready";
 const health = Bun.serve({
@@ -232,8 +276,8 @@ const automationLoop = (async () => {
         if (!stopping) await Bun.sleep(nextDelayMs);
         continue;
       }
-      const result = temporal
-        ? await temporal.execute({ kind: "priority.automation.run" }) as Awaited<ReturnType<OperationsService["runDueAutomation"]>>
+      const result = temporalGateway
+        ? await temporalGateway.execute({ kind: "priority.automation.run" }) as Awaited<ReturnType<OperationsService["runDueAutomation"]>>
         : await operations.runDueAutomation();
       consecutiveAutomationFailures = 0;
       nextDelayMs = config.operations.automationPollMs;
@@ -290,7 +334,7 @@ try {
   await automationLoop;
   scores.close();
   await operations.close();
-  if (temporal) await temporal.close();
+  if (temporalGateway) await temporalGateway.close();
   if (connection) await connection.close();
   console.log(JSON.stringify({ ok: true, component: "api2business-worker", state: "stopped", valuesPrinted: false }));
 }

@@ -240,10 +240,32 @@ export class Sub2ApiRuntimeService {
   }
 
   async createApiKeyAccount(account: Row, idempotencyKey: string, timeoutMs?: number): Promise<Record<string, unknown>> {
-    return await this.client.mutate("POST", "/admin/accounts/data", {
-      data: { accounts: [{ ...account, credentials: this.apiKeyCredentials(account.credentials) }], proxies: [] },
-      skip_default_group_bind: true,
+    return await this.client.mutate("POST", "/admin/accounts/batch", {
+      accounts: [{
+        ...account,
+        credentials: this.apiKeyCredentials(account.credentials),
+        confirm_mixed_channel_risk: true,
+      }],
     }, idempotencyKey, timeoutMs);
+  }
+
+  async configureApiKeyAccounts(accountIds: number[], patch: Row, timeoutMs?: number): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+      throw new Error("bulk API-key configuration requires stable positive account IDs");
+    }
+    const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update", {
+      account_ids: ids,
+      ...patch,
+      credentials: this.apiKeyCredentials(patch.credentials),
+      confirm_mixed_channel_risk: true,
+    }, undefined, timeoutMs);
+    const failed = Number(result.failed ?? 0);
+    const success = Number(result.success ?? ids.length);
+    if (failed > 0 || success !== ids.length) {
+      throw new Error(`Sub2API bulk API-key configuration updated ${success}/${ids.length}, failed ${failed}`);
+    }
+    return { accountIds: ids, configured: success, result };
   }
 
   async updateAccount(accountId: number, patch: Row, timeoutMs?: number): Promise<unknown> {

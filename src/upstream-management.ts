@@ -469,7 +469,7 @@ export class UpstreamManagementService {
     baseUrl: string;
     apiKey: string;
     suffix: string;
-    rateCnyPerApiUsd: unknown;
+    rateCnyPerApiUsd?: unknown;
     rechargeCny?: unknown;
     priority?: unknown;
     capacity?: unknown;
@@ -480,7 +480,11 @@ export class UpstreamManagementService {
     const settings = this.config.operations.upstreamManagement;
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const suffix = validateSuffix(input.suffix);
-    const rateCnyPerApiUsd = validateRate(input.rateCnyPerApiUsd);
+    const rateCnyPerApiUsd = validateRate(
+      input.rateCnyPerApiUsd === undefined || input.rateCnyPerApiUsd === null || input.rateCnyPerApiUsd === ""
+        ? settings.createBootstrapRateCnyPerApiUsd
+        : input.rateCnyPerApiUsd,
+    );
     const apiKey = input.apiKey.trim();
     if (!/^sk-[A-Za-z0-9_=+/.-]{16,}$/u.test(apiKey)) throw new Error("API key 格式无效");
     const rechargeCny = input.rechargeCny === undefined || input.rechargeCny === null || input.rechargeCny === ""
@@ -601,6 +605,7 @@ export class UpstreamManagementService {
   }
 
   private async accountQueryByIdentity(name: string, baseUrl: string): Promise<UpstreamAccount | null> {
+    const suffix = parseUpstreamName(name, baseUrl)?.suffix ?? "";
     const query = await this.reads.query<Row>({
       key: `upstream-account-identity:${name}:${baseUrl}`,
       kind: "upstream-account-identity",
@@ -609,12 +614,15 @@ export class UpstreamManagementService {
       sql: `${accountSelect}
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
-          AND a.name = $1::text
+          AND (
+            a.name = $1::text
+            OR ($3::text <> '' AND a.name LIKE RTRIM($2::text, '/') || ' ' || $3::text || ' %')
+          )
           AND RTRIM(COALESCE(a.credentials->>'base_url', ''), '/') = RTRIM($2::text, '/')
         GROUP BY a.id
         ORDER BY a.id DESC
         LIMIT 1`,
-      parameters: [name, baseUrl],
+      parameters: [name, baseUrl, suffix],
     });
     const row = query.rows[0];
     if (!row) return null;
@@ -816,6 +824,11 @@ export class UpstreamManagementService {
       try {
         const name = formatUpstreamName(result.baseUrl, parsed.suffix, detectedRate);
         await this.runtime.updateAccount(result.accountId, { name });
+        const readback = await this.accountQuery(result.accountId);
+        if (!readback || readback.name !== name || readback.rateCnyPerApiUsd === null
+          || Math.abs(readback.rateCnyPerApiUsd - detectedRate) > 0.0000005) {
+          throw new Error("探测费率写入后排队回读不一致");
+        }
         result.billingMultiplier.syncStatus = "synchronized";
         result.billingMultiplier.syncMessage = `已从 ${formatRate(parsed.rateCnyPerApiUsd)} 同步为 ${formatRate(detectedRate)} 元/刀`;
         synchronized.push(result.accountId);
@@ -1009,6 +1022,27 @@ export class UpstreamManagementService {
     let createError: unknown = null;
     let account = await this.accountQueryByIdentity(name, baseUrl);
     let recovered = account !== null;
+    if (account && recharge === null) {
+      const existingProbe = this.probeIsolation?.get(account.id) ?? null;
+      const expectedGroups = existingProbe
+        ? [...new Set([...groupIds, existingProbe.groupId])].sort((left, right) => left - right)
+        : [];
+      const actualGroups = [...account.groupIds].sort((left, right) => left - right);
+      if (existingProbe && account.priority === priority && account.capacity === capacity
+        && account.proxyId === settings.proxyId
+        && JSON.stringify(actualGroups) === JSON.stringify(expectedGroups)) {
+        return {
+          ok: true,
+          operation: "create-recovered",
+          recovered: true,
+          account,
+          idempotentFastPath: true,
+          skipDetection: true,
+          accounting: null,
+          warnings: [],
+        };
+      }
+    }
     if (!account) {
       if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
       try {
@@ -1043,20 +1077,22 @@ export class UpstreamManagementService {
     const postProcess = async () => {
       try {
         if (!this.probeIsolation) throw new Error("探活隔离服务不可用");
-        const probeBinding = await this.probeIsolation.ensure(resolvedAccountId);
+        const probeBinding = this.probeIsolation.get(resolvedAccountId)
+          ?? await this.probeIsolation.ensure(resolvedAccountId);
         const effectiveGroupIds = [...new Set([...groupIds, probeBinding.groupId])];
         const desiredGroupIds = [...effectiveGroupIds].sort((left, right) => left - right);
         const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
+        if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
         if (account.priority !== priority || account.capacity !== capacity || account.proxyId !== settings.proxyId
           || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds)) {
-          if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
-          await this.runtime.updateAccount(
-            resolvedAccountId,
+          await this.runtime.configureApiKeyAccounts(
+            [resolvedAccountId],
             { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId },
             settings.mutationTimeoutMs,
           );
+        } else {
+          await this.runtime.applyApiKeyFailoverTemplates([resolvedAccountId], settings.mutationTimeoutMs);
         }
-        await this.applyTemplate([resolvedAccountId]);
       } catch (error) {
         console.warn(`[upstream-create:${resolvedAccountId}] 后处理未完成：${safeMessage(error instanceof Error ? error.message : String(error))}`);
       }
@@ -1091,7 +1127,7 @@ export class UpstreamManagementService {
       account,
       template: { applied: false, verified: false, status: "pending" },
       probeIsolation: { enabled: false, status: "pending" },
-      warnings: ["探活隔离、运行设置和切号模板已转为后台后处理"],
+      warnings: ["探活隔离与运行设置已完成；返回账号快照可能早于最终倍率探测回写"],
       accounting,
     };
   }

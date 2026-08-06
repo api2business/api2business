@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#111412" />
   <title>上游资产与实时成本 | Api2Business</title>
-  <link rel="stylesheet" href="/styles.css?v=mobile-quality-layout-v2" />
-  <script src="/app.js?v=idle-probe-round-history-v1" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=pool-error-table-v1" />
+  <script src="/app.js?v=pool-error-table-v1" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -70,6 +70,30 @@
         <button id="score-prev" class="text-command" type="button" disabled>上一页</button>
         <span id="score-page" aria-live="polite">正在读取…</span>
         <button id="score-next" class="text-command" type="button" disabled>下一页</button>
+      </div>
+    </section>
+    <section class="table-section pool-error-section" aria-labelledby="pool-error-title">
+      <div class="table-toolbar">
+        <div>
+          <h2 id="pool-error-title">错误记录</h2>
+          <p id="pool-error-state" class="section-state">正在读取综合质量错误证据…</p>
+        </div>
+        <div class="score-query-controls">
+          <label class="select-field"><span>口径</span><select id="pool-error-filter"><option value="scoreable">计分失败</option><option value="excluded">已排除</option><option value="all">全部错误</option></select></label>
+          <button id="refresh-pool-errors" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>刷新错误</span></button>
+        </div>
+      </div>
+      <p id="pool-error-models" class="pool-error-models">模型分布：等待读取</p>
+      <div class="table-wrap">
+        <table class="data-table pool-error-table" aria-label="综合质量最近一千次调用错误记录">
+          <thead><tr><th>时间</th><th>模型</th><th>上游账号</th><th>记录 / 上游状态</th><th>端点</th><th>模式</th><th>最终错误</th></tr></thead>
+          <tbody id="pool-error-body"><tr><td colspan="7" class="empty">正在读取错误记录…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="table-pager" aria-label="错误记录分页">
+        <button id="pool-error-prev" class="text-command" type="button" disabled>上一页</button>
+        <span id="pool-error-page" aria-live="polite">正在读取…</span>
+        <button id="pool-error-next" class="text-command" type="button" disabled>下一页</button>
       </div>
     </section>
     <section class="table-section">

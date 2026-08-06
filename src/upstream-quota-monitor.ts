@@ -34,6 +34,10 @@ interface WalletCostObservation {
   apiAmountUsd: number;
 }
 
+function sameRate(left: number, right: number): boolean {
+  return Math.abs(left - right) <= 0.0000005;
+}
+
 function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObservation[] {
   const byWallet = new Map<string, UpstreamQuotaSample[]>();
   for (const sample of samples) {
@@ -56,6 +60,10 @@ function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObser
       const currentBalance = current.remainingCny!;
       const anchorOutput = anchor.walletApiAmountUsdTotal!;
       const currentOutput = current.walletApiAmountUsdTotal!;
+      if (!sameRate(anchor.cnyPerUsd, current.cnyPerUsd)) {
+        anchor = current;
+        continue;
+      }
       if (currentOutput < anchorOutput || currentBalance > anchorBalance) {
         anchor = current;
         continue;
@@ -160,9 +168,13 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
   let coverage = 0;
   for (const rows of byWallet.values()) {
     rows.sort((a, b) => Date.parse(a.sampledAt) - Date.parse(b.sampledAt));
-    if (rows.length < 2) continue;
+    const latestRate = rows.at(-1)!.cnyPerUsd;
+    let segmentStart = rows.length - 1;
+    while (segmentStart > 0 && sameRate(rows[segmentStart - 1]!.cnyPerUsd, latestRate)) segmentStart -= 1;
+    const comparableRows = rows.slice(segmentStart);
+    if (comparableRows.length < 2) continue;
     coverage += 1;
-    consumed += Math.max(0, rows[0]!.remainingCny! - rows.at(-1)!.remainingCny!);
+    consumed += Math.max(0, comparableRows[0]!.remainingCny! - comparableRows.at(-1)!.remainingCny!);
   }
   const insufficient = known.length - coverage;
   const burnKnown = coverage > 0;

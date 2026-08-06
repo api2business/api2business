@@ -13,7 +13,7 @@ export interface PoolParticipation {
   costSource: "detected" | "manual" | null;
 }
 
-export const poolQualitySql = `
+const poolQualityEventsSql = `
 WITH internal_probe_keys AS (
   SELECT k.id
   FROM api_keys k
@@ -31,33 +31,30 @@ WITH internal_probe_keys AS (
       SELECT 1 FROM account_groups ag
       WHERE ag.account_id = a.id AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
     )
-), raw_events AS (
+), usage_events AS (
     SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at, u.account_id,
-      a.name AS account_name, a.base_url, u.stream, u.first_token_ms::bigint,
-      u.duration_ms::bigint, false AS scoreable, NULL::int AS client_status_code
+      a.name AS account_name, a.base_url, u.stream, u.first_token_ms::bigint AS first_token_ms,
+      u.duration_ms::bigint, false AS scoreable, NULL::text AS exclusion_reason,
+      COALESCE(u.requested_model, u.model, 'unknown') AS model,
+      u.upstream_model, NULL::text AS inbound_endpoint, NULL::text AS upstream_endpoint,
+      NULL::text AS error_phase, NULL::text AS error_type,
+      NULL::int AS client_status_code, NULL::int AS upstream_status_code,
+      NULL::text AS error_message, NULL::text AS upstream_error_message,
+      NULL::text AS upstream_error_detail
     FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
     WHERE u.request_id IS NOT NULL
+      AND u.created_at <= $3::timestamptz
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
-    UNION ALL
+), error_sources AS (
     SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at, o.account_id,
-      a.name AS account_name, a.base_url, o.stream, o.time_to_first_token_ms::bigint,
-      o.duration_ms::bigint,
-      CASE
-        WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%context window%'
-          OR LOWER(COALESCE(o.error_message, '')) LIKE '%context_length_exceeded%'
-          OR LOWER(COALESCE(o.error_message, '')) LIKE '%input must be a list%'
-          OR LOWER(COALESCE(o.error_message, '')) LIKE '%not supported by any configured account%'
-          OR LOWER(COALESCE(o.error_message, '')) LIKE '%no available channel for model%'
-          OR LOWER(COALESCE(o.error_phase, '')) IN ('internal', 'client', 'business') THEN false
-        WHEN o.error_phase = 'upstream' OR LOWER(COALESCE(o.error_type, '')) LIKE '%upstream%' THEN true
-        WHEN LOWER(COALESCE(o.error_message, '')) LIKE ANY (ARRAY[
-          '%upstream service temporarily unavailable%', '%upstream request failed%',
-          '%bad gateway%', '%gateway timeout%', '%error code: 502%', '%error code: 503%',
-          '%error code: 504%', '%error code: 524%'
-        ]) THEN true
-        ELSE false
-      END AS scoreable,
-      o.status_code::int AS client_status_code
+      a.name AS account_name, a.base_url, o.stream,
+      o.time_to_first_token_ms::bigint AS first_token_ms,
+      o.duration_ms::bigint, COALESCE(o.requested_model, o.model, 'unknown') AS model,
+      o.upstream_model, o.inbound_endpoint, o.upstream_endpoint, o.error_phase, o.error_type,
+      o.status_code::int AS client_status_code, o.upstream_status_code::int AS upstream_status_code,
+      o.error_message, o.upstream_error_message, o.upstream_error_detail,
+      LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
+        o.upstream_error_message, o.upstream_error_detail)) AS message_text
     FROM ops_error_logs o JOIN target_accounts a ON a.id = o.account_id
     WHERE (
       COALESCE(o.status_code, 0) >= 400
@@ -65,11 +62,65 @@ WITH internal_probe_keys AS (
       OR o.error_type = 'cyber_policy'
     )
       AND o.request_id IS NOT NULL
+      AND o.created_at <= $3::timestamptz
       AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
       AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
         '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
       )
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = o.api_key_id)
+), error_events AS (
+    SELECT source.*,
+      CASE
+        WHEN LOWER(COALESCE(source.error_message, '')) LIKE '%context window%'
+          OR LOWER(COALESCE(source.error_message, '')) LIKE '%context_length_exceeded%'
+          OR LOWER(COALESCE(source.error_message, '')) LIKE '%input must be a list%'
+          OR source.message_text LIKE ANY (ARRAY[
+            '%insufficient_balance%',
+            '%insufficient account balance%',
+            '%balance is insufficient%',
+            '%余额不足%',
+            '%额度不足%',
+            '%model_not_found%',
+            '%model not found%'
+          ])
+          OR LOWER(COALESCE(source.error_message, '')) LIKE '%not supported by any configured account%'
+          OR LOWER(COALESCE(source.error_message, '')) LIKE '%no available channel for model%'
+          OR LOWER(COALESCE(source.error_phase, '')) IN ('internal', 'client', 'business') THEN false
+        WHEN source.error_phase = 'upstream' OR LOWER(COALESCE(source.error_type, '')) LIKE '%upstream%' THEN true
+        WHEN LOWER(COALESCE(source.error_message, '')) LIKE ANY (ARRAY[
+          '%upstream service temporarily unavailable%', '%upstream request failed%',
+          '%bad gateway%', '%gateway timeout%', '%error code: 502%', '%error code: 503%',
+          '%error code: 504%', '%error code: 524%'
+        ]) THEN true
+        ELSE false
+      END AS scoreable,
+      CASE
+        WHEN LOWER(COALESCE(source.error_message, '')) LIKE '%context window%'
+          OR LOWER(COALESCE(source.error_message, '')) LIKE '%context_length_exceeded%'
+          OR LOWER(COALESCE(source.error_message, '')) LIKE '%input must be a list%'
+          THEN 'client_request'
+        WHEN source.message_text LIKE ANY (ARRAY[
+          '%insufficient_balance%', '%insufficient account balance%',
+          '%balance is insufficient%', '%余额不足%', '%额度不足%'
+        ]) THEN 'insufficient_balance'
+        WHEN source.message_text LIKE ANY (ARRAY[
+          '%model_not_found%', '%model not found%',
+          '%not supported by any configured account%', '%no available channel for model%'
+        ]) THEN 'model_routing'
+        WHEN LOWER(COALESCE(source.error_phase, '')) IN ('internal', 'client', 'business')
+          THEN 'non_upstream'
+        ELSE 'unscored_error'
+      END AS exclusion_reason
+    FROM error_sources source
+), raw_events AS (
+    SELECT * FROM usage_events
+    UNION ALL
+    SELECT kind, id, request_id, created_at, account_id, account_name, base_url,
+      stream, first_token_ms, duration_ms, scoreable, exclusion_reason, model,
+      upstream_model, inbound_endpoint, upstream_endpoint, error_phase, error_type,
+      client_status_code, upstream_status_code, error_message,
+      upstream_error_message, upstream_error_detail
+    FROM error_events
 ), final_events AS (
   SELECT event.*,
     ROW_NUMBER() OVER (
@@ -83,6 +134,9 @@ WITH internal_probe_keys AS (
   ORDER BY created_at DESC, id DESC
   LIMIT $1
 )
+`;
+
+export const poolQualitySql = `${poolQualityEventsSql}
 SELECT e.*,
   EXISTS (
     SELECT 1 FROM ops_system_logs s
@@ -90,6 +144,61 @@ SELECT e.*,
       AND s.message LIKE '%upstream_failover_switching'
   ) AS failover_triggered
 FROM recent_events e ORDER BY e.created_at DESC, e.id DESC
+`;
+
+export type PoolQualityErrorFilter = "scoreable" | "excluded" | "all";
+
+export const poolQualityErrorsSql = `${poolQualityEventsSql}, filtered_errors AS (
+  SELECT e.*,
+    EXISTS (
+      SELECT 1 FROM ops_system_logs s
+      WHERE s.account_id=e.account_id AND s.request_id=e.request_id
+        AND s.message LIKE '%upstream_failover_switching'
+    ) AS failover_triggered
+  FROM recent_events e
+  WHERE e.kind = 'error'
+    AND ($4::text = 'all'
+      OR ($4::text = 'scoreable' AND e.scoreable = true)
+      OR ($4::text = 'excluded' AND e.scoreable = false))
+), numbered_errors AS (
+  SELECT e.*, ROW_NUMBER() OVER (ORDER BY e.created_at DESC, e.id DESC) AS row_number
+  FROM filtered_errors e
+)
+SELECT
+  COUNT(*)::int AS total_count,
+  COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
+    'requestId', request_id,
+    'createdAt', created_at,
+    'model', model,
+    'upstreamModel', upstream_model,
+    'accountId', account_id,
+    'accountName', account_name,
+    'clientStatusCode', client_status_code,
+    'upstreamStatusCode', upstream_status_code,
+    'inboundEndpoint', inbound_endpoint,
+    'upstreamEndpoint', upstream_endpoint,
+    'stream', stream,
+    'errorPhase', error_phase,
+    'errorType', error_type,
+    'errorMessage', error_message,
+    'upstreamErrorMessage', upstream_error_message,
+    'upstreamErrorDetail', upstream_error_detail,
+    'failoverTriggered', failover_triggered,
+    'scoreable', scoreable,
+    'exclusionReason', exclusion_reason
+  ) ORDER BY created_at DESC, id DESC) FILTER (
+    WHERE row_number > $6::int AND row_number <= ($6::int + $5::int)
+  ), '[]'::jsonb) AS rows,
+  COALESCE((
+    SELECT JSONB_AGG(JSONB_BUILD_OBJECT('model', model, 'count', requests)
+      ORDER BY requests DESC, model)
+    FROM (
+      SELECT model, COUNT(*)::int AS requests
+      FROM filtered_errors
+      GROUP BY model
+    ) distribution
+  ), '[]'::jsonb) AS model_distribution
+FROM numbered_errors
 `;
 
 function percentile(values: number[], ratio: number): number | null {
@@ -124,12 +233,12 @@ export async function collectPoolQualitySample(
   const recentCallLimit = 1000;
   const groupIds = [...new Set(config.sub2api.priorityPlan.eligibleGroupIds)].sort((a, b) => a - b);
   const query = await reads.query<Row>({
-    key: `pool-quality:${recentCallLimit}:${groupIds.join(",")}`,
+    key: `pool-quality:${recentCallLimit}:${groupIds.join(",")}:${sampledAt}`,
     kind: "pool-quality-sample",
     priority: "automatic",
     cacheMode: "bypass-cache",
     sql: poolQualitySql,
-    parameters: [recentCallLimit, groupIds.join(",")],
+    parameters: [recentCallLimit, groupIds.join(","), sampledAt],
   });
   const rows = query.rows;
   const successes = rows.filter((row) => row.kind === "usage");
@@ -188,6 +297,62 @@ export async function collectPoolQualitySample(
         costSource: manualMatch ? "manual" : null,
       } satisfies PoolParticipation;
     }).sort((a, b) => b.attempts - a.attempts || a.accountId - b.accountId),
+  };
+}
+
+export async function collectPoolQualityErrors(
+  config: AppConfig,
+  reads: Sub2ApiReadClient,
+  input: {
+    sampledAt: string;
+    page: number;
+    pageSize: number;
+    filter: PoolQualityErrorFilter;
+  },
+) {
+  const recentCallLimit = 1000;
+  if (!Number.isInteger(input.page) || input.page < 1) throw new Error("pool quality error page must be a positive integer");
+  if (!Number.isInteger(input.pageSize) || input.pageSize < 1 || input.pageSize > 100) {
+    throw new Error("pool quality error page size must be from 1 to 100");
+  }
+  if (!(["scoreable", "excluded", "all"] as string[]).includes(input.filter)) {
+    throw new Error("pool quality error filter is invalid");
+  }
+  const sampledAtMs = Date.parse(input.sampledAt);
+  if (!Number.isFinite(sampledAtMs)) throw new Error("pool quality sampledAt is invalid");
+  const sampledAt = new Date(sampledAtMs).toISOString();
+  const groupIds = [...new Set(config.sub2api.priorityPlan.eligibleGroupIds)].sort((a, b) => a - b);
+  const offset = (input.page - 1) * input.pageSize;
+  const query = await reads.query<Row>({
+    key: JSON.stringify(["pool-quality-errors", recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize]),
+    kind: "pool-quality-errors",
+    priority: "manual",
+    cacheMode: "prefer-cache",
+    sql: poolQualityErrorsSql,
+    parameters: [recentCallLimit, groupIds.join(","), sampledAt, input.filter, input.pageSize, offset],
+  });
+  const result = query.rows[0] ?? {};
+  const total = Number(result.total_count ?? 0);
+  const rows = Array.isArray(result.rows) ? result.rows : [];
+  const modelDistribution = Array.isArray(result.model_distribution) ? result.model_distribution : [];
+  return {
+    ok: true,
+    sampledAt,
+    recentCallLimit,
+    groupIds,
+    filter: input.filter,
+    rows,
+    modelDistribution,
+    pagination: {
+      page: input.page,
+      pageSize: input.pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / input.pageSize)),
+    },
+    databaseQueries: query.cached ? 0 : 1,
+    queueDurationMs: query.queueDurationMs,
+    queryDurationMs: query.queryDurationMs,
+    valuesPrinted: false,
   };
 }
 

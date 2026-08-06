@@ -42,6 +42,67 @@ test("runtime upstream settings validate priority, capacity, and pool selection"
   expect(() => validateGroupIds([])).toThrow("号池");
 });
 
+test("upstream creation bootstrap rate is YAML-owned", () => {
+  const config = loadConfig("config/api2business.example.yaml");
+  expect(config.operations.upstreamManagement.createBootstrapRateCnyPerApiUsd).toBe(1);
+});
+
+test("upstream create worker probes quota and synchronizes the detected rate", async () => {
+  const source = await Bun.file(new URL("./worker.ts", import.meta.url)).text();
+  const createBranch = source.slice(
+    source.indexOf('if (pending.action === "create")'),
+    source.indexOf('else if (pending.action === "update")'),
+  );
+  expect(createBranch).toContain("await upstreams.usage([accountId])");
+  expect(createBranch).toContain("await upstreams.synchronizeDetectedRates");
+  expect(createBranch).toContain("await internal.upstreamUsageCache");
+  expect(createBranch).toContain("result.detection = detected");
+});
+
+test("detected rate synchronization requires queued readback", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const synchronization = source.slice(
+    source.indexOf("  async synchronizeDetectedRates("),
+    source.indexOf("  async applyTemplate("),
+  );
+  expect(synchronization).toContain("await this.accountQuery(result.accountId)");
+  expect(synchronization).toContain("探测费率写入后排队回读不一致");
+});
+
+test("upstream identity ignores the temporary rate for the same URL and suffix", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const identityQuery = source.slice(
+    source.indexOf("  private async accountQueryByIdentity("),
+    source.indexOf("  private async walletAccounts("),
+  );
+  expect(identityQuery).toContain("parseUpstreamName(name, baseUrl)?.suffix");
+  expect(identityQuery).toContain("a.name LIKE RTRIM($2::text, '/') || ' ' || $3::text || ' %'");
+});
+
+test("fully configured recovered upstreams skip mutation and repeated detection", async () => {
+  const management = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const worker = await Bun.file(new URL("./worker.ts", import.meta.url)).text();
+  expect(management).toContain('idempotentFastPath: true');
+  expect(management).toContain('skipDetection: true');
+  expect(worker).toContain("result.skipDetection !== true");
+});
+
+test("successful account imports submit an independent OAuth runtime sample", async () => {
+  const source = await Bun.file(new URL("./worker.ts", import.meta.url)).text();
+  const importBranch = source.slice(
+    source.indexOf('if (command.kind === "account.import")'),
+    source.indexOf('if (command.kind === "account.lifecycle.detect")'),
+  );
+  expect(source).toContain('{ kind: "oauth.runtime.sample" }');
+  expect(importBranch).toContain('job.state === "succeeded"');
+  expect(importBranch).toContain("temporalGateway.submit");
+  expect(importBranch).toContain("postImportOAuthSample");
+  expect(importBranch).not.toContain("await operations.sampleOAuthRuntime()");
+  expect(source).toContain('if (command.kind === "upstream.quota.sample")');
+  expect(source).toContain("const oauth = await operations.sampleOAuthRuntime()");
+  expect(source).not.toMatch(/await temporal\./u);
+});
+
 test("failover template uses the Sub2API native error_code schema", async () => {
   const config = await Bun.file(new URL("../config/api2business.example.yaml", import.meta.url)).text();
   expect(config).toContain("errorCode: 502");
@@ -104,13 +165,13 @@ test("template application verifies persisted runtime fields through the queued 
 test("upstream creation keeps the created account successful when post-processing is incomplete", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   const createBody = source.slice(source.indexOf("  async create(input:"), source.indexOf("  async update(id:"));
-  expect(createBody).toContain("await this.applyTemplate([resolvedAccountId])");
+  expect(createBody).toContain("await this.runtime.configureApiKeyAccounts(");
   expect(createBody).toContain("await this.probeIsolation.ensure(resolvedAccountId)");
+  expect(createBody).toContain("this.probeIsolation.get(resolvedAccountId)");
   expect(createBody).toContain("const postProcess = async () =>");
   expect(createBody).toContain("settings.mutationTimeoutMs");
   expect(createBody).toContain("await postProcess();");
-  expect(createBody).toContain('status: "pending"');
-  expect(createBody).toContain("后台后处理");
+  expect(createBody).toContain("返回账号快照可能早于最终倍率探测回写");
   expect(createBody).not.toContain("上游账号已创建，但 Codex 通用切号模板未通过校验");
 });
 

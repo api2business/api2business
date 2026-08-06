@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { collectPoolQualitySample, poolQualityHistory, poolQualitySql } from "./pool-quality-monitor";
+import { collectPoolQualityErrors, collectPoolQualitySample, poolQualityErrorsSql, poolQualityHistory, poolQualitySql } from "./pool-quality-monitor";
 import { loadConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -8,7 +8,7 @@ test("pool quality uses one queued query and separates exact upstream accounts",
   const reads = {
     async query(input: { parameters: unknown[] }) {
       queries += 1;
-      expect(input.parameters).toEqual([1000, "2,3"]);
+      expect(input.parameters).toEqual([1000, "2,3", "2026-08-03T00:00:00.000Z"]);
       return {
         rows: [
           { id: 1, kind: "usage", request_id: "a", account_id: 10, account_name: "https://api.example.com plus 0.05", base_url: "https://api.example.com/v1", stream: true, first_token_ms: 1000, duration_ms: 2000, scoreable: false, failover_triggered: false },
@@ -37,11 +37,39 @@ test("pool quality excludes every monitor-user key without changing account scor
   expect(poolQualitySql).not.toContain("k.name LIKE");
   expect(poolQualitySql).toContain("p.id = u.api_key_id");
   expect(poolQualitySql).toContain("p.id = o.api_key_id");
+  expect(poolQualitySql).toContain("'%insufficient_balance%'");
+  expect(poolQualitySql).toContain("'%balance is insufficient%'");
+  expect(poolQualitySql).toContain("'%model_not_found%'");
+  expect(poolQualitySql).toContain("'%model not found%'");
+  expect(poolQualitySql.indexOf("'%model_not_found%'")).toBeLessThan(poolQualitySql.indexOf("WHEN source.error_phase = 'upstream'"));
   expect(poolQualitySql).toContain("PARTITION BY event.request_id");
   expect(poolQualitySql).toContain("(event.kind = 'usage') DESC");
   expect(poolQualitySql).toContain("'/responses/compact'");
   expect(poolQualitySql).toContain("'/v1/responses/compact'");
   expect(poolQualitySql).not.toContain("FROM ops_error_logs o\n        WHERE");
+});
+
+test("pool quality errors use the same bounded window and expose paginated model evidence", async () => {
+  let request: { parameters: unknown[]; sql: string } | null = null;
+  const reads = {
+    async query(input: { parameters: unknown[]; sql: string }) {
+      request = input;
+      return {
+        rows: [{ total_count: 107, rows: [{ requestId: "r1", model: "gpt-5.6-sol" }], model_distribution: [{ model: "gpt-5.6-sol", count: 107 }] }],
+        cached: false, deduplicated: false, queueDurationMs: 1, queryDurationMs: 2,
+        totalDurationMs: 3, queryStartedAt: new Date().toISOString(), queryCompletedAt: new Date().toISOString(),
+      };
+    },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+  const result = await collectPoolQualityErrors(loadConfig("config/api2business.yaml"), reads, {
+    sampledAt: "2026-08-05T22:12:43Z", page: 2, pageSize: 20, filter: "scoreable",
+  });
+  expect(request?.parameters).toEqual([1000, "2,3", "2026-08-05T22:12:43.000Z", "scoreable", 20, 20]);
+  expect(request?.sql).toContain("PARTITION BY event.request_id");
+  expect(request?.sql).toContain("requested_model");
+  expect(result.pagination).toEqual({ page: 2, pageSize: 20, total: 107, totalPages: 6 });
+  expect(result.modelDistribution).toEqual([{ model: "gpt-5.6-sol", count: 107 }]);
 });
 
 test("pool quality has an independent YAML score policy without failover points", () => {

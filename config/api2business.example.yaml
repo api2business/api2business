@@ -259,6 +259,8 @@ operations:
     priority: 1
     capacity: 16
     proxyId: 3
+    # 创建接口要求名称包含正费率；创建完成后会立即探测并回写真实倍率。
+    createBootstrapRateCnyPerApiUsd: 1
     mutationTimeoutMs: 120000
     usageConcurrency: 8
     usageTimeoutMs: 15000
@@ -267,7 +269,7 @@ operations:
     quotaSampleTimeoutSeconds: 240
     failoverRules:
       - errorCode: 429
-        keywords: [usage limit reached, API key 额度已用完, concurrency limit exceeded, upstream rate limit exceeded, too many pending requests, selected model is at capacity, upstream_error]
+        keywords: [usage limit reached, API key 额度已用完, concurrency limit exceeded, concurrency limit exceeded for account, rate_limit_exceeded, rate limit exceeded, rate_limit_error, rate limit error, upstream rate limit exceeded, too many pending requests, selected model is at capacity, upstream_error, "status code: 429", please retry later, retry later, 服务暂时不可用，请稍后重试]
         durationMinutes: 3
       - errorCode: 400
         keywords: [selected model is at capacity, our servers are currently overloaded, please try again later, upstream request failed, invalid_encrypted_content]

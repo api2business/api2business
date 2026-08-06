@@ -95,6 +95,30 @@ button:disabled { cursor: wait; opacity: .48; }
 .data-table th { height: 40px; padding: 0 12px; position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap; background: var(--surface-raised); color: var(--muted); font: 10px/1 var(--mono); border-bottom: 1px solid var(--line); }
 .data-table td { height: 52px; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .data-table tbody tr:hover { background: rgba(185,228,71,.045); }
+.pool-error-section .table-toolbar > div:first-child { min-width: 0; }
+.pool-error-section .section-state { margin: 5px 0 0; }
+.pool-error-models { margin: 0 0 10px; color: var(--muted); font: 11px/1.45 var(--mono); overflow-wrap: anywhere; }
+.pool-error-table { min-width: 1180px; table-layout: fixed; }
+.pool-error-table th:nth-child(1) { width: 132px; }
+.pool-error-table th:nth-child(2) { width: 170px; }
+.pool-error-table th:nth-child(3) { width: 260px; }
+.pool-error-table th:nth-child(4) { width: 135px; }
+.pool-error-table th:nth-child(5) { width: 250px; }
+.pool-error-table th:nth-child(6) { width: 92px; }
+.pool-error-row { cursor: pointer; }
+.pool-error-row:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
+.pool-error-model b, .pool-error-model small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.pool-error-model small, .pool-error-failover { margin-top: 4px; color: var(--muted); font: 10px/1.2 var(--mono); }
+.pool-error-status { font-family: var(--mono); }
+.pool-error-status b:last-child { color: var(--alert); }
+.pool-error-status span { margin: 0 6px; color: var(--muted); }
+.pool-error-endpoint, .pool-error-summary { overflow: hidden; text-overflow: ellipsis; }
+.pool-error-summary { color: #ffb3a2; }
+.pool-error-detail td { height: auto; padding: 0 !important; white-space: normal; background: #0d100e; }
+.pool-error-detail dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: 14px 16px; gap: 1px; background: var(--line); }
+.pool-error-detail dl div { min-width: 0; padding: 10px 12px; background: #0d100e; }
+.pool-error-detail dt { color: var(--muted); font: 10px/1.3 var(--mono); }
+.pool-error-detail dd { margin: 5px 0 0; color: var(--paper); font: 11px/1.5 var(--mono); overflow-wrap: anywhere; word-break: break-word; }
 .data-table tbody tr.score-row-unavailable { background: rgba(255,107,74,.09); box-shadow: inset 3px 0 rgba(255,107,74,.85); }
 .data-table tbody tr.score-row-unavailable:hover { background: rgba(255,107,74,.14); }
 .usd-cell { text-align: right !important; }
@@ -645,6 +669,9 @@ button:disabled { cursor: wait; opacity: .48; }
   .pool-participation-body { grid-template-columns: 96px minmax(0, 1fr); align-items: start; gap: 12px; }
   .pool-participation-ring { width: 96px; }
   .pool-participation-legend { max-height: 220px; padding-right: 6px; }
+  .pool-error-section .table-toolbar { align-items: stretch; }
+  .pool-error-section .score-query-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; }
+  .pool-error-detail dl { grid-template-columns: 1fr; padding: 10px; }
 }
 
 /* Readability pass: lift only compact labels and metadata; fixed table/chart geometry stays unchanged. */
