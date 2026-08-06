@@ -363,6 +363,19 @@ export class OperationsService {
       sourceQueriedAt: row.source_queried_at == null ? null : String(row.source_queried_at),
       apiAmountUsdTotal: row.api_amount_usd_total == null ? null : Number(row.api_amount_usd_total),
       walletApiAmountUsdTotal: row.wallet_api_amount_usd_total == null ? null : Number(row.wallet_api_amount_usd_total),
+      accountCostInputs: Array.isArray(row.account_cost_inputs)
+        ? row.account_cost_inputs.map((item) => {
+          const input = object(item);
+          return {
+            accountId: Number(input.accountId),
+            apiAmountUsdTotal: Number(input.apiAmountUsdTotal),
+            costRateCnyPerApiUsd: Number(input.costRateCnyPerApiUsd),
+            source: input.source === "detected" ? "detected" as const : "manual" as const,
+          };
+        }).filter((item) => Number.isSafeInteger(item.accountId) && item.accountId > 0
+          && Number.isFinite(item.apiAmountUsdTotal) && Number.isFinite(item.costRateCnyPerApiUsd)
+          && item.costRateCnyPerApiUsd > 0)
+        : [],
     }));
     return {
       ok: true,

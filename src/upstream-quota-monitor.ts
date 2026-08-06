@@ -16,6 +16,14 @@ export interface UpstreamQuotaSample {
   sourceQueriedAt: string | null;
   apiAmountUsdTotal?: number | null;
   walletApiAmountUsdTotal?: number | null;
+  accountCostInputs?: UpstreamAccountCostInput[];
+}
+
+export interface UpstreamAccountCostInput {
+  accountId: number;
+  apiAmountUsdTotal: number;
+  costRateCnyPerApiUsd: number;
+  source: "detected" | "manual";
 }
 
 function object(value: unknown): Row {
@@ -41,8 +49,7 @@ function sameRate(left: number, right: number): boolean {
 function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObservation[] {
   const byWallet = new Map<string, UpstreamQuotaSample[]>();
   for (const sample of samples) {
-    if (sample.remainingCny === null || sample.walletApiAmountUsdTotal === null
-      || sample.walletApiAmountUsdTotal === undefined) continue;
+    if (!sample.accountCostInputs?.length) continue;
     const rows = byWallet.get(sample.walletKey) ?? [];
     rows.push(sample);
     byWallet.set(sample.walletKey, rows);
@@ -56,25 +63,21 @@ function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObser
         anchor = current;
         continue;
       }
-      const anchorBalance = anchor.remainingCny!;
-      const currentBalance = current.remainingCny!;
-      const anchorOutput = anchor.walletApiAmountUsdTotal!;
-      const currentOutput = current.walletApiAmountUsdTotal!;
-      if (!sameRate(anchor.cnyPerUsd, current.cnyPerUsd)) {
-        anchor = current;
-        continue;
+      const previousById = new Map((anchor.accountCostInputs ?? []).map((item) => [item.accountId, item]));
+      let apiAmountUsd = 0;
+      let consumedCny = 0;
+      for (const item of current.accountCostInputs ?? []) {
+        const previous = previousById.get(item.accountId);
+        if (!previous || item.apiAmountUsdTotal < previous.apiAmountUsdTotal) continue;
+        const delta = item.apiAmountUsdTotal - previous.apiAmountUsdTotal;
+        apiAmountUsd += delta;
+        consumedCny += delta * item.costRateCnyPerApiUsd;
       }
-      if (currentOutput < anchorOutput || currentBalance > anchorBalance) {
-        anchor = current;
-        continue;
-      }
-      if (currentBalance >= anchorBalance) continue;
-      const apiAmountUsd = currentOutput - anchorOutput;
       if (apiAmountUsd > 0) {
         observations.push({
           walletKey,
           endedAt: Date.parse(current.sampledAt),
-          consumedCny: anchorBalance - currentBalance,
+          consumedCny,
           apiAmountUsd,
         });
       }
@@ -97,6 +100,16 @@ export function buildQuotaSamples(
     const quota = object(result.quota);
     const remainingUsd = result.ok === true && quota.unit === "USD" ? finite(quota.remaining) : null;
     const cnyPerUsd = rateForWallet(walletKey);
+    const multiplier = finite(object(result.billingMultiplier).value);
+    const manualRate = String(result.accountName ?? "").match(/\s(\d+(?:\.\d+)?)$/u);
+    const costRate = multiplier !== null && multiplier > 0
+      ? multiplier * cnyPerUsd
+      : manualRate && Number(manualRate[1]) > 0 ? Number(manualRate[1]) : null;
+    const accountOutput = finite(result.apiAmountUsdTotal);
+    const accountCostInputs: UpstreamAccountCostInput[] = costRate !== null && accountOutput !== null
+      ? [{ accountId, apiAmountUsdTotal: accountOutput, costRateCnyPerApiUsd: costRate,
+        source: multiplier !== null && multiplier > 0 ? "detected" : "manual" }]
+      : [];
     const candidate: UpstreamQuotaSample = {
       sampledAt,
       walletKey,
@@ -110,6 +123,7 @@ export function buildQuotaSamples(
       remainingCny: remainingUsd === null ? null : remainingUsd * cnyPerUsd,
       sourceQueriedAt: typeof result.queriedAt === "string" ? result.queriedAt : null,
       walletApiAmountUsdTotal: finite(result.apiAmountUsdTotal),
+      accountCostInputs,
     };
     const current = wallets.get(walletKey);
     if (!current) wallets.set(walletKey, candidate);
@@ -121,6 +135,7 @@ export function buildQuotaSamples(
         || candidate.walletApiAmountUsdTotal === undefined
         ? null
         : current.walletApiAmountUsdTotal + candidate.walletApiAmountUsdTotal;
+      current.accountCostInputs = [...(current.accountCostInputs ?? []), ...candidate.accountCostInputs];
       if (current.remainingCny === null && candidate.remainingCny !== null) {
         current.accountId = candidate.accountId;
         current.remainingUsd = candidate.remainingUsd;
@@ -197,12 +212,11 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
   const sampleCostConsumedCny = currentCostObservations.reduce((sum, observation) => sum + observation.consumedCny, 0);
   const sampleCostApiAmountUsd = currentCostObservations.reduce((sum, observation) => sum + observation.apiAmountUsd, 0);
   const costCoverageWallets = new Set(costObservations.map((observation) => observation.walletKey)).size;
-  const latestWalletOutputMissing = known.filter((row) => row.walletApiAmountUsdTotal === null
-    || row.walletApiAmountUsdTotal === undefined).length;
+  const latestWalletOutputMissing = latestRows.filter((row) => !row.accountCostInputs?.length).length;
   const warnings = [
     latestRows.length > known.length ? `${latestRows.length - known.length} 个 wallet 余额未知` : null,
-    latestWalletOutputMissing > 0 ? `${latestWalletOutputMissing} 个 wallet 缺少归属产出样本` : null,
-    costCoverageWallets === 0 ? "最近一小时缺少可配对的 wallet 消耗与产出" : null,
+    latestWalletOutputMissing > 0 ? `${latestWalletOutputMissing} 个 wallet 缺少账号费率或归属产出样本` : null,
+    costCoverageWallets === 0 ? "最近一小时缺少可配对的账号费率与上游产出" : null,
   ].filter(Boolean);
   return {
     sampledAt: new Date(latestAt).toISOString(),

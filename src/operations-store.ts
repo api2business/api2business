@@ -133,12 +133,15 @@ export class OperationsStore {
         source_queried_at timestamptz,
         api_amount_usd_total numeric,
         wallet_api_amount_usd_total numeric,
+        account_cost_inputs jsonb NOT NULL DEFAULT '[]'::jsonb,
         PRIMARY KEY (sampled_at, wallet_key)
       );
       ALTER TABLE api2business_upstream_quota_samples
         ADD COLUMN IF NOT EXISTS api_amount_usd_total numeric;
       ALTER TABLE api2business_upstream_quota_samples
         ADD COLUMN IF NOT EXISTS wallet_api_amount_usd_total numeric;
+      ALTER TABLE api2business_upstream_quota_samples
+        ADD COLUMN IF NOT EXISTS account_cost_inputs jsonb NOT NULL DEFAULT '[]'::jsonb;
       CREATE INDEX IF NOT EXISTS api2business_upstream_quota_samples_wallet_time_idx
         ON api2business_upstream_quota_samples(wallet_key, sampled_at DESC);
       CREATE TABLE IF NOT EXISTS api2business_oauth_runtime_samples (
@@ -343,11 +346,11 @@ export class OperationsStore {
           INSERT INTO api2business_upstream_quota_samples (
             sampled_at, wallet_key, account_id, schedulable, status, provider,
             probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at,
-            api_amount_usd_total, wallet_api_amount_usd_total
+            api_amount_usd_total, wallet_api_amount_usd_total, account_cost_inputs
           ) VALUES (${sample.sampledAt}, ${sample.walletKey}, ${sample.accountId},
             ${sample.schedulable}, ${sample.status}, ${sample.provider}, ${sample.probeOk},
             ${sample.remainingUsd}, ${sample.cnyPerUsd}, ${sample.remainingCny}, ${sample.sourceQueriedAt},
-            ${apiAmountUsdTotal}, ${sample.walletApiAmountUsdTotal ?? null})
+            ${apiAmountUsdTotal}, ${sample.walletApiAmountUsdTotal ?? null}, ${sample.accountCostInputs ?? []}::jsonb)
           ON CONFLICT (sampled_at, wallet_key) DO NOTHING
         `;
       }
@@ -358,7 +361,7 @@ export class OperationsStore {
     return await this.sql`
       SELECT sampled_at, wallet_key, account_id, schedulable, status, provider,
         probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at,
-        api_amount_usd_total, wallet_api_amount_usd_total
+        api_amount_usd_total, wallet_api_amount_usd_total, account_cost_inputs
       FROM api2business_upstream_quota_samples
       WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
          OR sampled_at IN (

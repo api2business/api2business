@@ -1,21 +1,29 @@
 import { expect, test } from "bun:test";
 import { buildQuotaSamples, quotaHistory, summarizeQuotaSamples } from "./upstream-quota-monitor";
 
+const costInputs = (apiAmountUsdTotal: number, costRateCnyPerApiUsd: number, accountId = 1) => ([{
+  accountId, apiAmountUsdTotal, costRateCnyPerApiUsd, source: "detected" as const,
+}]);
+
 test("deduplicates shared wallets and preserves schedulability", () => {
   const samples = buildQuotaSamples([
-    { accountId: 1, baseUrl: "https://a.test/v1", ok: true, status: "active", schedulable: false, provider: "sub2api", quota: { unit: "USD", remaining: 10 }, apiAmountUsdTotal: 4 },
-    { accountId: 2, baseUrl: "https://a.test", ok: true, status: "active", schedulable: true, provider: "sub2api", quota: { unit: "USD", remaining: 10 }, apiAmountUsdTotal: 6 },
+    { accountId: 1, baseUrl: "https://a.test/v1", ok: true, status: "active", schedulable: false, provider: "sub2api", quota: { unit: "USD", remaining: 10 }, apiAmountUsdTotal: 4, billingMultiplier: { value: 0.08 } },
+    { accountId: 2, baseUrl: "https://a.test", ok: true, status: "active", schedulable: true, provider: "sub2api", quota: { unit: "USD", remaining: 10 }, apiAmountUsdTotal: 6, billingMultiplier: { value: 0.2 } },
   ], "2026-08-02T00:00:00Z", () => 1);
   expect(samples).toHaveLength(1);
   expect(samples[0]).toMatchObject({ remainingCny: 10, schedulable: true, walletApiAmountUsdTotal: 10 });
+  expect(samples[0]!.accountCostInputs).toEqual([
+    { accountId: 1, apiAmountUsdTotal: 4, costRateCnyPerApiUsd: 0.08, source: "detected" },
+    { accountId: 2, apiAmountUsdTotal: 6, costRateCnyPerApiUsd: 0.2, source: "detected" },
+  ]);
 });
 
 test("computes wallet burn and rolling realtime cost without recharge offsets", () => {
   const base = { accountId: 1, status: "active", provider: "sub2api", probeOk: true, cnyPerUsd: 1, sourceQueriedAt: null };
   const summary = summarizeQuotaSamples([
-    { ...base, walletKey: "a", sampledAt: "2026-08-02T00:00:00Z", schedulable: true, remainingUsd: 10, remainingCny: 10, apiAmountUsdTotal: 100, walletApiAmountUsdTotal: 60 },
+    { ...base, walletKey: "a", sampledAt: "2026-08-02T00:00:00Z", schedulable: true, remainingUsd: 10, remainingCny: 10, apiAmountUsdTotal: 100, walletApiAmountUsdTotal: 60, accountCostInputs: costInputs(60, 0.2) },
     { ...base, walletKey: "b", sampledAt: "2026-08-02T00:00:00Z", schedulable: false, remainingUsd: 5, remainingCny: 5, apiAmountUsdTotal: 100, walletApiAmountUsdTotal: 40 },
-    { ...base, walletKey: "a", sampledAt: "2026-08-02T01:00:00Z", schedulable: true, remainingUsd: 8, remainingCny: 8, apiAmountUsdTotal: 110, walletApiAmountUsdTotal: 70 },
+    { ...base, walletKey: "a", sampledAt: "2026-08-02T01:00:00Z", schedulable: true, remainingUsd: 8, remainingCny: 8, apiAmountUsdTotal: 110, walletApiAmountUsdTotal: 70, accountCostInputs: costInputs(70, 0.2) },
     { ...base, walletKey: "b", sampledAt: "2026-08-02T01:00:00Z", schedulable: false, remainingUsd: 9, remainingCny: 9, apiAmountUsdTotal: 110, walletApiAmountUsdTotal: 40 },
   ]);
   expect(summary).toMatchObject({ totalRemainingCny: 17, schedulableRemainingCny: 8, consumedCny: 2, apiAmountUsd: 10, realtimeCostCnyPerApiUsd: 0.2, burnWindowHours: 1, estimatedAvailableHours: 4 });
@@ -40,6 +48,7 @@ test("returns the last eight hours while retaining boundary calculation context"
     remainingCny: 30 - index,
     apiAmountUsdTotal: 100 + index * 5,
     walletApiAmountUsdTotal: 100 + index * 5,
+    accountCostInputs: costInputs(100 + index * 5, 0.2),
   }));
   const history = quotaHistory(samples, 1, 8);
   expect(history).toHaveLength(17);
@@ -77,6 +86,7 @@ test("missing intermediate samples preserves rolling burn and cost", () => {
   const sample = (sampledAt: string, remainingCny: number, apiAmountUsdTotal: number) => ({
     ...base, sampledAt, remainingUsd: remainingCny, remainingCny,
     sourceQueriedAt: sampledAt, apiAmountUsdTotal, walletApiAmountUsdTotal: apiAmountUsdTotal,
+    accountCostInputs: costInputs(apiAmountUsdTotal, 0.1),
   });
   const full = [
     sample("2026-08-02T01:00:00Z", 100, 20),
@@ -97,9 +107,9 @@ test("recovers cost after unchanged balance samples by pairing from the last bal
     provider: "sub2api", probeOk: true, cnyPerUsd: 1, sourceQueriedAt: null,
   };
   const samples = [
-    { ...base, sampledAt: "2026-08-02T00:00:00Z", remainingUsd: 10, remainingCny: 10, apiAmountUsdTotal: 100, walletApiAmountUsdTotal: 100 },
-    { ...base, sampledAt: "2026-08-02T01:10:00Z", remainingUsd: 10, remainingCny: 10, apiAmountUsdTotal: 110, walletApiAmountUsdTotal: 110 },
-    { ...base, sampledAt: "2026-08-02T01:20:00Z", remainingUsd: 9, remainingCny: 9, apiAmountUsdTotal: 120, walletApiAmountUsdTotal: 120 },
+    { ...base, sampledAt: "2026-08-02T00:00:00Z", remainingUsd: 10, remainingCny: 10, apiAmountUsdTotal: 100, walletApiAmountUsdTotal: 100, accountCostInputs: costInputs(100, 0.05) },
+    { ...base, sampledAt: "2026-08-02T01:10:00Z", remainingUsd: 10, remainingCny: 10, apiAmountUsdTotal: 110, walletApiAmountUsdTotal: 110, accountCostInputs: costInputs(110, 0.05) },
+    { ...base, sampledAt: "2026-08-02T01:20:00Z", remainingUsd: 9, remainingCny: 9, apiAmountUsdTotal: 120, walletApiAmountUsdTotal: 120, accountCostInputs: costInputs(120, 0.05) },
   ];
   const summary = summarizeQuotaSamples(samples);
   expect(summary.sampleRealtimeCostCnyPerApiUsd).toBeCloseTo(0.05);
@@ -113,9 +123,9 @@ test("excludes output from wallets without balance evidence from realtime cost",
     probeOk: true, cnyPerUsd: 1, sourceQueriedAt: null,
   };
   const summary = summarizeQuotaSamples([
-    { ...base, walletKey: "known", sampledAt: "2026-08-02T00:00:00Z", remainingUsd: 10, remainingCny: 10, apiAmountUsdTotal: 1000, walletApiAmountUsdTotal: 100 },
+    { ...base, walletKey: "known", sampledAt: "2026-08-02T00:00:00Z", remainingUsd: 10, remainingCny: 10, apiAmountUsdTotal: 1000, walletApiAmountUsdTotal: 100, accountCostInputs: costInputs(100, 0.1) },
     { ...base, walletKey: "unknown", sampledAt: "2026-08-02T00:00:00Z", remainingUsd: null, remainingCny: null, apiAmountUsdTotal: 1000, walletApiAmountUsdTotal: 900 },
-    { ...base, walletKey: "known", sampledAt: "2026-08-02T01:00:00Z", remainingUsd: 9, remainingCny: 9, apiAmountUsdTotal: 1110, walletApiAmountUsdTotal: 110 },
+    { ...base, walletKey: "known", sampledAt: "2026-08-02T01:00:00Z", remainingUsd: 9, remainingCny: 9, apiAmountUsdTotal: 1110, walletApiAmountUsdTotal: 110, accountCostInputs: costInputs(110, 0.1) },
     { ...base, walletKey: "unknown", sampledAt: "2026-08-02T01:00:00Z", remainingUsd: null, remainingCny: null, apiAmountUsdTotal: 1110, walletApiAmountUsdTotal: 1000 },
   ]);
   expect(summary.apiAmountUsd).toBe(110);
@@ -123,24 +133,24 @@ test("excludes output from wallets without balance evidence from realtime cost",
   expect(summary.realtimeCostCnyPerApiUsd).toBeCloseTo(0.1);
 });
 
-test("resets wallet burn and cost anchors when the balance conversion rate changes", () => {
+test("uses account rates without mixing wallet balance conversion into cost", () => {
   const base = {
     walletKey: "wallet", accountId: 1, schedulable: true, status: "active",
     provider: "sub2api", probeOk: true, sourceQueriedAt: null,
   };
   const samples = [
-    { ...base, sampledAt: "2026-08-02T00:00:00Z", remainingUsd: 400, cnyPerUsd: 1, remainingCny: 400, apiAmountUsdTotal: 100, walletApiAmountUsdTotal: 100 },
-    { ...base, sampledAt: "2026-08-02T00:30:00Z", remainingUsd: 399, cnyPerUsd: 1, remainingCny: 399, apiAmountUsdTotal: 110, walletApiAmountUsdTotal: 110 },
-    { ...base, sampledAt: "2026-08-02T01:00:00Z", remainingUsd: 399, cnyPerUsd: 0.05, remainingCny: 19.95, apiAmountUsdTotal: 120, walletApiAmountUsdTotal: 120 },
+    { ...base, sampledAt: "2026-08-02T00:00:00Z", remainingUsd: 400, cnyPerUsd: 1, remainingCny: 400, apiAmountUsdTotal: 100, walletApiAmountUsdTotal: 100, accountCostInputs: costInputs(100, 0.1) },
+    { ...base, sampledAt: "2026-08-02T00:30:00Z", remainingUsd: 399, cnyPerUsd: 1, remainingCny: 399, apiAmountUsdTotal: 110, walletApiAmountUsdTotal: 110, accountCostInputs: costInputs(110, 0.1) },
+    { ...base, sampledAt: "2026-08-02T01:00:00Z", remainingUsd: 399, cnyPerUsd: 0.05, remainingCny: 19.95, apiAmountUsdTotal: 120, walletApiAmountUsdTotal: 120, accountCostInputs: costInputs(120, 0.005) },
   ];
   const firstNewRate = summarizeQuotaSamples(samples);
   expect(firstNewRate.consumedCny).toBeNull();
   expect(firstNewRate.estimatedAvailableHours).toBeNull();
-  expect(firstNewRate.realtimeCostCnyPerApiUsd).toBeCloseTo(0.1);
+  expect(firstNewRate.realtimeCostCnyPerApiUsd).toBeCloseTo(0.0525);
 
   const stableNewRate = summarizeQuotaSamples([
     ...samples,
-    { ...base, sampledAt: "2026-08-02T01:30:00Z", remainingUsd: 398, cnyPerUsd: 0.05, remainingCny: 19.9, apiAmountUsdTotal: 130, walletApiAmountUsdTotal: 130 },
+    { ...base, sampledAt: "2026-08-02T01:30:00Z", remainingUsd: 398, cnyPerUsd: 0.05, remainingCny: 19.9, apiAmountUsdTotal: 130, walletApiAmountUsdTotal: 130, accountCostInputs: costInputs(130, 0.005) },
   ], 0.5);
   expect(stableNewRate.consumedCny).toBeCloseTo(0.05);
   expect(stableNewRate.realtimeCostCnyPerApiUsd).toBeCloseTo(0.005);
