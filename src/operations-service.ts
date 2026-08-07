@@ -307,6 +307,14 @@ export class OperationsService {
     await this.store.close();
   }
 
+  async health(): Promise<void> {
+    await this.store.health();
+  }
+
+  async recoverConnection(error: unknown): Promise<boolean> {
+    return await this.store.recoverConnection(error);
+  }
+
   async getApiCache(key: string) {
     return await this.store.getApiCache(key);
   }

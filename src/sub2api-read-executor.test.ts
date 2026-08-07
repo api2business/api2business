@@ -185,6 +185,47 @@ test("maps PostgreSQL statement timeout to a stable query timeout", async () => 
   await executor.close();
 });
 
+test("recycles a closed connection and retries the logical query once", async () => {
+  const database = new FakeDatabase(async () => {
+    if (database.queryCount === 1) throw new Error("Connection closed");
+    return [{ value: 1 }];
+  });
+  const executor = new SingleConnectionSub2ApiReadExecutor(
+    "postgres://fixture",
+    options(),
+    database,
+  );
+
+  const result = await executor.query(request("recover-connection"));
+
+  expect(result.rows).toEqual([{ value: 1 }]);
+  expect(database.queryCount).toBe(2);
+  expect(executor.status()).toMatchObject({
+    totalQueries: 1,
+    failedQueries: 0,
+    connectionRecycles: 1,
+  });
+  await executor.close();
+});
+
+test("does not retry SQL errors that are unrelated to the connection", async () => {
+  const database = new FakeDatabase(async () => {
+    throw new Error("column missing_value does not exist");
+  });
+  const executor = new SingleConnectionSub2ApiReadExecutor(
+    "postgres://fixture",
+    options(),
+    database,
+  );
+
+  await expect(executor.query(request("invalid-sql"))).rejects.toMatchObject({
+    name: "sub2api_read_failed",
+  });
+  expect(database.queryCount).toBe(1);
+  expect(executor.status().connectionRecycles).toBe(0);
+  await executor.close();
+});
+
 test("bounds a transaction that hangs before PostgreSQL statement timeout can start", async () => {
   const database = new FakeDatabase(async () => await new Promise<Array<Record<string, unknown>>>(() => undefined));
   const executor = new SingleConnectionSub2ApiReadExecutor(

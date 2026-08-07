@@ -1,5 +1,6 @@
 import { SQL } from "bun";
 import { jitteredIntervalSeconds } from "./priority-automation-schedule";
+import { isRecoverableDatabaseConnectionError } from "./database-connection";
 
 export type CashDirection = "income" | "expense";
 
@@ -10,6 +11,8 @@ export interface PriorityOptimizationQueueLease {
   waitMs: number;
 }
 
+type OperationsSqlFactory = (databaseUrl: string, max: number) => SQL;
+
 export function postgresBigintArrayLiteral(values: number[]): string {
   if (values.some((value) => !Number.isSafeInteger(value) || value <= 0)) {
     throw new Error("PostgreSQL bigint array values must be positive integers");
@@ -18,12 +21,18 @@ export function postgresBigintArrayLiteral(values: number[]): string {
 }
 
 export class OperationsStore {
-  private readonly sql: SQL;
-  private readonly priorityOptimizationQueueSql: SQL;
+  private sql: SQL;
+  private priorityOptimizationQueueSql: SQL;
+  private connectionGeneration = 0;
+  private recyclePromise: Promise<void> | null = null;
+  private closed = false;
 
-  constructor(databaseUrl: string) {
-    this.sql = new SQL(databaseUrl, { max: 4 });
-    this.priorityOptimizationQueueSql = new SQL(databaseUrl, { max: 1 });
+  constructor(
+    private readonly databaseUrl: string,
+    private readonly sqlFactory: OperationsSqlFactory = (url, max) => new SQL(url, { max }),
+  ) {
+    this.sql = this.createSql(4);
+    this.priorityOptimizationQueueSql = this.createSql(1);
   }
 
   async migrate(): Promise<void> {
@@ -232,24 +241,85 @@ export class OperationsStore {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
+    if (this.recyclePromise) await this.recyclePromise;
     await Promise.all([this.sql.close(), this.priorityOptimizationQueueSql.close()]);
   }
 
+  async health(): Promise<void> {
+    await this.withConnectionRecovery(async () => {
+      await this.sql`SELECT 1 AS ok`;
+    });
+  }
+
+  async recoverConnection(error: unknown): Promise<boolean> {
+    if (!isRecoverableDatabaseConnectionError(error)) return false;
+    // A concurrent request may already have replaced the stale pool. Probing the
+    // current generation avoids recycling that fresh pool for a late old error.
+    await this.health();
+    return true;
+  }
+
   async getApiCache(key: string) {
-    const [row] = await this.sql`
-      SELECT cache_key, status, headers, body, cached_at
-      FROM api2business_api_cache WHERE cache_key=${key}
-    `;
-    return row ?? null;
+    return await this.withConnectionRecovery(async () => {
+      const [row] = await this.sql`
+        SELECT cache_key, status, headers, body, cached_at
+        FROM api2business_api_cache WHERE cache_key=${key}
+      `;
+      return row ?? null;
+    });
   }
 
   async setApiCache(key: string, status: number, headers: Record<string, string>, body: string) {
-    await this.sql`
-      INSERT INTO api2business_api_cache (cache_key, status, headers, body, cached_at)
-      VALUES (${key}, ${status}, ${headers}::jsonb, ${body}, now())
-      ON CONFLICT (cache_key) DO UPDATE SET
-        status=EXCLUDED.status, headers=EXCLUDED.headers, body=EXCLUDED.body, cached_at=now()
-    `;
+    await this.withConnectionRecovery(async () => {
+      await this.sql`
+        INSERT INTO api2business_api_cache (cache_key, status, headers, body, cached_at)
+        VALUES (${key}, ${status}, ${headers}::jsonb, ${body}, now())
+        ON CONFLICT (cache_key) DO UPDATE SET
+          status=EXCLUDED.status, headers=EXCLUDED.headers, body=EXCLUDED.body, cached_at=now()
+      `;
+    });
+  }
+
+  private createSql(max: number): SQL {
+    return this.sqlFactory(this.databaseUrl, max);
+  }
+
+  private async withConnectionRecovery<T>(operation: () => Promise<T>): Promise<T> {
+    const observedGeneration = this.connectionGeneration;
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isRecoverableDatabaseConnectionError(error)) throw error;
+      await this.recycleConnections(observedGeneration);
+      return await operation();
+    }
+  }
+
+  private async recycleConnections(observedGeneration: number): Promise<void> {
+    if (this.closed || observedGeneration !== this.connectionGeneration) return;
+    if (this.recyclePromise) return await this.recyclePromise;
+    const recycle = (async () => {
+      if (this.closed || observedGeneration !== this.connectionGeneration) return;
+      const expiredSql = this.sql;
+      const expiredQueueSql = this.priorityOptimizationQueueSql;
+      this.sql = this.createSql(4);
+      this.priorityOptimizationQueueSql = this.createSql(1);
+      this.connectionGeneration += 1;
+      await Promise.race([
+        Promise.all([
+          expiredSql.close({ timeout: 1 }).catch(() => undefined),
+          expiredQueueSql.close({ timeout: 1 }).catch(() => undefined),
+        ]),
+        Bun.sleep(1500),
+      ]);
+    })();
+    this.recyclePromise = recycle;
+    try {
+      await recycle;
+    } finally {
+      if (this.recyclePromise === recycle) this.recyclePromise = null;
+    }
   }
 
   async getSnapshot(key: string) {

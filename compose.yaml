@@ -13,6 +13,12 @@ services:
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
     command: ["bun", "src/api.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}", "--runtime", "compose"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
   worker:
     build: .
     restart: unless-stopped
@@ -28,6 +34,12 @@ services:
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
     command: ["bun", "src/worker.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}", "--runtime", "compose"]
     depends_on: [api]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
   web:
     build: .
     restart: unless-stopped

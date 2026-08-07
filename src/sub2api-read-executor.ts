@@ -1,4 +1,8 @@
 import { SQL } from "bun";
+import {
+  databaseErrorMessage,
+  isRecoverableDatabaseConnectionError,
+} from "./database-connection";
 
 export type Sub2ApiReadPriority = "manual" | "automatic";
 export type Sub2ApiReadCacheMode = "prefer-cache" | "bypass-cache";
@@ -91,10 +95,6 @@ interface QueueTask<Row extends Record<string, unknown>> {
 
 function roundedDuration(startedAt: number): number {
   return Math.round((performance.now() - startedAt) * 10) / 10;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function codedError(code: string, message: string): Error {
@@ -327,51 +327,60 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
     let queryCompletedAt = queryStartedAt;
     let queryDurationMs = 0;
     try {
-      const databaseOperation = this.database.begin(async (transaction) => {
-        await transaction.unsafe("SET TRANSACTION READ ONLY");
-        await transaction.unsafe(
-          `SET LOCAL statement_timeout = '${this.options.statementTimeoutMs}ms'`,
-        );
-        for (const statement of task.request.setupStatements ?? []) {
-          await transaction.unsafe(statement);
-        }
-        this.activeDatabaseQueries += 1;
-        this.metrics.maximumObservedDatabaseConcurrency = Math.max(
-          this.metrics.maximumObservedDatabaseConcurrency,
-          this.activeDatabaseQueries,
-        );
-        const queryStartedAtMs = performance.now();
-        queryStartedAt = new Date().toISOString();
+      let rows: Record<string, unknown>[] | null = null;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const databaseOperation = this.database.begin(async (transaction) => {
+          await transaction.unsafe("SET TRANSACTION READ ONLY");
+          await transaction.unsafe(
+            `SET LOCAL statement_timeout = '${this.options.statementTimeoutMs}ms'`,
+          );
+          for (const statement of task.request.setupStatements ?? []) {
+            await transaction.unsafe(statement);
+          }
+          this.activeDatabaseQueries += 1;
+          this.metrics.maximumObservedDatabaseConcurrency = Math.max(
+            this.metrics.maximumObservedDatabaseConcurrency,
+            this.activeDatabaseQueries,
+          );
+          const queryStartedAtMs = performance.now();
+          queryStartedAt = new Date().toISOString();
+          try {
+            return await transaction.unsafe(
+              task.request.sql,
+              task.request.parameters,
+            ) as Record<string, unknown>[];
+          } finally {
+            queryDurationMs = roundedDuration(queryStartedAtMs);
+            queryCompletedAt = new Date().toISOString();
+            this.activeDatabaseQueries -= 1;
+          }
+        });
+        let watchdog: ReturnType<typeof setTimeout> | null = null;
+        const watchdogTimeout = new Promise<never>((_, reject) => {
+          watchdog = setTimeout(() => reject(codedError(
+            "sub2api_read_query_timeout",
+            `query ${task.request.kind} exceeded ${this.options.statementTimeoutMs}ms before the connection was released`,
+          )), this.options.statementTimeoutMs + 1000);
+        });
         try {
-          return await transaction.unsafe(
-            task.request.sql,
-            task.request.parameters,
-          ) as Record<string, unknown>[];
+          rows = await Promise.race([databaseOperation, watchdogTimeout]);
+          break;
+        } catch (error) {
+          const watchdogExpired = error instanceof Error
+            && error.name === "sub2api_read_query_timeout";
+          if (watchdogExpired) void databaseOperation.catch(() => undefined);
+          if (watchdogExpired || isRecoverableDatabaseConnectionError(error)) {
+            await this.recycleDatabase();
+          }
+          if (!watchdogExpired && attempt === 0 && isRecoverableDatabaseConnectionError(error)) {
+            continue;
+          }
+          throw error;
         } finally {
-          queryDurationMs = roundedDuration(queryStartedAtMs);
-          queryCompletedAt = new Date().toISOString();
-          this.activeDatabaseQueries -= 1;
+          if (watchdog !== null) clearTimeout(watchdog);
         }
-      });
-      let watchdog: ReturnType<typeof setTimeout> | null = null;
-      const watchdogTimeout = new Promise<never>((_, reject) => {
-        watchdog = setTimeout(() => reject(codedError(
-          "sub2api_read_query_timeout",
-          `query ${task.request.kind} exceeded ${this.options.statementTimeoutMs}ms before the connection was released`,
-        )), this.options.statementTimeoutMs + 1000);
-      });
-      let rows: Record<string, unknown>[];
-      try {
-        rows = await Promise.race([databaseOperation, watchdogTimeout]);
-      } catch (error) {
-        if (error instanceof Error && error.name === "sub2api_read_query_timeout") {
-          void databaseOperation.catch(() => undefined);
-          await this.recycleDatabase();
-        }
-        throw error;
-      } finally {
-        if (watchdog !== null) clearTimeout(watchdog);
       }
+      if (rows === null) throw new Error("Sub2API read completed without rows");
       const result: Sub2ApiReadResult<Record<string, unknown>> = {
         rows,
         queueDurationMs,
@@ -388,7 +397,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
       this.remember(task.request.key, result);
       task.resolve(result);
     } catch (error) {
-      const message = errorMessage(error);
+      const message = databaseErrorMessage(error);
       const timedOut = (error instanceof Error && error.name === "sub2api_read_query_timeout")
         || /statement timeout|canceling statement due to statement timeout/iu.test(message);
       if (timedOut) this.metrics.queryTimeouts += 1;
@@ -416,10 +425,10 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
   }
 
   private async recycleDatabase(): Promise<void> {
+    this.metrics.connectionRecycles += 1;
     if (this.databaseOverride) return;
     const expired = this.database;
     this.database = this.createDatabase(this.databaseUrl);
-    this.metrics.connectionRecycles += 1;
     await Promise.race([
       expired.close({ timeout: 1 }).catch(() => undefined),
       Bun.sleep(1500),

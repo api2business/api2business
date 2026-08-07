@@ -250,17 +250,25 @@ let state: "ready" | "stopping" = "ready";
 const health = Bun.serve({
   hostname: target.workerHealthHost,
   port: target.workerHealthPort,
-  fetch: () => Response.json({
-    ok: state === "ready",
-    component: "api2business-worker",
-    state,
-    workflowMode: workflowEnabled ? "temporal" : "disabled",
-    namespace: workflowEnabled ? config.temporal.namespace : null,
-    taskQueue: workflowEnabled ? target.temporalTaskQueue : null,
-    schedule,
-    quotaSchedule,
-    idleProbeSchedule,
-  }, { status: state === "ready" ? 200 : 503 }),
+  fetch: async () => {
+    let databaseReady = false;
+    if (state === "ready") {
+      databaseReady = await operationsStore.health().then(() => true).catch(() => false);
+    }
+    const ok = state === "ready" && databaseReady;
+    return Response.json({
+      ok,
+      component: "api2business-worker",
+      state,
+      databaseReady,
+      workflowMode: workflowEnabled ? "temporal" : "disabled",
+      namespace: workflowEnabled ? config.temporal.namespace : null,
+      taskQueue: workflowEnabled ? target.temporalTaskQueue : null,
+      schedule,
+      quotaSchedule,
+      idleProbeSchedule,
+    }, { status: ok ? 200 : 503 });
+  },
 });
 
 console.log(JSON.stringify({

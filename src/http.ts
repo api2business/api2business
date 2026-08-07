@@ -8,6 +8,7 @@ import { UpstreamManagementError, type UpstreamManagementService } from "./upstr
 import type { AppCommand, OperationRequest } from "./contracts";
 import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import { isRecoverableDatabaseConnectionError } from "./database-connection";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { TemporalSubmissionError } from "./temporal-client";
 import {
@@ -46,7 +47,9 @@ function errorResponse(error: unknown, request?: Request): Response {
   if (error instanceof UpstreamManagementError) {
     return json({ ok: false, error: message, ...error.details }, error.status);
   }
-  const status = /does not exist|no draw chance|no eligible/u.test(message)
+  const status = isRecoverableDatabaseConnectionError(error)
+    ? 503
+    : /does not exist|no draw chance|no eligible/u.test(message)
     ? 409
     : /base_url|API key|后缀|费率|充值金额|幂等键|字段不能为空|当前账号缺少|JSON|ZIP|去重后的账号数量|账号数量/u.test(message)
     ? 400
@@ -119,7 +122,16 @@ export function createHandler(
       const apiKey = apiKeyAuthorized(request, auth) || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        return json({ ok: true, service: "api2business-api" });
+        await operations.health();
+        await reads.query({
+          key: "health.readiness",
+          kind: "health.readiness",
+          sql: "SELECT 1 AS ok",
+          parameters: [],
+          priority: "manual",
+          cacheMode: "bypass-cache",
+        });
+        return json({ ok: true, service: "api2business-api", readiness: "data-plane" });
       }
       if (request.method === "POST" && url.pathname === "/api/login") {
         const input = await body(request);
@@ -818,6 +830,9 @@ export function createHandler(
       }
       return json({ ok: false, error: "not found" }, 404);
     } catch (error) {
+      if (isRecoverableDatabaseConnectionError(error)) {
+        await operations.recoverConnection(error).catch(() => undefined);
+      }
       return errorResponse(error, request);
     }
   };
@@ -828,7 +843,19 @@ export function createHandler(
       || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
     if (!authorized) return await handle(request);
     const key = cacheKey(request);
-    const cached = await operations.getApiCache(key);
+    let cached = null;
+    try {
+      cached = await operations.getApiCache(key);
+    } catch (error) {
+      console.error(JSON.stringify({
+        ok: false,
+        component: "http-cache",
+        action: "lookup",
+        path: new URL(request.url).pathname,
+        error: error instanceof Error ? error.message : String(error),
+        fallback: "business-handler",
+      }));
+    }
     if (cached) {
       if (!cacheRefreshes.has(key)) {
         cacheRefreshes.add(key);
