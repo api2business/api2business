@@ -146,6 +146,9 @@ export function createHandler(
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/score-display-freshness.js") {
         return await staticFile("score-display-freshness.js", "text/javascript; charset=utf-8");
       }
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/upstream-quality-assets.js") {
+        return await staticFile("upstream-quality-assets.js", "text/javascript; charset=utf-8");
+      }
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
       const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");

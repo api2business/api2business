@@ -1,5 +1,6 @@
 import { shouldApplyScorePayload } from './score-display-freshness.js'
 import { sampleTimeDisplay } from './sample-time.js'
+import { buildSupplierQualityAssets } from './upstream-quality-assets.js'
 
 const page = document.body.dataset.page
 const $ = (selector) => document.querySelector(selector)
@@ -131,6 +132,9 @@ let scoreRefreshDueAt = null
 let scoreRefreshInFlight = null
 let upstreamAssetsInFlight = null
 let quotaSummaryInFlight = null
+let latestQuotaSummary = null
+let scoreSnapshotLoaded = false
+let upstreamAssetsLoaded = false
 let poolQualityInFlight = null
 let poolErrorPage = 1
 const poolErrorPageSize = 20
@@ -354,6 +358,7 @@ function renderScoreMetrics(data = {}) {
 function renderScores(data) {
   if (!shouldApplyScorePayload(scoreRefreshedAt, data)) return false
   scoreRows = data.accounts ?? []
+  scoreSnapshotLoaded = true
   renderScoreMetrics(data)
   const status = data.status ?? (scoreRows.length ? 'ready' : 'unavailable')
   $('#score-state').textContent = ({ ready: '已更新', refreshing: '刷新中', stale: '使用旧快照', unavailable: '暂无快照' })[status] ?? status
@@ -363,6 +368,7 @@ function renderScores(data) {
   if (data.recentCallLimit && $('#score-call-limit')) $('#score-call-limit').value = String(data.recentCallLimit)
   renderRefreshClock()
   renderScoreRows()
+  renderSupplierQualityAssets()
   return true
 }
 
@@ -383,12 +389,14 @@ async function loadUnifiedUpstreamAssets() {
       : []
     const accounts = [first, ...rest].flatMap((pageData) => pageData.accounts ?? [])
     scoreUpstreamsById = new Map(accounts.map((row) => [Number(row.id), row]))
+    upstreamAssetsLoaded = true
     const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
     const batches = []
     for (let offset = 0; offset < ids.length; offset += 40) batches.push(ids.slice(offset, offset + 40))
     const cachedPages = await Promise.all(batches.map((batch) => requestJson(`/api/upstreams/usage-cache?accountIds=${batch.join(',')}`)))
     scoreUsageById = new Map(cachedPages.flatMap((cached) => cached.results ?? []).map((result) => [Number(result.accountId), result]))
     renderScoreRows()
+    renderSupplierQualityAssets()
   })()
   try { return await upstreamAssetsInFlight } finally { upstreamAssetsInFlight = null }
 }
@@ -400,6 +408,7 @@ async function loadUnifiedQuotaSummary() {
 }
 
 function renderUnifiedQuotaSummary(summary) {
+  latestQuotaSummary = summary
   const points = Array.isArray(summary.history) ? summary.history : []
   const total = Number(summary.totalRemainingCny)
   const schedulable = Number(summary.schedulableRemainingCny)
@@ -443,17 +452,19 @@ function renderUnifiedQuotaSummary(summary) {
   })
   bindHistoryChartTooltip($('#quota-balance-chart'))
   bindHistoryChartTooltip($('#quota-cost-chart'))
+  renderSupplierQualityAssets()
 }
 
 const poolParticipationColors = ['#afdd4a', '#78b8de', '#d6a94d', '#d77b70', '#9ba7d7', '#74c7a1', '#d49ad2', '#b6a37c']
 
-function renderDonut({ ring, detail, items, center, centerLabel, emptyDetail, itemLabel, itemDetail }) {
+function renderDonut({ ring, detail, items, center, centerLabel, emptyDetail, itemLabel, itemDetail, itemColor }) {
   const normalized = items.filter((item) => Number(item.ratio) > 0)
   let angle = 0
   const stops = normalized.map((item, index) => {
     const start = angle
     angle += Number(item.ratio) * 360
-    return `${poolParticipationColors[index % poolParticipationColors.length]} ${start}deg ${angle}deg`
+    const color = itemColor?.(item, index) ?? poolParticipationColors[index % poolParticipationColors.length]
+    return `${color} ${start}deg ${angle}deg`
   })
   ring.style.background = stops.length ? `radial-gradient(circle, var(--surface) 0 56%, transparent 57%), conic-gradient(${stops.join(',')})` : ''
   ring.innerHTML = `<strong>${center}</strong><small>${centerLabel}</small>`
@@ -486,6 +497,50 @@ function renderDonut({ ring, detail, items, center, centerLabel, emptyDetail, it
     if (item) showDetail(event, `${itemLabel(item)}\n${itemDetail(item)}`)
   }
   ring.onpointerleave = hideDetail
+}
+
+const supplierQualityColors = {
+  good: 'var(--signal)',
+  mid: 'var(--warning)',
+  risk: 'var(--alert)',
+  unknown: 'var(--muted)',
+}
+
+function availabilityDuration(value) {
+  const hours = Number(value)
+  if (!Number.isFinite(hours)) return '暂不可估算'
+  return hours >= 24 ? `${number(hours / 24, 1)} 天` : `${number(hours, 1)} 小时`
+}
+
+function renderSupplierQualityAssets() {
+  const ring = $('#supplier-quality-ring')
+  if (!ring) return
+  if (!latestQuotaSummary || !scoreSnapshotLoaded || !upstreamAssetsLoaded) {
+    ring.innerHTML = '<strong>—</strong><small>等待快照</small>'
+    $('#quota-quality-estimated-hours').textContent = '等待数据'
+    $('#quota-quality-balance').textContent = '评分 >80 · 等待评分与额度快照'
+    return
+  }
+  const quality = buildSupplierQualityAssets({
+    walletDistribution: latestQuotaSummary.walletDistribution,
+    scoreRows,
+    upstreamAccounts: [...scoreUpstreamsById.values()],
+    consumedCny: latestQuotaSummary.consumedCny,
+    burnWindowHours: latestQuotaSummary.burnWindowHours,
+  })
+  renderDonut({
+    ring,
+    detail: $('#supplier-quality-detail'),
+    items: quality.items,
+    center: quality.goodBalanceRatio === null ? '—' : percent(quality.goodBalanceRatio),
+    centerLabel: '优质余额',
+    emptyDetail: '暂无可计算的供应商余额',
+    itemColor: (item) => supplierQualityColors[item.band] ?? supplierQualityColors.unknown,
+    itemLabel: (item) => item.wallet,
+    itemDetail: (item) => `${item.score === null ? '评分未知' : `评分 ${number(item.score, 1)}`} · ${cny(item.remainingCny)} · ${percent(item.ratio)}${item.schedulable ? '' : ' · 不可调度'}`,
+  })
+  $('#quota-quality-estimated-hours').textContent = availabilityDuration(quality.estimatedGoodAvailableHours)
+  $('#quota-quality-balance').textContent = `评分 >80 · 优质余额 ${cny(quality.goodBalanceCny)} · ${number(quality.scoredWallets)} 个已评分${quality.unknownScoreWallets > 0 ? ` · ${number(quality.unknownScoreWallets)} 个未知` : ''}`
 }
 
 function renderPoolQuality(data) {
