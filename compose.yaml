@@ -12,7 +12,7 @@ services:
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
-    command: ["bun", "src/api.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}", "--runtime", "compose"]
+    command: ["bun", "src/api.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}", "--runtime", "compose"]
   worker:
     build: .
     restart: unless-stopped
@@ -26,7 +26,7 @@ services:
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
-    command: ["bun", "src/worker.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}", "--runtime", "compose"]
+    command: ["bun", "src/worker.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}", "--runtime", "compose"]
     depends_on: [api]
   web:
     build: .
@@ -38,7 +38,7 @@ services:
     volumes:
       - ./config:/app/config:ro
     environment:
-      API2BUSINESS_CONFIG_PATH: ${API2BUSINESS_CONFIG_PATH:-config/api2business.example.yaml}
+      API2BUSINESS_CONFIG_PATH: ${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}
       API2BUSINESS_RUNTIME_ID: compose
     command: ["bunx", "vite", "--config", "vite.config.ts", "--host", "0.0.0.0"]
     depends_on: [api]
