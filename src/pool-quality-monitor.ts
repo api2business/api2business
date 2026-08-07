@@ -33,6 +33,7 @@ WITH internal_probe_keys AS (
     )
 ), usage_events AS (
     SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at, u.account_id,
+      u.user_id, requester.email AS user_email,
       a.name AS account_name, a.base_url, u.stream, u.first_token_ms::bigint AS first_token_ms,
       u.duration_ms::bigint, false AS scoreable, NULL::text AS exclusion_reason,
       COALESCE(u.requested_model, u.model, 'unknown') AS model,
@@ -42,11 +43,14 @@ WITH internal_probe_keys AS (
       NULL::text AS error_message, NULL::text AS upstream_error_message,
       NULL::text AS upstream_error_detail
     FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
+    LEFT JOIN users requester ON requester.id = u.user_id
     WHERE u.request_id IS NOT NULL
       AND u.created_at <= $3::timestamptz
+      AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
 ), error_sources AS (
     SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at, o.account_id,
+      o.user_id, requester.email AS user_email,
       a.name AS account_name, a.base_url, o.stream,
       o.time_to_first_token_ms::bigint AS first_token_ms,
       o.duration_ms::bigint, COALESCE(o.requested_model, o.model, 'unknown') AS model,
@@ -56,6 +60,7 @@ WITH internal_probe_keys AS (
       LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
         o.upstream_error_message, o.upstream_error_detail)) AS message_text
     FROM ops_error_logs o JOIN target_accounts a ON a.id = o.account_id
+    LEFT JOIN users requester ON requester.id = o.user_id
     WHERE (
       COALESCE(o.status_code, 0) >= 400
       OR COALESCE(o.upstream_status_code, 0) >= 400
@@ -63,6 +68,7 @@ WITH internal_probe_keys AS (
     )
       AND o.request_id IS NOT NULL
       AND o.created_at <= $3::timestamptz
+      AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
       -- 上游失败但入站已成功的 failover 中间事件不是用户错误。
       AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
       AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
@@ -117,7 +123,7 @@ WITH internal_probe_keys AS (
 ), raw_events AS (
     SELECT * FROM usage_events
     UNION ALL
-    SELECT kind, id, request_id, created_at, account_id, account_name, base_url,
+    SELECT kind, id, request_id, created_at, account_id, user_id, user_email, account_name, base_url,
       stream, first_token_ms, duration_ms, scoreable, exclusion_reason, model,
       upstream_model, inbound_endpoint, upstream_endpoint, error_phase, error_type,
       client_status_code, upstream_status_code, error_message,
@@ -174,6 +180,8 @@ SELECT
     'createdAt', created_at,
     'model', model,
     'upstreamModel', upstream_model,
+    'userId', user_id,
+    'userEmail', user_email,
     'accountId', account_id,
     'accountName', account_name,
     'clientStatusCode', client_status_code,

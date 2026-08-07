@@ -98,6 +98,10 @@ function record(value: unknown): Row {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 }
 
+function isLunaModel(...values: unknown[]): boolean {
+  return values.some((value) => typeof value === "string" && value.toLowerCase().includes("luna"));
+}
+
 function percentile(values: number[], fraction: number): number | null {
   if (values.length === 0) return null;
   const ordered = [...values].sort((left, right) => left - right);
@@ -154,7 +158,7 @@ function grade(score: number | null): string {
 export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group: Row; accounts: Row[]; collection: Row } {
   const usageByAccount = new Map<number, Sub2ApiUsageRow[]>();
   for (const row of input.usage) {
-    if (row.account_id === null) continue;
+    if (row.account_id === null || isLunaModel(row.model)) continue;
     usageByAccount.set(row.account_id, [...(usageByAccount.get(row.account_id) ?? []), row]);
   }
 
@@ -162,6 +166,7 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
   const excludedByAccount = new Map<number, Map<string, number>>();
   const customerErrorCount = new Map<number, Set<string>>();
   for (const row of input.requestErrors) {
+    if (isLunaModel(row.requested_model, row.model, row.upstream_model)) continue;
     if (row.account_id === null || row.account_id === undefined || !row.request_id) continue;
     const id = row.account_id;
     customerErrorCount.set(id, new Set([...(customerErrorCount.get(id) ?? []), row.request_id]));
@@ -181,6 +186,8 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
   const retries = new Map<number, number>();
   const upstreamStatuses = new Map<number, Map<number, number>>();
   for (const log of input.systemLogs) {
+    const metadata = extra(log);
+    if (isLunaModel(metadata.requested_model, metadata.model, metadata.upstream_model)) continue;
     if (!groupMatches(log, input.group.id)) continue;
     const id = accountId(log);
     const request = requestId(log);

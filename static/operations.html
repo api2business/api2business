@@ -22,7 +22,7 @@
       <div><span>账本配置</span><strong>只读</strong></div>
     </section>
     <section class="table-section">
-      <div class="table-toolbar"><h2>手工收支</h2></div>
+      <div class="table-toolbar"><h2>手工收支</h2><nav class="table-pagination" aria-label="手工收支分页"><button id="cash-prev" class="query-command" type="button">上一页</button><span id="cash-page" class="section-state" aria-live="polite">1 / 1</span><button id="cash-next" class="query-command" type="button">下一页</button></nav></div>
       <form id="cash-form" class="score-query-controls">
         <label class="filter-field"><span>日期</span><input id="cash-date" type="date" required /></label>
         <label class="select-field"><span>方向</span><select id="cash-direction"><option value="income">收入</option><option value="expense">支出</option></select></label>
@@ -32,17 +32,14 @@
         <button class="query-command" type="submit">新增记录</button>
       </form>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>来源</th><th>日期/月</th><th>方向</th><th>类别</th><th>金额</th><th>说明</th><th>状态</th><th>操作</th></tr></thead><tbody id="cash-body"></tbody></table></div>
-      <div class="table-pager"><button id="cash-prev" class="text-command" type="button">上一页</button><span id="cash-page">1 / 1</span><button id="cash-next" class="text-command" type="button">下一页</button></div>
     </section>
     <section class="table-section">
-      <div class="table-toolbar"><h2>预算采购建议</h2><form id="procurement-form" class="score-query-controls"><label class="filter-field"><span>预算 CNY</span><input id="procurement-budget" type="number" min="1" step="1" required /></label><button class="query-command" type="submit">计算建议</button></form></div>
+      <div class="table-toolbar"><h2>预算采购建议</h2><div class="table-toolbar-side"><form id="procurement-form" class="score-query-controls"><label class="filter-field"><span>预算 CNY</span><input id="procurement-budget" type="number" min="1" step="1" required /></label><button class="query-command" type="submit">计算建议</button></form><nav class="table-pagination" aria-label="采购建议分页"><button id="procurement-prev" class="query-command" type="button">上一页</button><span id="procurement-page" class="section-state" aria-live="polite">1 / 1</span><button id="procurement-next" class="query-command" type="button">下一页</button></nav></div></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>网站</th><th>金额</th><th>档位</th></tr></thead><tbody id="procurement-body"><tr><td colspan="3" class="empty">输入预算后计算；不调用 LLM</td></tr></tbody></table></div>
-      <div class="table-pager"><button id="procurement-prev" class="text-command" type="button">上一页</button><span id="procurement-page">1 / 1</span><button id="procurement-next" class="text-command" type="button">下一页</button></div>
     </section>
     <section class="table-section">
-      <div class="table-toolbar"><h2>操作记录</h2></div>
+      <div class="table-toolbar"><h2>操作记录</h2><nav class="table-pagination" aria-label="操作记录分页"><button id="audit-prev" class="query-command" type="button">上一页</button><span id="audit-page" class="section-state" aria-live="polite">1 / 1</span><button id="audit-next" class="query-command" type="button">下一页</button></nav></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>时间</th><th>动作</th><th>状态</th><th>操作人</th><th>输入摘要</th><th>结果摘要</th></tr></thead><tbody id="audit-body"></tbody></table></div>
-      <div class="table-pager"><button id="audit-prev" class="text-command" type="button">上一页</button><span id="audit-page">1 / 1</span><button id="audit-next" class="text-command" type="button">下一页</button></div>
     </section>
   </main>
 </body>

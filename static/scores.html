@@ -54,11 +54,18 @@
           <button id="generate-plan" class="query-command" type="button">生成调整计划</button>
           <button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button>
         </div>
-        <div id="score-updated" class="refresh-clock">
-          <span>上次更新时间</span>
-          <strong id="score-updated-time">尚无成功快照</strong>
-          <small id="score-refresh-countdown">自动刷新已关闭</small>
-          <small id="idle-probe-rolling">探活 24h：等待读取</small>
+        <div class="table-toolbar-side">
+          <nav class="table-pagination" aria-label="评分结果分页">
+            <button id="score-prev" class="query-command" type="button" disabled>上一页</button>
+            <span id="score-page" class="section-state" aria-live="polite">正在读取…</span>
+            <button id="score-next" class="query-command" type="button" disabled>下一页</button>
+          </nav>
+          <div id="score-updated" class="refresh-clock">
+            <span>上次更新时间</span>
+            <strong id="score-updated-time">尚无成功快照</strong>
+            <small id="score-refresh-countdown">自动刷新已关闭</small>
+            <small id="idle-probe-rolling">探活 24h：等待读取</small>
+          </div>
         </div>
       </div>
       <div class="profile-tabs" role="tablist" aria-label="评分账号类型">
@@ -73,11 +80,6 @@
           <tbody id="score-body"><tr><td colspan="14" class="empty">正在合并评分与资产数据...</td></tr></tbody>
         </table>
       </div>
-      <div class="table-pager score-pager" aria-label="评分结果分页">
-        <button id="score-prev" class="text-command" type="button" disabled>上一页</button>
-        <span id="score-page" aria-live="polite">正在读取…</span>
-        <button id="score-next" class="text-command" type="button" disabled>下一页</button>
-      </div>
     </section>
     <section class="table-section pool-error-section" aria-labelledby="pool-error-title">
       <div class="table-toolbar">
@@ -85,31 +87,33 @@
           <h2 id="pool-error-title">错误记录</h2>
           <p id="pool-error-state" class="section-state">正在读取综合质量错误证据…</p>
         </div>
-        <div class="score-query-controls">
+        <div class="table-toolbar-side">
           <label class="select-field"><span>口径</span><select id="pool-error-filter"><option value="scoreable">计分失败</option><option value="excluded">已排除</option><option value="all">全部错误</option></select></label>
+          <nav class="table-pagination" aria-label="错误记录分页">
+            <button id="pool-error-prev" class="query-command" type="button" disabled>上一页</button>
+            <span id="pool-error-page" class="section-state" aria-live="polite">正在读取…</span>
+            <button id="pool-error-next" class="query-command" type="button" disabled>下一页</button>
+          </nav>
           <button id="refresh-pool-errors" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>刷新错误</span></button>
         </div>
       </div>
       <p id="pool-error-models" class="pool-error-models">模型分布：等待读取</p>
       <div class="table-wrap">
         <table class="data-table pool-error-table" aria-label="综合质量最近一千次调用错误记录">
-          <thead><tr><th>时间</th><th>模型</th><th>上游账号</th><th>记录 / 上游状态</th><th>端点</th><th>模式</th><th>最终错误</th></tr></thead>
-          <tbody id="pool-error-body"><tr><td colspan="7" class="empty">正在读取错误记录…</td></tr></tbody>
+          <thead><tr><th>时间</th><th>模型</th><th>用户</th><th>上游账号</th><th>记录 / 上游状态</th><th>端点</th><th>模式</th><th>最终错误</th></tr></thead>
+          <tbody id="pool-error-body"><tr><td colspan="8" class="empty">正在读取错误记录…</td></tr></tbody>
         </table>
-      </div>
-      <div class="table-pager" aria-label="错误记录分页">
-        <button id="pool-error-prev" class="text-command" type="button" disabled>上一页</button>
-        <span id="pool-error-page" aria-live="polite">正在读取…</span>
-        <button id="pool-error-next" class="text-command" type="button" disabled>下一页</button>
       </div>
     </section>
     <section class="table-section">
       <div class="table-toolbar">
         <h2>调整记录</h2>
-        <div class="score-query-controls">
-          <button id="history-prev" class="query-command" type="button" disabled>上一页</button>
-          <span id="history-page-state" class="section-state" aria-live="polite">正在读取…</span>
-          <button id="history-next" class="query-command" type="button" disabled>下一页</button>
+        <div class="table-toolbar-side">
+          <nav class="table-pagination" aria-label="调整记录分页">
+            <button id="history-prev" class="query-command" type="button" disabled>上一页</button>
+            <span id="history-page-state" class="section-state" aria-live="polite">正在读取…</span>
+            <button id="history-next" class="query-command" type="button" disabled>下一页</button>
+          </nav>
           <button id="refresh-history" class="query-command" type="button">刷新记录</button>
         </div>
       </div>
@@ -118,10 +122,12 @@
     <section class="table-section">
       <div class="table-toolbar">
         <h2>探活记录</h2>
-        <div class="score-query-controls">
-          <button id="probe-history-prev" class="query-command" type="button" disabled>上一页</button>
-          <span id="probe-history-page-state" class="section-state" aria-live="polite">正在读取…</span>
-          <button id="probe-history-next" class="query-command" type="button" disabled>下一页</button>
+        <div class="table-toolbar-side">
+          <nav class="table-pagination" aria-label="探活记录分页">
+            <button id="probe-history-prev" class="query-command" type="button" disabled>上一页</button>
+            <span id="probe-history-page-state" class="section-state" aria-live="polite">正在读取…</span>
+            <button id="probe-history-next" class="query-command" type="button" disabled>下一页</button>
+          </nav>
           <button id="refresh-probe-history" class="query-command" type="button">刷新记录</button>
         </div>
       </div>
@@ -162,7 +168,7 @@
       <section id="score-benchmark-result" class="benchmark-result"><p class="empty">尚未运行评测</p></section>
       <p id="score-benchmark-state" class="dialog-state">只在点击开始后运行，不会自动跑分，也不会轮换探活 API Key。</p>
       <section class="upstream-job-console benchmark-console" aria-label="评测过程日志"><header><span>本次评测进度</span><code id="score-benchmark-run">RUN —</code></header><div class="benchmark-progress"><span id="score-benchmark-progress-label">等待启动</span><progress id="score-benchmark-progress" max="6" value="0"></progress></div><ol id="score-benchmark-logs" class="upstream-job-logs"><li class="empty">启动后显示逐题日志</li></ol></section>
-      <section class="benchmark-history" aria-label="评测历史"><header><div><span>评测历史</span><small>最近 20 次</small></div></header><div class="benchmark-history-scroll"><table><thead><tr><th>开始时间</th><th>模型</th><th>状态</th><th>分数</th><th>耗时</th></tr></thead><tbody id="score-benchmark-history"><tr><td colspan="5" class="empty">正在加载</td></tr></tbody></table></div></section>
+      <section class="benchmark-history" aria-label="评测历史"><header><div><span>评测历史</span><small>最近 20 次</small></div></header><div class="benchmark-history-scroll table-wrap"><table class="data-table"><thead><tr><th>开始时间</th><th>模型</th><th>状态</th><th>分数</th><th>耗时</th></tr></thead><tbody id="score-benchmark-history"><tr><td colspan="5" class="empty">正在加载</td></tr></tbody></table></div></section>
       <footer><button class="text-command" data-dialog-close type="button">取消</button><button id="score-benchmark-submit" class="primary-command" type="submit">开始评测</button></footer>
     </form>
   </dialog>

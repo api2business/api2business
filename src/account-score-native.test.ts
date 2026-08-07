@@ -82,6 +82,33 @@ describe("aggregateNativeGroupScore", () => {
     expect(result.group.maxCapacity).toBe(10);
   });
 
+  test("excludes luna usage, request errors, and system events from scoring", () => {
+    const result = aggregateNativeGroupScore({
+      group: { id: 2, name: "pool", platform: "openai", status: "active" },
+      accounts: [{ id: 15, name: "primary 0.02", platform: "openai", status: "active", schedulable: true, priority: 1 }],
+      usage: [
+        { id: 1, account_id: 15, group_id: 2, model: "gpt-5.6-terra", stream: true, input_tokens: 10, output_tokens: 5, actual_cost: 0.1, duration_ms: 1000, first_token_ms: 500, created_at: "2026-07-17T09:00:00Z" },
+        { id: 2, account_id: 15, group_id: 2, model: "gpt-5.6-luna", stream: true, input_tokens: 100, output_tokens: 50, actual_cost: 1, duration_ms: 9000, first_token_ms: 8000, created_at: "2026-07-17T09:01:00Z" },
+      ],
+      requestErrors: [
+        { id: 1, request_id: "req-terra", account_id: 15, status_code: 502, phase: "upstream", type: "upstream_error", requested_model: "gpt-5.6-terra", message: "temporary failure" },
+        { id: 2, request_id: "req-luna", account_id: 15, status_code: 502, phase: "upstream", type: "upstream_error", requested_model: "gpt-5.6-luna", message: "temporary failure" },
+      ],
+      systemLogs: [
+        { id: 1, created_at: "2026-07-17T09:02:00Z", message: "openai.upstream_failover_switching", request_id: "req-terra", account_id: 15, extra: { group_id: 2, requested_model: "gpt-5.6-terra" } },
+        { id: 2, created_at: "2026-07-17T09:03:00Z", message: "openai.upstream_failover_switching", request_id: "req-luna", account_id: 15, extra: { group_id: 2, requested_model: "gpt-5.6-luna" } },
+      ],
+      overview: {},
+      availability: availableOps,
+      concurrency: availableOps,
+    });
+    const row = result.accounts[0]!;
+    expect(row.successRequests).toBe(1);
+    expect(row.failureRequests).toBe(1);
+    expect(row.failoverRequests).toBe(1);
+    expect((row.usage as Record<string, unknown>).tokenCount).toBe(15);
+  });
+
   test("collects groups sequentially and deduplicates marker results", async () => {
     const calls: string[] = [];
     const fake = {

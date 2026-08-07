@@ -140,6 +140,7 @@ account_stats AS (
         FROM usage_logs u
         WHERE u.account_id = a.account_id
           AND u.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
+          AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
         ORDER BY u.created_at DESC
         LIMIT $1
       )
@@ -190,6 +191,7 @@ account_stats AS (
         FROM ops_error_logs o
         WHERE o.account_id = a.account_id
           AND o.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
+          AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
           AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
             '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
           )

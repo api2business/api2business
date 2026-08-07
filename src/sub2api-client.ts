@@ -54,6 +54,9 @@ export interface Sub2ApiRequestError {
   type?: string;
   message?: string;
   error_message?: string;
+  model?: string;
+  requested_model?: string;
+  upstream_model?: string;
 }
 
 export interface Sub2ApiSystemLog {

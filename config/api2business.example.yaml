@@ -82,7 +82,8 @@ sub2api:
     enabled: true
     intervalSeconds: 60
     idleSeconds: 600
-    model: gpt-5.4-mini
+    model: gpt-5.6-terra
+    reasoningEffort: low
     candidateLimit: 10
     concurrency: 1000
     accountTimeoutMs: 30000

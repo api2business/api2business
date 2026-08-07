@@ -365,7 +365,12 @@ export class ProbeIsolationService {
     return payload;
   }
 
-  async probe(accountId: number, model: string, timeoutMs: number): Promise<Record<string, unknown>> {
+  async probe(
+    accountId: number,
+    model: string,
+    timeoutMs: number,
+    reasoningEffort: "low" | "medium" | "high" = "low",
+  ): Promise<Record<string, unknown>> {
     const startedAt = Date.now();
     const roundBudgetMs = Math.max(1_000, this.config.sub2api.idleProbe.roundTimeoutSeconds * 1_000 - 1_000);
     const deadline = startedAt + roundBudgetMs;
@@ -394,7 +399,13 @@ export class ProbeIsolationService {
           "content-type": "application/json",
           authorization: `Bearer ${ensured.record.apiKey}`,
         },
-        body: JSON.stringify({ model, input: "health probe", max_output_tokens: 1, stream: false }),
+        body: JSON.stringify({
+          model,
+          input: "health probe",
+          reasoning: { effort: reasoningEffort },
+          max_output_tokens: 1,
+          stream: false,
+        }),
         signal: AbortSignal.timeout(Math.min(timeoutMs, this.remainingTimeout(deadline) ?? timeoutMs)),
       });
     } catch (error) {

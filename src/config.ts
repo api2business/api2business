@@ -131,6 +131,7 @@ export interface AppConfig {
       intervalSeconds: number;
       idleSeconds: number;
       model: string;
+      reasoningEffort: "low" | "medium" | "high";
       candidateLimit: number;
       concurrency: number;
       accountTimeoutMs: number;
@@ -722,43 +723,48 @@ export function loadConfig(path: string): AppConfig {
         if (requestJitterMaxMs < requestJitterMinMs) {
           throw new Error("sub2api.idleProbe.requestJitterMaxMs must be greater than or equal to requestJitterMinMs");
         }
+        const reasoningEffort = stringValue(idleProbe, "reasoningEffort", "sub2api.idleProbe");
+        if (!["low", "medium", "high"].includes(reasoningEffort)) {
+          throw new Error("sub2api.idleProbe.reasoningEffort must be low, medium, or high");
+        }
         return {
-        enabled: booleanValue(idleProbe, "enabled", "sub2api.idleProbe"),
-        intervalSeconds: integerValue(idleProbe, "intervalSeconds", "sub2api.idleProbe", 10, 3600),
-        idleSeconds: integerValue(idleProbe, "idleSeconds", "sub2api.idleProbe", 10, 86400),
-        model: stringValue(idleProbe, "model", "sub2api.idleProbe"),
-        candidateLimit: integerValue(idleProbe, "candidateLimit", "sub2api.idleProbe", 1, 100),
-        concurrency: integerValue(idleProbe, "concurrency", "sub2api.idleProbe", 1, 1000),
-        accountTimeoutMs: integerValue(idleProbe, "accountTimeoutMs", "sub2api.idleProbe", 1000, 120000),
-        requestJitterMinMs,
-        requestJitterMaxMs,
-        roundTimeoutSeconds: integerValue(idleProbe, "roundTimeoutSeconds", "sub2api.idleProbe", 5, 300),
-        provisionCandidateLimit: integerValue(idleProbe, "provisionCandidateLimit", "sub2api.idleProbe", 1, 20),
-        provisionTimeoutSeconds: integerValue(idleProbe, "provisionTimeoutSeconds", "sub2api.idleProbe", 10, 300),
-        isolation: (() => {
-          const value = object(idleProbe.isolation, "sub2api.idleProbe.isolation");
-          const gatewayBaseUrl = stringValue(value, "gatewayBaseUrl", "sub2api.idleProbe.isolation").replace(/\/$/u, "");
-          const parsedGatewayBaseUrl = new URL(gatewayBaseUrl);
-          if (parsedGatewayBaseUrl.protocol !== "https:" || parsedGatewayBaseUrl.username || parsedGatewayBaseUrl.password) {
-            throw new Error("sub2api.idleProbe.isolation.gatewayBaseUrl must be an HTTPS URL without credentials");
-          }
-          const groupNamePrefix = stringValue(value, "groupNamePrefix", "sub2api.idleProbe.isolation");
-          if (!/^[a-z][a-z0-9-]{2,48}-$/u.test(groupNamePrefix)) {
-            throw new Error("sub2api.idleProbe.isolation.groupNamePrefix must be an internal lowercase prefix ending with '-'");
-          }
-          const secretFile = stringValue(value, "secretFile", "sub2api.idleProbe.isolation");
-          if (secretFile.includes("..") || !secretFile.startsWith(".state/")) {
-            throw new Error("sub2api.idleProbe.isolation.secretFile must remain under .state");
-          }
-          return {
-            enabled: booleanValue(value, "enabled", "sub2api.idleProbe.isolation"),
-            gatewayBaseUrl,
-            groupNamePrefix,
-            groupRateMultiplier: numberValue(value, "groupRateMultiplier", "sub2api.idleProbe.isolation", 0.0001, 1),
-            userBalance: numberValue(value, "userBalance", "sub2api.idleProbe.isolation", 0.000001, 10000),
-            secretFile,
-          };
-        })(),
+          enabled: booleanValue(idleProbe, "enabled", "sub2api.idleProbe"),
+          intervalSeconds: integerValue(idleProbe, "intervalSeconds", "sub2api.idleProbe", 10, 3600),
+          idleSeconds: integerValue(idleProbe, "idleSeconds", "sub2api.idleProbe", 10, 86400),
+          model: stringValue(idleProbe, "model", "sub2api.idleProbe"),
+          reasoningEffort: reasoningEffort as "low" | "medium" | "high",
+          candidateLimit: integerValue(idleProbe, "candidateLimit", "sub2api.idleProbe", 1, 100),
+          concurrency: integerValue(idleProbe, "concurrency", "sub2api.idleProbe", 1, 1000),
+          accountTimeoutMs: integerValue(idleProbe, "accountTimeoutMs", "sub2api.idleProbe", 1000, 120000),
+          requestJitterMinMs,
+          requestJitterMaxMs,
+          roundTimeoutSeconds: integerValue(idleProbe, "roundTimeoutSeconds", "sub2api.idleProbe", 5, 300),
+          provisionCandidateLimit: integerValue(idleProbe, "provisionCandidateLimit", "sub2api.idleProbe", 1, 20),
+          provisionTimeoutSeconds: integerValue(idleProbe, "provisionTimeoutSeconds", "sub2api.idleProbe", 10, 300),
+          isolation: (() => {
+            const value = object(idleProbe.isolation, "sub2api.idleProbe.isolation");
+            const gatewayBaseUrl = stringValue(value, "gatewayBaseUrl", "sub2api.idleProbe.isolation").replace(/\/$/u, "");
+            const parsedGatewayBaseUrl = new URL(gatewayBaseUrl);
+            if (parsedGatewayBaseUrl.protocol !== "https:" || parsedGatewayBaseUrl.username || parsedGatewayBaseUrl.password) {
+              throw new Error("sub2api.idleProbe.isolation.gatewayBaseUrl must be an HTTPS URL without credentials");
+            }
+            const groupNamePrefix = stringValue(value, "groupNamePrefix", "sub2api.idleProbe.isolation");
+            if (!/^[a-z][a-z0-9-]{2,48}-$/u.test(groupNamePrefix)) {
+              throw new Error("sub2api.idleProbe.isolation.groupNamePrefix must be an internal lowercase prefix ending with '-'");
+            }
+            const secretFile = stringValue(value, "secretFile", "sub2api.idleProbe.isolation");
+            if (secretFile.includes("..") || !secretFile.startsWith(".state/")) {
+              throw new Error("sub2api.idleProbe.isolation.secretFile must remain under .state");
+            }
+            return {
+              enabled: booleanValue(value, "enabled", "sub2api.idleProbe.isolation"),
+              gatewayBaseUrl,
+              groupNamePrefix,
+              groupRateMultiplier: numberValue(value, "groupRateMultiplier", "sub2api.idleProbe.isolation", 0.0001, 1),
+              userBalance: numberValue(value, "userBalance", "sub2api.idleProbe.isolation", 0.000001, 10000),
+              secretFile,
+            };
+          })(),
         };
       })(),
       priorityPlan: readPriorityPlanPolicy(sub2api.priorityPlan, "sub2api.priorityPlan"),

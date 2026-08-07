@@ -46,7 +46,10 @@
           <label class="filter-field"><span>模糊筛选</span><input id="upstream-search" type="search" placeholder="ID、名称、base_url、Key 前缀或状态" autocomplete="off" /></label>
           <button class="query-command" type="submit">查询</button>
         </form>
-        <p id="upstream-query-state" class="section-state">默认每页 10 条，点击行编辑</p>
+        <div class="table-toolbar-side">
+          <p id="upstream-query-state" class="section-state">默认每页 10 条，点击行编辑</p>
+          <nav class="table-pagination" aria-label="上游账号分页"><button id="upstream-prev" class="query-command" type="button" disabled>上一页</button><span id="upstream-page" class="section-state" aria-live="polite">1 / 1</span><button id="upstream-next" class="query-command" type="button" disabled>下一页</button></nav>
+        </div>
       </div>
       <div class="table-wrap">
         <table class="data-table upstream-table" aria-label="runtime API-key 上游账号列表">
@@ -54,7 +57,6 @@
           <tbody id="upstream-body"><tr><td colspan="11" class="empty">正在读取上游账号</td></tr></tbody>
         </table>
       </div>
-      <div class="table-pager"><button id="upstream-prev" class="text-command" type="button" disabled>上一页</button><span id="upstream-page">1 / 1</span><button id="upstream-next" class="text-command" type="button" disabled>下一页</button></div>
     </section>
   </main>
 

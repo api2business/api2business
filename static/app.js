@@ -613,6 +613,7 @@ function renderPoolQualityErrors(data) {
     const detail = [
       ['请求 ID', requestId],
       ['模型', `${row.model ?? 'unknown'}${row.upstreamModel && row.upstreamModel !== row.model ? ` → ${row.upstreamModel}` : ''}`],
+      ['用户', `${row.userEmail ?? '未知用户'}${row.userId == null ? '' : ` #${row.userId}`}`],
       ['账号', `${row.accountName ?? '—'} #${row.accountId ?? '—'}`],
       ['状态', `记录 ${row.clientStatusCode ?? '—'} / 上游 ${row.upstreamStatusCode ?? '—'}`],
       ['端点', endpoint],
@@ -622,8 +623,8 @@ function renderPoolQualityErrors(data) {
       ['上游错误', row.upstreamErrorMessage ?? '—'],
       ['上游详情', row.upstreamErrorDetail ?? '—'],
     ]
-    return `<tr class="pool-error-row" data-pool-error-row="${index}" tabindex="0" aria-expanded="false"><td><time>${time(row.createdAt)}</time></td><td class="pool-error-model"><b>${escapeHtml(row.model ?? 'unknown')}</b>${row.upstreamModel && row.upstreamModel !== row.model ? `<small>→ ${escapeHtml(row.upstreamModel)}</small>` : ''}</td><td class="account-cell"><b>${escapeHtml(row.accountName ?? '—')}</b><small>#${number(row.accountId)}</small></td><td class="pool-error-status"><b>${escapeHtml(row.clientStatusCode ?? '—')}</b><span>/</span><b>${escapeHtml(row.upstreamStatusCode ?? '—')}</b></td><td class="pool-error-endpoint">${escapeHtml(endpoint)}</td><td>${row.stream ? '流式' : '同步'}${row.failoverTriggered ? '<small class="pool-error-failover">触发切号</small>' : ''}</td><td class="pool-error-summary" title="${escapeHtml(message)}">${escapeHtml(message)}</td></tr><tr class="pool-error-detail" data-pool-error-detail="${index}" hidden><td colspan="7"><dl>${detail.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl></td></tr>`
-  }).join('') : '<tr><td colspan="7" class="empty">当前口径没有错误记录</td></tr>'
+    return `<tr class="pool-error-row" data-pool-error-row="${index}" tabindex="0" aria-expanded="false"><td><time>${time(row.createdAt)}</time></td><td class="pool-error-model"><b>${escapeHtml(row.model ?? 'unknown')}</b>${row.upstreamModel && row.upstreamModel !== row.model ? `<small>→ ${escapeHtml(row.upstreamModel)}</small>` : ''}</td><td class="account-cell pool-error-user"><b>${escapeHtml(row.userEmail ?? '未知用户')}</b><small>${row.userId == null ? '未记录 ID' : `#${number(row.userId)}`}</small></td><td class="account-cell"><b>${escapeHtml(row.accountName ?? '—')}</b><small>#${number(row.accountId)}</small></td><td class="pool-error-status"><b>${escapeHtml(row.clientStatusCode ?? '—')}</b><span>/</span><b>${escapeHtml(row.upstreamStatusCode ?? '—')}</b></td><td class="pool-error-endpoint">${escapeHtml(endpoint)}</td><td>${row.stream ? '流式' : '同步'}${row.failoverTriggered ? '<small class="pool-error-failover">触发切号</small>' : ''}</td><td class="pool-error-summary" title="${escapeHtml(message)}">${escapeHtml(message)}</td></tr><tr class="pool-error-detail" data-pool-error-detail="${index}" hidden><td colspan="8"><dl>${detail.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl></td></tr>`
+  }).join('') : '<tr><td colspan="8" class="empty">当前口径没有错误记录</td></tr>'
   $('#pool-error-page').textContent = `${number(pagination.page)} / ${number(pagination.totalPages)} · ${number(pagination.total)} 条`
   $('#pool-error-prev').disabled = pagination.page <= 1
   $('#pool-error-next').disabled = pagination.page >= pagination.totalPages

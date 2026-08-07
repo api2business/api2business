@@ -205,11 +205,15 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
   }) as unknown as typeof fetch;
   try {
     await service.ensure(42);
-    const result = await service.probe(42, "gpt-5.5", 1000);
+    const result = await service.probe(42, "gpt-5.6-terra", 1000, "low");
     expect(result).toMatchObject({ accountId: 42, groupId: 51, classification: "alive", ordinaryLogRecorded: true });
     expect(requestUrl).toBe("https://gateway.example.com/v1/responses");
     expect(requestUrl).not.toContain("/admin/accounts/");
-    expect(JSON.parse(requestBody)).toMatchObject({ model: "gpt-5.5", stream: false });
+    expect(JSON.parse(requestBody)).toMatchObject({
+      model: "gpt-5.6-terra",
+      reasoning: { effort: "low" },
+      stream: false,
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

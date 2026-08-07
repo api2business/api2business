@@ -266,7 +266,12 @@ export class IdleAccountProbeService {
             try {
               const jitterMs = idleProbeRequestJitterMs(policy.requestJitterMinMs, policy.requestJitterMaxMs);
               await Bun.sleep(jitterMs);
-              const response = await this.isolation!.probe(candidate.accountId, policy.model, policy.accountTimeoutMs);
+              const response = await this.isolation!.probe(
+                candidate.accountId,
+                policy.model,
+                policy.accountTimeoutMs,
+                policy.reasoningEffort,
+              );
               return {
                 accountId: candidate.accountId,
                 accountName: candidate.accountName,
