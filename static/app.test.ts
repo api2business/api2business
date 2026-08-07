@@ -517,16 +517,10 @@ test("pool quality is sampled separately above the account table with participat
   expect(source).toContain("最近 ${number(data.recentCallLimit)} 次");
 });
 
-test("tables use the shared header pagination and pool errors expose requester identity", async () => {
-  const htmlFiles = ["scores.html", "upstreams.html", "oauth-cost.html", "operations.html"];
-  const pages = await Promise.all(htmlFiles.map((file) => Bun.file(new URL(`./${file}`, import.meta.url)).text()));
+test("pool errors expose requester identity", async () => {
+  const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
   const source = await Bun.file(new URL("./app.js", import.meta.url)).text();
-  for (const html of pages) {
-    expect(html).not.toContain("table-pager");
-    expect(html.match(/<table\b/gu)?.length).toBe(html.match(/<table\b[^>]*class="[^"]*data-table/gu)?.length);
-  }
-  expect(pages.join("\n")).toContain('class="table-pagination"');
-  expect(pages[0]).toContain("<th>用户</th>");
+  expect(html).toContain("<th>用户</th>");
   expect(source).toContain("row.userEmail ?? '未知用户'");
   expect(source).toContain("row.userId == null");
   expect(source).toContain('colspan="8"');

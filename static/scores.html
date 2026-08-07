@@ -8,7 +8,7 @@
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>上游资产与实时成本 | Api2Business</title>
-  <link rel="stylesheet" href="/styles.css?v=quality-assets-v1" />
+  <link rel="stylesheet" href="/styles.css?v=table-layout-v2" />
   <script src="/app.js?v=quality-assets-v1" type="module"></script>
 </head>
 <body data-page="scores">
@@ -46,7 +46,7 @@
       <figure class="pool-participation"><figcaption><span>上游参与比例</span><small>最近 1000 次调用</small></figcaption><div class="pool-participation-body"><div class="donut-stack"><div id="pool-participation-ring" class="pool-participation-ring" role="img" aria-label="各上游参与比例"><strong>—</strong><small>调用</small></div><p id="pool-participation-detail" class="donut-hover-detail">悬停查看账号详情</p></div><ol id="pool-participation-legend" class="pool-participation-legend"><li class="empty">暂无参与样本</li></ol></div></figure>
     </section>
     <section class="table-section">
-      <div class="table-toolbar">
+      <div class="table-toolbar score-table-toolbar">
         <div class="score-query-controls">
           <div class="filter-field"><span>筛选</span><input id="score-filter" type="search" placeholder="账号、URL、分组或状态" /></div>
           <label class="select-field"><span>评分/计划样本</span><select id="score-call-limit"></select></label>
@@ -55,11 +55,6 @@
           <button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button>
         </div>
         <div class="table-toolbar-side">
-          <nav class="table-pagination" aria-label="评分结果分页">
-            <button id="score-prev" class="query-command" type="button" disabled>上一页</button>
-            <span id="score-page" class="section-state" aria-live="polite">正在读取…</span>
-            <button id="score-next" class="query-command" type="button" disabled>下一页</button>
-          </nav>
           <div id="score-updated" class="refresh-clock">
             <span>上次更新时间</span>
             <strong id="score-updated-time">尚无成功快照</strong>
@@ -74,20 +69,28 @@
       </div>
       <p id="plan-refresh-state" class="section-state">尚未生成调整计划</p>
       <div id="plan-progress" class="operation-progress" aria-live="polite"></div>
-      <div class="table-wrap">
+      <div class="table-wrap score-table-wrap">
         <table class="data-table unified-upstream-table" aria-label="上游账号资产、评分与实时成本总表">
+          <colgroup><col class="score-col-account"><col class="score-col-status"><col class="score-col-score"><col class="score-col-priority"><col class="score-col-balance"><col class="score-col-rate"><col class="score-col-probe"><col class="score-col-output"><col class="score-col-sample"><col class="score-col-failure"><col class="score-col-ttft"><col class="score-col-failover"><col class="score-col-groups"><col class="score-col-actions"></colgroup>
           <thead><tr><th data-score-sort="accountName">账号</th><th data-score-sort="available">状态</th><th data-score-sort="score" aria-sort="descending">评分</th><th data-score-sort="priority">优先级</th><th data-score-sort="balance">账号余额</th><th data-score-sort="rate">手工费率</th><th data-score-sort="probeCost">探测成本</th><th data-score-sort="apiAmountUsd">API 产出</th><th data-score-sort="latestSampleAt">最新样本</th><th data-score-sort="failureRate">失败率</th><th data-score-sort="ttftP95Ms">TTFT P95</th><th>失败 / 切号 / 恢复</th><th>分组</th><th>操作</th></tr></thead>
           <tbody id="score-body"><tr><td colspan="14" class="empty">正在合并评分与资产数据...</td></tr></tbody>
         </table>
       </div>
+      <footer class="table-footer">
+        <nav class="table-pagination" aria-label="评分结果分页">
+          <button id="score-prev" class="query-command" type="button" disabled>上一页</button>
+          <span id="score-page" class="section-state" aria-live="polite">正在读取…</span>
+          <button id="score-next" class="query-command" type="button" disabled>下一页</button>
+        </nav>
+      </footer>
     </section>
     <section class="table-section pool-error-section" aria-labelledby="pool-error-title">
-      <div class="table-toolbar">
+      <div class="table-toolbar record-table-toolbar">
         <div>
           <h2 id="pool-error-title">错误记录</h2>
           <p id="pool-error-state" class="section-state">正在读取综合质量错误证据…</p>
         </div>
-        <div class="table-toolbar-side">
+        <div class="table-toolbar-side record-table-controls">
           <label class="select-field"><span>口径</span><select id="pool-error-filter"><option value="scoreable">计分失败</option><option value="excluded">已排除</option><option value="all">全部错误</option></select></label>
           <nav class="table-pagination" aria-label="错误记录分页">
             <button id="pool-error-prev" class="query-command" type="button" disabled>上一页</button>
@@ -106,9 +109,9 @@
       </div>
     </section>
     <section class="table-section">
-      <div class="table-toolbar">
+      <div class="table-toolbar record-table-toolbar">
         <h2>调整记录</h2>
-        <div class="table-toolbar-side">
+        <div class="table-toolbar-side record-table-controls">
           <nav class="table-pagination" aria-label="调整记录分页">
             <button id="history-prev" class="query-command" type="button" disabled>上一页</button>
             <span id="history-page-state" class="section-state" aria-live="polite">正在读取…</span>
@@ -120,9 +123,9 @@
       <div class="table-wrap"><table class="data-table"><thead><tr><th>调优池</th><th>开始时间</th><th>方式</th><th>状态</th><th>操作者</th><th>样本</th><th>调整数</th><th>完成时间</th><th>耗时</th></tr></thead><tbody id="priority-history-body"><tr><td colspan="9" class="empty">正在读取调整记录</td></tr></tbody></table></div>
     </section>
     <section class="table-section">
-      <div class="table-toolbar">
+      <div class="table-toolbar record-table-toolbar">
         <h2>探活记录</h2>
-        <div class="table-toolbar-side">
+        <div class="table-toolbar-side record-table-controls">
           <nav class="table-pagination" aria-label="探活记录分页">
             <button id="probe-history-prev" class="query-command" type="button" disabled>上一页</button>
             <span id="probe-history-page-state" class="section-state" aria-live="polite">正在读取…</span>
