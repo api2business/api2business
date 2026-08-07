@@ -502,8 +502,13 @@ function renderDonut({ ring, detail, items, center, centerLabel, emptyDetail, it
 const supplierQualityColors = {
   good: 'var(--signal)',
   mid: 'var(--warning)',
-  risk: 'var(--alert)',
-  unknown: 'var(--muted)',
+  risk: 'var(--line)',
+}
+
+const supplierQualityLabels = {
+  good: '优质',
+  mid: '一般',
+  risk: '不良',
 }
 
 function availabilityDuration(value) {
@@ -531,13 +536,13 @@ function renderSupplierQualityAssets() {
   renderDonut({
     ring,
     detail: $('#supplier-quality-detail'),
-    items: quality.items,
-    center: quality.goodBalanceRatio === null ? '—' : percent(quality.goodBalanceRatio),
-    centerLabel: '优质余额',
+    items: quality.qualityBands,
+    center: cny(quality.goodBalanceCny),
+    centerLabel: quality.goodBalanceRatio === null ? '优质余额' : `优质 ${percent(quality.goodBalanceRatio)}`,
     emptyDetail: '暂无可计算的供应商余额',
-    itemColor: (item) => supplierQualityColors[item.band] ?? supplierQualityColors.unknown,
-    itemLabel: (item) => item.wallet,
-    itemDetail: (item) => `${item.score === null ? '评分未知' : `评分 ${number(item.score, 1)}`} · ${cny(item.remainingCny)} · ${percent(item.ratio)}${item.schedulable ? '' : ' · 不可调度'}`,
+    itemColor: (item) => supplierQualityColors[item.band] ?? supplierQualityColors.risk,
+    itemLabel: (item) => supplierQualityLabels[item.band] ?? '不良',
+    itemDetail: (item) => `${cny(item.remainingCny)} · ${percent(item.ratio)} · ${number(item.supplierCount)} 个供应商`,
   })
   $('#quota-quality-estimated-hours').textContent = availabilityDuration(quality.estimatedGoodAvailableHours)
   $('#quota-quality-balance').textContent = `评分 >80 · 优质余额 ${cny(quality.goodBalanceCny)} · ${number(quality.scoredWallets)} 个已评分${quality.unknownScoreWallets > 0 ? ` · ${number(quality.unknownScoreWallets)} 个未知` : ''}`

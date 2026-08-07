@@ -422,12 +422,12 @@ button:disabled { cursor: wait; opacity: .48; }
 .quota-donut-pair { display:grid; grid-template-columns:repeat(2,124px); justify-content:center; align-items:start; gap:12px; }
 .quota-donut-pair .donut-stack { min-width:124px; }
 .supplier-quality-ring { background:radial-gradient(circle,var(--surface) 0 56%,transparent 57%),conic-gradient(var(--line) 0 360deg); }
+.supplier-quality-ring strong { font-size:18px; }
 .supplier-quality-scale { grid-column:1 / -1; display:flex; justify-content:center; flex-wrap:wrap; gap:5px 10px; margin:0; color:var(--muted); font:10px/1.2 var(--mono); }
 .supplier-quality-scale span::before { display:inline-block; width:6px; height:6px; margin-right:4px; background:var(--quality-color); content:""; }
 .supplier-quality-scale span[data-band="good"] { --quality-color:var(--signal); }
 .supplier-quality-scale span[data-band="mid"] { --quality-color:var(--warning); }
-.supplier-quality-scale span[data-band="risk"] { --quality-color:var(--alert); }
-.supplier-quality-scale span[data-band="unknown"] { --quality-color:var(--muted); }
+.supplier-quality-scale span[data-band="risk"] { --quality-color:var(--line); }
 .quota-monitor-values { display: grid; grid-template-columns: repeat(5, minmax(108px, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); }
 .quota-monitor-values div { min-width: 0; padding: 13px 15px; background: var(--surface); }.quota-monitor-values dt { color: var(--muted); font-size: 10px; }.quota-monitor-values dd { margin: 7px 0 0; color: var(--paper); font: 700 17px/1.2 var(--mono); overflow-wrap: anywhere; }
 .quota-monitor-values small { display: block; margin-top: 5px; color: var(--muted); font: 8px/1.2 var(--mono); }

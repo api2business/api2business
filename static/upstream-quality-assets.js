@@ -34,13 +34,29 @@ export function buildSupplierQualityAssets({
     const remainingCny = Math.max(0, finite(row.remainingCny) ?? 0)
     const schedulable = row.schedulable === true
     const good = score !== null && score > goodScoreThreshold && schedulable
-    const band = score === null ? 'unknown' : score > goodScoreThreshold ? 'good' : score >= 60 ? 'mid' : 'risk'
+    const band = !schedulable || score === null
+      ? 'risk'
+      : score > goodScoreThreshold
+        ? 'good'
+        : score >= 60
+          ? 'mid'
+          : 'risk'
     return { wallet, score, remainingCny, remainingUsd: finite(row.remainingUsd), schedulable, good, band, ratio: 0 }
   }).filter((row) => row.wallet && row.remainingCny > 0)
 
   const totalBalanceCny = items.reduce((sum, row) => sum + row.remainingCny, 0)
   const goodBalanceCny = items.filter((row) => row.good).reduce((sum, row) => sum + row.remainingCny, 0)
   for (const item of items) item.ratio = totalBalanceCny > 0 ? item.remainingCny / totalBalanceCny : 0
+  const qualityBands = ['good', 'mid', 'risk'].map((band) => {
+    const members = items.filter((item) => item.band === band)
+    const remainingCny = members.reduce((sum, item) => sum + item.remainingCny, 0)
+    return {
+      band,
+      remainingCny,
+      ratio: totalBalanceCny > 0 ? remainingCny / totalBalanceCny : 0,
+      supplierCount: members.length,
+    }
+  })
 
   const consumed = finite(consumedCny)
   const windowHours = finite(burnWindowHours)
@@ -53,6 +69,7 @@ export function buildSupplierQualityAssets({
 
   return {
     items: items.sort((left, right) => right.remainingCny - left.remainingCny || left.wallet.localeCompare(right.wallet)),
+    qualityBands,
     totalBalanceCny,
     goodBalanceCny,
     goodBalanceRatio: totalBalanceCny > 0 ? goodBalanceCny / totalBalanceCny : null,
