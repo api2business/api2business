@@ -272,7 +272,7 @@ operations:
     quotaSampleTimeoutSeconds: 240
     failoverRules:
       - errorCode: 429
-        keywords: [usage limit reached, API key 额度已用完, concurrency limit exceeded, concurrency limit exceeded for account, rate_limit_exceeded, rate limit exceeded, rate_limit_error, rate limit error, upstream rate limit exceeded, too many pending requests, selected model is at capacity, upstream_error, "status code: 429", please retry later, retry later, 服务暂时不可用，请稍后重试]
+        keywords: [usage limit reached, API key 额度已用完, concurrency limit exceeded, concurrency limit exceeded for account, rate_limit_exceeded, rate limit exceeded, rate_limit_error, rate limit error, upstream rate limit exceeded, too many pending requests, selected model is at capacity, "status code: 429", please retry later, retry later, 服务暂时不可用，请稍后重试]
         durationMinutes: 3
       - errorCode: 400
         keywords: [selected model is at capacity, our servers are currently overloaded, please try again later, upstream request failed, invalid_encrypted_content]
@@ -284,16 +284,16 @@ operations:
         keywords: [insufficient account balance, insufficient balance, payment required, account balance depleted, failed to validate api key, invalid api key, 余额不足, 欠费]
         durationMinutes: 10
       - errorCode: 500
-        keywords: [failed to validate api key, do request failed, upstream gateway error]
+        keywords: [failed to validate api key, do request failed, upstream gateway error, upstream service temporarily unavailable, service temporarily unavailable]
         durationMinutes: 3
       - errorCode: 502
-        keywords: [upstream service temporarily unavailable, upstream request failed, upstream response stream was interrupted, service temporarily unavailable, 服务暂时不可用, overloaded, our servers are currently overloaded, please try again later, concurrency limit exceeded, rate_limit_exceeded, upstream rate limit exceeded, insufficient account balance, insufficient balance, selected model is at capacity, upstream_error, api_error, recovered upstream error 502, "error code: 502", "status code: 502"]
+        keywords: [upstream service temporarily unavailable, upstream request failed, upstream response stream was interrupted, service temporarily unavailable, 服务暂时不可用, overloaded, our servers are currently overloaded, please try again later, concurrency limit exceeded, rate_limit_exceeded, upstream rate limit exceeded, insufficient account balance, insufficient balance, selected model is at capacity, recovered upstream error 502, "error code: 502", "status code: 502"]
         durationMinutes: 3
       - errorCode: 503
-        keywords: [upstream service temporarily unavailable, upstream request failed, service temporarily unavailable, 服务暂时不可用, temporarily unavailable, overloaded, concurrency limit exceeded, selected model is at capacity, upstream_error, api_error, unexpected eof, bad_response_status_code, "error code: 503", "status code: 503"]
+        keywords: [upstream service temporarily unavailable, upstream request failed, service temporarily unavailable, 服务暂时不可用, temporarily unavailable, overloaded, concurrency limit exceeded, selected model is at capacity, unexpected eof, bad_response_status_code, "error code: 503", "status code: 503"]
         durationMinutes: 3
       - errorCode: 504
-        keywords: [concurrency limit exceeded, upstream service temporarily unavailable, service temporarily unavailable, upstream gateway error, gateway timeout, upstream timeout, request timeout, timeout awaiting response headers, context deadline exceeded, deadline exceeded, selected model is at capacity, upstream_error, api_error, recovered upstream error 504, "error code: 504", "status code: 504", "504"]
+        keywords: [concurrency limit exceeded, upstream service temporarily unavailable, service temporarily unavailable, upstream gateway error, gateway timeout, upstream timeout, request timeout, timeout awaiting response headers, context deadline exceeded, deadline exceeded, selected model is at capacity, recovered upstream error 504, "error code: 504", "status code: 504", "504"]
         durationMinutes: 3
       - errorCode: 522
         keywords: [upstream request failed]
