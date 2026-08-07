@@ -439,6 +439,7 @@ test("upstream intelligence benchmark is manual and reuses the persisted probe i
 test("scores and upstream assets share one sortable operations table", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+  const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
 
   const quotaIndex = html.indexOf('class="quota-monitor unified-quota-monitor"');
   const tableIndex = html.indexOf('class="data-table unified-upstream-table"');
@@ -454,6 +455,8 @@ test("scores and upstream assets share one sortable operations table", async () 
   expect(html).toContain('data-score-sort="cost"');
   expect(html).not.toContain('>手工费率</th>');
   expect(html).not.toContain('>探测成本</th>');
+  expect(app).toContain("function resetScoreTableViewport()");
+  expect(css).toContain('.unified-upstream-table th:first-child');
   expect(app).toContain("let scoreSort = { key: 'score', direction: 'desc' }");
   expect(app).toContain("loadUnifiedUpstreamAssets()");
   expect(app).toContain("scoreUpstreamsById.get(Number(row.accountId))");

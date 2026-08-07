@@ -392,6 +392,15 @@ button:disabled { cursor: wait; opacity: .48; }
 .pool-participation-legend::-webkit-scrollbar-thumb:hover { background:var(--muted); background-clip:padding-box; }
 .unified-upstream-table { min-width: 1660px; table-layout: fixed; }
 .score-table-wrap { scrollbar-gutter: stable; }
+.unified-upstream-table th:first-child,
+.unified-upstream-table td:first-child { position: sticky; left: 0; z-index: 2; background: var(--surface); box-shadow: 1px 0 0 var(--line); }
+.unified-upstream-table th:first-child { z-index: 4; background: var(--surface-raised); }
+.unified-upstream-table tbody tr:hover td:first-child { background: #1b211b; }
+.unified-upstream-table tbody tr.score-row-unavailable td:first-child { background: #211815; }
+.unified-upstream-table tbody tr.score-row-unavailable:hover td:first-child { background: #2a1b17; }
+.unified-upstream-table td { overflow: hidden; text-overflow: ellipsis; }
+.unified-upstream-table td > small { display: block; max-width: 100%; margin-top: 4px; overflow: hidden; color: var(--muted); font: 10px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.unified-upstream-table td > strong { display: block; overflow: hidden; text-overflow: ellipsis; }
 .unified-upstream-table td { height: 64px; vertical-align: middle; }
 .score-col-account { width: 270px; }
 .score-col-status { width: 118px; }

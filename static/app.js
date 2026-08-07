@@ -343,6 +343,11 @@ function renderScoreRows() {
   })
 }
 
+function resetScoreTableViewport() {
+  const wrap = document.querySelector('.score-table-wrap')
+  if (wrap) wrap.scrollLeft = 0
+}
+
 function renderScoreMetrics(data = {}) {
   const rows = scoreRowsForActiveProfile()
   const groups = [...new Set(rows.flatMap((row) =>
@@ -668,6 +673,7 @@ async function loadPoolQualityErrors() {
 }
 
 async function scoresPage() {
+  resetScoreTableViewport()
   const select = $('#score-call-limit')
   const refreshInterval = $('#score-refresh-interval')
   refreshInterval.value = String(readScoreRefreshInterval())
