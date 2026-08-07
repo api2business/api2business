@@ -8,8 +8,8 @@
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>上游资产与实时成本 | Api2Business</title>
-  <link rel="stylesheet" href="/styles.css?v=table-layout-v2" />
-  <script src="/app.js?v=quality-assets-v1" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=error-table-v3" />
+  <script src="/app.js?v=error-table-v3" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -91,7 +91,7 @@
           <p id="pool-error-state" class="section-state">正在读取综合质量错误证据…</p>
         </div>
         <div class="table-toolbar-side record-table-controls">
-          <label class="select-field"><span>口径</span><select id="pool-error-filter"><option value="scoreable">计分失败</option><option value="excluded">已排除</option><option value="all">全部错误</option></select></label>
+          <label class="select-field"><span>口径</span><select id="pool-error-filter"><option value="all" selected>全部错误</option><option value="scoreable">计分失败</option><option value="excluded">已排除</option></select></label>
           <nav class="table-pagination" aria-label="错误记录分页">
             <button id="pool-error-prev" class="query-command" type="button" disabled>上一页</button>
             <span id="pool-error-page" class="section-state" aria-live="polite">正在读取…</span>
