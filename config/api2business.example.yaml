@@ -284,6 +284,8 @@ operations:
           - too many pending requests
           - selected model is at capacity
           - "status code: 429"
+          - please retry later
+          - retry later
           - 服务暂时不可用，请稍后重试
         durationMinutes: 3
         description: 账号限流、并发上限或模型容量暂时不足
@@ -291,6 +293,8 @@ operations:
         keywords:
           - selected model is at capacity
           - our servers are currently overloaded
+          - please try again later
+          - upstream request failed
           - invalid_encrypted_content
         durationMinutes: 3
         description: 上游明确返回模型容量或临时过载
@@ -322,8 +326,10 @@ operations:
       - errorCode: 500
         keywords:
           - failed to validate api key
+          - do request failed
           - upstream gateway error
           - upstream service temporarily unavailable
+          - service temporarily unavailable
         durationMinutes: 3
         description: 上游明确返回服务或网关故障
       - errorCode: 502
@@ -331,9 +337,14 @@ operations:
           - upstream service temporarily unavailable
           - upstream request failed
           - upstream response stream was interrupted
+          - service temporarily unavailable
+          - 服务暂时不可用
+          - overloaded
           - origin web server returned an invalid or incomplete response
           - our servers are currently overloaded
           - concurrency limit exceeded for account
+          - concurrency limit exceeded
+          - please try again later
           - rate_limit_exceeded
           - upstream rate limit exceeded
           - insufficient account balance
@@ -348,9 +359,15 @@ operations:
       - errorCode: 503
         keywords:
           - upstream service temporarily unavailable
+          - upstream request failed
+          - service temporarily unavailable
+          - 服务暂时不可用
+          - temporarily unavailable
+          - overloaded
           - origin web server returned an invalid or incomplete response
           - our servers are currently overloaded
           - concurrency limit exceeded for account
+          - concurrency limit exceeded
           - selected model is at capacity
           - unexpected eof
           - bad_response_status_code
@@ -360,8 +377,10 @@ operations:
         description: 上游服务暂时不可用或流响应异常
       - errorCode: 504
         keywords:
+          - concurrency limit exceeded
           - concurrency limit exceeded for account
           - upstream service temporarily unavailable
+          - service temporarily unavailable
           - upstream gateway error
           - gateway timeout
           - upstream timeout
@@ -373,6 +392,7 @@ operations:
           - recovered upstream error 504
           - "error code: 504"
           - "status code: 504"
+          - "504"
         durationMinutes: 3
         description: 上游网关或请求超时
       - errorCode: 522
@@ -386,15 +406,20 @@ operations:
         keywords:
           - upstream request failed
           - upstream service temporarily unavailable
+          - service temporarily unavailable
+          - overloaded
+          - concurrency limit exceeded
           - origin web server returned an invalid or incomplete response
           - concurrency limit exceeded for account
           - recovered upstream error 524
           - "error code: 524"
           - "status code: 524"
+          - "524"
         durationMinutes: 3
         description: 上游连接或响应超时
       - errorCode: 529
         keywords:
+          - overloaded
           - api is at capacity
           - the api is at capacity
           - selected model is at capacity

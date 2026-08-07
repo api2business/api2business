@@ -5,25 +5,23 @@ function rule(errorCode: number, keywords: string[]): FailoverRule {
   return { error_code: errorCode, keywords, duration_minutes: 3, description: "test" };
 }
 
-test("rejects generic failover keywords that cannot distinguish business errors", () => {
-  for (const keyword of [
+test("preserves legacy failover keywords while rejecting model-not-found", () => {
+  expect(() => validateFailoverRules([rule(503, [
     "please retry later",
     "service temporarily unavailable",
     "temporarily unavailable",
     "overloaded",
     "concurrency limit exceeded",
-    "model_not_found",
     "504",
-  ]) {
-    expect(() => validateFailoverRules([rule(503, [keyword])])).toThrow();
-  }
+  ])])).not.toThrow();
+  expect(() => validateFailoverRules([rule(404, ["model_not_found"])] )).toThrow();
 });
 
-test("allows the native upstream wrapper phrase only for transient gateway statuses", () => {
+test("preserves the legacy upstream wrapper phrase", () => {
   expect(() => validateFailoverRules([rule(502, ["upstream request failed"])]))
     .not.toThrow();
   expect(() => validateFailoverRules([rule(503, ["upstream request failed"])]))
-    .toThrow();
+    .not.toThrow();
 });
 
 test("keeps model capacity and billing/authentication matches explicit", () => {

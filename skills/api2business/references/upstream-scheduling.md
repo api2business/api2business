@@ -28,14 +28,14 @@
     - 匹配方式是同状态码下的响应体包含关系；
     - 不支持端点、错误阶段或排除条件。
   - 关键词规则：
-    - 只写完整、稳定的上游错误短语；
-    - 禁止 `please retry later`、`service temporarily unavailable`、裸 `overloaded`、裸状态码和 `model_not_found` 等通用关键词。
+    - 保留既有切号模板关键词，模板同步不得因为本地校验而静默删词；
+    - `model_not_found` 和 `model not found` 不得写入模板，因为模型不存在不是账号故障。
   - 模型错误：
     - `selected model is at capacity` 表示模型或容量临时异常，可以切号；
     - `404 model_not_found` 不进入模板，直接保留标准模型错误。
   - 网关错误：
-    - `upstream request failed` 只允许挂在 502/522/524 等明确的网关或连接故障状态下；
-    - 不能作为 500/503 的通用规则。
+    - `upstream request failed` 按既有状态码模板保留，不由 Api2Business 擅自删除；
+    - 具体切号效果以 Sub2API 当前原生匹配语义和真实回读为准。
   - 数据口径：
     - `/models`、billing、failover 中间事件和其他非最终用户可见记录不作为模板匹配或评分输入；
     - 最终错误仍由 Sub2API 运行面产生；

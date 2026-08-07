@@ -5,25 +5,10 @@ export interface FailoverRule {
   description: string;
 }
 
-// Sub2API 目前只支持“状态码相等 + 响应体包含关键词”。这些短词在
-// billing、models、网关包装错误和真正的上游业务错误之间没有区分度，
-// 一旦写入模板就可能把同一请求连续切穿整个候选池。
-const unsafeGenericKeywords = new Map<string, string>([
-  ["please retry later", "请使用完整的限流/容量错误短语"],
-  ["retry later", "请使用完整的限流/容量错误短语"],
-  ["please try again later", "请使用完整的限流/容量错误短语"],
-  ["service temporarily unavailable", "请使用带 upstream 前缀的完整错误短语"],
-  ["temporarily unavailable", "请使用带 upstream 前缀的完整错误短语"],
-  ["upstream request failed", "仅允许挂在明确的 502/522/524 网关或连接故障上"],
-  ["overloaded", "请使用完整的 provider 过载错误短语"],
-  ["concurrency limit exceeded", "请使用 concurrency limit exceeded for account"],
-  ["504", "请使用 error code: 504 或 status code: 504"],
-  ["524", "请使用 error code: 524 或 status code: 524"],
-  ["model_not_found", "模型不存在不得触发账号级切号"],
-  ["model not found", "模型不存在不得触发账号级切号"],
-]);
-
-const statusScopedGenericKeywords = new Set(["upstream request failed"]);
+// Sub2API 原生模板是“状态码相等 + 响应体包含关键词”。旧版模板中的
+// 通用临时故障词属于既有运行契约，不能因为本地校验而被静默删除。
+// 唯一明确禁止的是模型不存在：它不是账号故障，不能触发账号级切号。
+const forbiddenFailoverKeywords = new Set(["model_not_found", "model not found"]);
 
 export function validateFailoverRules(rules: FailoverRule[]): void {
   if (!Array.isArray(rules) || rules.length === 0) {
@@ -46,9 +31,8 @@ export function validateFailoverRules(rules: FailoverRule[]): void {
       const duplicateKey = `${rule.error_code}:${normalized}`;
       if (seen.has(duplicateKey)) throw new Error(`duplicate failover keyword: ${rule.error_code}/${keyword}`);
       seen.add(duplicateKey);
-      const reason = unsafeGenericKeywords.get(normalized);
-      if (reason && !(statusScopedGenericKeywords.has(normalized) && [502, 522, 524].includes(rule.error_code))) {
-        throw new Error(`unsafe failover keyword ${JSON.stringify(keyword)} on ${rule.error_code}: ${reason}`);
+      if (forbiddenFailoverKeywords.has(normalized)) {
+        throw new Error(`model-not-found must not trigger account failover: ${JSON.stringify(keyword)}`);
       }
     }
   }
