@@ -120,6 +120,12 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   expect(config).not.toMatch(/errorCode: 404\n/u);
   expect(config).not.toContain("statusCode:");
   expect(config).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
+  expect(config).not.toContain("please retry later");
+  expect(config).not.toContain("service temporarily unavailable,");
+  expect(config).not.toContain("- overloaded");
+  expect(config).not.toContain("- 504");
+  expect(config).not.toContain("- 524");
+  expect(config).toContain("description: 上游明确返回模型容量或临时过载");
 });
 
 test("usage target discovery uses one queued database read", async () => {

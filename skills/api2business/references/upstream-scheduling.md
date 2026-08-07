@@ -22,6 +22,24 @@
 - 充值完成后，批量恢复该规范化 URL 下所有状态异常或不可调度的账号，写入 `status=active` 和 `schedulable=true`，再排队回读验证可以立即参与调度。
 - 充值恢复使用一次 Sub2API 原生 `/admin/accounts/bulk-update`，禁止逐账号调用状态和可调度接口；充值记账保持幂等，写后只做必要的排队回读。
 - API key 只通过标准输入或受控请求传入，不进入 argv、日志和账本。
+- 切号模板匹配边界：
+  - 原生能力：
+    - 只有 `error_code + keywords + duration_minutes`；
+    - 匹配方式是同状态码下的响应体包含关系；
+    - 不支持端点、错误阶段或排除条件。
+  - 关键词规则：
+    - 只写完整、稳定的上游错误短语；
+    - 禁止 `please retry later`、`service temporarily unavailable`、裸 `overloaded`、裸状态码和 `model_not_found` 等通用关键词。
+  - 模型错误：
+    - `selected model is at capacity` 表示模型或容量临时异常，可以切号；
+    - `404 model_not_found` 不进入模板，直接保留标准模型错误。
+  - 网关错误：
+    - `upstream request failed` 只允许挂在 502/522/524 等明确的网关或连接故障状态下；
+    - 不能作为 500/503 的通用规则。
+  - 数据口径：
+    - `/models`、billing、failover 中间事件和其他非最终用户可见记录不作为模板匹配或评分输入；
+    - 最终错误仍由 Sub2API 运行面产生；
+    - Api2Business 只负责模板声明、批量写入和回读校验。
 - 调度先按账号质量和成本形成排序，再生成有界优先级计划。
 - 只使用权重调整质量、成本、余额和探索，不增加隐式硬门槛。
 - 优先使用探测成本；探测成本缺失时再使用手工成本。

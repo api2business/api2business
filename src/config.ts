@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { DateTime } from "luxon";
 import { parse } from "yaml";
+import { validateFailoverRules, type FailoverRule } from "./failover-rules";
 
 export type IdentityField = "username" | "email" | "emailLocalPart";
 export type OAuthPlanType = "k12" | "plus" | "free" | "team";
@@ -23,7 +24,7 @@ export interface UpstreamManagementConfig {
   usageDays: number;
   quotaSampleIntervalSeconds: number;
   quotaSampleTimeoutSeconds: number;
-  failoverRules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }>;
+  failoverRules: FailoverRule[];
 }
 
 export interface SecretRef {
@@ -528,14 +529,16 @@ export function loadConfig(path: string): AppConfig {
   if (!Array.isArray(upstreamFailoverRulesValue) || upstreamFailoverRulesValue.length === 0) {
     throw new Error("operations.upstreamManagement.failoverRules must be a non-empty array");
   }
-  const upstreamFailoverRules = upstreamFailoverRulesValue.map((value, index) => {
+  const upstreamFailoverRules: FailoverRule[] = upstreamFailoverRulesValue.map((value, index) => {
     const rule = object(value, `operations.upstreamManagement.failoverRules[${index}]`);
     return {
       error_code: integerValue(rule, "errorCode", `operations.upstreamManagement.failoverRules[${index}]`, 100, 599),
       keywords: strings(rule, "keywords", `operations.upstreamManagement.failoverRules[${index}]`),
       duration_minutes: integerValue(rule, "durationMinutes", `operations.upstreamManagement.failoverRules[${index}]`, 1, 60),
+      description: stringValue(rule, "description", `operations.upstreamManagement.failoverRules[${index}]`),
     };
   });
+  validateFailoverRules(upstreamFailoverRules);
   const upstreamGroupIds = integers(upstreamManagement, "groupIds", "operations.upstreamManagement", 1, Number.MAX_SAFE_INTEGER);
   const upstreamPrimaryGroupId = integerValue(upstreamManagement, "primaryGroupId", "operations.upstreamManagement", 1);
   if (!upstreamGroupIds.includes(upstreamPrimaryGroupId)) {
