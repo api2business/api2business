@@ -16,6 +16,7 @@ export interface UpstreamManagementConfig {
   capacity: number;
   proxyId: number;
   createBootstrapRateCnyPerApiUsd: number;
+  unprobedFallbackRateCnyPerApiUsd: number;
   mutationTimeoutMs: number;
   usageConcurrency: number;
   usageTimeoutMs: number;
@@ -844,6 +845,13 @@ export function loadConfig(path: string): AppConfig {
         createBootstrapRateCnyPerApiUsd: numberValue(
           upstreamManagement,
           "createBootstrapRateCnyPerApiUsd",
+          "operations.upstreamManagement",
+          0.000001,
+          1000,
+        ),
+        unprobedFallbackRateCnyPerApiUsd: numberValue(
+          upstreamManagement,
+          "unprobedFallbackRateCnyPerApiUsd",
           "operations.upstreamManagement",
           0.000001,
           1000,

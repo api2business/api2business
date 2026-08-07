@@ -261,6 +261,8 @@ operations:
     proxyId: 3
     # 创建接口要求名称包含正费率；创建完成后会立即探测并回写真实倍率。
     createBootstrapRateCnyPerApiUsd: 1
+    # 创建时未指定成本且探测不到有效倍率时使用的回退费率。
+    unprobedFallbackRateCnyPerApiUsd: 0.1
     mutationTimeoutMs: 120000
     usageConcurrency: 8
     usageTimeoutMs: 15000

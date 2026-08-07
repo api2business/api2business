@@ -45,6 +45,7 @@ test("runtime upstream settings validate priority, capacity, and pool selection"
 test("upstream creation bootstrap rate is YAML-owned", () => {
   const config = loadConfig("config/api2business.example.yaml");
   expect(config.operations.upstreamManagement.createBootstrapRateCnyPerApiUsd).toBe(1);
+  expect(config.operations.upstreamManagement.unprobedFallbackRateCnyPerApiUsd).toBe(0.1);
 });
 
 test("upstream create worker probes quota and synchronizes the detected rate", async () => {
@@ -55,6 +56,9 @@ test("upstream create worker probes quota and synchronizes the detected rate", a
   );
   expect(createBranch).toContain("await upstreams.usage([accountId])");
   expect(createBranch).toContain("await upstreams.synchronizeDetectedRates");
+  expect(createBranch).toContain("pending.input.rateWasSpecified");
+  expect(createBranch).toContain("unprobedFallbackRateCnyPerApiUsd");
+  expect(createBranch).toContain("await upstreams.update(accountId");
   expect(createBranch).toContain("await internal.upstreamUsageCache");
   expect(createBranch).toContain("result.detection = detected");
 });
@@ -67,6 +71,8 @@ test("detected rate synchronization requires queued readback", async () => {
   );
   expect(synchronization).toContain("await this.accountQuery(result.accountId)");
   expect(synchronization).toContain("探测费率写入后排队回读不一致");
+  expect(synchronization).toContain("探测失败回退费率写入后排队回读不一致");
+  expect(synchronization).toContain("未取得有效正倍率，已回退为");
 });
 
 test("upstream identity ignores the temporary rate for the same URL and suffix", async () => {

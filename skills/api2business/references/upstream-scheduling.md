@@ -5,8 +5,11 @@
   - CLI 的 `upstreams create` 默认不要求 `--rate`；
   - 创建所需占位费率只读取 owning YAML 的 `operations.upstreamManagement.createBootstrapRateCnyPerApiUsd`；
   - worker 在账号落库后自动探测额度和有效倍率，并同步最终费率；
+  - 创建时未指定成本且探测不到有效倍率时，使用 owning YAML 的
+    `operations.upstreamManagement.unprobedFallbackRateCnyPerApiUsd`，默认值为 `0.1`；
+  - 用户显式指定成本时，探测失败保留用户指定值，不使用回退费率；
   - 同步成功必须以排队数据库写后回读一致为准，禁止只凭管理 API 成功响应判定；
-  - 探测失败不得把创建标为失败，必须返回 warning 并由后续采样重试；
+  - 探测失败不得把创建标为失败，必须返回 warning，并按上述规则落费率后由后续采样重试；
   - 用户显式传入 `--rate` 时，该值也只作为探测前的临时值。
 - 新增上游的性能路径：
   - API-key 账号创建使用 Sub2API 原生 `/admin/accounts/batch`；

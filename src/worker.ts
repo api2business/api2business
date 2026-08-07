@@ -154,6 +154,9 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
           if (Array.isArray(detected.results)) {
             detected.rateSynchronization = await upstreams.synchronizeDetectedRates(
               detected.results as UpstreamUsageResult[],
+              pending.input.rateWasSpecified
+                ? {}
+                : { fallbackRateCnyPerApiUsd: config.operations.upstreamManagement.unprobedFallbackRateCnyPerApiUsd },
             );
             await internal.upstreamUsageCache(
               detected.results as Array<Record<string, unknown>>,
@@ -168,9 +171,25 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
             accountId,
             error: error instanceof Error ? error.message : String(error),
           };
+          let fallbackApplied = false;
+          if (pending.input.rateWasSpecified === false) {
+            try {
+              await upstreams.update(accountId, {
+                rateCnyPerApiUsd: config.operations.upstreamManagement.unprobedFallbackRateCnyPerApiUsd,
+              });
+              fallbackApplied = true;
+            } catch (fallbackError) {
+              result.warnings = [
+                ...(Array.isArray(result.warnings) ? result.warnings : []),
+                `探测失败后的回退费率写入失败：${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+              ];
+            }
+          }
           result.warnings = [
             ...(Array.isArray(result.warnings) ? result.warnings : []),
-            "账号已创建，但额度或倍率探测失败；保留 YAML 声明的创建占位费率，下一轮采样将重试",
+            fallbackApplied
+              ? `账号已创建，探测失败，已回退费率 ${config.operations.upstreamManagement.unprobedFallbackRateCnyPerApiUsd} 元/刀；下一轮采样将重试探测`
+              : "账号已创建，但额度或倍率探测失败；下一轮采样将重试探测",
           ];
         }
       }

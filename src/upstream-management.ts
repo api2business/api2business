@@ -76,6 +76,7 @@ export interface UpstreamCreateInput {
   apiKey: string;
   suffix: string;
   rateCnyPerApiUsd: number;
+  rateWasSpecified: boolean;
   rechargeCny: number | null;
   priority: number;
   capacity: number;
@@ -480,8 +481,13 @@ export class UpstreamManagementService {
     const settings = this.config.operations.upstreamManagement;
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const suffix = validateSuffix(input.suffix);
+    const rateWasSpecified = !(
+      input.rateCnyPerApiUsd === undefined
+      || input.rateCnyPerApiUsd === null
+      || input.rateCnyPerApiUsd === ""
+    );
     const rateCnyPerApiUsd = validateRate(
-      input.rateCnyPerApiUsd === undefined || input.rateCnyPerApiUsd === null || input.rateCnyPerApiUsd === ""
+      !rateWasSpecified
         ? settings.createBootstrapRateCnyPerApiUsd
         : input.rateCnyPerApiUsd,
     );
@@ -500,6 +506,7 @@ export class UpstreamManagementService {
       apiKey,
       suffix,
       rateCnyPerApiUsd,
+      rateWasSpecified,
       rechargeCny,
       priority,
       capacity,
@@ -789,22 +796,47 @@ export class UpstreamManagementService {
     };
   }
 
-  async synchronizeDetectedRates(results: UpstreamUsageResult[]): Promise<Record<string, unknown>> {
+  async synchronizeDetectedRates(results: UpstreamUsageResult[], options: {
+    fallbackRateCnyPerApiUsd?: number;
+  } = {}): Promise<Record<string, unknown>> {
     if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
     const policy = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
     const synchronized: number[] = [];
     const alreadySynchronized: number[] = [];
     const retained: Array<{ accountId: number; reason: string }> = [];
     const failed: Array<{ accountId: number; error: string }> = [];
+    const fallbackRate = options.fallbackRateCnyPerApiUsd === undefined
+      ? null
+      : validateRate(options.fallbackRateCnyPerApiUsd);
     for (const result of results) {
       const multiplier = Number(result.billingMultiplier.value);
+      const parsed = parseUpstreamName(result.accountName, result.baseUrl) ?? parseUpstreamNameTail(result.accountName);
       if (result.billingMultiplier.value == null || !Number.isFinite(multiplier) || multiplier <= 0) {
+        if (fallbackRate !== null && parsed) {
+          try {
+            const name = formatUpstreamName(result.baseUrl, parsed.suffix, fallbackRate);
+            await this.runtime.updateAccount(result.accountId, { name });
+            const readback = await this.accountQuery(result.accountId);
+            if (!readback || readback.name !== name || readback.rateCnyPerApiUsd === null
+              || Math.abs(readback.rateCnyPerApiUsd - fallbackRate) > 0.0000005) {
+              throw new Error("探测失败回退费率写入后排队回读不一致");
+            }
+            result.billingMultiplier.synchronizedRateCnyPerApiUsd = fallbackRate;
+            result.billingMultiplier.syncStatus = "synchronized";
+            result.billingMultiplier.syncMessage = `未取得有效正倍率，已回退为 ${formatRate(fallbackRate)} 元/刀`;
+            synchronized.push(result.accountId);
+            continue;
+          } catch (error) {
+            failed.push({ accountId: result.accountId, error: safeMessage(error instanceof Error ? error.message : String(error)) });
+          }
+        }
         result.billingMultiplier.syncStatus = "retained-manual";
-        result.billingMultiplier.syncMessage = "未取得有效正倍率，保留手工费率";
+        result.billingMultiplier.syncMessage = fallbackRate === null
+          ? "未取得有效正倍率，保留手工费率"
+          : "未取得有效正倍率，回退费率写入失败，保留当前费率";
         retained.push({ accountId: result.accountId, reason: "invalid-or-missing-multiplier" });
         continue;
       }
-      const parsed = parseUpstreamName(result.accountName, result.baseUrl) ?? parseUpstreamNameTail(result.accountName);
       if (!parsed) {
         result.billingMultiplier.syncStatus = "retained-manual";
         result.billingMultiplier.syncMessage = "账号名称缺少可保留的后缀，未自动改名";
@@ -997,6 +1029,7 @@ export class UpstreamManagementService {
     apiKey: string;
     suffix: string;
     rateCnyPerApiUsd: unknown;
+    rateWasSpecified: boolean;
     rechargeCny?: unknown;
     priority?: unknown;
     capacity?: unknown;
@@ -1029,7 +1062,7 @@ export class UpstreamManagementService {
         ? [...new Set([...groupIds, existingProbe.groupId])].sort((left, right) => left - right)
         : [];
       const actualGroups = [...account.groupIds].sort((left, right) => left - right);
-      if (existingProbe && account.priority === priority && account.capacity === capacity
+      if (input.rateWasSpecified && existingProbe && account.priority === priority && account.capacity === capacity
         && account.proxyId === settings.proxyId
         && JSON.stringify(actualGroups) === JSON.stringify(expectedGroups)) {
         return {
