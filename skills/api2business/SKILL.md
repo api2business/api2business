@@ -88,6 +88,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 ## 领域操作
 
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
+- OAuth 退役计划可用 `--plan-type` 限定账号类型；默认只选择该类型的死亡状态，
+  `k12` 和 `team` 的限流账号不会进入候选。
 - 上游、评分和优先级读取 `references/upstream-scheduling.md`。
 - 新增上游时省略 `--rate`，由 YAML 提供创建占位费率；worker 创建成功后自动探测额度与有效倍率，并将有效倍率同步为最终费率。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。

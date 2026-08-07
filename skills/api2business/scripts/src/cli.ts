@@ -215,7 +215,7 @@ function help(): Record<string, unknown> {
       "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--confirm] --over-api",
       "accounts idle-probe run [--accounts <id-or-range,...>] [--rounds 1..10] [--confirm] --over-api",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
-      "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] --over-api",
+      "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] --over-api",
       "accounts lifecycle retire status --id <plan-id> --over-api",
       "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
       "upstreams list [--page N --search <text>] --over-api",
@@ -643,8 +643,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
         if (parsed.confirm) throw new Error("retire plan does not accept --confirm; create the plan first");
         const scope = parsed.scope ?? "pool";
         if (scope !== "pool" && scope !== "day") throw new Error("--scope must be pool or day");
+        const planType = parsed.planType ?? "all";
+        if (planType !== "k12" && planType !== "plus" && planType !== "team" && planType !== "free" && planType !== "all") {
+          throw new Error("--plan-type must be k12, plus, team, free, or all");
+        }
         const day = parsed.day ?? new Date().toLocaleDateString("sv-SE", { timeZone: config.monitor.timezone });
-        return await client.accountLifecycleDetect({ day, planType: "all", scope, selectionMode: "database-all", confirm: false });
+        return await client.accountLifecycleDetect({ day, planType, scope, selectionMode: "database-dead", confirm: false });
       }
       if (!parsed.id) throw new Error(`accounts lifecycle retire ${phase ?? ""} requires --id`);
       if (phase === "status") return await client.accountLifecycleStatus(parsed.id);
