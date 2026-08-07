@@ -246,6 +246,11 @@ function scoreAsset(row) {
   return { upstream, usageResult, balanceCny, probeCost }
 }
 
+function scoreAccountDisplayName(row, upstream) {
+  if (upstream?.baseUrl && upstream?.suffix) return `${upstream.baseUrl} ${upstream.suffix}`
+  return String(row.accountName ?? '—')
+}
+
 function scoreSortValue(row, key) {
   const { upstream, balanceCny, probeCost } = scoreAsset(row)
   const usage = row.usage ?? {}
@@ -255,8 +260,7 @@ function scoreSortValue(row, key) {
     score: Number(row.score),
     priority: Number(row.priority),
     balance: balanceCny,
-    rate: upstream?.rateCnyPerApiUsd ?? usage.costRateCnyPerApiUsd,
-    probeCost,
+    cost: probeCost ?? upstream?.rateCnyPerApiUsd ?? usage.costRateCnyPerApiUsd,
     apiAmountUsd: Number(usage.apiAmountUsd),
     latestSampleAt: row.latestSampleAt ? Date.parse(row.latestSampleAt) : null,
     failureRate: Number(row.failureRate),
@@ -304,17 +308,19 @@ function renderScoreRows() {
     const reason = row.availabilityReason ?? {}
     const reasonDetail = reason.resetAt ? `${reason.detail ?? reason.label}，${time(reason.resetAt)} 恢复` : (reason.detail ?? reason.label ?? '原因未记录')
     const { upstream, usageResult, balanceCny, probeCost } = scoreAsset(row)
+    const manualCost = upstream?.rateCnyPerApiUsd ?? costRate
+    const effectiveCost = probeCost ?? manualCost
+    const costSource = probeCost !== null ? '探测' : effectiveCost == null ? '成本未知' : '手工'
     const desiredLabel = desiredPriority === null ? number(row.priority) : `${number(row.priority)} → ${number(desiredPriority)}`
     const status = upstream ? upstreamStatus(upstream) : { label: available ? '可调度' : '不可用', className: available ? 'is-available' : 'is-error' }
     const latestSample = sampleTimeDisplay(row.latestSampleAt)
     return `<tr class="${available ? '' : 'score-row-unavailable'}">
-      <td class="account-cell"><b>${escapeHtml(row.accountName)}</b><small>#${escapeHtml(row.accountId)}${upstream?.baseUrl ? ` · ${escapeHtml(upstream.baseUrl)}` : ''}</small></td>
+      <td class="account-cell"><b>${escapeHtml(scoreAccountDisplayName(row, upstream))}</b><small>#${escapeHtml(row.accountId)}</small></td>
       <td><span class="upstream-status ${status.className}">${status.label}</span><small class="upstream-muted">${escapeHtml(reason.label ?? upstream?.status ?? '—')}</small></td>
       <td><span class="score-value ${gradeClass(row.grade)}">${number(row.score, 1)}</span><small class="upstream-muted">${escapeHtml(row.grade ?? '—')} · ${escapeHtml(row.confidence ?? '—')}</small></td>
       <td>${desiredLabel}<small class="upstream-muted">${priorityDelta === null ? '当前' : `变化 ${signed(priorityDelta)}`}</small></td>
       <td class="upstream-balance" data-known="${balanceCny !== null}"><strong>${balanceCny === null ? '未查询' : cny(balanceCny)}</strong><small>${usageResult?.queriedAt ? time(usageResult.queriedAt) : '无额度样本'}</small></td>
-      <td class="upstream-rate">${upstream?.rateCnyPerApiUsd == null ? costRate == null ? '—' : `¥${number(costRate, 4)}` : `¥${number(upstream.rateCnyPerApiUsd, 4)}`}</td>
-      <td class="upstream-multiplier"><strong>${probeCost === null ? '未知' : `¥${number(probeCost, 4)}`}</strong><small>${escapeHtml(usageResult?.billingMultiplier?.source ?? '无探测')}</small></td>
+      <td class="upstream-rate upstream-cost-cell"><strong>${effectiveCost == null ? '—' : `¥${number(effectiveCost, 4)}`}</strong><small>${escapeHtml(costSource)}</small></td>
       <td class="usd-cell">${usd(usage.apiAmountUsd)}<small class="upstream-muted">${compact(usage.requestCount)} 请求</small></td>
       <td class="sample-time sample-time-${latestSample.freshness}"${latestSample.exact ? ` title="北京时间 ${escapeHtml(latestSample.exact)}"` : ''}><span>${escapeHtml(latestSample.label)}</span></td>
       <td>${percent(row.failureRate)}<small class="upstream-muted">${number(row.observedAttempts)} 次尝试</small></td>
@@ -326,7 +332,7 @@ function renderScoreRows() {
       <td>${groupLabels(row)}</td>
       <td>${upstream ? `<div class="table-row-actions"><button class="icon-command benchmark-trigger${scoreBenchmarksById.get(Number(row.accountId))?.state === 'running' ? ' is-running' : ''}" type="button" data-score-benchmark="${escapeHtml(row.accountId)}" title="智商评测" aria-label="智商评测"><span>⌁</span></button><button class="text-command table-action" type="button" data-score-upstream-edit="${escapeHtml(row.accountId)}">调整</button></div>${scoreBenchmarksById.has(Number(row.accountId)) ? `<small class="benchmark-inline">${scoreBenchmarksById.get(Number(row.accountId)).state === 'running' ? '评测中' : `智商 ${scoreBenchmarksById.get(Number(row.accountId)).score == null ? '—' : number(scoreBenchmarksById.get(Number(row.accountId)).score, 1)}`} · ${escapeHtml(scoreBenchmarksById.get(Number(row.accountId)).state)}</small>` : ''}` : '—'}</td>
     </tr>`
-  }).join('') : '<tr><td colspan="14" class="empty">没有匹配的账号</td></tr>'
+  }).join('') : '<tr><td colspan="13" class="empty">没有匹配的账号</td></tr>'
   const range = filteredRows.length === 0 ? '0 条' : `${start + 1}-${Math.min(start + scorePageSize, filteredRows.length)} / ${number(filteredRows.length)} 条`
   $('#score-page').textContent = `${scorePage} / ${totalPages} · ${range}`
   $('#score-prev').disabled = scorePage <= 1

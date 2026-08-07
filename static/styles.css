@@ -390,7 +390,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .pool-participation-legend::-webkit-scrollbar-track { background:transparent; }
 .pool-participation-legend::-webkit-scrollbar-thumb { border:1px solid transparent; border-radius:8px; background:var(--line); background-clip:padding-box; }
 .pool-participation-legend::-webkit-scrollbar-thumb:hover { background:var(--muted); background-clip:padding-box; }
-.unified-upstream-table { min-width: 1780px; table-layout: fixed; }
+.unified-upstream-table { min-width: 1660px; table-layout: fixed; }
 .score-table-wrap { scrollbar-gutter: stable; }
 .unified-upstream-table td { height: 64px; vertical-align: middle; }
 .score-col-account { width: 270px; }
@@ -398,8 +398,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .score-col-score { width: 100px; }
 .score-col-priority { width: 96px; }
 .score-col-balance { width: 138px; }
-.score-col-rate { width: 106px; }
-.score-col-probe { width: 116px; }
+.score-col-cost { width: 126px; }
 .score-col-output { width: 138px; }
 .score-col-sample { width: 104px; }
 .score-col-failure { width: 108px; }

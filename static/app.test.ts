@@ -451,7 +451,9 @@ test("scores and upstream assets share one sortable operations table", async () 
   expect(html).toContain('aria-label="上游账号资产、评分与实时成本总表"');
   expect(html).toContain('data-score-sort="score" aria-sort="descending"');
   expect(html).toContain('data-score-sort="balance"');
-  expect(html).toContain('data-score-sort="probeCost"');
+  expect(html).toContain('data-score-sort="cost"');
+  expect(html).not.toContain('>手工费率</th>');
+  expect(html).not.toContain('>探测成本</th>');
   expect(app).toContain("let scoreSort = { key: 'score', direction: 'desc' }");
   expect(app).toContain("loadUnifiedUpstreamAssets()");
   expect(app).toContain("scoreUpstreamsById.get(Number(row.accountId))");
