@@ -48,11 +48,11 @@ WHERE a.deleted_at IS NULL
   AND a.status = 'active'
   AND COALESCE(a.schedulable, false) = true
   AND a.platform = $1
-  AND EXISTS (
+  AND ($7::boolean OR EXISTS (
     SELECT 1 FROM account_groups ag
     WHERE ag.account_id = a.id
       AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
-  )
+  ))
   AND ($5::text IS NULL OR a.id = ANY(string_to_array($5, ',')::bigint[]))
   AND ($6::boolean OR sample_stats.available_sample_count < 100 OR NOT EXISTS (
     SELECT 1 FROM usage_logs u
@@ -150,6 +150,7 @@ export class IdleAccountProbeService {
         policy.idleSeconds,
         explicit.length > 0 ? explicit.length : policy.candidateLimit,
         explicit.length > 0 ? explicit.join(",") : null,
+        explicit.length > 0,
         explicit.length > 0,
       ],
       priority,

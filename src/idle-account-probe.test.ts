@@ -43,6 +43,7 @@ test("idle probe selects only normal schedulable API-key accounts", async () => 
   expect(idleProbeCandidatesSql).toContain("available_sample_count < 100");
   expect(idleProbeCandidatesSql).toContain("insufficient_balance");
   expect(idleProbeCandidatesSql).toContain("o.upstream_error_detail");
+  expect(idleProbeCandidatesSql).toContain("$7::boolean OR EXISTS");
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
     account_status: "active", schedulable: true, temp_unschedulable_until: null,
