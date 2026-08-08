@@ -88,6 +88,30 @@ test("idle probe reconciliation skips a persisted binding still present in the d
   expect(await service.reconcile()).toMatchObject({ attempted: 0, succeeded: 0, failed: 0 });
 });
 
+test("explicit manual reconciliation is not truncated by the automatic provision limit", async () => {
+  const ensured: number[] = [];
+  const isolation = {
+    get: () => null,
+    ensure: async (accountId: number) => {
+      ensured.push(accountId);
+      return { accountId, groupId: accountId + 100, keyCreated: true };
+    },
+  };
+  const service = new IdleAccountProbeService(config, reads([
+    {
+      account_id: 28, account_name: "upstream-28", platform: "openai", priority: 300,
+      account_status: "active", schedulable: true, available_sample_count: 4, group_ids: [2, 3],
+    },
+    {
+      account_id: 29, account_name: "upstream-29", platform: "openai", priority: 300,
+      account_status: "active", schedulable: true, available_sample_count: 4, group_ids: [2, 3],
+    },
+  ]), null, isolation as never);
+
+  expect(await service.reconcile([28, 29])).toMatchObject({ attempted: 2, succeeded: 2, failed: 0 });
+  expect(ensured).toEqual([28, 29]);
+});
+
 test("idle probe usage follows monitor-user owned API keys", () => {
   expect(idleProbeRollingUsageSql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
   expect(idleProbeRollingUsageSql).toContain("JOIN probe_keys p ON p.id = u.api_key_id");

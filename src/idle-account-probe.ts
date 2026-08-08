@@ -220,7 +220,9 @@ export class IdleAccountProbeService {
         const binding = this.isolation!.get(candidate.accountId);
         return binding === null || !candidate.groupIds.includes(binding.groupId);
       })
-      .slice(0, this.config.sub2api.idleProbe.provisionCandidateLimit);
+      .slice(0, accountIds.length > 0
+        ? accountIds.length
+        : this.config.sub2api.idleProbe.provisionCandidateLimit);
     const results: Array<Record<string, unknown>> = [];
     for (const candidate of candidates) {
       try {
