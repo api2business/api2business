@@ -43,7 +43,7 @@ test("idle probe selects only normal schedulable API-key accounts", async () => 
   expect(idleProbeCandidatesSql).toContain("available_sample_count < 100");
   expect(idleProbeCandidatesSql).toContain("insufficient_balance");
   expect(idleProbeCandidatesSql).toContain("o.upstream_error_detail");
-  expect(idleProbeCandidatesSql).toContain("$7::boolean OR EXISTS");
+  expect(idleProbeCandidatesSql).toContain("$7::boolean OR (");
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
     account_status: "active", schedulable: true, temp_unschedulable_until: null,
@@ -111,6 +111,24 @@ test("explicit manual reconciliation is not truncated by the automatic provision
 
   expect(await service.reconcile([28, 29])).toMatchObject({ attempted: 2, succeeded: 2, failed: 0 });
   expect(ensured).toEqual([28, 29]);
+});
+
+test("explicit manual reconciliation includes an error OpenAI API-key account", async () => {
+  const ensured: number[] = [];
+  const isolation = {
+    get: () => null,
+    ensure: async (accountId: number) => {
+      ensured.push(accountId);
+      return { accountId, groupId: 146, keyCreated: true };
+    },
+  };
+  const service = new IdleAccountProbeService(config, reads([{
+    account_id: 46, account_name: "upstream-46", platform: "openai", priority: 300,
+    account_status: "error", schedulable: false, available_sample_count: 4, group_ids: [2, 3],
+  }]), null, isolation as never);
+
+  expect(await service.reconcile([46])).toMatchObject({ attempted: 1, succeeded: 1, failed: 0 });
+  expect(ensured).toEqual([46]);
 });
 
 test("idle probe usage follows monitor-user owned API keys", () => {
@@ -227,7 +245,13 @@ test("idle probe skips blocked accounts even when an explicit plan is stale", as
     account_status: "error", schedulable: false,
   }]), runtime as never, isolation as never);
 
-  expect(await service.run([369], 1)).toMatchObject({ ok: true, attempted: 0, planned: 0, ready: 0 });
+  expect(await service.run([369], 1)).toMatchObject({
+    ok: true,
+    attempted: 0,
+    planned: 1,
+    ready: 0,
+    unreadyAccountIds: [369],
+  });
   expect(probes).toBe(0);
 });
 

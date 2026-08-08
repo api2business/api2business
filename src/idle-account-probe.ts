@@ -45,13 +45,15 @@ CROSS JOIN LATERAL (
 ) sample_stats
 WHERE a.deleted_at IS NULL
   AND LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'
-  AND a.status = 'active'
-  AND COALESCE(a.schedulable, false) = true
   AND a.platform = $1
-  AND ($7::boolean OR EXISTS (
-    SELECT 1 FROM account_groups ag
-    WHERE ag.account_id = a.id
-      AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
+  AND ($7::boolean OR (
+    a.status = 'active'
+    AND COALESCE(a.schedulable, false) = true
+    AND EXISTS (
+      SELECT 1 FROM account_groups ag
+      WHERE ag.account_id = a.id
+        AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
+    )
   ))
   AND ($5::text IS NULL OR a.id = ANY(string_to_array($5, ',')::bigint[]))
   AND ($6::boolean OR sample_stats.available_sample_count < 100 OR NOT EXISTS (
@@ -157,7 +159,7 @@ export class IdleAccountProbeService {
       cacheMode: "bypass-cache",
     });
     const candidates = result.rows
-      .filter((row) => row.account_status === "active" && row.schedulable === true)
+      .filter((row) => explicit.length > 0 || row.account_status === "active" && row.schedulable === true)
       .map((row) => ({
       accountId: Number(row.account_id),
       accountName: String(row.account_name),
