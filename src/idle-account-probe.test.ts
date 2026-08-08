@@ -46,14 +46,46 @@ test("idle probe selects only normal schedulable API-key accounts", async () => 
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
     account_status: "active", schedulable: true, temp_unschedulable_until: null,
-    available_sample_count: 4,
+    available_sample_count: 4, group_ids: [2, 3, 51],
   }]), null);
   const plan = await service.plan();
   expect(plan.databaseQueries).toBe(2);
   expect(plan.candidates).toEqual([{
     accountId: 369, accountName: "upstream plus 0.05", platform: "openai", priority: 300,
     status: "active", schedulable: true, hadRuntimeBlock: false, availableSampleCount: 4,
+    groupIds: [2, 3, 51],
   }]);
+});
+
+test("idle probe reconciliation repairs a persisted private group removed by a bulk account update", async () => {
+  const ensured: number[] = [];
+  const isolation = {
+    get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
+    ensure: async (accountId: number) => {
+      ensured.push(accountId);
+      return { accountId, groupId: 51, keyCreated: false };
+    },
+  };
+  const service = new IdleAccountProbeService(config, reads([{
+    account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
+    account_status: "active", schedulable: true, available_sample_count: 4, group_ids: [2, 3],
+  }]), null, isolation as never);
+
+  expect(await service.reconcile()).toMatchObject({ attempted: 1, succeeded: 1, failed: 0 });
+  expect(ensured).toEqual([369]);
+});
+
+test("idle probe reconciliation skips a persisted binding still present in the database", async () => {
+  const isolation = {
+    get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
+    ensure: async () => { throw new Error("must not reconcile an intact binding"); },
+  };
+  const service = new IdleAccountProbeService(config, reads([{
+    account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
+    account_status: "active", schedulable: true, available_sample_count: 4, group_ids: [2, 3, 51],
+  }]), null, isolation as never);
+
+  expect(await service.reconcile()).toMatchObject({ attempted: 0, succeeded: 0, failed: 0 });
 });
 
 test("idle probe usage follows monitor-user owned API keys", () => {

@@ -241,6 +241,27 @@ test("probe reports a gateway timeout without claiming an ordinary log", async (
   }
 });
 
+test("probe does not claim an account sample when the private group has no available account", async () => {
+  const { service } = fixture();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    error: { message: "no available accounts" },
+  }), { status: 503 })) as unknown as typeof fetch;
+  try {
+    await service.ensure(42);
+    expect(await service.probe(42, "gpt-5.6-terra", 1000, "low")).toMatchObject({
+      accountId: 42,
+      groupId: 51,
+      classification: "error",
+      httpStatus: 503,
+      ordinaryLogRecorded: false,
+      errorMarker: "no-available-account",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("an exhausted monitor user is not automatically replenished", async () => {
   const { state, service } = fixture();
   await service.ensure(42);

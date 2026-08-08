@@ -7,6 +7,12 @@ const idleProbeCandidatesSql = `
 SELECT a.id::int AS account_id, a.name AS account_name, a.platform, a.priority::int AS priority,
   a.status AS account_status, a.schedulable,
   a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until,
+  ARRAY(
+    SELECT binding.group_id::int
+    FROM account_groups binding
+    WHERE binding.account_id = a.id
+    ORDER BY binding.group_id
+  ) AS group_ids,
   sample_stats.available_sample_count
 FROM accounts a
 CROSS JOIN LATERAL (
@@ -82,6 +88,12 @@ export interface IdleProbeCandidate {
   schedulable: boolean;
   hadRuntimeBlock: boolean;
   availableSampleCount: number;
+  groupIds: number[];
+}
+
+function numericIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(Number).filter((candidate) => Number.isSafeInteger(candidate) && candidate > 0);
 }
 
 export const idleProbeRollingUsageSql = `
@@ -156,6 +168,7 @@ export class IdleAccountProbeService {
         || row.overload_until != null
         || row.temp_unschedulable_until != null,
       availableSampleCount: Number(row.available_sample_count ?? 0),
+      groupIds: numericIds(row.group_ids),
       } satisfies IdleProbeCandidate));
     const includeRollingUsage = priority !== "automatic";
     const rolling24Hours = includeRollingUsage ? await this.rollingUsage(priority) : null;
@@ -203,7 +216,10 @@ export class IdleAccountProbeService {
     if (!this.isolation) throw new Error("idle probe reconciliation requires isolated probe API key");
     const plan = await this.plan(accountIds, "automatic");
     const candidates = (plan.candidates as IdleProbeCandidate[])
-      .filter((candidate) => this.isolation!.get(candidate.accountId) === null)
+      .filter((candidate) => {
+        const binding = this.isolation!.get(candidate.accountId);
+        return binding === null || !candidate.groupIds.includes(binding.groupId);
+      })
       .slice(0, this.config.sub2api.idleProbe.provisionCandidateLimit);
     const results: Array<Record<string, unknown>> = [];
     for (const candidate of candidates) {

@@ -424,6 +424,12 @@ export class ProbeIsolationService {
     const body = await response.text();
     const success = response.status >= 200 && response.status < 300;
     const lowered = body.toLowerCase();
+    const accountRoutingFailed = !success && [
+      "no available accounts",
+      "no available account",
+      "no available channel",
+      "not supported by any configured account",
+    ].some((marker) => lowered.includes(marker));
     const classification = success ? "alive"
       : response.status === 401 || response.status === 403 ? "dead"
         : response.status === 429 ? "rate-limited" : "error";
@@ -433,9 +439,9 @@ export class ProbeIsolationService {
       classification,
       httpStatus: response.status,
       durationMs: Date.now() - startedAt,
-      ordinaryLogRecorded: true,
+      ordinaryLogRecorded: !accountRoutingFailed,
       responseBytes: body.length,
-      errorMarker: success ? null : ["invalid_api_key", "insufficient", "rate_limit", "temporarily", "overloaded", "model_not_found"]
+      errorMarker: success ? null : accountRoutingFailed ? "no-available-account" : ["invalid_api_key", "insufficient", "rate_limit", "temporarily", "overloaded", "model_not_found"]
         .find((marker) => lowered.includes(marker)) ?? "upstream-error",
     };
   }
