@@ -81,16 +81,32 @@ const scores = new AccountScoreService(
 async function executeWorkerOperation(operation: OperationRequest): Promise<unknown> {
   const command = operation.command;
   if (command.kind === "scores.refresh") return await scores.refresh();
-  if (command.kind === "upstream.quota.sample") {
-    // 先持久化本地 OAuth 快照，避免单个外部钱包缓慢或故障造成 OAuth 曲线同步断点。
-    const oauth = await operations.sampleOAuthRuntime();
+  const sampleUpstreamUsage = async () => {
     const result = await upstreams.usage([]);
     if (Array.isArray(result.results)) await internal.upstreamUsageCache(
       result.results as Array<Record<string, unknown>>, Number(result.apiAmountUsdTotal),
       true,
     );
-    const quality = await operations.samplePoolQuality();
-    return { ok: true, sampled: result.targetCount, succeeded: result.succeeded, failed: result.failed, oauth, quality };
+    return { ok: true, sampled: result.targetCount, succeeded: result.succeeded, failed: result.failed };
+  };
+  if (command.kind === "upstream.usage.sample") return await sampleUpstreamUsage();
+  if (command.kind === "pool.quality.sample") return await operations.samplePoolQuality();
+  if (command.kind === "upstream.quota.sample") {
+    const [oauth, usage, quality] = await Promise.allSettled([
+      operations.sampleOAuthRuntime(),
+      sampleUpstreamUsage(),
+      operations.samplePoolQuality(),
+    ]);
+    const stages = { oauth, usage, quality };
+    return {
+      ok: Object.values(stages).every((stage) => stage.status === "fulfilled"),
+      stages: Object.fromEntries(Object.entries(stages).map(([name, stage]) => [
+        name,
+        stage.status === "fulfilled"
+          ? { ok: true, result: stage.value }
+          : { ok: false, error: stage.reason instanceof Error ? stage.reason.message : String(stage.reason) },
+      ])),
+    };
   }
   if (command.kind === "oauth.runtime.sample") {
     return await operations.sampleOAuthRuntime();

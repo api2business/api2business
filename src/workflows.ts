@@ -1,5 +1,5 @@
-import { continueAsNew, proxyActivities, sleep, workflowInfo } from "@temporalio/workflow";
-import type { OperationRequest, ScheduledIdleProbeInput, ScheduledScoreRefreshInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
+import { continueAsNew, log, proxyActivities, sleep, workflowInfo } from "@temporalio/workflow";
+import type { AppCommand, OperationRequest, ScheduledIdleProbeInput, ScheduledScoreRefreshInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
 
 export interface Activities {
   executeOperation(request: OperationRequest): Promise<unknown>;
@@ -40,13 +40,22 @@ export async function upstreamQuotaScheduleWorkflow(input: ScheduledUpstreamQuot
     retry: { maximumAttempts: 1 },
   });
   for (let iteration = 0; iteration < 500; iteration += 1) {
-    try {
-      await activity.executeOperation({
-        operationId: `${workflowInfo().runId}:upstream-quota:${iteration}`,
-        command: { kind: "upstream.quota.sample" },
+    const stages: Array<{ name: string; command: AppCommand }> = [
+      { name: "oauth-runtime", command: { kind: "oauth.runtime.sample" } },
+      { name: "upstream-usage", command: { kind: "upstream.usage.sample" } },
+      { name: "pool-quality", command: { kind: "pool.quality.sample" } },
+    ];
+    const results = await Promise.allSettled(stages.map(async (stage) => await activity.executeOperation({
+      operationId: `${workflowInfo().runId}:upstream-quota:${iteration}:${stage.name}`,
+      command: stage.command,
+    })));
+    for (let index = 0; index < results.length; index += 1) {
+      const result = results[index];
+      if (result.status === "rejected") log.warn("upstream sampling stage deferred to next round", {
+        iteration,
+        stage: stages[index]?.name ?? `stage-${index}`,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
       });
-    } catch {
-      // API 短暂重载不能终止长期采样循环。
     }
     await sleep(input.intervalMs);
   }

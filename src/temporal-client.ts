@@ -131,15 +131,17 @@ export class TemporalGateway {
 
   async ensureUpstreamQuotaSchedule(): Promise<{ started: boolean; workflowId: string }> {
     const legacyWorkflowId = `${this.runtime.scoreScheduleWorkflowId}-upstream-quota`;
-    const workflowId = `${legacyWorkflowId}-v2`;
-    try {
-      const legacy = this.client.workflow.getHandle(legacyWorkflowId);
-      const description = await legacy.describe();
-      if (description.status.name === "RUNNING") {
-        await legacy.terminate("migrated to bounded upstream quota schedule v2");
+    const workflowId = `${legacyWorkflowId}-v3`;
+    for (const previousWorkflowId of [legacyWorkflowId, `${legacyWorkflowId}-v2`]) {
+      try {
+        const previous = this.client.workflow.getHandle(previousWorkflowId);
+        const description = await previous.describe();
+        if (description.status.name === "RUNNING") {
+          await previous.terminate("migrated to independently bounded upstream sampling schedule v3");
+        }
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
       }
-    } catch (error) {
-      if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
     }
     try {
       await this.client.workflow.start("upstreamQuotaScheduleWorkflow", {

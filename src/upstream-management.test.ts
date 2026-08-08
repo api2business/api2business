@@ -93,8 +93,10 @@ test("fully configured recovered upstreams skip mutation and repeated detection"
   expect(worker).toContain("result.skipDetection !== true");
 });
 
-test("successful account imports submit an independent OAuth runtime sample", async () => {
+test("account imports and scheduled sampling keep independent failure boundaries", async () => {
   const source = await Bun.file(new URL("./worker.ts", import.meta.url)).text();
+  const workflows = await Bun.file(new URL("./workflows.ts", import.meta.url)).text();
+  const temporal = await Bun.file(new URL("./temporal-client.ts", import.meta.url)).text();
   const importBranch = source.slice(
     source.indexOf('if (command.kind === "account.import")'),
     source.indexOf('if (command.kind === "account.lifecycle.detect")'),
@@ -105,7 +107,15 @@ test("successful account imports submit an independent OAuth runtime sample", as
   expect(importBranch).toContain("postImportOAuthSample");
   expect(importBranch).not.toContain("await operations.sampleOAuthRuntime()");
   expect(source).toContain('if (command.kind === "upstream.quota.sample")');
-  expect(source).toContain("const oauth = await operations.sampleOAuthRuntime()");
+  expect(source).toContain('if (command.kind === "upstream.usage.sample")');
+  expect(source).toContain('if (command.kind === "pool.quality.sample")');
+  expect(workflows).toContain("Promise.allSettled");
+  expect(workflows).toContain('{ kind: "oauth.runtime.sample" }');
+  expect(workflows).toContain('{ kind: "upstream.usage.sample" }');
+  expect(workflows).toContain('{ kind: "pool.quality.sample" }');
+  expect(workflows).toContain("await sleep(input.intervalMs)");
+  expect(temporal).toContain('`${legacyWorkflowId}-v3`');
+  expect(temporal).toContain('`${legacyWorkflowId}-v2`');
   expect(source).not.toMatch(/await temporal\./u);
 });
 
