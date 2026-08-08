@@ -17,6 +17,7 @@ interface FakeState {
   userUpdates: Row[];
   accountUpdates: Row[];
   requestTimeouts: Array<{ path: string; timeoutMs: number }>;
+  rejectDuplicateKeyOnce?: boolean;
 }
 
 class FakeClient {
@@ -58,6 +59,10 @@ class FakeClient {
       return this.state.users[0] as T;
     }
     if (method === "POST" && path === "/keys") {
+      if (this.state.rejectDuplicateKeyOnce) {
+        this.state.rejectDuplicateKeyOnce = false;
+        throw new Error("Sub2API POST /keys failed: HTTP 409 api key already exists");
+      }
       this.state.keyCreates.push(payload);
       const key = { id: 71, key: payload.custom_key, status: "active", ...payload };
       this.state.keys.push(key);
@@ -316,6 +321,17 @@ test("probe isolation reuses the persisted key when the API masks existing key p
   expect(state.keyCreates).toHaveLength(1);
   expect(state.requestTimeouts.some(({ path }) => path === "/keys?page=1&page_size=100")).toBe(true);
   expect(state.requestTimeouts.some(({ path }) => path.startsWith("/keys?") && path.includes("search="))).toBe(false);
+});
+
+test("probe isolation rotates a stale key exactly once after a duplicate-key conflict", async () => {
+  const { rootDirectory, state, service } = fixture();
+  state.rejectDuplicateKeyOnce = true;
+
+  expect(await service.ensure(42)).toMatchObject({ accountId: 42, groupId: 51, keyCreated: true });
+  expect(state.keyCreates).toHaveLength(1);
+  const secretPath = join(rootDirectory, ".state/idle-probe/probe-keys.json");
+  const secret = JSON.parse(readFileSync(secretPath, "utf8")) as { records: Record<string, Row> };
+  expect(secret.records["42"]?.apiKey).toBe(state.keyCreates[0]?.custom_key);
 });
 
 test("probe isolation resumes at account binding after credentials were persisted", async () => {

@@ -256,12 +256,23 @@ export class ProbeIsolationService {
         keyCreated: false,
       };
     }
-    const apiKey = existingPlaintext ?? storedApiKey;
-    const created = await userClient.mutate<Row>("POST", "/keys", {
-      name: keyName,
-      group_id: groupId,
-      custom_key: apiKey,
-    }, undefined, this.remainingTimeout(deadline));
+    let apiKey = existingPlaintext ?? storedApiKey;
+    let created: Row;
+    try {
+      created = await userClient.mutate<Row>("POST", "/keys", {
+        name: keyName,
+        group_id: groupId,
+        custom_key: apiKey,
+      }, undefined, this.remainingTimeout(deadline));
+    } catch (error) {
+      if (!/409|api key already exists/iu.test(errorMessage(error))) throw error;
+      apiKey = generatedSecret("sk-api2business-probe-");
+      created = await userClient.mutate<Row>("POST", "/keys", {
+        name: keyName,
+        group_id: groupId,
+        custom_key: apiKey,
+      }, undefined, this.remainingTimeout(deadline));
+    }
     const returnedKey = typeof created.key === "string" ? created.key : apiKey;
     return {
       record: { accountId, groupId, userId, email, password, apiKey: returnedKey, ready: false, policyVersion: POLICY_VERSION },
