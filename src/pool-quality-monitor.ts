@@ -1,6 +1,7 @@
 import type { AppConfig } from "./config";
 import { scoreRecentDatabaseRow } from "./account-score-database";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import { modelRoutingPatternsSql } from "./scoring-error-policy";
 type Row = Record<string, unknown>;
 
 export interface PoolParticipation {
@@ -87,12 +88,9 @@ WITH internal_probe_keys AS (
             '%insufficient account balance%',
             '%balance is insufficient%',
             '%余额不足%',
-            '%额度不足%',
-            '%model_not_found%',
-            '%model not found%'
+            '%额度不足%'
           ])
-          OR LOWER(COALESCE(source.error_message, '')) LIKE '%not supported by any configured account%'
-          OR LOWER(COALESCE(source.error_message, '')) LIKE '%no available channel for model%'
+          OR source.message_text LIKE ANY (${modelRoutingPatternsSql})
           OR LOWER(COALESCE(source.error_phase, '')) IN ('internal', 'client', 'business') THEN false
         WHEN source.error_phase = 'upstream' OR LOWER(COALESCE(source.error_type, '')) LIKE '%upstream%' THEN true
         WHEN LOWER(COALESCE(source.error_message, '')) LIKE ANY (ARRAY[
@@ -111,10 +109,7 @@ WITH internal_probe_keys AS (
           '%insufficient_balance%', '%insufficient account balance%',
           '%balance is insufficient%', '%余额不足%', '%额度不足%'
         ]) THEN 'insufficient_balance'
-        WHEN source.message_text LIKE ANY (ARRAY[
-          '%model_not_found%', '%model not found%',
-          '%not supported by any configured account%', '%no available channel for model%'
-        ]) THEN 'model_routing'
+        WHEN source.message_text LIKE ANY (${modelRoutingPatternsSql}) THEN 'model_routing'
         WHEN LOWER(COALESCE(source.error_phase, '')) IN ('internal', 'client', 'business')
           THEN 'non_upstream'
         ELSE 'unscored_error'

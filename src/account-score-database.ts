@@ -4,6 +4,7 @@ import type {
   Sub2ApiReadPriority,
 } from "./sub2api-read-executor";
 import { isOAuthAccount } from "./account-score-eligibility";
+import { modelRoutingPatternsSql } from "./scoring-error-policy";
 
 type Row = Record<string, unknown>;
 
@@ -172,8 +173,8 @@ account_stats AS (
               '%余额不足%',
               '%额度不足%'
             ]) THEN false
-            WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%not supported by any configured account%'
-              OR LOWER(COALESCE(o.error_message, '')) LIKE '%no available channel for model%' THEN false
+            WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
+              o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${modelRoutingPatternsSql}) THEN false
             WHEN LOWER(COALESCE(o.error_phase, '')) IN ('internal', 'client', 'business') THEN false
             WHEN o.error_phase = 'upstream' OR LOWER(COALESCE(o.error_type, '')) LIKE '%upstream%' THEN true
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE ANY (ARRAY[

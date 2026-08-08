@@ -37,6 +37,12 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("AS failover_failed");
   expect(recentAccountAggregateQuery).toContain("%insufficient_balance%");
   expect(recentAccountAggregateQuery).toContain("%insufficient account balance%");
+  expect(recentAccountAggregateQuery).toContain("%model_not_found%");
+  expect(recentAccountAggregateQuery).toContain("%model_no_found%");
+  expect(recentAccountAggregateQuery).toContain("%moddel_no_found%");
+  expect(recentAccountAggregateQuery).toContain("%model does not exist%");
+  expect(recentAccountAggregateQuery.indexOf("%model_not_found%"))
+    .toBeLessThan(recentAccountAggregateQuery.indexOf("WHEN o.error_phase = 'upstream'"));
   expect(recentAccountAggregateQuery).toContain("'/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'");
   expect(recentAccountAggregateQuery).toContain("%余额不足%");
   expect(recentAccountAggregateQuery).toContain("o.upstream_error_detail");

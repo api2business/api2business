@@ -41,6 +41,9 @@ test("pool quality excludes every monitor-user key without changing account scor
   expect(poolQualitySql).toContain("'%balance is insufficient%'");
   expect(poolQualitySql).toContain("'%model_not_found%'");
   expect(poolQualitySql).toContain("'%model not found%'");
+  expect(poolQualitySql).toContain("'%model_no_found%'");
+  expect(poolQualitySql).toContain("'%moddel_no_found%'");
+  expect(poolQualitySql).toContain("'%model does not exist%'");
   expect(poolQualitySql.indexOf("'%model_not_found%'")).toBeLessThan(poolQualitySql.indexOf("WHEN source.error_phase = 'upstream'"));
   expect(poolQualitySql).toContain("PARTITION BY event.request_id");
   expect(poolQualitySql).toContain("(event.kind = 'usage') DESC");
