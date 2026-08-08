@@ -254,28 +254,15 @@ export class ProbeIsolationService {
         keyCreated: false,
       };
     }
-    let apiKey = existingPlaintext ?? storedApiKey;
-    let created: Row;
-    try {
-      created = await userClient.mutate<Row>("POST", "/keys", {
-        name: keyName,
-        group_id: groupId,
-        custom_key: apiKey,
-      }, undefined, this.remainingTimeout(deadline));
-    } catch (error) {
-      if (!/API_KEY_EXISTS|api key already exists/iu.test(errorMessage(error))) throw error;
-      created = await userClient.mutate<Row>("POST", "/keys", {
-        name: keyName,
-        group_id: groupId,
-      }, undefined, this.remainingTimeout(deadline));
-      if (typeof created.key !== "string" || created.key.length === 0) {
-        throw new Error("Sub2API 原生生成探活 Key 后未返回凭据");
-      }
-      apiKey = created.key;
+    const created = await userClient.mutate<Row>("POST", "/keys", {
+      name: keyName,
+      group_id: groupId,
+    }, undefined, this.remainingTimeout(deadline));
+    if (typeof created.key !== "string" || created.key.length === 0) {
+      throw new Error("Sub2API 原生生成探活 Key 后未返回凭据");
     }
-    const returnedKey = typeof created.key === "string" ? created.key : apiKey;
     return {
-      record: { accountId, groupId, userId, email, password, apiKey: returnedKey, ready: false, policyVersion: POLICY_VERSION },
+      record: { accountId, groupId, userId, email, password, apiKey: created.key, ready: false, policyVersion: POLICY_VERSION },
       keyCreated: true,
     };
   }

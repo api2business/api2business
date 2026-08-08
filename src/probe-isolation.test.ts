@@ -17,7 +17,6 @@ interface FakeState {
   userUpdates: Row[];
   accountUpdates: Row[];
   requestTimeouts: Array<{ path: string; timeoutMs: number }>;
-  rejectDuplicateKeyOnce?: boolean;
   rejectKeyCreateOnce?: string;
 }
 
@@ -64,10 +63,6 @@ class FakeClient {
         const message = this.state.rejectKeyCreateOnce;
         this.state.rejectKeyCreateOnce = undefined;
         throw new Error(message);
-      }
-      if (this.state.rejectDuplicateKeyOnce) {
-        this.state.rejectDuplicateKeyOnce = false;
-        throw new Error("Sub2API POST /keys failed: HTTP 409 api key already exists");
       }
       this.state.keyCreates.push(payload);
       const key = { id: 71, key: payload.custom_key ?? "sk-server-generated-fixture", status: "active", ...payload };
@@ -163,7 +158,8 @@ test("probe isolation creates one private internal-ID group and redacts every se
   const secretPath = join(rootDirectory, ".state/idle-probe/probe-keys.json");
   expect(statSync(secretPath).mode & 0o777).toBe(0o600);
   const secret = JSON.parse(readFileSync(secretPath, "utf8")) as Row;
-  expect(JSON.stringify(secret)).toContain("sk-api2business-probe-");
+  expect(JSON.stringify(secret)).toContain("sk-server-generated-fixture");
+  expect(state.keyCreates[0]).not.toHaveProperty("custom_key");
 });
 
 test("concurrent ensure calls are idempotent and keep the target as the only group member", async () => {
@@ -328,9 +324,8 @@ test("probe isolation reuses the persisted key when the API masks existing key p
   expect(state.requestTimeouts.some(({ path }) => path.startsWith("/keys?") && path.includes("search="))).toBe(true);
 });
 
-test("probe isolation rotates a stale key exactly once after a duplicate-key conflict", async () => {
+test("probe isolation asks Sub2API to generate every new key", async () => {
   const { rootDirectory, state, service } = fixture();
-  state.rejectDuplicateKeyOnce = true;
 
   expect(await service.ensure(42)).toMatchObject({ accountId: 42, groupId: 51, keyCreated: true });
   expect(state.keyCreates).toHaveLength(1);
