@@ -309,6 +309,8 @@ test("probe isolation reuses the persisted key when the API masks existing key p
 
   expect(await service.ensure(42)).toMatchObject({ accountId: 42, groupId: 51, keyCreated: false });
   expect(state.keyCreates).toHaveLength(1);
+  expect(state.requestTimeouts.some(({ path }) => path === "/keys?page=1&page_size=100")).toBe(true);
+  expect(state.requestTimeouts.some(({ path }) => path.startsWith("/keys?") && path.includes("search="))).toBe(false);
 });
 
 test("probe isolation resumes at account binding after credentials were persisted", async () => {
