@@ -271,11 +271,17 @@ export class IdleAccountProbeService {
         const plannedCandidates = plan.candidates as IdleProbeCandidate[];
         const candidates = plannedCandidates
           .filter((candidate) => candidate.status === "active" && candidate.schedulable === true)
-          .filter((candidate) => this.isolation!.get(candidate.accountId) !== null);
+          .filter((candidate) => {
+            const binding = this.isolation!.get(candidate.accountId);
+            return binding !== null && candidate.groupIds.includes(binding.groupId);
+          });
         planned += plannedCandidates.length;
         ready += candidates.length;
         for (const candidate of plannedCandidates) {
-          if (this.isolation!.get(candidate.accountId) === null) unreadyAccountIds.add(candidate.accountId);
+          const binding = this.isolation!.get(candidate.accountId);
+          if (binding === null || !candidate.groupIds.includes(binding.groupId)) {
+            unreadyAccountIds.add(candidate.accountId);
+          }
         }
         // 探活只执行计划中的 active + schedulable 账号，不改变账号运行状态。
         const settled = await Promise.all(candidates.map(async (candidate) => {

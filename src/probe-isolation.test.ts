@@ -114,7 +114,8 @@ function fixture() {
   } as AppConfig;
   const client = new FakeClient(state);
   const runtime = {
-    updateAccount: async (_accountId: number, patch: Row) => {
+    configureApiKeyAccounts: async (accountIds: number[], patch: Row) => {
+      expect(accountIds).toEqual([42]);
       state.accountUpdates.push(patch);
       Object.assign(state.account, { group_ids: patch.group_ids });
     },

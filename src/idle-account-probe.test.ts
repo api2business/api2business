@@ -127,7 +127,7 @@ test("idle probe skips a concurrent round and never retries inside one account a
   const runtime = {};
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
-    account_status: "active", schedulable: true,
+    account_status: "active", schedulable: true, group_ids: [51],
   }]), runtime as never, isolation as never);
   const first = service.run([369], 1);
   await Bun.sleep(1);
@@ -154,7 +154,7 @@ test("idle probe does not claim an ordinary log when the gateway never responds"
   const runtime = { recoverAccounts: async () => {} };
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
-    account_status: "active", schedulable: true,
+    account_status: "active", schedulable: true, group_ids: [51],
   }]), runtime as never, isolation as never);
 
   expect(await service.run([369], 1)).toMatchObject({
@@ -164,6 +164,30 @@ test("idle probe does not claim an ordinary log when the gateway never responds"
     failed: 1,
     ordinaryLogRecorded: false,
   });
+});
+
+test("idle probe does not use a persisted key after its private group binding was removed", async () => {
+  let probes = 0;
+  const isolation = {
+    get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
+    probe: async () => {
+      probes += 1;
+      return { classification: "alive", ordinaryLogRecorded: true };
+    },
+  };
+  const service = new IdleAccountProbeService(config, reads([{
+    account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
+    account_status: "active", schedulable: true, group_ids: [2],
+  }]), {} as never, isolation as never);
+
+  expect(await service.run([369], 1)).toMatchObject({
+    ok: true,
+    attempted: 0,
+    ready: 0,
+    unreadyAccountIds: [369],
+    ordinaryLogRecorded: false,
+  });
+  expect(probes).toBe(0);
 });
 
 test("idle probe skips blocked accounts even when an explicit plan is stale", async () => {
@@ -189,7 +213,7 @@ test("idle probe sends every ready planned request concurrently", async () => {
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const rows = Array.from({ length: 8 }, (_, index) => ({
     account_id: index + 1, account_name: `upstream-${index + 1}`, platform: "openai", priority: 300,
-    account_status: "active", schedulable: true,
+    account_status: "active", schedulable: true, group_ids: [index + 101],
   }));
   const runtime = { recoverAccounts: async () => {} };
   const isolation = {

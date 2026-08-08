@@ -266,9 +266,8 @@ export class ProbeIsolationService {
     const currentGroupIds = accountGroupIds(account);
     if (!currentGroupIds.includes(groupId)) {
       if (!this.runtime) throw new Error("探活账号绑定需要 Sub2API runtime mutation service");
-      await this.runtime.updateAccount(accountId, {
+      await this.runtime.configureApiKeyAccounts([accountId], {
         group_ids: [...new Set([...currentGroupIds, groupId])],
-        confirm_mixed_channel_risk: true,
       }, this.remainingTimeout(deadline));
     }
     const verifiedAccount = row(await this.admin.getAccount(accountId, this.remainingTimeout(deadline)));
