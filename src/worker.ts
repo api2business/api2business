@@ -19,6 +19,7 @@ import { AccountImportService, type ImportJob } from "./account-import-service";
 import { AccountLifecycleService, type LifecycleJob } from "./account-lifecycle-service";
 import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { ProbeIsolationService } from "./probe-isolation";
+import { idleProbeScheduleFreshness } from "./idle-probe-schedule-watchdog";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -286,6 +287,59 @@ console.log(JSON.stringify({
 }));
 
 let stopping = false;
+let wakeIdleProbeWatchdog = () => {};
+async function waitForIdleProbeWatchdog(delayMs: number): Promise<void> {
+  if (stopping) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      wakeIdleProbeWatchdog = () => {};
+      resolve();
+    }, delayMs);
+    wakeIdleProbeWatchdog = () => {
+      clearTimeout(timer);
+      wakeIdleProbeWatchdog = () => {};
+      resolve();
+    };
+  });
+}
+const idleProbeWatchdogStartedAtMs = Date.now();
+const idleProbeWatchdog = (async () => {
+  if (!temporalGateway || !config.sub2api.idleProbe.enabled) return;
+  while (!stopping) {
+    try {
+      const latest = await operationsStore.latestAutomaticIdleProbeRound();
+      const freshness = idleProbeScheduleFreshness({
+        nowMs: Date.now(),
+        workerStartedAtMs: idleProbeWatchdogStartedAtMs,
+        lastAutomaticCompletedAt: latest?.completed_at ?? null,
+        intervalSeconds: config.sub2api.idleProbe.intervalSeconds,
+        roundTimeoutSeconds: config.sub2api.idleProbe.roundTimeoutSeconds,
+      });
+      if (freshness.stale) {
+        const recovered = await temporalGateway.replaceIdleProbeSchedule(
+          `automatic idle probe stale for ${freshness.ageMs}ms (${freshness.reference})`,
+        );
+        console.log(JSON.stringify({
+          ok: true,
+          component: "idle-probe-schedule-watchdog",
+          action: "replaced",
+          ...freshness,
+          ...recovered,
+          valuesPrinted: false,
+        }));
+      }
+    } catch (error) {
+      console.error(JSON.stringify({
+        ok: false,
+        component: "idle-probe-schedule-watchdog",
+        action: "deferred-to-next-cycle",
+        error: error instanceof Error ? error.message : String(error),
+        valuesPrinted: false,
+      }));
+    }
+    await waitForIdleProbeWatchdog(config.sub2api.idleProbe.intervalSeconds * 1000);
+  }
+})();
 let consecutiveAutomationFailures = 0;
 const automationLoop = (async () => {
   while (!stopping) {
@@ -344,6 +398,7 @@ const standaloneStop = new Promise<void>((resolve) => {
 async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
+  wakeIdleProbeWatchdog();
   state = "stopping";
   health.stop(true);
   if (worker) worker.shutdown();
@@ -356,8 +411,10 @@ try {
   else await standaloneStop;
 } finally {
   stopping = true;
+  wakeIdleProbeWatchdog();
   state = "stopping";
   health.stop(true);
+  await idleProbeWatchdog;
   await automationLoop;
   scores.close();
   await operations.close();

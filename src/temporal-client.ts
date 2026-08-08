@@ -187,22 +187,63 @@ export class TemporalGateway {
       activityStartToCloseTimeout: `${this.config.sub2api.idleProbe.roundTimeoutSeconds}s`,
       maximumAttempts: 1,
     };
-    try {
+    let started = false;
+    await this.connection.withDeadline(Date.now() + this.config.temporal.submissionTimeoutMs, async () => {
+      try {
+        await this.client.workflow.start("idleAccountProbeScheduleWorkflow", {
+          taskQueue: this.runtime.taskQueue,
+          workflowId,
+          args: [input],
+        });
+        started = true;
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError")) throw error;
+      }
+      try {
+        await this.client.workflow.start("idleAccountProvisionScheduleWorkflow", {
+          taskQueue: this.runtime.taskQueue, workflowId: provisionWorkflowId, args: [input],
+        });
+        started = true;
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError")) throw error;
+      }
+    });
+    return { started, workflowId, provisionWorkflowId };
+  }
+
+  async replaceIdleProbeSchedule(reason: string): Promise<{
+    started: true;
+    workflowId: string;
+    provisionWorkflowId: string;
+  }> {
+    if (!this.config.sub2api.idleProbe.enabled) throw new Error("idle probe is disabled by configuration");
+    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-probe-v4`;
+    const provisionWorkflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-provision-v1`;
+    const input = {
+      intervalMs: this.config.sub2api.idleProbe.intervalSeconds * 1000,
+      roundTimeoutMs: this.config.sub2api.idleProbe.roundTimeoutSeconds * 1000,
+      provisionTimeoutMs: this.config.sub2api.idleProbe.provisionTimeoutSeconds * 1000,
+      activityStartToCloseTimeout: `${this.config.sub2api.idleProbe.roundTimeoutSeconds}s`,
+      maximumAttempts: 1,
+    };
+    await this.connection.withDeadline(Date.now() + this.config.temporal.submissionTimeoutMs, async () => {
       await this.client.workflow.start("idleAccountProbeScheduleWorkflow", {
         taskQueue: this.runtime.taskQueue,
         workflowId,
+        workflowIdConflictPolicy: "TERMINATE_EXISTING",
+        workflowIdReusePolicy: "ALLOW_DUPLICATE",
         args: [input],
+        memo: { recoveryReason: reason.slice(0, 500) },
       });
-    } catch (error) {
-      if (!(error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError")) throw error;
-    }
-    try {
       await this.client.workflow.start("idleAccountProvisionScheduleWorkflow", {
-        taskQueue: this.runtime.taskQueue, workflowId: provisionWorkflowId, args: [input],
+        taskQueue: this.runtime.taskQueue,
+        workflowId: provisionWorkflowId,
+        workflowIdConflictPolicy: "TERMINATE_EXISTING",
+        workflowIdReusePolicy: "ALLOW_DUPLICATE",
+        args: [input],
+        memo: { recoveryReason: reason.slice(0, 500) },
       });
-    } catch (error) {
-      if (!(error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError")) throw error;
-    }
+    });
     return { started: true, workflowId, provisionWorkflowId };
   }
 

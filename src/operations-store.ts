@@ -546,6 +546,25 @@ export class OperationsStore {
     `;
   }
 
+  async latestAutomaticIdleProbeRound(): Promise<{
+    operation_id: string;
+    completed_at: string;
+    status: "succeeded" | "partial" | "failed" | "skipped";
+  } | null> {
+    const rows = await this.sql`
+      SELECT operation_id, completed_at::text AS completed_at, status
+      FROM api2business_idle_probe_rounds
+      WHERE trigger_type = 'automatic'
+      ORDER BY completed_at DESC, id DESC
+      LIMIT 1
+    ` as Array<{
+      operation_id: string;
+      completed_at: string;
+      status: "succeeded" | "partial" | "failed" | "skipped";
+    }>;
+    return rows[0] ?? null;
+  }
+
   async startUpstreamBenchmark(input: { accountId: number; provider: string; benchmarkVersion: string; model: string }) {
     const id = crypto.randomUUID();
     await this.sql`
