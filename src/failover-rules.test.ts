@@ -27,6 +27,7 @@ test("preserves the legacy upstream wrapper phrase", () => {
 test("keeps model capacity and billing/authentication matches explicit", () => {
   expect(() => validateFailoverRules([
     rule(429, ["selected model is at capacity", "concurrency limit exceeded for account"]),
+    rule(401, ["invalid_api_key", "authentication failed"]),
     rule(402, ["insufficient account balance"]),
     rule(403, ["invalid_api_key"]),
   ])).not.toThrow();
