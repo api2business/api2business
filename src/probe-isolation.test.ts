@@ -87,7 +87,7 @@ function fixture() {
     groups: [],
     users: [],
     keys: [],
-    account: { id: 42, platform: "openai", type: "apikey", group_ids: [2, 3] },
+    account: { id: 42, platform: "openai", type: "apikey", group_ids: [2] },
     groupCreates: [],
     keyCreates: [],
     accountUpdates: [],
@@ -109,7 +109,7 @@ function fixture() {
       },
     },
     operations: {
-      upstreamManagement: { mutationTimeoutMs: 120000 },
+      upstreamManagement: { mutationTimeoutMs: 120000, groupIds: [2, 3] },
     },
   } as AppConfig;
   const client = new FakeClient(state);

@@ -266,14 +266,21 @@ export class ProbeIsolationService {
   private async ensureAccountBinding(accountId: number, groupId: number, deadline?: number): Promise<void> {
     const account = row(await this.admin.getAccount(accountId, this.remainingTimeout(deadline)));
     const currentGroupIds = accountGroupIds(account);
-    if (!currentGroupIds.includes(groupId)) {
+    const desiredGroupIds = [...new Set([
+      ...currentGroupIds,
+      ...this.config.operations.upstreamManagement.groupIds,
+      groupId,
+    ])].sort((left, right) => left - right);
+    if (desiredGroupIds.some((desiredGroupId) => !currentGroupIds.includes(desiredGroupId))) {
       if (!this.runtime) throw new Error("探活账号绑定需要 Sub2API runtime mutation service");
       await this.runtime.configureApiKeyAccounts([accountId], {
-        group_ids: [...new Set([...currentGroupIds, groupId])],
+        group_ids: desiredGroupIds,
       }, this.remainingTimeout(deadline));
     }
     const verifiedAccount = row(await this.admin.getAccount(accountId, this.remainingTimeout(deadline)));
-    if (!accountGroupIds(verifiedAccount).includes(groupId)) throw new Error(`账号 ${accountId} 未绑定探活私有分组 ${groupId}`);
+    const verifiedGroupIds = accountGroupIds(verifiedAccount);
+    const missingGroupIds = desiredGroupIds.filter((desiredGroupId) => !verifiedGroupIds.includes(desiredGroupId));
+    if (missingGroupIds.length > 0) throw new Error(`账号 ${accountId} 未绑定目标分组 ${missingGroupIds.join(",")}`);
     const members = await this.admin.listGroupAccounts(groupId, "openai", this.remainingTimeout(deadline));
     const memberIds = accountIds(members as unknown as Row[]);
     if (memberIds.some((memberId) => memberId !== accountId)) {
