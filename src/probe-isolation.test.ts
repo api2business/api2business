@@ -14,6 +14,7 @@ interface FakeState {
   account: Row;
   groupCreates: Row[];
   keyCreates: Row[];
+  userUpdates: Row[];
   accountUpdates: Row[];
   requestTimeouts: Array<{ path: string; timeoutMs: number }>;
 }
@@ -52,6 +53,7 @@ class FakeClient {
       return user as T;
     }
     if (method === "PUT" && path === "/admin/users/61") {
+      this.state.userUpdates.push(payload);
       Object.assign(this.state.users[0]!, payload);
       return this.state.users[0] as T;
     }
@@ -90,6 +92,7 @@ function fixture() {
     account: { id: 42, platform: "openai", type: "apikey", group_ids: [2] },
     groupCreates: [],
     keyCreates: [],
+    userUpdates: [],
     accountUpdates: [],
     requestTimeouts: [],
   };
@@ -98,6 +101,7 @@ function fixture() {
     sub2api: {
       idleProbe: {
         roundTimeoutSeconds: 50,
+        concurrency: 10,
         isolation: {
           enabled: true,
           gatewayBaseUrl: "https://gateway.example.com/v1",
@@ -159,6 +163,7 @@ test("concurrent ensure calls are idempotent and keep the target as the only gro
   expect(results[1]).toMatchObject({ accountId: 42, groupId: 51, keyCreated: false });
   expect(state.groupCreates).toHaveLength(1);
   expect(state.keyCreates).toHaveLength(1);
+  expect(state.userUpdates).toHaveLength(0);
   expect(state.accountUpdates).toHaveLength(1);
 });
 

@@ -211,13 +211,19 @@ export class ProbeIsolationService {
       funded = true;
     } else {
       const allowedGroups = [...new Set([...ids(user?.allowed_groups), groupId])];
-      await this.admin.mutate("PUT", `/admin/users/${userId}`, {
-        password,
-        allowed_groups: allowedGroups,
-        concurrency: this.config.sub2api.idleProbe.concurrency,
-        rpm_limit: 0,
-        ...(!funded ? { balance: this.config.sub2api.idleProbe.isolation.userBalance } : {}),
-      }, undefined, this.remainingTimeout(deadline));
+      const needsUpdate = !ids(user?.allowed_groups).includes(groupId)
+        || Number(user?.concurrency) !== this.config.sub2api.idleProbe.concurrency
+        || Number(user?.rpm_limit ?? 0) !== 0
+        || !funded;
+      if (needsUpdate) {
+        await this.admin.mutate("PUT", `/admin/users/${userId}`, {
+          password,
+          allowed_groups: allowedGroups,
+          concurrency: this.config.sub2api.idleProbe.concurrency,
+          rpm_limit: 0,
+          ...(!funded ? { balance: this.config.sub2api.idleProbe.isolation.userBalance } : {}),
+        }, undefined, this.remainingTimeout(deadline));
+      }
       funded = true;
     }
     if (userId === null) throw new Error("创建 monitor-user 后未返回稳定 ID");
