@@ -72,23 +72,3 @@ export async function idleAccountProbeScheduleWorkflow(input: ScheduledIdleProbe
   }
   await continueAsNew<typeof idleAccountProbeScheduleWorkflow>(input);
 }
-
-export async function idleAccountProvisionScheduleWorkflow(input: ScheduledIdleProbeInput): Promise<void> {
-  const activity = proxyActivities<Activities>({
-    startToCloseTimeout: input.provisionTimeoutMs,
-    scheduleToCloseTimeout: input.provisionTimeoutMs,
-    retry: { maximumAttempts: 1 },
-  });
-  for (let iteration = 0; iteration < 500; iteration += 1) {
-    try {
-      await activity.executeOperation({
-        operationId: `${workflowInfo().runId}:idle-probe-reconcile:${iteration}`,
-        command: { kind: "account.idle-probe.reconcile", accountIds: [] },
-      });
-    } catch {
-      // 单轮初始化失败直接跳过，不影响独立的探活周期。
-    }
-    await sleep(input.intervalMs);
-  }
-  await continueAsNew<typeof idleAccountProvisionScheduleWorkflow>(input);
-}

@@ -173,12 +173,12 @@ test("upstream creation keeps the created account successful when post-processin
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   const createBody = source.slice(source.indexOf("  async create(input:"), source.indexOf("  async update(id:"));
   expect(createBody).toContain("await this.runtime.configureApiKeyAccounts(");
-  expect(createBody).toContain("await this.probeIsolation.ensure(resolvedAccountId)");
-  expect(createBody).toContain("this.probeIsolation.get(resolvedAccountId)");
+  expect(createBody).toContain("this.probeIsolation?.get(resolvedAccountId)");
+  expect(createBody).not.toContain("await this.probeIsolation.ensure(resolvedAccountId)");
   expect(createBody).toContain("const postProcess = async () =>");
   expect(createBody).toContain("settings.mutationTimeoutMs");
   expect(createBody).toContain("await postProcess();");
-  expect(createBody).toContain("返回账号快照可能早于最终倍率探测回写");
+  expect(createBody).toContain("探活隔离只通过手动批量操作创建");
   expect(createBody).not.toContain("上游账号已创建，但 Codex 通用切号模板未通过校验");
 });
 

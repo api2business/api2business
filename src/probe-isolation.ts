@@ -243,9 +243,7 @@ export class ProbeIsolationService {
     if (!ids(verifiedUser.allowed_groups).includes(groupId)) throw new Error(`monitor-user ${userId} 未绑定私有分组 ${groupId}`);
 
     const userClient = this.admin.fork({ email, password });
-    // Sub2API's user key list does not consistently implement the search query.
-    // Read the bounded list and match the internal key name exactly before creating.
-    const keyList = await userClient.request<Paginated<Row>>("/keys?page=1&page_size=100", {}, true, this.remainingTimeout(deadline));
+    const keyList = await userClient.request<Paginated<Row>>(`/keys?page=1&page_size=100&search=${encodeURIComponent(keyName)}`, {}, true, this.remainingTimeout(deadline));
     const existingKey = pageItems(keyList).find((item) => String(item.name ?? "") === keyName);
     const existingKeyId = id(existingKey?.id);
     const existingPlaintext = typeof existingKey?.key === "string" ? existingKey.key : null;
@@ -265,13 +263,15 @@ export class ProbeIsolationService {
         custom_key: apiKey,
       }, undefined, this.remainingTimeout(deadline));
     } catch (error) {
-      if (!/409|api key already exists/iu.test(errorMessage(error))) throw error;
-      apiKey = generatedSecret("sk-api2business-probe-");
+      if (!/API_KEY_EXISTS|api key already exists/iu.test(errorMessage(error))) throw error;
       created = await userClient.mutate<Row>("POST", "/keys", {
         name: keyName,
         group_id: groupId,
-        custom_key: apiKey,
       }, undefined, this.remainingTimeout(deadline));
+      if (typeof created.key !== "string" || created.key.length === 0) {
+        throw new Error("Sub2API 原生生成探活 Key 后未返回凭据");
+      }
+      apiKey = created.key;
     }
     const returnedKey = typeof created.key === "string" ? created.key : apiKey;
     return {

@@ -1058,11 +1058,12 @@ export class UpstreamManagementService {
     let recovered = account !== null;
     if (account && recharge === null) {
       const existingProbe = this.probeIsolation?.get(account.id) ?? null;
-      const expectedGroups = existingProbe
-        ? [...new Set([...groupIds, existingProbe.groupId])].sort((left, right) => left - right)
-        : [];
+      const expectedGroups = [...new Set([
+        ...groupIds,
+        ...(existingProbe ? [existingProbe.groupId] : []),
+      ])].sort((left, right) => left - right);
       const actualGroups = [...account.groupIds].sort((left, right) => left - right);
-      if (input.rateWasSpecified && existingProbe && account.priority === priority && account.capacity === capacity
+      if (input.rateWasSpecified && account.priority === priority && account.capacity === capacity
         && account.proxyId === settings.proxyId
         && JSON.stringify(actualGroups) === JSON.stringify(expectedGroups)) {
         return {
@@ -1106,14 +1107,15 @@ export class UpstreamManagementService {
     }
     if (createError !== null) recovered = true;
     const resolvedAccountId = account.id;
-    // 创建终态只依赖稳定账号 ID；探活隔离、运行设置和模板在后台尽力完成，
+    // 创建终态只依赖稳定账号 ID；运行设置和模板在后台尽力完成，
     // 避免 Sub2API 后处理超时把已经创建成功的账号伪装成导入失败。
     const postProcess = async () => {
       try {
-        if (!this.probeIsolation) throw new Error("探活隔离服务不可用");
-        const probeBinding = this.probeIsolation.get(resolvedAccountId)
-          ?? await this.probeIsolation.ensure(resolvedAccountId);
-        const effectiveGroupIds = [...new Set([...groupIds, probeBinding.groupId])];
+        const probeBinding = this.probeIsolation?.get(resolvedAccountId) ?? null;
+        const effectiveGroupIds = [...new Set([
+          ...groupIds,
+          ...(probeBinding ? [probeBinding.groupId] : []),
+        ])];
         const desiredGroupIds = [...effectiveGroupIds].sort((left, right) => left - right);
         const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
         if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
@@ -1166,7 +1168,7 @@ export class UpstreamManagementService {
       account,
       template: { applied: false, verified: false, status: "pending" },
       probeIsolation: { enabled: false, status: "pending" },
-      warnings: ["探活隔离与运行设置已完成；返回账号快照可能早于最终倍率探测回写"],
+      warnings: ["运行设置已完成；探活隔离只通过手动批量操作创建，返回账号快照可能早于最终倍率探测回写"],
       accounting,
     };
   }

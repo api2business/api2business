@@ -180,6 +180,15 @@ export class TemporalGateway {
         if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
       }
     }
+    try {
+      const provision = this.client.workflow.getHandle(provisionWorkflowId);
+      const description = await provision.describe();
+      if (description.status.name === "RUNNING") {
+        await provision.terminate("probe isolation provisioning is manual-only");
+      }
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
+    }
     const input = {
       intervalMs: this.config.sub2api.idleProbe.intervalSeconds * 1000,
       roundTimeoutMs: this.config.sub2api.idleProbe.roundTimeoutSeconds * 1000,
@@ -194,14 +203,6 @@ export class TemporalGateway {
           taskQueue: this.runtime.taskQueue,
           workflowId,
           args: [input],
-        });
-        started = true;
-      } catch (error) {
-        if (!(error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError")) throw error;
-      }
-      try {
-        await this.client.workflow.start("idleAccountProvisionScheduleWorkflow", {
-          taskQueue: this.runtime.taskQueue, workflowId: provisionWorkflowId, args: [input],
         });
         started = true;
       } catch (error) {
@@ -227,17 +228,18 @@ export class TemporalGateway {
       maximumAttempts: 1,
     };
     await this.connection.withDeadline(Date.now() + this.config.temporal.submissionTimeoutMs, async () => {
+      try {
+        const provision = this.client.workflow.getHandle(provisionWorkflowId);
+        const description = await provision.describe();
+        if (description.status.name === "RUNNING") {
+          await provision.terminate("probe isolation provisioning is manual-only");
+        }
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
+      }
       await this.client.workflow.start("idleAccountProbeScheduleWorkflow", {
         taskQueue: this.runtime.taskQueue,
         workflowId,
-        workflowIdConflictPolicy: "TERMINATE_EXISTING",
-        workflowIdReusePolicy: "ALLOW_DUPLICATE",
-        args: [input],
-        memo: { recoveryReason: reason.slice(0, 500) },
-      });
-      await this.client.workflow.start("idleAccountProvisionScheduleWorkflow", {
-        taskQueue: this.runtime.taskQueue,
-        workflowId: provisionWorkflowId,
         workflowIdConflictPolicy: "TERMINATE_EXISTING",
         workflowIdReusePolicy: "ALLOW_DUPLICATE",
         args: [input],
