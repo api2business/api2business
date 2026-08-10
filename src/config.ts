@@ -194,6 +194,7 @@ export interface AppConfig {
       testBatchSize: number;
       testTimeoutMs: number;
       deleteTimeoutMs: number;
+      deleteBatchSize: number;
     };
     accountImportDefaults: {
       priority: number;
@@ -831,6 +832,7 @@ export function loadConfig(path: string): AppConfig {
         testBatchSize: integerValue(accountLifecycle, "testBatchSize", "operations.accountLifecycle", 1, 20),
         testTimeoutMs: integerValue(accountLifecycle, "testTimeoutMs", "operations.accountLifecycle", 1000, 3600000),
         deleteTimeoutMs: integerValue(accountLifecycle, "deleteTimeoutMs", "operations.accountLifecycle", 1000, 3600000),
+        deleteBatchSize: integerValue(accountLifecycle, "deleteBatchSize", "operations.accountLifecycle", 1, 100),
       },
       accountImportDefaults: {
         priority: integerValue(accountImportDefaults, "priority", "operations.accountImportDefaults", 1, 1000),

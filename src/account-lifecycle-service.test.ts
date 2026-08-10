@@ -61,6 +61,23 @@ test("settlement keeps its confirmed candidates when a worker snapshot omits the
   expect(patches.some((patch) => Object.hasOwn(patch, "candidates"))).toBeFalse();
 });
 
+test("failed settlement resumes only the persisted remaining account IDs", async () => {
+  const submitted: unknown[] = [];
+  const job = {
+    id: "job-resume", state: "failed" as const, createdAt: new Date().toISOString(), completedAt: new Date().toISOString(),
+    settings: { day: "2026-08-01", planType: "team" as const, unitCostCny: 0.01, model: "gpt-5.6-sol", confirm: false, selectionMode: "database-dead" as const, scope: "pool" as const },
+    fingerprint: "fingerprint", logs: [], candidates: [{ accountId: 1 }, { accountId: 2 }], result: { summary: { alive: 0, dead: 2, unknown: 0 } },
+    settlement: { remainingAccountIds: [2] }, error: "timeout",
+  };
+  const service = new AccountLifecycleService({} as AppConfig, {} as Sub2ApiReadClient, {
+    submit: async (command) => { submitted.push(command); return { workflowId: "resume-1", runId: "run-1", state: "submitted" }; },
+  } as never);
+  (service as unknown as { jobs: Map<string, unknown> }).jobs.set(job.id, job);
+  const result = await service.settle(job.id);
+  expect(submitted).toEqual([{ kind: "account.lifecycle.settle", jobId: job.id, candidateIds: [2] }]);
+  expect(result.state).toBe("settling");
+});
+
 test("includes YAML acquisition entries so manually recorded OAuth accounts enter lifecycle detection", () => {
   const root = mkdtempSync(join(tmpdir(), "api2business-lifecycle-yaml-"));
   const ledger = join(root, "pool.yaml");

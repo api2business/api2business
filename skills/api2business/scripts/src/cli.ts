@@ -196,7 +196,7 @@ function help(): Record<string, unknown> {
       "records list|delete",
       "credit test",
       "api smoke --over-api",
-      "web screenshot [--profile scores-layout] --over-api",
+      "web screenshot [--profile <owning smoke profile>] --over-api",
       "workflow status --id <workflow-id>",
       "priority automation get|create|update|delete --over-api [--interval-seconds N --calls N --enabled true|false] [--confirm]",
       "priority plan create --over-api [--calls N]",
@@ -669,7 +669,11 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
         const job = record(status.job);
         const settings = record(job?.settings);
         if (!job || (settings?.selectionMode !== "database-error" && settings?.selectionMode !== "database-dead" && settings?.selectionMode !== "database-all")) throw new Error("retire confirm requires a database retirement plan");
-        if (job.state !== "succeeded") throw new Error(`retirement plan must be succeeded before confirm; current state is ${String(job.state)}`);
+        const settlement = record(job.settlement);
+        const remaining = Array.isArray(settlement?.remainingAccountIds) ? settlement.remainingAccountIds.length : 0;
+        if (job.state !== "succeeded" && !(job.state === "failed" && remaining > 0)) {
+          throw new Error(`retirement plan must be succeeded or have resumable remaining accounts; current state is ${String(job.state)}`);
+        }
         return await client.accountLifecycleSettle(parsed.id);
       }
       throw new Error("accounts lifecycle retire requires plan, status, or confirm");

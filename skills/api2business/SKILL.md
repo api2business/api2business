@@ -92,6 +92,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   和 `team` 的限流账号也按死亡处理，`k12` 限流账号保留。
 - 对缺少采购成本记录的整池账号，先用 `--scope pool --plan-type <type> --unit-cost-cny <CNY>`
   显式声明本批结算单价；该模式只支持单一账号类型，并在计划与确认回读中固定成本。
+- 退役删除按 `operations.accountLifecycle.deleteBatchSize` 分批调用原生批量接口；单批失败会跳过并继续，终态只以排队回读为准，失败且有剩余账号时复用原计划恢复。
 - 上游、评分和优先级读取 `references/upstream-scheduling.md`。
 - 充值候选使用 `upstreams recharge-candidates --over-api`；同时分析当前欠费和最新额度低于 YAML `lowBalanceCny` 的账号，分别回看锚点前 `lookbackHours` 小时。
 - 新增上游时省略 `--rate`，由 YAML 提供创建占位费率；worker 创建成功后自动探测额度与有效倍率，并将有效倍率同步为最终费率。

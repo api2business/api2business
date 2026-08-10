@@ -57,6 +57,17 @@ webProbe:
       settleMs: 5000
       commandTimeoutSeconds: 90
       outputLimits: { failures: 12, network: 40, console: 12 }
+    account-import:
+      path: /account-import
+      readySelector: body
+      screenshotName: api2business-account-import-desktop.png
+      mobileScreenshotName: api2business-account-import-mobile.png
+      viewport: { width: 1920, height: 1080 }
+      mobileViewport: { width: 390, height: 844 }
+      navigationTimeoutMs: 30000
+      settleMs: 3000
+      commandTimeoutSeconds: 90
+      outputLimits: { failures: 12, network: 40, console: 12 }
 
 sub2api:
   baseUrl: https://api.example.com/api/v1
@@ -268,6 +279,7 @@ operations:
     testBatchSize: 8
     testTimeoutMs: 1800000
     deleteTimeoutMs: 600000
+    deleteBatchSize: 10
   accountImportDefaults:
     priority: 1
     capacity: 16

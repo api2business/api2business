@@ -250,7 +250,27 @@ export class AccountLifecycleService {
   async settle(id: string): Promise<LifecycleJob> {
     const job = this.jobs.get(id);
     if (!job) throw new Error("OAuth 生命周期作业不存在");
-    if (job.state !== "succeeded") throw new Error("只有检测成功的作业可以结算");
+    const remaining = Array.isArray(job.settlement?.remainingAccountIds)
+      ? job.settlement.remainingAccountIds.map((value) => number(value)).filter((value) => value > 0)
+      : [];
+    const resuming = job.state === "failed" && remaining.length > 0;
+    if (job.state !== "succeeded" && !resuming) throw new Error("只有检测成功或存在剩余账号的失败作业可以结算");
+    if (resuming) {
+      if (!this.temporal) throw new Error("Temporal worker 当前不可用");
+      job.state = "settling";
+      job.error = null;
+      this.log(job, "settlement", "resume", `从上次失败继续结算，剩余 ${remaining.length} 个账号`);
+      try {
+        job.workflow = await this.temporal.submit({ kind: "account.lifecycle.settle", jobId: job.id, candidateIds: remaining });
+      } catch (error) {
+        job.state = "failed";
+        job.error = safeMessage(error instanceof Error ? error.message : String(error));
+        this.log(job, "settlement", "failed", job.error);
+        job.completedAt = new Date().toISOString();
+        throw error;
+      }
+      return this.project(job);
+    }
     const summary = job.result?.summary as Row | undefined;
     if (number(summary?.alive) !== 0 || number(summary?.unknown) !== 0 || number(summary?.dead) !== job.candidates.length) {
       throw new Error("批次并非全部确定死亡，拒绝结算和删除");
@@ -287,13 +307,15 @@ export class AccountLifecycleService {
     if (!this.workerJobs) throw new Error("OAuth 生命周期 worker job 控制面不可用");
     const job = await this.workerJobs.get(id);
     if (!job) throw new Error("OAuth 生命周期作业不存在");
-    if (job.state === "settled" || job.state === "failed") return job;
+    if (job.state === "settled") return job;
     const expectedIds = [...new Set(candidateIds.filter((value) => Number.isSafeInteger(value) && value > 0))]
       .sort((left, right) => left - right);
     if (expectedIds.length === 0) throw new Error("OAuth 生命周期结算缺少已确认的候选账号");
     const snapshotIds = [...new Set(job.candidates.map((row) => number(row.accountId)))]
       .sort((left, right) => left - right);
-    if (snapshotIds.length > 0 && JSON.stringify(snapshotIds) !== JSON.stringify(expectedIds)) {
+    const resumable = job.state === "failed" && Array.isArray(job.settlement?.remainingAccountIds);
+    if (snapshotIds.length > 0 && (!resumable && JSON.stringify(snapshotIds) !== JSON.stringify(expectedIds)
+      || resumable && expectedIds.some((id) => !snapshotIds.includes(id)))) {
       throw new Error("OAuth 生命周期结算候选与已确认计划不一致");
     }
     // Temporal 命令承载不可变结算快照，避免不完整的 worker 回读覆盖 API 侧计划。
@@ -445,7 +467,7 @@ export class AccountLifecycleService {
       }
       const gross = current.reduce((sum, row) => sum + number(row.costCny), 0);
       const apiAmountUsd = current.reduce((sum, row) => sum + number(row.apiAmountUsd), 0);
-      const accounting = recordLifecycleSettlement(this.config.operations.accountLifecycleLedgerPath, {
+      const accounting = job.settlement?.accounting ?? recordLifecycleSettlement(this.config.operations.accountLifecycleLedgerPath, {
         acquisitionDay: job.settings.day, planType: job.settings.planType, accountIds: expectedIds,
         accountCount: expectedIds.length, grossAcquisitionCostCny: Math.round(gross * 100) / 100,
         requestCount: current.reduce((sum, row) => sum + number(row.requestCount), 0),
@@ -460,11 +482,25 @@ export class AccountLifecycleService {
       let deletionError: string | null = null;
       try {
         if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
-        const deleted = await this.runtime.deleteAccounts(
-          expectedIds,
-          this.config.operations.accountLifecycle.deleteTimeoutMs,
-        );
-        deletion = { ok: true, operation: "account-batch-delete", ...deleted, valuesPrinted: false };
+        const batchSize = this.config.operations.accountLifecycle.deleteBatchSize;
+        const batches: Row[] = [];
+        for (let offset = 0; offset < expectedIds.length; offset += batchSize) {
+          const batch = expectedIds.slice(offset, offset + batchSize);
+          const batchNumber = Math.floor(offset / batchSize) + 1;
+          const batchCount = Math.ceil(expectedIds.length / batchSize);
+          this.log(job, "deletion", "start", `删除批次 ${batchNumber}/${batchCount}，账号 ${batch.length} 个`);
+          try {
+            const deleted = await this.runtime.deleteAccounts(batch, this.config.operations.accountLifecycle.deleteTimeoutMs);
+            batches.push({ ok: true, ...deleted });
+            this.log(job, "deletion", "done", `删除批次 ${batchNumber}/${batchCount} 完成 ${batch.length} 个`);
+          } catch (error) {
+            const message = safeMessage(errorMessage(error));
+            deletionError = deletionError ? `${deletionError}; ${message}` : message;
+            this.log(job, "deletion", "failed", `删除批次 ${batchNumber}/${batchCount} 失败，继续后续批次：${message}`);
+          }
+          await this.persistWorkerJob(job, includeCandidates);
+        }
+        deletion = { ok: deletionError === null, operation: "account-batch-delete", batchCount: batches.length, batches, valuesPrinted: false };
       } catch (error) {
         deletionError = safeMessage(errorMessage(error));
         this.log(job, "deletion", "verify", `删除命令结果回收失败，转入终态回读：${deletionError}`);
