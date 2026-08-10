@@ -1,4 +1,4 @@
-import { shouldApplyScorePayload } from './score-display-freshness.js'
+import { scoreFreshnessLabel, shouldApplyScorePayload } from './score-display-freshness.js'
 import { sampleTimeDisplay } from './sample-time.js'
 import { buildSupplierQualityAssets } from './upstream-quality-assets.js'
 
@@ -171,8 +171,15 @@ function countdown(value) {
 }
 
 function renderRefreshClock() {
-  $('#score-updated-time').textContent = scoreRefreshedAt ? `北京时间 ${time(scoreRefreshedAt)}` : '尚无成功快照'
+  renderScoreFreshness()
   renderScoreRefreshCountdown()
+}
+
+function renderScoreFreshness() {
+  const relative = $('#score-updated-time')
+  const exact = $('#score-updated-exact')
+  if (relative) relative.textContent = scoreFreshnessLabel(scoreRefreshedAt)
+  if (exact) exact.textContent = scoreRefreshedAt ? `最近快照：北京时间 ${time(scoreRefreshedAt)}` : '最近快照：尚无成功时间'
 }
 
 function renderScoreRefreshCountdown() {
@@ -1005,6 +1012,7 @@ async function scoresPage() {
   const preferredLimit = options.includes(1000) ? 1000 : options[0]
   select.innerHTML = options.map((value) => `<option value="${value}"${value === preferredLimit ? ' selected' : ''}>最近 ${number(value)} 次</option>`).join('')
   renderScores(initial)
+  setInterval(renderScoreFreshness, 1000)
   await setupPriorityPanel(options)
   void refreshPriorityState().catch(() => undefined).finally(scheduleScoreRefresh)
   setInterval(async () => {
@@ -2119,19 +2127,15 @@ async function accountImportPage() {
     $('#import-json').readOnly = zip
     $('#import-json').placeholder = zip ? 'ZIP 解析后将在这里展示合并 JSON' : '粘贴 Sub2API 导出的 JSON'
     $('#file-state').textContent = `${file.name} · ${number(file.size)} bytes`
-    if (!zip) {
-      applyDetectedPlatform()
-      updateUnitCostFromTotal()
-      return
-    }
     $('#import-submit').disabled = true
-    $('#import-platform-state').textContent = '正在解析 ZIP、合并 JSON 并识别账号数量'
+    $('#import-platform-state').textContent = zip ? '正在解析 ZIP、合并 JSON 并识别账号数量' : '正在聚合 JSON 并识别账号数量'
     try {
       const preview = await requestJson('/api/account-import/preview', {
-        method: 'POST', body: JSON.stringify({ content: importContent, inputFormat: 'zip' }),
+        method: 'POST', body: JSON.stringify({ content: importContent, inputFormat: importInputFormat }),
       }, 30000)
       if (sequence !== previewSequence) return
       importPreview = preview
+      if (!zip) importContent = preview.content
       $('#import-json').value = JSON.stringify(JSON.parse(preview.content), null, 2)
       $('#file-state').textContent = `${file.name} · ${number(file.size)} bytes · ${preview.accountCount} 个账号`
       applyDetectedPlatform()
@@ -2139,8 +2143,8 @@ async function accountImportPage() {
     } catch (error) {
       if (sequence !== previewSequence) return
       importPreview = null
-      $('#import-json').value = ''
-      $('#file-state').textContent = `${file.name} · ZIP 解析失败`
+      if (zip) $('#import-json').value = ''
+      $('#file-state').textContent = `${file.name} · ${zip ? 'ZIP' : 'JSON'} 解析失败`
       $('#import-platform-state').textContent = error instanceof Error ? error.message : String(error)
     } finally {
       if (sequence === previewSequence) $('#import-submit').disabled = false
@@ -2226,11 +2230,23 @@ async function accountImportPage() {
       button.disabled = false
     }
   }
-  $('#import-form').addEventListener('submit', (event) => {
+  $('#import-form').addEventListener('submit', async (event) => {
     event.preventDefault()
-    if (importInputFormat === 'zip' && !importPreview) {
-      $('#import-platform-state').textContent = 'ZIP 尚未成功解析，不能提交导入'
-      return
+    if (!importPreview) {
+      try {
+        const content = importInputFormat === 'zip' ? importContent : $('#import-json').value
+        const preview = await requestJson('/api/account-import/preview', {
+          method: 'POST', body: JSON.stringify({ content, inputFormat: importInputFormat }),
+        }, 30000)
+        importPreview = preview
+        importContent = preview.content
+        $('#import-json').value = JSON.stringify(JSON.parse(preview.content), null, 2)
+        applyDetectedPlatform()
+        updateUnitCostFromTotal()
+      } catch (error) {
+        $('#import-platform-state').textContent = error instanceof Error ? error.message : String(error)
+        return
+      }
     }
     openPlanTypeConfirmation()
   })

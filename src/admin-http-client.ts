@@ -148,6 +148,7 @@ export class AdminHttpClient {
     return this.request(`/api/upstreams/usage-cache${query}`);
   }
   upstreamQuotaSummary(): Promise<Record<string, unknown>> { return this.request("/api/upstreams/quota-summary"); }
+  upstreamRechargeCandidates(): Promise<Record<string, unknown>> { return this.request("/api/upstreams/recharge-candidates"); }
   oauthRuntimeSummary(profile: "codex" | "grok"): Promise<Record<string, unknown>> {
     return this.request(`/api/oauth/runtime-summary?profile=${profile}`);
   }

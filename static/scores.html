@@ -8,8 +8,8 @@
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>上游资产与实时成本 | Api2Business</title>
-  <link rel="stylesheet" href="/styles.css?v=score-table-stability-v1" />
-  <script src="/app.js?v=score-table-stability-v1" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=score-freshness-v1" />
+  <script src="/app.js?v=score-freshness-v1" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -21,7 +21,14 @@
         <div class="pool-quality-score" data-grade="insufficient"><span>综合评分</span><strong id="pool-quality-score">—</strong><small id="pool-quality-grade">证据不足</small></div>
         <dl class="pool-quality-metrics"><div><dt>成功 / 失败</dt><dd id="pool-quality-outcomes">—</dd><small id="pool-quality-failure-rate">失败率 —</small></div><div><dt>切号恢复</dt><dd id="pool-quality-failover">—</dd><small>恢复 / 触发</small></div><div><dt>TTFT P95</dt><dd id="pool-quality-ttft">—</dd><small id="pool-quality-ttft-samples">首 token 样本 —</small></div></dl>
       </section>
-      <div class="page-actions">
+      <div class="page-actions score-head-actions">
+        <div id="score-updated" class="refresh-clock score-head-clock">
+          <span>数据新鲜度</span>
+          <strong id="score-updated-time">尚无成功快照</strong>
+          <small id="score-updated-exact">最近快照：尚无成功时间</small>
+          <small id="score-refresh-countdown">自动刷新已关闭</small>
+          <small id="idle-probe-rolling">探活 24h：等待读取</small>
+        </div>
         <label class="score-auto-refresh"><span>自动刷新</span><select id="score-refresh-interval" aria-label="账号评分自动刷新间隔"><option value="0" selected>关闭</option><option value="300">5 分钟</option><option value="900">15 分钟</option><option value="1800">30 分钟</option></select></label>
         <span id="score-state" class="state-badge" data-state="refreshing">读取中</span>
         <button id="score-create-upstream" class="query-command" type="button">新增上游</button>
@@ -53,14 +60,6 @@
           <button id="query-scores" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>刷新当前状态</span></button>
           <button id="generate-plan" class="query-command" type="button">生成调整计划</button>
           <button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button>
-        </div>
-        <div class="table-toolbar-side">
-          <div id="score-updated" class="refresh-clock">
-            <span>上次更新时间</span>
-            <strong id="score-updated-time">尚无成功快照</strong>
-            <small id="score-refresh-countdown">自动刷新已关闭</small>
-            <small id="idle-probe-rolling">探活 24h：等待读取</small>
-          </div>
         </div>
       </div>
       <div class="profile-tabs" role="tablist" aria-label="评分账号类型">

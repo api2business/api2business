@@ -34,6 +34,20 @@ test("keeps JSON input compatible while projecting canonical content", () => {
   expect(normalized.source).toEqual({ format: "json", jsonFileCount: 1, duplicateAccountCount: 0, platform: "openai" });
 });
 
+test("merges newline-delimited and array-wrapped Sub2API JSON payloads", () => {
+  const ndjson = `${payload("user-a")}\n${payload("user-b")}\n${payload("user-a")}\n`;
+  const normalizedNdjson = normalizeAccountImportInput(ndjson, "json");
+  expect(normalizedNdjson.accountCount).toBe(2);
+  expect(normalizedNdjson.source).toEqual({ format: "json", jsonFileCount: 3, duplicateAccountCount: 1, platform: "openai" });
+
+  const normalizedArray = normalizeAccountImportInput(JSON.stringify([
+    JSON.parse(payload("user-a")),
+    JSON.parse(payload("user-b")),
+  ]), "json");
+  expect(normalizedArray.accountCount).toBe(2);
+  expect(normalizedArray.source.jsonFileCount).toBe(2);
+});
+
 test("detects Grok JSON and rejects mixed-platform batches", () => {
   const grok = JSON.stringify({ accounts: [{ platform: "grok", type: "oauth", credentials: { account_id: "grok-a", access_token: "grok-token" } }], proxies: [] });
   expect(normalizeAccountImportInput(grok).platform).toBe("grok");

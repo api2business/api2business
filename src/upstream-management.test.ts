@@ -226,3 +226,10 @@ test("upstream update merges rename and failover template into one bulk update",
   expect(updateBody).not.toContain("this.runtime.updateAccount(id");
   expect(updateBody).not.toContain("applyApiKeyFailoverTemplate(id");
 });
+
+test("detected rate synchronization uses the native bulk update API", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const synchronize = source.slice(source.indexOf("  async synchronizeDetectedRates("), source.indexOf("  async create(input:"));
+  expect(synchronize).toContain("this.runtime.configureApiKeyAccounts([result.accountId], { name }");
+  expect(synchronize).not.toContain("this.runtime.updateAccount(result.accountId, { name }");
+});

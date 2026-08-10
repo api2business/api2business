@@ -15,6 +15,11 @@ test("preserves legacy failover keywords while rejecting model-not-found", () =>
     "504",
   ])])).not.toThrow();
   expect(() => validateFailoverRules([rule(404, ["model_not_found"])] )).toThrow();
+  expect(() => validateFailoverRules([rule(404, [
+    'Model "gpt-5.6" is not supported by any configured account in this group',
+  ])])).toThrow();
+  expect(() => validateFailoverRules([rule(404, ["no available channel for model gpt-5.6"])]))
+    .toThrow();
 });
 
 test("preserves the legacy upstream wrapper phrase", () => {

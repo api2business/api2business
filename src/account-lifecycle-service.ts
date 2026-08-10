@@ -18,6 +18,7 @@ type Row = Record<string, unknown>;
 export interface LifecycleRequest {
   day: string;
   planType: PlanType;
+  unitCostCny?: number;
   model?: string;
   confirm: boolean;
   selectionMode?: SelectionMode;
@@ -29,7 +30,7 @@ export interface LifecycleJob {
   state: JobState;
   createdAt: string;
   completedAt: string | null;
-  settings: { day: string; planType: PlanType; model: string; confirm: boolean; selectionMode: SelectionMode; scope: LifecycleScope };
+  settings: { day: string; planType: PlanType; unitCostCny: number | null; model: string; confirm: boolean; selectionMode: SelectionMode; scope: LifecycleScope };
   fingerprint: string | null;
   logs: Array<{ timestamp: string; stage: string; state: string; message: string }>;
   candidates: Row[];
@@ -59,19 +60,31 @@ const candidateSql = `
 WITH cost_input AS (
   SELECT account_id, cost_cny
   FROM unnest(
-    string_to_array($1::text, ',')::bigint[],
-    string_to_array($2::text, ',')::numeric[]
+    COALESCE(string_to_array(NULLIF($1::text, ''), ',')::bigint[], ARRAY[]::bigint[]),
+    COALESCE(string_to_array(NULLIF($2::text, ''), ',')::numeric[], ARRAY[]::numeric[])
   ) AS item(account_id, cost_cny)
+), account_scope AS (
+  SELECT account_id, cost_cny
+  FROM cost_input
+  WHERE $5::numeric IS NULL
+  UNION ALL
+  SELECT account.id, $5::numeric AS cost_cny
+  FROM accounts account
+  WHERE $5::numeric IS NOT NULL
+    AND account.deleted_at IS NULL
+    AND LOWER(account.platform) = 'openai'
+    AND LOWER(account.type) = 'oauth'
+    AND COALESCE(NULLIF(LOWER(account.credentials->>'plan_type'), ''), 'unknown') = $6::text
 ), usage_totals AS (
   SELECT usage.account_id, COUNT(*)::bigint AS request_count,
     COALESCE(SUM(usage.input_tokens + usage.output_tokens), 0)::bigint AS token_count,
     COALESCE(SUM(usage.actual_cost), 0)::numeric AS api_amount_usd
   FROM usage_logs usage
-  JOIN cost_input cost ON cost.account_id = usage.account_id
+  JOIN account_scope scope ON scope.account_id = usage.account_id
   WHERE usage.created_at >= $3::timestamptz AND usage.created_at < $4::timestamptz
   GROUP BY usage.account_id
 )
-SELECT cost.account_id, cost.cost_cny,
+SELECT scope.account_id, scope.cost_cny,
   (account.id IS NOT NULL) AS exists,
   account.platform, account.type,
   COALESCE(NULLIF(LOWER(account.credentials->>'plan_type'), ''), 'unknown') AS plan_type,
@@ -87,10 +100,10 @@ SELECT cost.account_id, cost.cost_cny,
   COALESCE(usage.request_count, 0)::bigint AS request_count,
   COALESCE(usage.token_count, 0)::bigint AS token_count,
   COALESCE(usage.api_amount_usd, 0)::numeric AS api_amount_usd
-FROM cost_input cost
-LEFT JOIN accounts account ON account.id = cost.account_id AND account.deleted_at IS NULL
-LEFT JOIN usage_totals usage ON usage.account_id = cost.account_id
-ORDER BY cost.account_id`;
+FROM account_scope scope
+LEFT JOIN accounts account ON account.id = scope.account_id AND account.deleted_at IS NULL
+LEFT JOIN usage_totals usage ON usage.account_id = scope.account_id
+ORDER BY scope.account_id`;
 
 function number(value: unknown): number {
   const parsed = Number(value);
@@ -126,7 +139,7 @@ export function lifecycleRetirementReason(row: Row, selectionMode: SelectionMode
   if (selectionMode === "database-error") return state === "error" ? "database-error" : null;
   if (selectionMode !== "database-dead") return null;
   if (state === "error") return "database-error";
-  if (state === "rate_limited" && (planType === "free" || planType === "plus")) return "database-rate-limited";
+  if (state === "rate_limited" && (planType === "free" || planType === "plus" || planType === "team")) return "database-rate-limited";
   return null;
 }
 
@@ -177,11 +190,19 @@ export class AccountLifecycleService {
     if (selectionMode !== "probe" && selectionMode !== "database-error" && selectionMode !== "database-dead" && selectionMode !== "database-all") throw new Error("selectionMode is invalid");
     const scope = input.scope ?? "day";
     if (scope !== "day" && scope !== "pool") throw new Error("scope is invalid");
+    const unitCostCny = input.unitCostCny === undefined ? null : Number(input.unitCostCny);
+    if (unitCostCny !== null && (!Number.isFinite(unitCostCny) || unitCostCny <= 0
+      || Math.abs(Math.round(unitCostCny * 100) - unitCostCny * 100) > 1e-8)) {
+      throw new Error("unitCostCny must be positive CNY with at most two decimal places");
+    }
+    if (unitCostCny !== null && (scope !== "pool" || input.planType === "all")) {
+      throw new Error("unitCostCny retirement requires pool scope and one explicit plan type");
+    }
     const model = input.model?.trim() || this.config.operations.accountLifecycle.defaultModel;
     if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(model)) throw new Error("model is invalid");
     const job: LifecycleJob = {
       id: randomUUID(), state: "queued", createdAt: new Date().toISOString(), completedAt: null,
-      settings: { day: input.day, planType: input.planType, model, confirm: input.confirm, selectionMode, scope },
+      settings: { day: input.day, planType: input.planType, unitCostCny, model, confirm: input.confirm, selectionMode, scope },
       fingerprint: null, logs: [], candidates: [], result: null, settlement: null, error: null,
     };
     this.jobs.set(job.id, job);
@@ -300,20 +321,20 @@ export class AccountLifecycleService {
     });
   }
 
-  private async facts(day: string, scope: LifecycleScope): Promise<Row[]> {
+  private async facts(day: string, scope: LifecycleScope, planType: PlanType, unitCostCny: number | null): Promise<Row[]> {
     const automaticCosts = readAccountImportCosts(this.config.operations.accountImportLedgerPath)
       .filter((entry) => scope === "pool" || entry.occurredOn === day)
       .map((entry) => ({ accountId: entry.accountId, costCny: entry.amountCny }));
     const costs = mergeLifecycleCosts(automaticCosts, readLifecycleAcquisitionCosts(this.config, scope === "pool" ? null : day));
-    if (costs.length === 0) return [];
+    if (costs.length === 0 && unitCostCny === null) return [];
     const window = scope === "pool"
       ? { startUtc: "1970-01-01T00:00:00.000Z" }
       : parseAccountEconomicsWindow({ day }, this.config.monitor.timezone);
     const end = new Date().toISOString();
     const query = await this.reads.query<Row>({
-      key: JSON.stringify(["accounts.lifecycle", day, costs, end]), kind: "accounts.lifecycle",
+      key: JSON.stringify(["accounts.lifecycle", day, costs, planType, unitCostCny, end]), kind: "accounts.lifecycle",
       sql: candidateSql,
-      parameters: [costs.map((item) => item.accountId).join(","), costs.map((item) => item.costCny).join(","), window.startUtc, end],
+      parameters: [costs.map((item) => item.accountId).join(","), costs.map((item) => item.costCny).join(","), window.startUtc, end, unitCostCny, planType],
       priority: "manual", cacheMode: "bypass-cache",
     });
     return query.rows.map((row) => ({
@@ -331,7 +352,7 @@ export class AccountLifecycleService {
       job.state = "running";
       this.log(job, "candidates", "start", `读取 ${job.settings.scope === "pool" ? "当前号池" : job.settings.day} 的 ${job.settings.planType.toUpperCase()} OAuth 候选`);
       await this.persistWorkerJob(job);
-      const rows = await this.facts(job.settings.day, job.settings.scope);
+      const rows = await this.facts(job.settings.day, job.settings.scope, job.settings.planType, job.settings.unitCostCny);
       const eligible = rows.filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth"
         && (job.settings.planType === "all" || row.planType === job.settings.planType));
       if (job.settings.selectionMode === "database-error" || job.settings.selectionMode === "database-dead" || job.settings.selectionMode === "database-all") {
@@ -344,7 +365,8 @@ export class AccountLifecycleService {
           rateLimited: job.candidates.filter((row) => row.planType === planType && row.stateBucket === "rate_limited").length,
         }]));
         const selectedRateLimited = job.candidates.filter((row) => row.stateBucket === "rate_limited").length;
-        job.fingerprint = createHash("sha256").update(JSON.stringify({ day: job.settings.day, scope: job.settings.scope, selectionMode: job.settings.selectionMode, accountIds })).digest("hex");
+        job.fingerprint = createHash("sha256").update(JSON.stringify({ day: job.settings.day, scope: job.settings.scope,
+          selectionMode: job.settings.selectionMode, unitCostCny: job.settings.unitCostCny, accountIds })).digest("hex");
         job.result = {
           tests: job.candidates.map((row) => ({ accountId: row.accountId, planType: row.planType, stateBucket: row.stateBucket,
             classification: "dead", reason: lifecycleRetirementReason(row, job.settings.selectionMode) })),
@@ -407,7 +429,7 @@ export class AccountLifecycleService {
 
   private async finishSettlement(job: LifecycleJob, includeCandidates = true): Promise<void> {
     try {
-      const currentEligible = (await this.facts(job.settings.day, job.settings.scope))
+      const currentEligible = (await this.facts(job.settings.day, job.settings.scope, job.settings.planType, job.settings.unitCostCny))
         .filter((row) => row.exists === true && row.platform === "openai" && row.type === "oauth"
           && (job.settings.planType === "all" || row.planType === job.settings.planType));
       const current = job.settings.selectionMode === "database-error" || job.settings.selectionMode === "database-dead" || job.settings.selectionMode === "database-all"
@@ -448,7 +470,7 @@ export class AccountLifecycleService {
         this.log(job, "deletion", "verify", `删除命令结果回收失败，转入终态回读：${deletionError}`);
         await this.persistWorkerJob(job, includeCandidates);
       }
-      const verified = await this.facts(job.settings.day, job.settings.scope);
+      const verified = await this.facts(job.settings.day, job.settings.scope, job.settings.planType, job.settings.unitCostCny);
       const remaining = verified.filter((row) => expectedIds.includes(number(row.accountId)) && row.exists === true).map((row) => row.accountId);
       job.settlement = { accounting, deletion, deletionError, remainingAccountIds: remaining, valuesPrinted: false };
       await this.persistWorkerJob(job, includeCandidates);

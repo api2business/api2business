@@ -7,8 +7,19 @@ export interface FailoverRule {
 
 // Sub2API 原生模板是“状态码相等 + 响应体包含关键词”。旧版模板中的
 // 通用临时故障词属于既有运行契约，不能因为本地校验而被静默删除。
-// 唯一明确禁止的是模型不存在：它不是账号故障，不能触发账号级切号。
-const forbiddenFailoverKeywords = new Set(["model_not_found", "model not found"]);
+// 模型不存在或分组不支持模型不是账号故障，不能触发账号级切号。
+// 容量不足（例如 selected model is at capacity）仍属于可恢复的临时故障。
+const forbiddenFailoverKeywordFragments = [
+  "model_not_found",
+  "model not found",
+  "model_no_found",
+  "moddel_no_found",
+  "model does not exist",
+  "unsupported model",
+  "model is not supported",
+  "not supported by any configured account",
+  "no available channel for model",
+];
 
 export function validateFailoverRules(rules: FailoverRule[]): void {
   if (!Array.isArray(rules) || rules.length === 0) {
@@ -31,8 +42,8 @@ export function validateFailoverRules(rules: FailoverRule[]): void {
       const duplicateKey = `${rule.error_code}:${normalized}`;
       if (seen.has(duplicateKey)) throw new Error(`duplicate failover keyword: ${rule.error_code}/${keyword}`);
       seen.add(duplicateKey);
-      if (forbiddenFailoverKeywords.has(normalized)) {
-        throw new Error(`model-not-found must not trigger account failover: ${JSON.stringify(keyword)}`);
+      if (forbiddenFailoverKeywordFragments.some((fragment) => normalized.includes(fragment))) {
+        throw new Error(`unsupported model must not trigger account failover: ${JSON.stringify(keyword)}`);
       }
     }
   }

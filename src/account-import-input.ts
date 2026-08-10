@@ -16,14 +16,33 @@ function object(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-function parseJson(content: string, label: string): Record<string, unknown> {
-  let value: unknown;
-  try { value = JSON.parse(content); } catch { throw new Error(`${label} JSON 内容格式无效`); }
+function payload(value: unknown, label: string): Record<string, unknown> {
   const payload = object(value);
   if (!payload || !Array.isArray(payload.accounts) || !Array.isArray(payload.proxies)) {
     throw new Error(`${label} 必须是包含 accounts 和 proxies 数组的 Sub2API JSON`);
   }
   return payload;
+}
+
+function parseJson(content: string, label: string): Record<string, unknown> {
+  let value: unknown;
+  try { value = JSON.parse(content); } catch { throw new Error(`${label} JSON 内容格式无效`); }
+  return payload(value, label);
+}
+
+function parseJsonPayloads(content: string): Record<string, unknown>[] {
+  try {
+    const value = JSON.parse(content) as unknown;
+    if (Array.isArray(value)) {
+      if (value.length === 0) throw new Error("输入 JSON 数组不能为空");
+      return value.map((item, index) => payload(item, `输入[${index + 1}]`));
+    }
+    return [payload(value, "输入")];
+  } catch (error) {
+    const lines = content.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+    if (lines.length < 2) throw error;
+    return lines.map((line, index) => parseJson(line, `输入第 ${index + 1} 行`));
+  }
 }
 
 function accountIdentity(account: unknown): string {
@@ -81,7 +100,7 @@ function decodeBase64(value: string): Uint8Array {
 export function normalizeAccountImportInput(content: string, format: "json" | "zip" = "json"): NormalizedAccountImportInput {
   if (format === "json") {
     if (Buffer.byteLength(content, "utf8") > MAX_INPUT_BYTES) throw new Error("JSON 文件不能超过 10 MiB");
-    return canonicalize([parseJson(content, "输入")], "json");
+    return canonicalize(parseJsonPayloads(content), "json");
   }
   const data = decodeBase64(content);
   let totalOriginalBytes = 0;

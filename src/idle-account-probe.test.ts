@@ -47,7 +47,7 @@ test("idle probe selects only normal schedulable API-key accounts", async () => 
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
     account_status: "active", schedulable: true, temp_unschedulable_until: null,
-    available_sample_count: 4, group_ids: [2, 3, 51],
+    available_sample_count: 4, group_ids: { 0: 2, 1: 3, 2: 51 },
   }]), null);
   const plan = await service.plan();
   expect(plan.databaseQueries).toBe(2);

@@ -21,12 +21,23 @@ export async function operationWorkflow(input: OperationWorkflowInput): Promise<
 }
 
 export async function scoreRefreshScheduleWorkflow(input: ScheduledScoreRefreshInput): Promise<void> {
-  const activity = activities(input);
-  for (let iteration = 0; iteration < 500; iteration += 1) {
-    await activity.executeOperation({
-      operationId: `${workflowInfo().runId}:${iteration}`,
-      command: { kind: "scores.refresh" },
-    });
+  const activity = proxyActivities<Activities>({
+    startToCloseTimeout: input.activityStartToCloseTimeout,
+    scheduleToCloseTimeout: input.activityStartToCloseTimeout,
+    retry: { maximumAttempts: 1 },
+  });
+  for (let iteration = 0; iteration < 50; iteration += 1) {
+    try {
+      await activity.executeOperation({
+        operationId: `${workflowInfo().runId}:${iteration}`,
+        command: { kind: "scores.refresh" },
+      });
+    } catch (error) {
+      log.warn("score snapshot refresh deferred to next round", {
+        iteration,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     await sleep(input.intervalMs);
   }
   await continueAsNew<typeof scoreRefreshScheduleWorkflow>(input);

@@ -88,10 +88,15 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 ## 领域操作
 
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
-- OAuth 退役计划可用 `--plan-type` 限定账号类型；默认只选择该类型的死亡状态，
-  `k12` 和 `team` 的限流账号不会进入候选。
+- OAuth 退役计划可用 `--plan-type` 限定账号类型；默认选择错误账号，`free`、`plus`
+  和 `team` 的限流账号也按死亡处理，`k12` 限流账号保留。
+- 对缺少采购成本记录的整池账号，先用 `--scope pool --plan-type <type> --unit-cost-cny <CNY>`
+  显式声明本批结算单价；该模式只支持单一账号类型，并在计划与确认回读中固定成本。
 - 上游、评分和优先级读取 `references/upstream-scheduling.md`。
+- 充值候选使用 `upstreams recharge-candidates --over-api`；同时分析当前欠费和最新额度低于 YAML `lowBalanceCny` 的账号，分别回看锚点前 `lookbackHours` 小时。
 - 新增上游时省略 `--rate`，由 YAML 提供创建占位费率；worker 创建成功后自动探测额度与有效倍率，并将有效倍率同步为最终费率。
+  倍率写回使用 Sub2API 原生批量更新并做排队回读，超时只保留可见 warning，不重复创建账号。
+- 多个同钱包 API Key 只对实际充值动作记一笔充值；创建、模板和探活隔离作业按账号 ID 幂等回读。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
 - 手工收入明细使用 `cash ledger --period YYYY-MM --over-api`，汇总使用 `profit daily`。
 - 页面数据快照统一写入 host PostgreSQL：
@@ -110,5 +115,16 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 ## 验收
 
 - 验证 `/health`、Web 登录、主要数据页和至少一个异步作业。
+- 页面截图使用正式 CLI 取得临时 session，再交给受控 WebProbe：
+
+  ```bash
+  bun skills/api2business/scripts/api2business-cli.ts \
+    --config config/api2business.yaml \
+    --over-api \
+    web screenshot \
+    --profile scores-layout
+  ```
+
+- CLI 通过 `/api/login` 获取 Cookie，并只在内存中传给 WebProbe；WebProbe 不填写登录表单，Cookie 不进入 argv、日志、报告或磁盘。
 - 验证重启后账本、缓存、采样和作业状态仍可读取。
 - 失败时按配置、Secret、网络、数据库、worker 和外部 API 的顺序定位首个断点。

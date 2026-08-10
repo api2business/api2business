@@ -102,7 +102,8 @@ export class TemporalGateway {
 
   async ensureScoreSchedule(): Promise<{ started: boolean; workflowId: string }> {
     const legacyWorkflowId = this.runtime.scoreScheduleWorkflowId;
-    const workflowId = `${legacyWorkflowId}-snapshot-${this.config.monitor.refreshIntervalMinutes}m-v1`;
+    const previousWorkflowId = `${legacyWorkflowId}-snapshot-${this.config.monitor.refreshIntervalMinutes}m-v1`;
+    const workflowId = `${legacyWorkflowId}-snapshot-${this.config.monitor.refreshIntervalMinutes}m-v2`;
     try {
       const legacy = this.client.workflow.getHandle(legacyWorkflowId);
       const description = await legacy.describe();
@@ -113,13 +114,23 @@ export class TemporalGateway {
       if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
     }
     try {
+      const previous = this.client.workflow.getHandle(previousWorkflowId);
+      const description = await previous.describe();
+      if (description.status.name === "RUNNING") {
+        await previous.terminate("migrated to recoverable score snapshot schedule v2");
+      }
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
+    }
+    try {
       await this.client.workflow.start("scoreRefreshScheduleWorkflow", {
         taskQueue: this.runtime.taskQueue,
         workflowId,
+        workflowIdReusePolicy: "ALLOW_DUPLICATE",
         args: [{
           intervalMs: this.config.monitor.refreshIntervalMinutes * 60_000,
           activityStartToCloseTimeout: this.config.temporal.activityStartToCloseTimeout,
-          maximumAttempts: this.config.temporal.retry.maximumAttempts,
+          maximumAttempts: 1,
         }],
       });
       return { started: true, workflowId };
@@ -127,6 +138,25 @@ export class TemporalGateway {
       if (error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError") return { started: false, workflowId };
       throw error;
     }
+  }
+
+  async replaceScoreSchedule(reason: string): Promise<{ started: true; workflowId: string }> {
+    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-snapshot-${this.config.monitor.refreshIntervalMinutes}m-v2`;
+    await this.connection.withDeadline(Date.now() + this.config.temporal.submissionTimeoutMs, async () => {
+      await this.client.workflow.start("scoreRefreshScheduleWorkflow", {
+        taskQueue: this.runtime.taskQueue,
+        workflowId,
+        workflowIdConflictPolicy: "TERMINATE_EXISTING",
+        workflowIdReusePolicy: "ALLOW_DUPLICATE",
+        args: [{
+          intervalMs: this.config.monitor.refreshIntervalMinutes * 60_000,
+          activityStartToCloseTimeout: this.config.temporal.activityStartToCloseTimeout,
+          maximumAttempts: 1,
+        }],
+        memo: { recoveryReason: reason.slice(0, 500) },
+      });
+    });
+    return { started: true, workflowId };
   }
 
   async ensureUpstreamQuotaSchedule(): Promise<{ started: boolean; workflowId: string }> {

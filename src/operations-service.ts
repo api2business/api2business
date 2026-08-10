@@ -71,6 +71,7 @@ import { IdleAccountProbeService } from "./idle-account-probe";
 import type { ProbeIsolationService } from "./probe-isolation";
 import { UpstreamBenchmarkService } from "./upstream-benchmark";
 import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
+import { collectRechargeCandidates } from "./upstream-recharge-candidates";
 
 export { normalizeUpstreamWallet, upstreamBalanceRateByWallet } from "./upstream-valuation";
 
@@ -393,6 +394,10 @@ export class OperationsService {
       history: quotaHistory(samples, calculationWindowHours, displayHours),
       valuesPrinted: false,
     };
+  }
+
+  async upstreamRechargeCandidates() {
+    return await collectRechargeCandidates(this.config, this.store, this.reads);
   }
 
   async sampleOAuthRuntime(): Promise<Record<string, unknown>> {

@@ -18,6 +18,7 @@ import { emitDailyProfit } from "./daily-profit-output";
 import { parseAccountIdSelector } from "../../../../src/account-batch-economics";
 import { runBoundedProcess } from "../../../../src/bounded-process";
 import { parseManualPriorityAssignments } from "./priority-plan-input";
+import { readSecret } from "../../../../src/secrets";
 
 type Row = Record<string, unknown>;
 
@@ -195,13 +196,14 @@ function help(): Record<string, unknown> {
       "records list|delete",
       "credit test",
       "api smoke --over-api",
+      "web screenshot [--profile scores-layout] --over-api",
       "workflow status --id <workflow-id>",
       "priority automation get|create|update|delete --over-api [--interval-seconds N --calls N --enabled true|false] [--confirm]",
       "priority plan create --over-api [--calls N]",
       "priority plan manual-create --over-api --priorities ACCOUNT_ID:PRIORITY[,ACCOUNT_ID:PRIORITY...]",
       "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
-      "accounts import --file <json|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 16 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
+      "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 16 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
       "accounts delete --accounts <id-or-range,...> [--confirm] --over-api",
@@ -215,13 +217,14 @@ function help(): Record<string, unknown> {
       "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--confirm] --over-api",
       "accounts idle-probe run [--accounts <id-or-range,...>] [--rounds 1..10] [--confirm] --over-api",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
-      "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] --over-api",
+      "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] [--unit-cost-cny CNY] --over-api",
       "accounts lifecycle retire status --id <plan-id> --over-api",
       "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
       "upstreams list [--page N --search <text>] --over-api",
       "upstreams usage [--accounts <id-or-range,...>] --over-api",
       "upstreams usage-cache [--accounts <id-or-range,...>] --over-api",
       "upstreams quota-summary --over-api",
+      "upstreams recharge-candidates [--json] --over-api",
       "upstreams benchmark [--id <account-id> --model <id> --confirm] --over-api",
       "upstreams benchmark-status --id <benchmark-run-id> --over-api",
       "upstreams benchmark-history --id <account-id> [--limit 20] --over-api",
@@ -327,6 +330,7 @@ export function summarizeLifecycleResponse(value: Record<string, unknown>): Reco
     day: record(job.settings)?.day,
     selectionMode: record(job.settings)?.selectionMode,
     scope: record(job.settings)?.scope,
+    unitCostCny: record(job.settings)?.unitCostCny,
     candidateCount: Array.isArray(job.candidates) ? job.candidates.length : 0,
     excludedRateLimited: summary?.excludedRateLimited ?? null,
     error: job.error ?? null,
@@ -416,6 +420,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
 async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: HttpCliTarget): Promise<unknown> {
   const client = new AdminHttpClient(config, target);
   const [group, action] = parsed.command;
+  if (group === "web" && action === "screenshot") return await runWebScreenshot(parsed, config, target);
   if (group === "upstreams" && action === "list") return await client.upstreams(parsed.page ?? 1, parsed.search);
   if (group === "upstreams" && action === "usage") {
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
@@ -435,6 +440,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await client.upstreamUsageCacheRead(accountIds);
   }
   if (group === "upstreams" && action === "quota-summary") return await client.upstreamQuotaSummary();
+  if (group === "upstreams" && action === "recharge-candidates") return await client.upstreamRechargeCandidates();
   if (group === "upstreams" && action === "benchmark") {
     if (!parsed.id) return await client.upstreamBenchmarks();
     const id = Number(parsed.id);
@@ -648,7 +654,11 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
           throw new Error("--plan-type must be k12, plus, team, free, or all");
         }
         const day = parsed.day ?? new Date().toLocaleDateString("sv-SE", { timeZone: config.monitor.timezone });
-        return await client.accountLifecycleDetect({ day, planType, scope, selectionMode: "database-dead", confirm: false });
+        if (parsed.unitCostCny !== null && (scope !== "pool" || planType === "all")) {
+          throw new Error("--unit-cost-cny requires --scope pool and one explicit --plan-type");
+        }
+        return await client.accountLifecycleDetect({ day, planType, scope, unitCostCny: parsed.unitCostCny ?? undefined,
+          selectionMode: "database-dead", confirm: false });
       }
       if (!parsed.id) throw new Error(`accounts lifecycle retire ${phase ?? ""} requires --id`);
       if (phase === "status") return await client.accountLifecycleStatus(parsed.id);
@@ -783,6 +793,80 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   throw new Error(`unknown command: ${parsed.command.join(" ")}`);
 }
 
+async function runWebScreenshot(
+  parsed: Parsed,
+  config: ReturnType<typeof loadConfig>,
+  target: HttpCliTarget,
+): Promise<Record<string, unknown>> {
+  if (!parsed.overApi) throw new Error("web screenshot requires --over-api");
+  const passwordRef = config.runtime.native.env.API2BUSINESS_WEB_PASSWORD;
+  if (!passwordRef) throw new Error("runtime.native.env.API2BUSINESS_WEB_PASSWORD is required");
+  const password = readSecret(config, passwordRef);
+  const response = await fetch(new URL("/api/login", target.baseUrl), {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ username: config.webAuth.username, password }),
+    signal: AbortSignal.timeout(Math.min(config.monitor.cli.timeoutMs, 15_000)),
+  });
+  if (!response.ok) throw new Error(`Api2Business session request failed: HTTP ${response.status}`);
+  const cookieHeader = response.headers.get("set-cookie") ?? "";
+  const cookiePair = cookieHeader.split(";", 1)[0] ?? "";
+  const separator = cookiePair.indexOf("=");
+  const cookieName = separator > 0 ? cookiePair.slice(0, separator).trim() : "";
+  const cookieValue = separator > 0 ? cookiePair.slice(separator + 1).trim() : "";
+  if (cookieName !== config.webAuth.cookieName || cookieValue === "") {
+    throw new Error(`Api2Business session response is missing ${config.webAuth.cookieName}`);
+  }
+  const profile = parsed.profile ?? "scores-layout";
+  const probe = await runBoundedProcess([
+    config.monitor.cli.executable,
+    config.monitor.cli.entrypoint,
+    "web-probe",
+    "product-smoke",
+    "--product", "api2business",
+    "--target", "NC01",
+    "--profile", profile,
+    "--json",
+  ], {
+    cwd: config.monitor.cli.workDir,
+    env: { ...process.env, API2BUSINESS_WEB_PROBE_SESSION_COOKIE: cookieValue },
+    timeoutMs: config.monitor.cli.timeoutMs,
+    maxOutputBytes: 2 * 1024 * 1024,
+  });
+  if (probe.stdout.includes(cookieValue) || probe.stderr.includes(cookieValue)) {
+    throw new Error("WebProbe output contained session material and was blocked");
+  }
+  let result: Record<string, unknown> | null = null;
+  try { result = record(JSON.parse(probe.stdout)); } catch { result = null; }
+  if (result === null) {
+    const stderr = probe.stderr.replace(/\s+/gu, " ").trim().slice(-500);
+    const stdout = probe.stdout.replace(/\s+/gu, " ").trim().slice(-500);
+    const resultError = record(result?.error);
+    const childErrorValue = typeof result?.error === "string" ? result.error
+      : typeof resultError?.message === "string" ? resultError.message : "";
+    const childError = childErrorValue.replace(/\s+/gu, " ").trim().slice(0, 500);
+    throw new Error(`WebProbe screenshot failed: exit=${probe.exitCode}${childError ? ` error=${childError}` : ""}${result === null && stdout ? ` stdout=${stdout}` : ""}${stderr ? ` stderr=${stderr}` : ""}`);
+  }
+  if (probe.exitCode !== 0 || result.ok !== true) return {
+    ok: false,
+    action: "web-screenshot",
+    profile,
+    session: { cookieName, present: true, valuesPrinted: false },
+    probe: result,
+    mutation: false,
+    valuesPrinted: false,
+  };
+  return {
+    ok: result.ok === true,
+    action: "web-screenshot",
+    profile,
+    session: { cookieName, present: true, valuesPrinted: false },
+    probe: result,
+    mutation: false,
+    valuesPrinted: false,
+  };
+}
+
 function aggregateSmoke(): Record<string, unknown> {
   const account = (groupId: number, groupName: string, successRequests: number, failureRequests: number, ttftP95Ms: number, apiAmountUsd: number) => ({
     accountId: 15, accountName: "lyon9801 0.0", groupId, groupName, status: "active", currentlyAvailable: true, priority: 1,
@@ -845,6 +929,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command.join(" ") === "accounts import-economics"
       || parsed.command.join(" ") === "accounts oauth-economics"
       || parsed.command.join(" ") === "accounts inspect"
+      || parsed.command.join(" ") === "upstreams recharge-candidates"
       || (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle")
       || parsed.command.join(" ") === "payments alipay-revenue"
     );
@@ -867,10 +952,35 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "accounts import-economics") emitAccountImportEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts oauth-economics") emitOAuthEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "profit daily") emitDailyProfit(output, parsed.json);
+    else if (parsed.command.join(" ") === "upstreams recharge-candidates") emitRechargeCandidates(output, parsed.json);
     else if (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle" && !parsed.json) emit(summarizeLifecycleResponse(output), false);
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);
     process.exitCode = 1;
   }
+}
+
+function emitRechargeCandidates(value: Record<string, unknown>, json: boolean): void {
+  if (json) return emit(value, true);
+  const rows = Array.isArray(value.candidates) ? value.candidates.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
+  console.log(`API2BUSINESS RECHARGE CANDIDATES threshold=¥${String(value.lowBalanceThresholdCny)} lookback=${String(value.lookbackHours)}h candidates=${rows.length} queryMs=${String(value.queryDurationMs)} totalMs=${String(value.totalDurationMs)}`);
+  console.log("RANK  SCORE  ACTION                 REASON                       BALANCE  ANCHOR                 REQ  FAIL%  TTFT_P95  API_USD  COST_CNY  ACCOUNT");
+  for (const [index, row] of rows.entries()) {
+    const rate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
+    const anchor = String(row.anchorAt ?? "-").replace("T", " ").slice(0, 19);
+    console.log([
+      String(index + 1).padStart(4),
+      (typeof row.recommendationScore === "number" ? row.recommendationScore.toFixed(1) : "-").padStart(6),
+      String(row.recommendation ?? "-").padEnd(22),
+      String(row.reason ?? "-").padEnd(28),
+      (typeof row.balanceCny === "number" ? `¥${row.balanceCny.toFixed(2)}` : "-").padStart(8),
+      anchor.padEnd(22), String(row.observedAttempts ?? 0).padStart(3), rate.padStart(6),
+      (typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-").padStart(9),
+      (typeof row.usage === "object" && row.usage !== null ? Number((row.usage as Record<string, unknown>).apiAmountUsd ?? 0).toFixed(4) : "0").padStart(8),
+      (typeof row.usage === "object" && row.usage !== null && typeof (row.usage as Record<string, unknown>).upstreamCostCny === "number" ? Number((row.usage as Record<string, unknown>).upstreamCostCny).toFixed(2) : "-").padStart(8),
+      String(row.accountName ?? "-"),
+    ].join("  "));
+  }
+  if (!rows.length) console.log("无欠费或低于阈值的上游账号");
 }

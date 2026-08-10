@@ -20,6 +20,7 @@ import { AccountLifecycleService, type LifecycleJob } from "./account-lifecycle-
 import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { ProbeIsolationService } from "./probe-isolation";
 import { idleProbeScheduleFreshness } from "./idle-probe-schedule-watchdog";
+import { scoreScheduleFreshness } from "./score-schedule-watchdog";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -304,6 +305,7 @@ console.log(JSON.stringify({
 
 let stopping = false;
 let wakeIdleProbeWatchdog = () => {};
+let wakeScoreWatchdog = () => {};
 async function waitForIdleProbeWatchdog(delayMs: number): Promise<void> {
   if (stopping) return;
   await new Promise<void>((resolve) => {
@@ -354,6 +356,55 @@ const idleProbeWatchdog = (async () => {
       }));
     }
     await waitForIdleProbeWatchdog(config.sub2api.idleProbe.intervalSeconds * 1000);
+  }
+})();
+const scoreWatchdogStartedAtMs = Date.now();
+const scoreWatchdog = (async () => {
+  if (!temporalGateway || !config.monitor.automaticRefresh.enabled) return;
+  let startupGrace = Boolean(schedule.started);
+  while (!stopping) {
+    try {
+      const snapshot = await operationsStore.getSnapshot("account-scores");
+      const freshness = scoreScheduleFreshness({
+        nowMs: Date.now(),
+        workerStartedAtMs: scoreWatchdogStartedAtMs,
+        capturedAt: startupGrace ? null : snapshot?.captured_at ? String(snapshot.captured_at) : null,
+        intervalMinutes: config.monitor.refreshIntervalMinutes,
+      });
+      startupGrace = false;
+      if (freshness.stale) {
+        const recovered = await temporalGateway.replaceScoreSchedule(
+          `automatic score snapshot stale for ${freshness.ageMs}ms (${freshness.reference})`,
+        );
+        console.log(JSON.stringify({
+          ok: true,
+          component: "score-schedule-watchdog",
+          action: "replaced",
+          ...freshness,
+          ...recovered,
+          valuesPrinted: false,
+        }));
+      }
+    } catch (error) {
+      console.error(JSON.stringify({
+        ok: false,
+        component: "score-schedule-watchdog",
+        action: "deferred-to-next-cycle",
+        error: error instanceof Error ? error.message : String(error),
+        valuesPrinted: false,
+      }));
+    }
+    if (!stopping) await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        wakeScoreWatchdog = () => {};
+        resolve();
+      }, Math.max(30_000, config.monitor.refreshIntervalMinutes * 60_000));
+      wakeScoreWatchdog = () => {
+        clearTimeout(timer);
+        wakeScoreWatchdog = () => {};
+        resolve();
+      };
+    });
   }
 })();
 let consecutiveAutomationFailures = 0;
@@ -415,6 +466,7 @@ async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
   wakeIdleProbeWatchdog();
+  wakeScoreWatchdog();
   state = "stopping";
   health.stop(true);
   if (worker) worker.shutdown();
@@ -428,9 +480,11 @@ try {
 } finally {
   stopping = true;
   wakeIdleProbeWatchdog();
+  wakeScoreWatchdog();
   state = "stopping";
   health.stop(true);
   await idleProbeWatchdog;
+  await scoreWatchdog;
   await automationLoop;
   scores.close();
   await operations.close();

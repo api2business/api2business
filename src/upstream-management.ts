@@ -815,7 +815,8 @@ export class UpstreamManagementService {
         if (fallbackRate !== null && parsed) {
           try {
             const name = formatUpstreamName(result.baseUrl, parsed.suffix, fallbackRate);
-            await this.runtime.updateAccount(result.accountId, { name });
+            await this.runtime.configureApiKeyAccounts([result.accountId], { name },
+              this.config.operations.upstreamManagement.mutationTimeoutMs);
             const readback = await this.accountQuery(result.accountId);
             if (!readback || readback.name !== name || readback.rateCnyPerApiUsd === null
               || Math.abs(readback.rateCnyPerApiUsd - fallbackRate) > 0.0000005) {
@@ -856,7 +857,8 @@ export class UpstreamManagementService {
       }
       try {
         const name = formatUpstreamName(result.baseUrl, parsed.suffix, detectedRate);
-        await this.runtime.updateAccount(result.accountId, { name });
+        await this.runtime.configureApiKeyAccounts([result.accountId], { name },
+          this.config.operations.upstreamManagement.mutationTimeoutMs);
         const readback = await this.accountQuery(result.accountId);
         if (!readback || readback.name !== name || readback.rateCnyPerApiUsd === null
           || Math.abs(readback.rateCnyPerApiUsd - detectedRate) > 0.0000005) {
@@ -1107,6 +1109,7 @@ export class UpstreamManagementService {
     }
     if (createError !== null) recovered = true;
     const resolvedAccountId = account.id;
+    const resolvedAccount = account;
     // 创建终态只依赖稳定账号 ID；运行设置和模板在后台尽力完成，
     // 避免 Sub2API 后处理超时把已经创建成功的账号伪装成导入失败。
     const postProcess = async () => {
@@ -1117,10 +1120,10 @@ export class UpstreamManagementService {
           ...(probeBinding ? [probeBinding.groupId] : []),
         ])];
         const desiredGroupIds = [...effectiveGroupIds].sort((left, right) => left - right);
-        const actualGroupIds = [...account.groupIds].sort((left, right) => left - right);
+        const actualGroupIds = [...resolvedAccount.groupIds].sort((left, right) => left - right);
         if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
-        const needsRuntimeSettings = account.priority !== priority || account.capacity !== capacity
-          || account.proxyId !== settings.proxyId || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds);
+        const needsRuntimeSettings = resolvedAccount.priority !== priority || resolvedAccount.capacity !== capacity
+          || resolvedAccount.proxyId !== settings.proxyId || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds);
         // Sub2API 原生批量更新同时写运行参数和切号模板，避免创建流程产生两次远程 mutation。
         await this.runtime.configureApiKeyAccounts(
           [resolvedAccountId],

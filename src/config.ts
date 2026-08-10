@@ -24,6 +24,12 @@ export interface UpstreamManagementConfig {
   usageDays: number;
   quotaSampleIntervalSeconds: number;
   quotaSampleTimeoutSeconds: number;
+  rechargeCandidates: {
+    lowBalanceCny: number;
+    lookbackHours: number;
+    recommendationLimit: number;
+    retiredSuppliers: string[];
+  };
   failoverRules: FailoverRule[];
 }
 
@@ -871,6 +877,15 @@ export function loadConfig(path: string): AppConfig {
         usageDays: integerValue(upstreamManagement, "usageDays", "operations.upstreamManagement", 1, 90),
         quotaSampleIntervalSeconds,
         quotaSampleTimeoutSeconds,
+        rechargeCandidates: (() => {
+          const value = object(upstreamManagement.rechargeCandidates, "operations.upstreamManagement.rechargeCandidates");
+          return {
+            lowBalanceCny: numberValue(value, "lowBalanceCny", "operations.upstreamManagement.rechargeCandidates", 0, 1000000),
+            lookbackHours: integerValue(value, "lookbackHours", "operations.upstreamManagement.rechargeCandidates", 1, 168),
+            recommendationLimit: integerValue(value, "recommendationLimit", "operations.upstreamManagement.rechargeCandidates", 1, 100),
+            retiredSuppliers: strings(value, "retiredSuppliers", "operations.upstreamManagement.rechargeCandidates"),
+          };
+        })(),
         failoverRules: upstreamFailoverRules,
       },
       upstreamBenchmark: {

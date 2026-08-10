@@ -52,8 +52,9 @@ test("ZIP import previews merged JSON and recognized account count before submit
   expect(app).toContain("JSON.stringify(JSON.parse(preview.content), null, 2)");
   expect(app).toContain("preview.accountCount");
   expect(app).toContain("importPreview.source.duplicateAccountCount");
-  expect(app).toContain("importInputFormat === 'zip' && !importPreview");
-  expect(app).toContain("ZIP 尚未成功解析，不能提交导入");
+  expect(app).toContain("importInputFormat === 'zip' ? importContent : $('#import-json').value");
+  expect(app).toContain("正在聚合 JSON 并识别账号数量");
+  expect(html).toContain(".txt");
 });
 
 test("upstream management exposes queued quota and usage queries", async () => {
@@ -84,7 +85,7 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(html).toContain('id="quota-cost-chart"');
   expect(app).toContain("requestJson('/api/upstreams/quota-summary')");
   expect(app).toContain("usdText(summary.apiAmountUsd, 3)");
-  expect(html).toContain('/styles.css?v=live-layout-v15');
+  expect(html).toContain('/styles.css?v=status-visibility-v1');
   expect(html).toContain('最近 8 小时');
   expect(html).toContain('<th>账号余额（人民币）</th>');
   expect(html).toContain('<th>成本（元/刀）</th>');

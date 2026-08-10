@@ -7,12 +7,11 @@ const idleProbeCandidatesSql = `
 SELECT a.id::int AS account_id, a.name AS account_name, a.platform, a.priority::int AS priority,
   a.status AS account_status, a.schedulable,
   a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until,
-  ARRAY(
-    SELECT binding.group_id::int
+  COALESCE((
+    SELECT array_agg(binding.group_id::int ORDER BY binding.group_id)
     FROM account_groups binding
     WHERE binding.account_id = a.id
-    ORDER BY binding.group_id
-  ) AS group_ids,
+  ), '{}') AS group_ids,
   sample_stats.available_sample_count
 FROM accounts a
 CROSS JOIN LATERAL (
@@ -94,8 +93,14 @@ export interface IdleProbeCandidate {
 }
 
 function numericIds(value: unknown): number[] {
-  if (!Array.isArray(value)) return [];
-  return value.map(Number).filter((candidate) => Number.isSafeInteger(candidate) && candidate > 0);
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.match(/\d+/gu) ?? []
+      : value && typeof value === "object"
+        ? Object.values(value as Record<string, unknown>)
+      : [];
+  return values.map(Number).filter((candidate) => Number.isSafeInteger(candidate) && candidate > 0);
 }
 
 export const idleProbeRollingUsageSql = `

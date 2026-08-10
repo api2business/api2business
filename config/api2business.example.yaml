@@ -32,6 +32,32 @@ webAuth:
   cookieName: api2business_session
   sessionTtlSeconds: 43200
 
+webProbe:
+  enabled: false
+  productId: api2business
+  runner:
+    node: NC01
+    lane: v03
+  origin:
+    baseUrl: https://api2business.example.com
+    browserProxyMode: direct
+  authentication:
+    mode: provided-session-cookie
+    cookieName: api2business_session
+  defaultSmokeProfile: scores-layout
+  smokeProfiles:
+    scores-layout:
+      path: /scores
+      readySelector: "#score-updated-time"
+      screenshotName: api2business-scores-desktop.png
+      mobileScreenshotName: api2business-scores-mobile.png
+      viewport: { width: 1920, height: 1080 }
+      mobileViewport: { width: 390, height: 844 }
+      navigationTimeoutMs: 30000
+      settleMs: 5000
+      commandTimeoutSeconds: 90
+      outputLimits: { failures: 12, network: 40, console: 12 }
+
 sub2api:
   baseUrl: https://api.example.com/api/v1
   requestTimeoutMs: 20000
@@ -270,6 +296,11 @@ operations:
     usageDays: 30
     quotaSampleIntervalSeconds: 300
     quotaSampleTimeoutSeconds: 240
+    rechargeCandidates:
+      lowBalanceCny: 10
+      lookbackHours: 24
+      recommendationLimit: 20
+      retiredSuppliers: []
     failoverRules:
       - errorCode: 429
         keywords:
@@ -349,17 +380,12 @@ operations:
         description: 上游明确返回服务或网关故障
       - errorCode: 502
         keywords:
-          - upstream service temporarily unavailable
-          - upstream request failed
-          - upstream response stream was interrupted
-          - service temporarily unavailable
-          - 服务暂时不可用
           - overloaded
-          - origin web server returned an invalid or incomplete response
           - our servers are currently overloaded
+          - stream disconnected before completion
+          - upstream stream disconnected
           - concurrency limit exceeded for account
           - concurrency limit exceeded
-          - please try again later
           - rate_limit_exceeded
           - upstream rate limit exceeded
           - too many pending requests
@@ -367,12 +393,23 @@ operations:
           - insufficient account balance
           - insufficient balance
           - selected model is at capacity
+        durationMinutes: 3
+        description: 上游持续过载、容量、限流或余额故障
+      - errorCode: 502
+        keywords:
+          - upstream service temporarily unavailable
+          - upstream request failed
+          - upstream response stream was interrupted
+          - service temporarily unavailable
+          - 服务暂时不可用
+          - origin web server returned an invalid or incomplete response
+          - please try again later
           - bad_response_status_code
           - recovered upstream error 502
           - "error code: 502"
           - "status code: 502"
         durationMinutes: 3
-        description: 上游网关、流中断、容量或限流故障
+        description: 上游网关、流中断或包装层故障
       - errorCode: 503
         keywords:
           - upstream service temporarily unavailable

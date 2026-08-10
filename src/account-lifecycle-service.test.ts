@@ -24,9 +24,16 @@ test("candidate query projects lifecycle facts without OAuth credentials", () =>
   expect(accountLifecycleCandidateQuery).not.toContain("refresh_token");
 });
 
-test("pool retirement treats free and plus rate limits as dead but retains rate-limited k12", () => {
+test("explicit retirement unit cost can include current OAuth accounts missing from the acquisition ledger", () => {
+  expect(accountLifecycleCandidateQuery).toContain("$5::numeric AS cost_cny");
+  expect(accountLifecycleCandidateQuery).toContain("LOWER(account.type) = 'oauth'");
+  expect(accountLifecycleCandidateQuery).toContain("= $6::text");
+});
+
+test("pool retirement treats free, plus, and team rate limits as dead but retains rate-limited k12", () => {
   expect(lifecycleRetirementReason({ planType: "free", stateBucket: "rate_limited" }, "database-dead")).toBe("database-rate-limited");
   expect(lifecycleRetirementReason({ planType: "plus", stateBucket: "rate_limited" }, "database-dead")).toBe("database-rate-limited");
+  expect(lifecycleRetirementReason({ planType: "team", stateBucket: "rate_limited" }, "database-dead")).toBe("database-rate-limited");
   expect(lifecycleRetirementReason({ planType: "k12", stateBucket: "rate_limited" }, "database-dead")).toBeNull();
   expect(lifecycleRetirementReason({ planType: "k12", stateBucket: "error" }, "database-dead")).toBe("database-error");
   expect(lifecycleRetirementReason({ planType: "plus", stateBucket: "normal" }, "database-dead")).toBeNull();
@@ -42,7 +49,7 @@ test("settlement keeps its confirmed candidates when a worker snapshot omits the
   const patches: Array<Record<string, unknown>> = [];
   const job = {
     id: "job-settlement", state: "settling" as const, createdAt: new Date().toISOString(), completedAt: null,
-    settings: { day: "2026-08-01", planType: "all" as const, model: "gpt-5.6-sol", confirm: false, selectionMode: "database-dead" as const, scope: "pool" as const },
+    settings: { day: "2026-08-01", planType: "all" as const, unitCostCny: null, model: "gpt-5.6-sol", confirm: false, selectionMode: "database-dead" as const, scope: "pool" as const },
     fingerprint: "fingerprint", logs: [], candidates: [], result: null, settlement: null, error: null,
   };
   const service = new AccountLifecycleService({} as AppConfig, {} as Sub2ApiReadClient, null, {

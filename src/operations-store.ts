@@ -444,6 +444,17 @@ export class OperationsStore {
     `;
   }
 
+  async getLatestSuccessfulUpstreamQuotaSamples() {
+    return await this.sql`
+      SELECT DISTINCT ON (wallet_key)
+        sampled_at, wallet_key, account_id, remaining_usd, cny_per_usd,
+        remaining_cny, source_queried_at, account_cost_inputs
+      FROM api2business_upstream_quota_samples
+      WHERE probe_ok=true AND remaining_cny IS NOT NULL
+      ORDER BY wallet_key, sampled_at DESC
+    `;
+  }
+
   async addOAuthRuntimeSamples(samples: import("./oauth-runtime-monitor").OAuthRuntimeSample[]) {
     await this.sql.begin(async (tx) => {
       for (const sample of samples) {

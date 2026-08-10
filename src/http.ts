@@ -30,6 +30,21 @@ import {
 
 const staticRoot = resolve(import.meta.dir, "../static");
 
+const persistentSnapshotApiPaths = [
+  /^\/api\/upstreams\/pool-quality(?:\/|$)/u,
+  /^\/api\/upstreams\/(?:quota-summary|usage-cache|recharge-candidates)$/u,
+  /^\/api\/oauth\/runtime-summary$/u,
+  /^\/api\/admin\/errors(?:\/|$)/u,
+];
+
+export function isApiResponseCacheable(request: Request): boolean {
+  if (request.method !== "GET") return false;
+  const pathname = new URL(request.url).pathname;
+  return pathname.startsWith("/api/")
+    && !/\/jobs(?:\/|$)|\/workflows(?:\/|$)|\/benchmarks(?:\/|$)|\/scores(?:\/|$)|\/status$|\/health$/u.test(pathname)
+    && !persistentSnapshotApiPaths.some((pattern) => pattern.test(pathname));
+}
+
 function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
   return Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
 }
@@ -112,9 +127,6 @@ export function createHandler(
   runtime: Sub2ApiRuntimeService,
 ): (request: Request) => Promise<Response> {
   const cacheKey = (request: Request) => createHash("sha256").update(`${request.method} ${new URL(request.url).pathname}${new URL(request.url).search}`).digest("hex");
-  const cacheable = (request: Request) => request.method === "GET"
-    && new URL(request.url).pathname.startsWith("/api/")
-    && !/\/jobs(?:\/|$)|\/workflows(?:\/|$)|\/benchmarks(?:\/|$)|\/scores(?:\/|$)|\/status$|\/health$/u.test(new URL(request.url).pathname);
   const cacheRefreshes = new Set<string>();
   const handle = async (request: Request) => {
     const url = new URL(request.url);
@@ -222,6 +234,9 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/upstreams/quota-summary") {
         return json(await operations.upstreamQuotaSummary());
       }
+      if (request.method === "GET" && url.pathname === "/api/upstreams/recharge-candidates") {
+        return json(await operations.upstreamRechargeCandidates());
+      }
       if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality") {
         return json(await operations.poolQualitySummary());
       }
@@ -301,6 +316,7 @@ export function createHandler(
           apiKey: input.apiKey,
           suffix: input.suffix,
           rateCnyPerApiUsd: input.rateCnyPerApiUsd,
+          rateWasSpecified: input.rateCnyPerApiUsd !== undefined && input.rateCnyPerApiUsd !== null && input.rateCnyPerApiUsd !== "",
           rechargeCny: input.rechargeCny,
           priority: input.priority,
           capacity: input.capacity,
@@ -837,7 +853,7 @@ export function createHandler(
     }
   };
   return async (request) => {
-    if (!cacheable(request)) return await handle(request);
+    if (!isApiResponseCacheable(request)) return await handle(request);
     const authorized = sessionAuthorized(request, config, auth)
       || apiKeyAuthorized(request, auth)
       || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
