@@ -585,6 +585,10 @@ export class UpstreamManagementService {
     return { ok: true, operationId: id, released: deleted, valuesPrinted: false };
   }
 
+  configuredUnprobedFallbackRate(): number {
+    return this.config.operations.upstreamManagement.unprobedFallbackRateCnyPerApiUsd;
+  }
+
   async workflowStatus(id: string): Promise<Record<string, unknown>> {
     if (!this.temporal) throw new UpstreamManagementError("Temporal worker 当前不可用", 503, { operation: "status" });
     return await this.temporal.status(id);

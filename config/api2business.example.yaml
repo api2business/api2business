@@ -632,10 +632,10 @@ runtime:
         logFile: api.log
       worker:
         envKeys:
+          - API2BUSINESS_API_KEY
           - API2BUSINESS_TEMPORAL_ADDRESS
         command:
-          - bun
-          - src/worker.ts
+          - go-worker/bin/api2business-temporal-worker
           - --config
           - config/api2business.example.yaml
           - --runtime

@@ -25,6 +25,9 @@ export async function dispatchDirect(services: DispatcherServices, command: AppC
   if (command.kind === "credit.test") return await services.lottery.creditTest(command.execute);
   if (command.kind === "upstream.operation"
     || command.kind === "upstream.quota.sample"
+    || command.kind === "upstream.usage.sample"
+    || command.kind === "pool.quality.sample"
+    || command.kind === "oauth.runtime.sample"
     || command.kind === "upstream.benchmark"
     || command.kind === "account.import"
     || command.kind === "account.lifecycle.detect"

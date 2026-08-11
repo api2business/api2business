@@ -125,6 +125,7 @@ export function createHandler(
   upstreams: UpstreamManagementService,
   reads: Sub2ApiReadClient,
   runtime: Sub2ApiRuntimeService,
+  executeWorkerOperation?: (operation: OperationRequest) => Promise<unknown>,
 ): (request: Request) => Promise<Response> {
   const cacheKey = (request: Request) => createHash("sha256").update(`${request.method} ${new URL(request.url).pathname}${new URL(request.url).search}`).digest("hex");
   const cacheRefreshes = new Set<string>();
@@ -465,6 +466,13 @@ export function createHandler(
           operationId: operation.operationId,
           result: await dispatcher.executeDirect(operation.command),
         });
+      }
+      if (request.method === "POST" && url.pathname === "/api/internal/execute-worker-operation") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        if (!executeWorkerOperation) return json({ ok: false, error: "worker operation executor unavailable" }, 503);
+        const operation = operationRequest(await body(request));
+        if (!operation) return json({ ok: false, error: "invalid operation request" }, 400);
+        return json({ ok: true, operationId: operation.operationId, result: await executeWorkerOperation(operation) });
       }
       if (request.method === "POST" && url.pathname === "/api/internal/priority-automation/run-due") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);

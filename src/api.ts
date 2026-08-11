@@ -10,6 +10,7 @@ import { AccountImportService } from "./account-import-service";
 import { AccountLifecycleService } from "./account-lifecycle-service";
 import { SingleConnectionSub2ApiReadExecutor } from "./sub2api-read-executor";
 import { UpstreamManagementService } from "./upstream-management";
+import { createWorkerOperationExecutor } from "./worker-operation";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -43,10 +44,22 @@ const operations = new OperationsService(
 const imports = new AccountImportService(config, reads, temporal, null, context.runtime);
 const lifecycle = new AccountLifecycleService(config, reads, temporal, null, context.runtime);
 const upstreams = new UpstreamManagementService(config, reads, temporal, context.runtime);
+const workerImports = new AccountImportService(config, reads, null, {
+  get: async (id) => imports.workerGet(id),
+  patch: async (id, patch) => { imports.applyWorkerPatch(id, patch); },
+}, context.runtime);
+const workerLifecycle = new AccountLifecycleService(config, reads, null, {
+  get: async (id) => lifecycle.workerGet(id),
+  patch: async (id, patch) => { lifecycle.applyWorkerPatch(id, patch); },
+}, context.runtime);
+const executeWorkerOperation = createWorkerOperationExecutor({
+  dispatcher, scores: context.monitor, operations, imports: workerImports,
+  lifecycle: workerLifecycle, upstreams, temporal,
+});
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle, upstreams, reads, context.runtime),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation),
 });
 
 console.log(JSON.stringify({
