@@ -518,7 +518,7 @@ operations:
   auditLimit: 200
   priorityVerificationTimeoutMs: 15000
   priorityVerificationPollMs: 500
-  automationPollMs: 1000
+  automationPollMs: 60000
   automationRunTimeoutMs: 600000
   automationFailureBackoffMaxMs: 60000
   automationFailureRetryLimit: 3

@@ -25,7 +25,7 @@ monitor:
 sub2api:
   idleProbe: { enabled: true, intervalSeconds: 60, roundTimeoutSeconds: 50 }
 operations:
-  automationPollMs: 1000
+  automationPollMs: 60000
   upstreamManagement: { quotaSampleIntervalSeconds: 300, quotaSampleTimeoutSeconds: 240 }
 temporal:
   addressEnv: TEMPORAL_ADDRESS
@@ -57,7 +57,7 @@ runtime:
 	if cfg.APIBaseURL != "http://127.0.0.1:8080" || cfg.TaskQueue != "api2business-native" {
 		t.Fatalf("unexpected runtime config: %#v", cfg)
 	}
-	if !cfg.AutomaticRefreshEnabled || !cfg.IdleProbeEnabled || cfg.AutomationPollMilliseconds != 1000 {
+	if !cfg.AutomaticRefreshEnabled || !cfg.IdleProbeEnabled || cfg.AutomationPollMilliseconds != 60000 {
 		t.Fatalf("missing periodic worker config: %#v", cfg)
 	}
 }
@@ -86,10 +86,19 @@ func TestConfiguredScheduleIdentitiesRemainStable(t *testing.T) {
 		Quota:              "api2business-native-score-refresh-schedule-upstream-quota-v4",
 		IdleProbe:          "api2business-native-score-refresh-schedule-idle-account-probe-v5",
 		IdleProvision:      "api2business-native-score-refresh-schedule-idle-account-provision-v1",
-		PriorityAutomation: "api2business-native-score-refresh-schedule-priority-automation-v1",
+		PriorityAutomation: "api2business-native-score-refresh-schedule-priority-automation-v2",
 	}
 	if identities != expected {
 		t.Fatalf("schedule identities changed: %#v", identities)
+	}
+}
+
+func TestPriorityAutomationPollHasSafeMinimum(t *testing.T) {
+	if got := priorityAutomationPollMilliseconds(1000); got != minimumPriorityAutomationPollMilliseconds {
+		t.Fatalf("poll interval was not clamped: %d", got)
+	}
+	if got := priorityAutomationPollMilliseconds(120000); got != 120000 {
+		t.Fatalf("valid poll interval was changed: %d", got)
 	}
 }
 
