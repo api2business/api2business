@@ -165,19 +165,28 @@ func ensureSchedules(c client.Client, cfg Config) error {
 }
 
 func waitForAPI(ctx context.Context, cfg Config) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.APIBaseURL+"/health", nil)
-	if err != nil {
-		return err
+	httpClient := &http.Client{Timeout: 2 * time.Second}
+	var lastError error
+	for {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.APIBaseURL+"/health", nil)
+		if err != nil {
+			return err
+		}
+		response, err := httpClient.Do(request)
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return nil
+			}
+			err = fmt.Errorf("API readiness returned HTTP %d", response.StatusCode)
+		}
+		lastError = err
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w: %v", ctx.Err(), lastError)
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
-	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("API readiness returned HTTP %d", response.StatusCode)
-	}
-	return nil
 }
 
 func watchSchedules(ctx context.Context, c client.Client, cfg Config) {
@@ -212,6 +221,12 @@ func Run(ctx context.Context, cfg Config) error {
 		activityTimeout = 15 * time.Minute
 	}
 	w.RegisterActivityWithOptions(Activities{cfg: cfg, http: &http.Client{Timeout: activityTimeout}}.ExecuteOperation, activity.RegisterOptions{Name: "executeOperation"})
+	apiContext, cancelAPI := context.WithTimeout(ctx, 30*time.Second)
+	if err := waitForAPI(apiContext, cfg); err != nil {
+		cancelAPI()
+		return fmt.Errorf("API dependency readiness: %w", err)
+	}
+	cancelAPI()
 	if err := w.Start(); err != nil {
 		return err
 	}
@@ -219,12 +234,6 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := ensureSchedules(c, cfg); err != nil {
 		return err
 	}
-	apiContext, cancelAPI := context.WithTimeout(ctx, 30*time.Second)
-	if err := waitForAPI(apiContext, cfg); err != nil {
-		cancelAPI()
-		return fmt.Errorf("API dependency readiness: %w", err)
-	}
-	cancelAPI()
 	watchContext, stopWatch := context.WithCancel(ctx)
 	watchDone := make(chan struct{})
 	go func() {

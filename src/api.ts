@@ -11,6 +11,7 @@ import { AccountLifecycleService } from "./account-lifecycle-service";
 import { SingleConnectionSub2ApiReadExecutor } from "./sub2api-read-executor";
 import { UpstreamManagementService } from "./upstream-management";
 import { createWorkerOperationExecutor } from "./worker-operation";
+import { ProbeIsolationService } from "./probe-isolation";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -30,6 +31,7 @@ if (!operationsDatabaseUrl) throw new Error(`server target requires env ${config
 const operationsStore = new OperationsStore(operationsDatabaseUrl);
 await operationsStore.migrate();
 const context = createServerContext(config, target, reads, operationsStore);
+const probeIsolation = new ProbeIsolationService(config, context.admin, context.runtime);
 const temporalAddress = process.env[config.temporal.addressEnv];
 const temporal = temporalAddress
   ? await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue, scoreScheduleWorkflowId: target.scoreScheduleWorkflowId })
@@ -40,10 +42,11 @@ const operations = new OperationsService(
   operationsStore,
   reads,
   context.runtime,
+  probeIsolation,
 );
 const imports = new AccountImportService(config, reads, temporal, null, context.runtime);
 const lifecycle = new AccountLifecycleService(config, reads, temporal, null, context.runtime);
-const upstreams = new UpstreamManagementService(config, reads, temporal, context.runtime);
+const upstreams = new UpstreamManagementService(config, reads, temporal, context.runtime, probeIsolation);
 const workerImports = new AccountImportService(config, reads, null, {
   get: async (id) => imports.workerGet(id),
   patch: async (id, patch) => { imports.applyWorkerPatch(id, patch); },

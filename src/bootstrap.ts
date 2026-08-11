@@ -16,6 +16,7 @@ export interface AppContext {
   monitor: AccountScoreService;
   auth: WebAuthSecrets;
   runtime: Sub2ApiRuntimeService;
+  admin: Sub2ApiClient;
   close(): void;
 }
 
@@ -29,6 +30,7 @@ export function createEmbeddedContext(config: AppConfig, target: EmbeddedCliTarg
     monitor,
     auth: { password: "embedded", apiKey: "embedded", sessionSecret: "embedded" },
     runtime: new Sub2ApiRuntimeService(client, config.operations.upstreamManagement.failoverRules),
+    admin: client,
     close: () => { monitor.close(); store.close(); },
   };
 }
@@ -62,6 +64,7 @@ export function createServerContext(
     monitor,
     auth: { password: webPassword, apiKey, sessionSecret },
     runtime: new Sub2ApiRuntimeService(client, config.operations.upstreamManagement.failoverRules),
+    admin: client,
     close: () => { monitor.close(); store.close(); },
   };
 }
