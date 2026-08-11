@@ -36,6 +36,7 @@ const persistentSnapshotApiPaths = [
   /^\/api\/oauth\/runtime-summary$/u,
   /^\/api\/admin\/errors(?:\/|$)/u,
   /^\/api\/operations\/priority-(?:automation|history)$/u,
+  /^\/api\/operations\/idle-probe\/(?:history|summary)$/u,
 ];
 
 export function isApiResponseCacheable(request: Request): boolean {
