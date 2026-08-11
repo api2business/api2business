@@ -99,13 +99,17 @@ func IdleAccountProbeScheduleWorkflow(ctx workflow.Context, input ScheduleInput)
 
 func PriorityAutomationScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
 	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions(input.ActivityStartToCloseTimeout, 1))
+	intervalMS := input.IntervalMS
+	if intervalMS < minimumPriorityAutomationPollMilliseconds {
+		intervalMS = minimumPriorityAutomationPollMilliseconds
+	}
 	for iteration := 0; iteration < 5000; iteration++ {
 		request := OperationRequest{
 			OperationID: fmt.Sprintf("%s:priority-automation:%d", workflow.GetInfo(ctx).WorkflowExecution.RunID, iteration),
 			Command:     map[string]any{"kind": "priority.automation.run"},
 		}
 		_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, nil)
-		if err := workflow.Sleep(ctx, time.Duration(input.IntervalMS)*time.Millisecond); err != nil {
+		if err := workflow.Sleep(ctx, time.Duration(intervalMS)*time.Millisecond); err != nil {
 			return err
 		}
 	}
