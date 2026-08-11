@@ -120,7 +120,7 @@ func configuredScheduleIdentities(cfg Config) scheduleIdentities {
 		Quota:              base + "-upstream-quota-v4",
 		IdleProbe:          base + "-idle-account-probe-v5",
 		IdleProvision:      base + "-idle-account-provision-v1",
-		PriorityAutomation: base + "-priority-automation-v2",
+		PriorityAutomation: base + "-priority-automation-v3",
 	}
 }
 
@@ -167,14 +167,16 @@ func ensureSchedules(c client.Client, cfg Config) error {
 		}
 	}
 	if cfg.AutomationPollMilliseconds > 0 {
-		if err := terminateIfRunning(c, cfg.Namespace, base+"-priority-automation-v1", "migrated to bounded priority automation schedule v2"); err != nil {
-			return err
+		for _, legacy := range []string{base + "-priority-automation-v1", base + "-priority-automation-v2"} {
+			if err := terminateIfRunning(c, cfg.Namespace, legacy, "migrated to YAML-paced priority automation schedule v3"); err != nil {
+				return err
+			}
 		}
 		if err := startWorkflow(c, scheduleOptions(identities.PriorityAutomation, cfg.TaskQueue), "priorityAutomationScheduleWorkflow", ScheduleInput{IntervalMS: priorityAutomationPollMilliseconds(cfg.AutomationPollMilliseconds), ActivityStartToCloseTimeout: cfg.ActivityTimeout, MaximumAttempts: 1}); err != nil {
 			return err
 		}
 	} else {
-		for _, id := range []string{base + "-priority-automation-v1", identities.PriorityAutomation} {
+		for _, id := range []string{base + "-priority-automation-v1", base + "-priority-automation-v2", identities.PriorityAutomation} {
 			if err := terminateIfRunning(c, cfg.Namespace, id, "priority automation disabled by configuration"); err != nil {
 				return err
 			}

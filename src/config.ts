@@ -911,7 +911,7 @@ export function loadConfig(path: string): AppConfig {
       auditLimit: integerValue(operations, "auditLimit", "operations", 1, 1000),
       priorityVerificationTimeoutMs: integerValue(operations, "priorityVerificationTimeoutMs", "operations", 1000, 120000),
       priorityVerificationPollMs: integerValue(operations, "priorityVerificationPollMs", "operations", 100, 10000),
-      automationPollMs: integerValue(operations, "automationPollMs", "operations", 100, 60000),
+      automationPollMs: integerValue(operations, "automationPollMs", "operations", 100, 600000),
       automationRunTimeoutMs: integerValue(operations, "automationRunTimeoutMs", "operations", 60000, 3600000),
       automationFailureBackoffMaxMs: integerValue(
         operations,
