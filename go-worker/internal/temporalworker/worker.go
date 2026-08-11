@@ -106,9 +106,9 @@ type scheduleIdentities struct {
 func configuredScheduleIdentities(cfg Config) scheduleIdentities {
 	base := cfg.ScoreScheduleWorkflowID
 	return scheduleIdentities{
-		Score:              fmt.Sprintf("%s-snapshot-%dm-v2", base, cfg.RefreshIntervalMinutes),
-		Quota:              base + "-upstream-quota-v3",
-		IdleProbe:          base + "-idle-account-probe-v4",
+		Score:              fmt.Sprintf("%s-snapshot-%dm-v3", base, cfg.RefreshIntervalMinutes),
+		Quota:              base + "-upstream-quota-v4",
+		IdleProbe:          base + "-idle-account-probe-v5",
 		IdleProvision:      base + "-idle-account-provision-v1",
 		PriorityAutomation: base + "-priority-automation-v1",
 	}
@@ -118,8 +118,8 @@ func ensureSchedules(c client.Client, cfg Config) error {
 	base := cfg.ScoreScheduleWorkflowID
 	identities := configuredScheduleIdentities(cfg)
 	if cfg.AutomaticRefreshEnabled && cfg.RefreshIntervalMinutes > 0 {
-		for _, legacy := range []string{base, fmt.Sprintf("%s-snapshot-%dm-v1", base, cfg.RefreshIntervalMinutes)} {
-			if err := terminateIfRunning(c, cfg.Namespace, legacy, "migrated to recoverable score snapshot schedule v2"); err != nil {
+		for _, legacy := range []string{base, fmt.Sprintf("%s-snapshot-%dm-v1", base, cfg.RefreshIntervalMinutes), fmt.Sprintf("%s-snapshot-%dm-v2", base, cfg.RefreshIntervalMinutes)} {
+			if err := terminateIfRunning(c, cfg.Namespace, legacy, "migrated to Go score snapshot schedule v3"); err != nil {
 				return err
 			}
 		}
@@ -128,8 +128,8 @@ func ensureSchedules(c client.Client, cfg Config) error {
 		}
 	}
 	if cfg.QuotaIntervalSeconds > 0 {
-		for _, legacy := range []string{base + "-upstream-quota", base + "-upstream-quota-v2"} {
-			if err := terminateIfRunning(c, cfg.Namespace, legacy, "migrated to independently bounded upstream sampling schedule v3"); err != nil {
+		for _, legacy := range []string{base + "-upstream-quota", base + "-upstream-quota-v2", base + "-upstream-quota-v3"} {
+			if err := terminateIfRunning(c, cfg.Namespace, legacy, "migrated to Go upstream sampling schedule v4"); err != nil {
 				return err
 			}
 		}
@@ -138,8 +138,8 @@ func ensureSchedules(c client.Client, cfg Config) error {
 		}
 	}
 	if cfg.IdleProbeEnabled {
-		for _, legacy := range []string{base + "-idle-account-probe-v2", base + "-idle-account-probe-v3"} {
-			if err := terminateIfRunning(c, cfg.Namespace, legacy, "migrated to independent probe schedule v4"); err != nil {
+		for _, legacy := range []string{base + "-idle-account-probe-v2", base + "-idle-account-probe-v3", base + "-idle-account-probe-v4"} {
+			if err := terminateIfRunning(c, cfg.Namespace, legacy, "migrated to Go idle probe schedule v5"); err != nil {
 				return err
 			}
 		}

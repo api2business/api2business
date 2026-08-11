@@ -82,9 +82,9 @@ func TestConfiguredScheduleIdentitiesRemainStable(t *testing.T) {
 		RefreshIntervalMinutes:  5,
 	})
 	expected := scheduleIdentities{
-		Score:              "api2business-native-score-refresh-schedule-snapshot-5m-v2",
-		Quota:              "api2business-native-score-refresh-schedule-upstream-quota-v3",
-		IdleProbe:          "api2business-native-score-refresh-schedule-idle-account-probe-v4",
+		Score:              "api2business-native-score-refresh-schedule-snapshot-5m-v3",
+		Quota:              "api2business-native-score-refresh-schedule-upstream-quota-v4",
+		IdleProbe:          "api2business-native-score-refresh-schedule-idle-account-probe-v5",
 		IdleProvision:      "api2business-native-score-refresh-schedule-idle-account-provision-v1",
 		PriorityAutomation: "api2business-native-score-refresh-schedule-priority-automation-v1",
 	}
