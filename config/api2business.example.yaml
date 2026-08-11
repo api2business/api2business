@@ -283,7 +283,7 @@ operations:
   accountImportDefaults:
     priority: 1
     capacity: 16
-    importTimeoutMs: 120000
+    importTimeoutMs: 600000
     groupIds: [2, 3]
     sourceProxyId: 3
     perAccountProxy: false
@@ -541,8 +541,8 @@ temporal:
   taskQueue: api2business
   scoreScheduleWorkflowId: api2business-score-refresh-schedule
   submissionTimeoutMs: 10000
-  workflowExecutionTimeout: 12m
-  activityStartToCloseTimeout: 10m
+  workflowExecutionTimeout: 20m
+  activityStartToCloseTimeout: 15m
   retry:
     maximumAttempts: 1
 

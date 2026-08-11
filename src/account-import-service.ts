@@ -284,6 +284,7 @@ export class AccountImportService {
       this.log(job, "batch-import", "start", `stage=batch-import state=start accounts=${plan.sourceIndexes.length} initial-proxy=${plan.initialProxyId}`);
       await this.persistWorkerJob(job);
       let output: Record<string, unknown>;
+      const mutationStartedAt = Date.now();
       try {
         output = await this.runtime.importAccounts({
           operationKey: job.id,
@@ -299,6 +300,7 @@ export class AccountImportService {
         });
       } catch (error) {
         if (!isTimeoutError(error)) throw error;
+        this.log(job, "batch-import", "timeout", `stage=batch-import state=timeout elapsed-ms=${Date.now() - mutationStartedAt}`);
         this.log(job, "reconciliation", "start", "导入请求超时，正在通过排队数据库核对账号终态");
         await this.persistWorkerJob(job);
         const reconciled = await accountImportPreflight(content, {
@@ -311,7 +313,7 @@ export class AccountImportService {
         output = recoveredImportOutput(job, plan, reconciled);
         this.log(job, "reconciliation", "done", "导入响应超时，但排队数据库终态已全部对齐");
       }
-      this.log(job, "batch-import", output.ok === false ? "failed" : "done", `stage=batch-import state=${output.ok === false ? "failed" : "done"} accounts=${plan.sourceIndexes.length}`);
+      this.log(job, "batch-import", output.ok === false ? "failed" : "done", `stage=batch-import state=${output.ok === false ? "failed" : "done"} accounts=${plan.sourceIndexes.length} elapsed-ms=${Date.now() - mutationStartedAt}`);
       mergePreflightResult(output, job, plan);
       job.result = output;
       const result = output.result && typeof output.result === "object" && !Array.isArray(output.result)
