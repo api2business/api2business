@@ -293,6 +293,11 @@ test("OAuth cost table separates live status buckets and does not infer archived
   expect(app).toContain("oauth-status-unavailable");
 });
 
+test("score table displays total sampled attempts when quality attempts are excluded", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  expect(app).toContain("row.attemptCount ?? row.selectedCalls ?? row.observedAttempts");
+});
+
 test("OAuth runtime monitoring reuses the upstream history chart component", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();

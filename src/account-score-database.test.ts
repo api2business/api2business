@@ -110,6 +110,7 @@ test("账务额度不足样本保留审计但不参与质量评分", () => {
 
   expect(row.customerErrorRequests).toBe(38);
   expect(row.excludedNonUpstreamErrorRequests).toBe(36);
+  expect(row.attemptCount).toBe(40);
   expect(row.observedAttempts).toBe(6);
   expect(row.failureRequests).toBe(2);
   expect(row.failoverRequests).toBe(0);

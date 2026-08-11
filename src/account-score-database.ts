@@ -415,6 +415,10 @@ export function scoreRecentDatabaseRow(
     assessment: ({ A: "preferred", B: "healthy", C: "watch", D: "degraded", E: "poor" } as Row)[accountGrade] ?? "insufficient-evidence",
     confidence: observedAttempts >= 50 && firstTokenSamples >= 20 ? "high" : observedAttempts >= 10 && firstTokenSamples >= 5 ? "medium" : "low",
     scoreComparable: comparable,
+    // selected_calls is the complete deduplicated request sample used for
+    // latestSampleAt. Keep it separate from observedAttempts, which excludes
+    // errors intentionally removed from quality scoring.
+    attemptCount: numeric(row.selected_calls) ?? 0,
     observedAttempts,
     successRequests,
     failureRequests,

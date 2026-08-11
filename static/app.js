@@ -330,7 +330,7 @@ function renderScoreRows() {
       <td class="upstream-rate upstream-cost-cell"><strong>${effectiveCost == null ? '—' : `¥${number(effectiveCost, 4)}`}</strong><small>${escapeHtml(costSource)}</small></td>
       <td class="usd-cell">${usd(usage.apiAmountUsd)}<small class="upstream-muted">${compact(usage.requestCount)} 请求</small></td>
       <td class="sample-time sample-time-${latestSample.freshness}"${latestSample.exact ? ` title="北京时间 ${escapeHtml(latestSample.exact)}"` : ''}><span>${escapeHtml(latestSample.label)}</span></td>
-      <td>${percent(row.failureRate)}<small class="upstream-muted">${number(row.observedAttempts)} 次尝试</small></td>
+      <td>${percent(row.failureRate)}<small class="upstream-muted">${number(row.attemptCount ?? row.selectedCalls ?? row.observedAttempts)} 次尝试</small></td>
       <td>${row.ttftP95Ms == null ? '—' : `${number(row.ttftP95Ms)} ms`}</td>
       <td class="failover-cell" title="失败 ${number(row.failureRequests)} 次；触发切号 ${number(row.failoverRequests)} 次，其中恢复 ${number(row.failoverRecovered)} 次；未触发切号 ${number(row.failoverNotTriggered)} 次">
         <span>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}</span>

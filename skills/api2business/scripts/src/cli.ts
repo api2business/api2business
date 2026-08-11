@@ -258,7 +258,7 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
       String(row.grade ?? "-").padEnd(5),
       (typeof row.score === "number" ? row.score.toFixed(1) : "-").padStart(5),
       String(row.confidence ?? "-").padEnd(7),
-      String(row.observedAttempts ?? 0).padStart(8),
+      String(row.attemptCount ?? row.selectedCalls ?? row.observedAttempts ?? 0).padStart(8),
       failureRate.padStart(6),
       failoverRate.padStart(7),
       ttft.padStart(9),
