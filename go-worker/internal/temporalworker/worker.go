@@ -17,6 +17,7 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
+	workflowservice "go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
@@ -204,6 +205,35 @@ func watchSchedules(ctx context.Context, c client.Client, cfg Config) {
 	}
 }
 
+func terminateLegacyOperationWorkflows(ctx context.Context, c client.Client, cfg Config) error {
+	var nextPageToken []byte
+	for {
+		response, err := c.ListWorkflow(ctx, &workflowservice.ListWorkflowExecutionsRequest{
+			Namespace:     cfg.Namespace,
+			PageSize:      1000,
+			NextPageToken: nextPageToken,
+			Query:         `WorkflowType = "operationWorkflow" AND ExecutionStatus = "Running"`,
+		})
+		if err != nil {
+			return err
+		}
+		for _, execution := range response.Executions {
+			if execution.GetTaskQueue() != cfg.TaskQueue {
+				continue
+			}
+			workflowID := execution.GetExecution().GetWorkflowId()
+			runID := execution.GetExecution().GetRunId()
+			if err := c.TerminateWorkflow(ctx, workflowID, runID, "migrated to Go operation workflow v2"); err != nil {
+				return fmt.Errorf("terminate legacy operation workflow %s: %w", workflowID, err)
+			}
+		}
+		nextPageToken = response.NextPageToken
+		if len(nextPageToken) == 0 {
+			return nil
+		}
+	}
+}
+
 func Run(ctx context.Context, cfg Config) error {
 	c, err := client.Dial(client.Options{HostPort: cfg.Address, Namespace: cfg.Namespace})
 	if err != nil {
@@ -211,7 +241,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer c.Close()
 	w := worker.New(c, cfg.TaskQueue, worker.Options{})
-	w.RegisterWorkflowWithOptions(OperationWorkflow, workflow.RegisterOptions{Name: "operationWorkflow"})
+	w.RegisterWorkflowWithOptions(OperationWorkflow, workflow.RegisterOptions{Name: "operationWorkflowV2"})
 	w.RegisterWorkflowWithOptions(ScoreRefreshScheduleWorkflow, workflow.RegisterOptions{Name: "scoreRefreshScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(UpstreamQuotaScheduleWorkflow, workflow.RegisterOptions{Name: "upstreamQuotaScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(IdleAccountProbeScheduleWorkflow, workflow.RegisterOptions{Name: "idleAccountProbeScheduleWorkflow"})
@@ -227,6 +257,9 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("API dependency readiness: %w", err)
 	}
 	cancelAPI()
+	if err := terminateLegacyOperationWorkflows(ctx, c, cfg); err != nil {
+		return fmt.Errorf("legacy operation workflow migration: %w", err)
+	}
 	if err := w.Start(); err != nil {
 		return err
 	}
