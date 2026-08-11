@@ -55,7 +55,9 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
     if (command.kind === "priority.plan.confirm") return await services.operations.confirmPriorityPlan(command.planId, command.operator);
     if (command.kind === "priority.automation.run") {
       try {
-        return await services.operations.runDueAutomation();
+        const result = await services.operations.runDueAutomation();
+        const dispatch = await services.operations.priorityAutomationDispatchDelay();
+        return { ...result, nextDelayMs: dispatch.delayMs, nextDelayReason: dispatch.reason };
       } catch (error) {
         await services.operations.deferPriorityAutomationAfterDispatchFailure(error).catch(() => null);
         throw error;

@@ -26,6 +26,7 @@ function services(overrides: Record<string, unknown> = {}) {
     sampleOAuthRuntime: async () => ({ ok: true }),
     samplePoolQuality: async () => ({ ok: true }),
     runDueAutomation: async () => ({ ok: true }),
+    priorityAutomationDispatchDelay: async () => ({ due: false, delayMs: 637000, reason: "waiting" }),
     deferPriorityAutomationAfterDispatchFailure: async () => ({ ok: true }),
   };
   return {
@@ -38,6 +39,13 @@ function services(overrides: Record<string, unknown> = {}) {
     completed, cached, synchronized, operations, upstreams,
   };
 }
+
+test("worker executor returns the authoritative automation delay", async () => {
+  const fixture = services();
+  const execute = createWorkerOperationExecutor(fixture.value as never);
+  const result = await execute({ operationId: "automation-delay", command: { kind: "priority.automation.run" } }) as Record<string, unknown>;
+  expect(result).toMatchObject({ ok: true, nextDelayMs: 637000, nextDelayReason: "waiting" });
+});
 
 test("worker executor preserves create detection, rate synchronization, and completion", async () => {
   const fixture = services({

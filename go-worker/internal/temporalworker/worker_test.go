@@ -102,6 +102,18 @@ func TestPriorityAutomationPollHasSafeMinimum(t *testing.T) {
 	}
 }
 
+func TestPriorityAutomationUsesAuthoritativeDelay(t *testing.T) {
+	if got := priorityAutomationDelayMilliseconds(PriorityAutomationRunResult{NextDelayMS: 637000}, 600000); got != 637000 {
+		t.Fatalf("authoritative delay was changed: %d", got)
+	}
+	if got := priorityAutomationDelayMilliseconds(PriorityAutomationRunResult{}, 600000); got != 600000 {
+		t.Fatalf("missing delay did not use fallback: %d", got)
+	}
+	if got := priorityAutomationDelayMilliseconds(PriorityAutomationRunResult{NextDelayMS: 1000}, 600000); got != minimumPriorityAutomationPollMilliseconds {
+		t.Fatalf("short delay was not clamped: %d", got)
+	}
+}
+
 func TestExecuteOperationUsesAuthAndChecksIdentity(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("authorization") != "Bearer test-token" {

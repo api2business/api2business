@@ -20,6 +20,7 @@ import {
   preparePriorityAutomationBatch,
   randomIntervalMs,
 } from "./priority-automation-safety";
+import { automationDispatchDelayMs } from "./priority-automation-dispatch";
 import type {
   Sub2ApiReadClient,
   Sub2ApiReadPriority,
@@ -1361,6 +1362,15 @@ export class OperationsService {
       runClaimedAt: row.run_claimed_at ?? null,
       runStartedAt: row.run_started_at ?? null,
     };
+  }
+
+  async priorityAutomationDispatchDelay() {
+    return automationDispatchDelayMs(
+      await this.priorityAutomationDispatchState(),
+      Date.now(),
+      this.config.operations.automationRunTimeoutMs,
+      this.config.operations.automationPollMs,
+    );
   }
 
   async deferPriorityAutomationAfterDispatchFailure(error: unknown) {

@@ -23,6 +23,20 @@ type ScheduleInput struct {
 	ActivityStartToCloseTimeout string `json:"activityStartToCloseTimeout"`
 	MaximumAttempts             int32  `json:"maximumAttempts"`
 }
+type PriorityAutomationRunResult struct {
+	NextDelayMS int `json:"nextDelayMs"`
+}
+
+func priorityAutomationDelayMilliseconds(result PriorityAutomationRunResult, fallback int) int {
+	delay := result.NextDelayMS
+	if delay <= 0 {
+		delay = fallback
+	}
+	if delay < minimumPriorityAutomationPollMilliseconds {
+		delay = minimumPriorityAutomationPollMilliseconds
+	}
+	return delay
+}
 
 func activityOptions(timeout string, attempts int32) workflow.ActivityOptions {
 	duration, err := time.ParseDuration(timeout)
@@ -108,8 +122,10 @@ func PriorityAutomationScheduleWorkflow(ctx workflow.Context, input ScheduleInpu
 			OperationID: fmt.Sprintf("%s:priority-automation:%d", workflow.GetInfo(ctx).WorkflowExecution.RunID, iteration),
 			Command:     map[string]any{"kind": "priority.automation.run"},
 		}
-		_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, nil)
-		if err := workflow.Sleep(ctx, time.Duration(intervalMS)*time.Millisecond); err != nil {
+		var result PriorityAutomationRunResult
+		_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, &result)
+		delayMS := priorityAutomationDelayMilliseconds(result, intervalMS)
+		if err := workflow.Sleep(ctx, time.Duration(delayMS)*time.Millisecond); err != nil {
 			return err
 		}
 	}
