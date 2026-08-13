@@ -41,13 +41,19 @@ test("account import supports Team manual selection and three price-inferred typ
   expect(cli).not.toContain('inferredPlanType = "team"');
   expect(app).not.toContain("history.replaceState(null, '', `/account-import?job=");
   expect(app).not.toContain("new URLSearchParams(location.search).get('job')");
+  expect(app).toContain("zone.addEventListener('click', (event) => {");
+  expect(app).toContain("event.preventDefault()");
+  expect(app).toContain("if (event.target === fileInput) return");
+  expect(app).toContain("fileInput.addEventListener('click', (event) => event.stopPropagation())");
+  expect(app).toContain("if (event.key !== 'Enter' && event.key !== ' ') return");
+  expect(app).not.toContain("location.reload()");
 });
 
 test("ZIP import previews merged JSON and recognized account count before submit", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
   expect(html).toContain("合并后的 JSON");
-  expect(html).toContain("/app.js?v=import-type-confirm-v1");
+  expect(html).toContain("/app.js?v=account-upload-stability-v1");
   expect(app).toContain("requestJson('/api/account-import/preview'");
   expect(app).toContain("JSON.stringify(JSON.parse(preview.content), null, 2)");
   expect(app).toContain("preview.accountCount");

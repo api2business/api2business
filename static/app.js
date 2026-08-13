@@ -2158,8 +2158,17 @@ async function accountImportPage() {
     applyDetectedPlatform()
     updateUnitCostFromTotal()
   })
-  zone.addEventListener('click', () => fileInput.click())
-  zone.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') fileInput.click() })
+  zone.addEventListener('click', (event) => {
+    event.preventDefault()
+    if (event.target === fileInput) return
+    fileInput.click()
+  })
+  fileInput.addEventListener('click', (event) => event.stopPropagation())
+  zone.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    fileInput.click()
+  })
   fileInput.addEventListener('change', () => loadFile(fileInput.files?.[0]))
   for (const eventName of ['dragenter', 'dragover']) zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.add('is-dragging') })
   for (const eventName of ['dragleave', 'drop']) zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.remove('is-dragging') })
