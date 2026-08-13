@@ -345,6 +345,7 @@ operations:
           - rate_limit_exceeded
           - rate_limit_error
           - bad_response_status_code
+          - openai_error
         durationMinutes: 3
         description: 上游明确返回模型容量、临时过载或包装层故障
       - errorCode: 401
