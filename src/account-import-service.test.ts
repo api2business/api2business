@@ -12,13 +12,13 @@ import { strToU8, zipSync } from "fflate";
 test("projects YAML-owned account import defaults", () => {
   const service = new AccountImportService({ operations: {
     accountImportDefaults: {
-      priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, perAccountProxy: false,
+      priority: 1, capacity: 3, groupIds: [2, 3], sourceProxyId: 3, perAccountProxy: false,
       importTimeoutMs: 600000, planType: "k12", freeCostThresholdCny: 1, plusCostThresholdCny: 7,
     },
     oauthEconomics: { idealApiUsdPerAccount: { free: 3.8, k12: 20, plus: 135, team: 140 } },
   } } as AppConfig, {} as Sub2ApiReadClient);
   expect(service.options().defaults).toEqual({
-    priority: 1, capacity: 16, groupIds: [2, 3], sourceProxyId: 3, perAccountProxy: false,
+    priority: 1, capacity: 3, groupIds: [2, 3], sourceProxyId: 3, perAccountProxy: false,
     importTimeoutMs: 600000, unitCostCny: null, planType: "k12", freeCostThresholdCny: 1, plusCostThresholdCny: 7,
   });
   expect(service.options().planTypes).toEqual([{ id: "k12", name: "K12" }, { id: "plus", name: "Plus" }, { id: "team", name: "Team" }, { id: "free", name: "Free" }]);

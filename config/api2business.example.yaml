@@ -282,7 +282,7 @@ operations:
     deleteBatchSize: 10
   accountImportDefaults:
     priority: 1
-    capacity: 16
+    capacity: 3
     importTimeoutMs: 600000
     groupIds: [2, 3]
     sourceProxyId: 3
