@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { summarizeLifecycleResponse } from "./cli";
+import { retirementSelectionMode, summarizeLifecycleResponse } from "./cli";
+
+test("maps explicit full-pool selection to the existing database-all lifecycle mode", () => {
+  expect(retirementSelectionMode(null, "pool", "team")).toBe("database-dead");
+  expect(retirementSelectionMode("all", "pool", "team")).toBe("database-all");
+  expect(() => retirementSelectionMode("all", "day", "team")).toThrow("--scope pool");
+  expect(() => retirementSelectionMode("all", "pool", "all")).toThrow("one explicit --plan-type");
+});
 
 test("summarizes retirement plans without expanding candidates", () => {
   const summary = summarizeLifecycleResponse({

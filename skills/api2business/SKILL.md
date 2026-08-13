@@ -88,8 +88,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 ## 领域操作
 
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
-- OAuth 退役计划可用 `--plan-type` 限定账号类型；默认选择错误账号，`free`、`plus`
-  和 `team` 的限流账号也按死亡处理，`k12` 限流账号保留。
+- OAuth 退役计划可用 `--plan-type` 限定账号类型：
+  - 默认 `--selection dead` 选择错误账号；`free`、`plus` 和 `team` 的限流账号也按死亡处理，`k12` 限流账号保留；
+  - 显式 `--selection all` 选择指定单一类型的全部当前账号，且只允许用于整池范围。
 - 对缺少采购成本记录的整池账号，先用 `--scope pool --plan-type <type> --unit-cost-cny <CNY>`
   显式声明本批结算单价；该模式只支持单一账号类型，并在计划与确认回读中固定成本。
 - 退役删除按 `operations.accountLifecycle.deleteBatchSize` 分批调用原生批量接口；单批失败会跳过并继续，终态只以排队回读为准，失败且有剩余账号时复用原计划恢复。

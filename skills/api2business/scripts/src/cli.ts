@@ -55,6 +55,7 @@ interface Parsed {
   unitCostCny: number | null;
   planType: string | null;
   scope: string | null;
+  selection: string | null;
   profile: string | null;
   model: string | null;
   day: string | null;
@@ -81,6 +82,15 @@ function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+export function retirementSelectionMode(selection: string | null, scope: string, planType: string): "database-dead" | "database-all" {
+  const selected = selection ?? "dead";
+  if (selected !== "dead" && selected !== "all") throw new Error("--selection must be dead or all");
+  if (selected === "all" && (scope !== "pool" || planType === "all")) {
+    throw new Error("--selection all requires --scope pool and one explicit --plan-type");
+  }
+  return selected === "all" ? "database-all" : "database-dead";
+}
+
 function value(args: string[], name: string): string | null {
   const index = args.indexOf(name);
   if (index < 0) return null;
@@ -92,7 +102,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--priorities", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--priorities", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -152,6 +162,7 @@ function parseArgs(args: string[]): Parsed {
     unitCostCny: decimal("--unit-cost-cny"),
     planType: value(args, "--plan-type"),
     scope: value(args, "--scope"),
+    selection: value(args, "--selection"),
     profile: value(args, "--profile"),
     model: value(args, "--model"),
     affectedOnly: args.includes("--affected-only"),
@@ -217,7 +228,7 @@ function help(): Record<string, unknown> {
       "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--confirm] --over-api",
       "accounts idle-probe run [--accounts <id-or-range,...>] [--rounds 1..10] [--confirm] --over-api",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
-      "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] [--unit-cost-cny CNY] --over-api",
+      "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] [--selection dead|all] [--unit-cost-cny CNY] --over-api",
       "accounts lifecycle retire status --id <plan-id> --over-api",
       "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
       "upstreams list [--page N --search <text>] --over-api",
@@ -654,11 +665,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
           throw new Error("--plan-type must be k12, plus, team, free, or all");
         }
         const day = parsed.day ?? new Date().toLocaleDateString("sv-SE", { timeZone: config.monitor.timezone });
+        const selectionMode = retirementSelectionMode(parsed.selection, scope, planType);
         if (parsed.unitCostCny !== null && (scope !== "pool" || planType === "all")) {
           throw new Error("--unit-cost-cny requires --scope pool and one explicit --plan-type");
         }
         return await client.accountLifecycleDetect({ day, planType, scope, unitCostCny: parsed.unitCostCny ?? undefined,
-          selectionMode: "database-dead", confirm: false });
+          selectionMode, confirm: false });
       }
       if (!parsed.id) throw new Error(`accounts lifecycle retire ${phase ?? ""} requires --id`);
       if (phase === "status") return await client.accountLifecycleStatus(parsed.id);

@@ -8,6 +8,10 @@
   - `free`、`plus` 和 `team` 选择错误或限流状态；
   - 缺少采购成本的单一类型可用 `--unit-cost-cny` 显式补齐本批结算成本；
   - 未指定时检查全部类型，但仍只选择各类型的死亡状态。
+  - 退役选择策略：
+    - `--selection dead` 是默认策略；
+    - 显式 `--selection all` 会选择指定单一类型的正常、限流和错误账号；
+    - `--selection all` 只允许与 `--scope pool` 一起使用。
 - 作业终态通过排队读取核对，不以 HTTP 受理或前端成功文本代替。
 - 退役删除使用 `operations.accountLifecycle.deleteBatchSize` 分批调用 Sub2API 原生批量接口；单批超时只记录失败并继续后续批次，最终以排队回读确定剩余账号。
 - 结算账本按计划指纹幂等写入；失败作业存在 `remainingAccountIds` 时可从原计划恢复，不重复记账。
