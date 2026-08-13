@@ -121,8 +121,13 @@ test("account imports and scheduled sampling keep independent failure boundaries
 
 test("failover template uses the Sub2API native error_code schema", async () => {
   const config = await Bun.file(new URL("../config/api2business.example.yaml", import.meta.url)).text();
+  const parsed = loadConfig("config/api2business.example.yaml");
+  const badResponseRule = parsed.operations.upstreamManagement.failoverRules.find(
+    (rule) => rule.error_code === 400 && rule.keywords.includes("bad_response_status_code"),
+  );
   expect(config).toContain("errorCode: 502");
   expect(config).toContain("errorCode: 524");
+  expect(badResponseRule?.duration_minutes).toBe(3);
   expect(config).not.toContain("input must be a list");
   expect(config).not.toContain("input exceeds the context window of this model");
   expect(config).not.toContain("openai_error");
@@ -130,7 +135,7 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   expect(config).not.toMatch(/errorCode: 404\n/u);
   expect(config).not.toContain("statusCode:");
   expect(config).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
-  expect(config).toContain("description: 上游明确返回模型容量或临时过载");
+  expect(config).toContain("description: 上游明确返回模型容量、临时过载或包装层故障");
 });
 
 test("usage target discovery uses one queued database read", async () => {
