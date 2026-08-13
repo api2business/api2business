@@ -46,6 +46,10 @@
       - 上游原始正文为 `openai_error` 时，视为包装层瞬态故障；
       - 使用不超过 3 分钟的短冷却；
       - `openai_error` 只允许用于 HTTP 400 规则，不得扩展到其他状态码。
+      - 供应商返回 `ran out of room in the model's context window` 时允许切号；
+        该短语只允许用于 HTTP 400 的 3 分钟短冷却。
+      - 不使用宽泛的 `context window`、`context_length_exceeded` 或
+        `maximum context length`，避免把请求本身确定性超长误判为账号故障。
     - `502` 的过载、容量、限流、余额故障以及未开始输出前的流断开统一使用不超过 3 分钟的短冷却；
     - 具体切号效果以 Sub2API 当前原生匹配语义和真实回读为准。
   - 数据口径：

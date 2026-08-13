@@ -130,17 +130,23 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   const openAIErrorRules = parsed.operations.upstreamManagement.failoverRules.filter(
     (rule) => rule.keywords.includes("openai_error"),
   );
+  const contextRoomRules = parsed.operations.upstreamManagement.failoverRules.filter(
+    (rule) => rule.keywords.includes("ran out of room in the model's context window"),
+  );
   expect(config).toContain("errorCode: 502");
   expect(config).toContain("errorCode: 524");
   expect(badResponseRule?.duration_minutes).toBe(3);
   expect(openAIErrorRules.map((rule) => rule.error_code)).toEqual([400]);
+  expect(contextRoomRules.map((rule) => [rule.error_code, rule.duration_minutes])).toEqual([[400, 3]]);
   expect(config).not.toContain("input must be a list");
   expect(config).not.toContain("input exceeds the context window of this model");
+  expect(config).not.toContain("context_length_exceeded");
+  expect(config).not.toContain("maximum context length");
   expect(config).not.toContain("model_not_found");
   expect(config).not.toMatch(/errorCode: 404\n/u);
   expect(config).not.toContain("statusCode:");
   expect(config).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
-  expect(config).toContain("description: 上游明确返回模型容量、临时过载或包装层故障");
+  expect(config).toContain("description: 上游明确返回模型容量、临时过载、包装层故障或供应商上下文空间故障");
 });
 
 test("usage target discovery uses one queued database read", async () => {
