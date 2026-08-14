@@ -105,6 +105,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `--group` 按错误记录的实际请求分组筛选；
   - 默认排除内部 monitor 用户和 `api2business-probe-*` 探活流量；
   - 返回 `groupFilterBasis=request-group` 与 `probeNoiseExcluded=true` 供调用方核对口径。
+  - `errors diagnose` 按请求关联真实 `upstream_failover_switching` 事件；
+  - 每条链返回 `switchCount`、`failoverOutcome`、`failoverFailed` 和失败原因；
+  - `not_triggered` 表示没有切号，禁止误报为切号失败。
 - 页面数据快照统一写入 host PostgreSQL：
   - API 与 Worker 按稳定快照键共享成功载荷；
   - 快照型 API 不再叠加通用 HTTP 响应缓存；

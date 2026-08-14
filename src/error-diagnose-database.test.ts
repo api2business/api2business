@@ -16,6 +16,10 @@ test("error diagnosis uses one bounded query for signatures and failover chains"
   expect(errorDiagnoseQuery).toContain("request_group.id = o.group_id");
   expect(errorDiagnoseQuery).toContain("api2business-probe-%");
   expect(errorDiagnoseQuery).toContain("probe.id = o.api_key_id");
+  expect(errorDiagnoseQuery).toContain("reported_switch_count");
+  expect(errorDiagnoseQuery).toContain("switch_count > 0 AS failover_triggered");
+  expect(errorDiagnoseQuery).toContain("'final_error_after_switch'");
+  expect(errorDiagnoseQuery).toContain("'%account_select_failed'");
   expect(errorDiagnoseQuery).not.toContain("account_groups");
   expect(errorDiagnoseQuery).not.toContain("api_key_prefix");
 });
@@ -29,6 +33,8 @@ test("error diagnosis projection exposes bounded facts without raw payloads", ()
     failover_triggered_requests: 2,
     failover_recovered_requests: 1,
     failover_failed_requests: 1,
+    failover_switches: 3,
+    failover_not_triggered_requests: 1,
     failover_aborted_requests: 1,
     signatures: [{
       signature: "502:upstream:upstream_error:-:upstream_overloaded",
@@ -45,6 +51,8 @@ test("error diagnosis projection exposes bounded facts without raw payloads", ()
     failoverTriggeredRequests: 2,
     failoverRecoveredRequests: 1,
     failoverFailedRequests: 1,
+    failoverSwitches: 3,
+    failoverNotTriggeredRequests: 1,
     failoverAbortedRequests: 1,
   });
   expect(projected.analysisHints).toEqual({

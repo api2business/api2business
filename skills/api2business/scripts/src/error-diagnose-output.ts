@@ -22,6 +22,7 @@ export function emitErrorDiagnosis(value: Row, json: boolean): void {
     + ` failover=${String(summary.failoverTriggeredRequests ?? 0)}`
     + ` failoverRecovered=${String(summary.failoverRecoveredRequests ?? 0)}`
     + ` failoverFailed=${String(summary.failoverFailedRequests ?? 0)}`
+    + ` switches=${String(summary.failoverSwitches ?? 0)}`
     + ` databaseQueries=${String(value.databaseQueries ?? 0)}`,
   );
   console.log("VISIBLE  REQUESTS  RECOVERED  ACCOUNTS  SIGNATURE");
@@ -37,15 +38,16 @@ export function emitErrorDiagnosis(value: Row, json: boolean): void {
   const chains = rows(value.chains);
   if (chains.length === 0) return;
   console.log("\nCUSTOMER-VISIBLE / FAILOVER SAMPLES");
-  console.log("VISIBLE  RECOVERED  FAILOVER  ATTEMPTS  STATUS  REQUEST_ID  FINAL_SIGNATURE");
+  console.log("VISIBLE  RECOVERED  SWITCHES  OUTCOME        STATUS  REQUEST_ID  FAILURE_REASON  FINAL_SIGNATURE");
   for (const row of chains) {
     console.log([
       (row.customerVisible === true ? "yes" : "no").padEnd(7),
       (row.recovered === true ? "yes" : "no").padEnd(9),
-      (row.failoverTriggered === true ? "yes" : "no").padEnd(8),
-      String(row.attemptCount ?? 0).padStart(8),
+      String(row.switchCount ?? 0).padStart(8),
+      String(row.failoverOutcome ?? "not_triggered").padEnd(14),
       String(row.finalStatusCode ?? "-").padStart(6),
       String(row.requestId ?? "-").padEnd(36),
+      String(row.failoverFailureReason ?? "-").padEnd(18),
       String(row.finalSignature ?? "-"),
     ].join("  "));
   }

@@ -424,6 +424,7 @@ operations:
           - origin web server returned an invalid or incomplete response
           - please try again later
           - bad_response_status_code
+          - upstream_error
           - recovered upstream error 502
           - "error code: 502"
           - "status code: 502"

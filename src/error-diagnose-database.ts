@@ -180,10 +180,24 @@ error_chains AS (
 failover_event_chains AS (
   SELECT
     l.request_id::text AS request_key,
-    MIN(l.created_at) AS first_at,
-    MAX(l.created_at) AS last_at,
-    COUNT(*)::int AS event_count,
-    COUNT(DISTINCT l.account_id)::int AS account_count,
+    MIN(l.created_at) FILTER (
+      WHERE l.message LIKE '%upstream_failover_switching'
+    ) AS first_at,
+    MAX(l.created_at) FILTER (
+      WHERE l.message LIKE '%upstream_failover_switching'
+    ) AS last_at,
+    COUNT(*) FILTER (
+      WHERE l.message LIKE '%upstream_failover_switching'
+    )::int AS switch_event_count,
+    MAX(COALESCE(NULLIF(l.extra->>'switch_count', '')::int, 0)) FILTER (
+      WHERE l.message LIKE '%upstream_failover_switching'
+    ) AS reported_switch_count,
+    MAX(COALESCE(NULLIF(l.extra->>'max_switches', '')::int, 0)) FILTER (
+      WHERE l.message LIKE '%upstream_failover_switching'
+    ) AS max_switches,
+    BOOL_OR(l.message LIKE '%account_select_failed') AS account_select_failed,
+    BOOL_OR(l.message LIKE '%forward_failed') AS forward_failed,
+    BOOL_OR(l.message LIKE '%failover_aborted_client_disconnected') AS failover_aborted,
     JSONB_AGG(JSONB_BUILD_OBJECT(
       'accountId', l.account_id,
       'accountName', COALESCE(a.name, 'unattributed'),
@@ -200,16 +214,23 @@ failover_event_chains AS (
       'createdAt', l.created_at,
       'switchCount', COALESCE(NULLIF(l.extra->>'switch_count', '')::int, 0),
       'maxSwitches', COALESCE(NULLIF(l.extra->>'max_switches', '')::int, 0)
-    ) ORDER BY l.created_at, l.id) AS attempts
+    ) ORDER BY l.created_at, l.id) FILTER (
+      WHERE l.message LIKE '%upstream_failover_switching'
+    ) AS attempts
   FROM ops_system_logs l
   LEFT JOIN accounts a ON a.id = l.account_id
   WHERE l.request_id::text IN (
     SELECT DISTINCT request_id::text FROM selected_errors WHERE request_id IS NOT NULL
   )
-    AND l.message LIKE '%upstream_failover_switching'
+    AND (
+      l.message LIKE '%upstream_failover_switching'
+      OR l.message LIKE '%account_select_failed'
+      OR l.message LIKE '%forward_failed'
+      OR l.message LIKE '%failover_aborted_client_disconnected'
+    )
   GROUP BY l.request_id::text
 ),
-request_chains AS (
+request_chain_base AS (
   SELECT
     e.request_key,
     e.request_id,
@@ -220,8 +241,16 @@ request_chains AS (
     (SELECT COUNT(DISTINCT attempt->>'accountId')::int
       FROM JSONB_ARRAY_ELEMENTS(COALESCE(f.attempts, '[]'::jsonb) || e.attempts) AS attempt
       WHERE attempt->>'accountId' IS NOT NULL) AS account_count,
-    e.failover_triggered OR f.request_key IS NOT NULL AS failover_triggered,
-    e.failover_aborted,
+    COALESCE(
+      NULLIF(f.reported_switch_count, 0),
+      f.switch_event_count,
+      0
+    )::int AS switch_count,
+    COALESCE(f.switch_event_count, 0)::int AS switch_event_count,
+    COALESCE(f.max_switches, 0)::int AS max_switches,
+    COALESCE(f.account_select_failed, false) AS account_select_failed,
+    COALESCE(f.forward_failed, false) AS forward_failed,
+    e.failover_aborted OR COALESCE(f.failover_aborted, false) AS failover_aborted,
     e.model,
     e.inbound_endpoint,
     e.upstream_endpoint,
@@ -231,6 +260,26 @@ request_chains AS (
     COALESCE(f.attempts, '[]'::jsonb) || e.attempts AS attempts
   FROM error_chains e
   LEFT JOIN failover_event_chains f ON f.request_key = e.request_key
+),
+request_chains AS (
+  SELECT
+    *,
+    switch_count > 0 AS failover_triggered,
+    switch_count > 0 AND NOT recovered AND NOT failover_aborted AS failover_failed,
+    CASE
+      WHEN switch_count = 0 THEN 'not_triggered'
+      WHEN recovered THEN 'recovered'
+      WHEN failover_aborted THEN 'aborted'
+      ELSE 'failed'
+    END AS failover_outcome,
+    CASE
+      WHEN switch_count = 0 OR recovered THEN NULL
+      WHEN failover_aborted THEN 'client_disconnected'
+      WHEN account_select_failed THEN 'no_next_account'
+      WHEN forward_failed THEN 'forward_failed'
+      ELSE 'final_error_after_switch'
+    END AS failover_failure_reason
+  FROM request_chain_base
 ),
 signature_rows AS (
   SELECT
@@ -267,8 +316,12 @@ SELECT
     AS failover_triggered_requests,
   (SELECT COUNT(*) FILTER (WHERE failover_triggered AND recovered)::int FROM request_chains)
     AS failover_recovered_requests,
-  (SELECT COUNT(*) FILTER (WHERE failover_triggered AND NOT recovered)::int FROM request_chains)
+  (SELECT COUNT(*) FILTER (WHERE failover_failed)::int FROM request_chains)
     AS failover_failed_requests,
+  (SELECT COALESCE(SUM(switch_count), 0)::int FROM request_chains)
+    AS failover_switches,
+  (SELECT COUNT(*) FILTER (WHERE NOT failover_triggered)::int FROM request_chains)
+    AS failover_not_triggered_requests,
   (SELECT COUNT(*) FILTER (WHERE failover_aborted)::int FROM request_chains)
     AS failover_aborted_requests,
   COALESCE((
@@ -293,7 +346,15 @@ SELECT
       'stream', stream,
       'attemptCount', attempt_count,
       'accountCount', account_count,
+      'switchCount', switch_count,
+      'switchEventCount', switch_event_count,
+      'maxSwitches', max_switches,
       'failoverTriggered', failover_triggered,
+      'failoverFailed', failover_failed,
+      'failoverOutcome', failover_outcome,
+      'failoverFailureReason', failover_failure_reason,
+      'accountSelectFailed', account_select_failed,
+      'forwardFailed', forward_failed,
       'failoverAborted', failover_aborted,
       'recovered', recovered,
       'customerVisible', NOT recovered,
@@ -320,6 +381,8 @@ export function projectErrorDiagnoseRow(row: Row): Row {
     failoverTriggeredRequests: integer(row.failover_triggered_requests),
     failoverRecoveredRequests: integer(row.failover_recovered_requests),
     failoverFailedRequests: integer(row.failover_failed_requests),
+    failoverSwitches: integer(row.failover_switches),
+    failoverNotTriggeredRequests: integer(row.failover_not_triggered_requests),
     failoverAbortedRequests: integer(row.failover_aborted_requests),
   };
   const signatures = Array.isArray(row.signatures) ? row.signatures : [];
