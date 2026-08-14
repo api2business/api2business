@@ -9,6 +9,10 @@ test("error aggregate is one bounded database query with recovered request detec
   expect(errorAggregateQuery).toContain("rank <= $4");
   expect(errorAggregateQuery).toContain("a.name = $2::text");
   expect(errorAggregateQuery).toContain("g.name = $3::text");
+  expect(errorAggregateQuery).toContain("request_group.id = o.group_id");
+  expect(errorAggregateQuery).toContain("api2business-probe-%");
+  expect(errorAggregateQuery).toContain("probe.id = o.api_key_id");
+  expect(errorAggregateQuery).not.toContain("account_groups");
   expect(errorAggregateQuery).not.toContain("o.*");
   expect(errorAggregateQuery).toContain("e.status_code IN (502, 503, 504, 524)");
   expect(errorAggregateQuery).toContain("e.upstream_status_code IN (502, 503, 504, 524)");

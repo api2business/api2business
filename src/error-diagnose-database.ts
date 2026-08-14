@@ -7,21 +7,21 @@ import type {
 type Row = Record<string, unknown>;
 
 const errorDiagnoseSql = `
-WITH target_accounts AS (
+WITH internal_probe_keys AS (
+  SELECT k.id
+  FROM api_keys k
+  LEFT JOIN users owner ON owner.id = k.user_id
+  WHERE owner.email = 'monitor-user@sub2api.platform-infra.local'
+    OR LOWER(COALESCE(k.name, '')) LIKE 'api2business-probe-%'
+), target_accounts AS (
   SELECT a.id, a.name
   FROM accounts a
   WHERE a.deleted_at IS NULL
     AND ($2::text IS NULL OR a.id::text = $2::text OR a.name = $2::text)
-    AND (
-      $3::text IS NULL
-      OR EXISTS (
-        SELECT 1
-        FROM account_groups ag
-        JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
-        WHERE ag.account_id = a.id
-          AND (g.id::text = $3::text OR g.name = $3::text)
-      )
-    )
+), request_groups AS (
+  SELECT g.id, g.name
+  FROM groups g
+  WHERE $3::text IS NULL OR g.id::text = $3::text OR g.name = $3::text
 ),
 selected_errors AS (
   SELECT
@@ -51,7 +51,13 @@ selected_errors AS (
     ) AS message_text
   FROM ops_error_logs o
   LEFT JOIN target_accounts a ON a.id = o.account_id
-  WHERE (($2::text IS NULL AND $3::text IS NULL) OR a.id IS NOT NULL)
+  LEFT JOIN request_groups request_group ON request_group.id = o.group_id
+  WHERE ($2::text IS NULL OR a.id IS NOT NULL)
+    AND ($3::text IS NULL OR request_group.id IS NOT NULL)
+    AND LOWER(COALESCE(request_group.name, '')) NOT LIKE 'api2business-probe-%'
+    AND NOT EXISTS (
+      SELECT 1 FROM internal_probe_keys probe WHERE probe.id = o.api_key_id
+    )
     AND (COALESCE(o.status_code, 0) >= 400 OR o.error_type = 'cyber_policy')
     AND ($6::text IS NULL OR o.request_id::text = ANY(string_to_array($6::text, ',')))
   ORDER BY o.created_at DESC, o.id DESC
@@ -386,6 +392,8 @@ export async function collectErrorDiagnosisFromDatabase(
     top,
     accountSelector,
     groupSelector,
+    groupFilterBasis: "request-group",
+    probeNoiseExcluded: true,
     timezone: config.monitor.timezone,
     databaseQueries: query.cached ? 0 : 1,
     queueDurationMs: query.queueDurationMs,

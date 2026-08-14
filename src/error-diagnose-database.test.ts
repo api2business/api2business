@@ -13,6 +13,10 @@ test("error diagnosis uses one bounded query for signatures and failover chains"
   expect(errorDiagnoseQuery).toContain("rank <= $5");
   expect(errorDiagnoseQuery).toContain("a.name = $2::text");
   expect(errorDiagnoseQuery).toContain("g.name = $3::text");
+  expect(errorDiagnoseQuery).toContain("request_group.id = o.group_id");
+  expect(errorDiagnoseQuery).toContain("api2business-probe-%");
+  expect(errorDiagnoseQuery).toContain("probe.id = o.api_key_id");
+  expect(errorDiagnoseQuery).not.toContain("account_groups");
   expect(errorDiagnoseQuery).not.toContain("api_key_prefix");
 });
 

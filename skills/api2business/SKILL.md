@@ -101,6 +101,10 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 多个同钱包 API Key 只对实际充值动作记一笔充值；创建、模板和探活隔离作业按账号 ID 幂等回读。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
 - 手工收入明细使用 `cash ledger --period YYYY-MM --over-api`，汇总使用 `profit daily`。
+- 错误聚合与诊断：
+  - `--group` 按错误记录的实际请求分组筛选；
+  - 默认排除内部 monitor 用户和 `api2business-probe-*` 探活流量；
+  - 返回 `groupFilterBasis=request-group` 与 `probeNoiseExcluded=true` 供调用方核对口径。
 - 页面数据快照统一写入 host PostgreSQL：
   - API 与 Worker 按稳定快照键共享成功载荷；
   - 快照型 API 不再叠加通用 HTTP 响应缓存；
