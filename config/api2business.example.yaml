@@ -102,7 +102,9 @@ webProbe:
       path: /bugteam-cost
       readySelector: "#bugteam-state"
       screenshotName: api2business-bugteam-cost-mobile.png
+      mobileScreenshotName: api2business-bugteam-cost-mobile-secondary.png
       viewport: { width: 390, height: 844 }
+      mobileViewport: { width: 390, height: 844 }
       navigationTimeoutMs: 30000
       settleMs: 3000
       commandTimeoutSeconds: 90
