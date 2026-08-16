@@ -98,6 +98,15 @@ webProbe:
       settleMs: 3000
       commandTimeoutSeconds: 90
       outputLimits: { failures: 12, network: 40, console: 12 }
+    bugteam-cost-mobile:
+      path: /bugteam-cost
+      readySelector: "#bugteam-state"
+      screenshotName: api2business-bugteam-cost-mobile.png
+      viewport: { width: 390, height: 844 }
+      navigationTimeoutMs: 30000
+      settleMs: 3000
+      commandTimeoutSeconds: 90
+      outputLimits: { failures: 12, network: 40, console: 12 }
 
 sub2api:
   baseUrl: https://api.example.com/api/v1
