@@ -100,9 +100,9 @@ function render(data) {
     $('#bugteam-sampled-at').textContent = `采样时间 ${time(latest.sampledAt)}`
   }
 
-  drawChart('#bugteam-available-chart', points, {
+  drawChart('#bugteam-available-chart', chartPoints, {
     series: [{ key: 'available', className: 'chart-bugteam-stock', label: '未售' }],
-    valueFormatter: (value) => number(value, 0), unit: '个', ariaLabel: 'BugTeam 剩余未售趋势',
+    valueFormatter: (value) => number(value, 0), unit: '个', ariaLabel: 'BugTeam 剩余未售趋势', missingKey: 'chartMissing',
   })
   drawChart('#bugteam-price-chart', chartPoints, {
     series: [{ key: 'unitPriceCny', className: 'chart-bugteam-price', label: '最低价车次' }],
