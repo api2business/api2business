@@ -92,6 +92,7 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
   };
   if (command.kind === "upstream.usage.sample") return await sampleUpstreamUsage();
   if (command.kind === "pool.quality.sample") return await operations.samplePoolQuality();
+  if (command.kind === "bugteam.cost.sample") return await operations.sampleBugTeamCost();
   if (command.kind === "upstream.quota.sample") {
     const [oauth, usage, quality] = await Promise.allSettled([
       operations.sampleOAuthRuntime(),
@@ -261,6 +262,7 @@ const schedule = temporalGateway
     workflowId: target.scoreScheduleWorkflowId,
   };
 const quotaSchedule = temporalGateway ? await temporalGateway.ensureUpstreamQuotaSchedule() : { started: false, workflowId: null };
+const bugTeamCostSchedule = temporalGateway ? await temporalGateway.ensureBugTeamCostSchedule() : { started: false, workflowId: null };
 const idleProbeSchedule = temporalGateway
   ? await temporalGateway.ensureIdleProbeSchedule()
   : { started: false, workflowId: null };
@@ -284,6 +286,7 @@ const health = Bun.serve({
       taskQueue: workflowEnabled ? target.temporalTaskQueue : null,
       schedule,
       quotaSchedule,
+      bugTeamCostSchedule,
       idleProbeSchedule,
     }, { status: ok ? 200 : 503 });
   },
@@ -299,6 +302,7 @@ console.log(JSON.stringify({
   temporalTaskQueue: workflowEnabled ? target.temporalTaskQueue : null,
   schedule,
   quotaSchedule,
+  bugTeamCostSchedule,
   idleProbeSchedule,
   valuesPrinted: false,
 }));

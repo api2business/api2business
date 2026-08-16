@@ -32,6 +32,7 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
     if (command.kind === "scores.refresh") return await services.scores.refresh();
     if (command.kind === "upstream.usage.sample") return await sampleUpstreamUsage();
     if (command.kind === "pool.quality.sample") return await services.operations.samplePoolQuality();
+    if (command.kind === "bugteam.cost.sample") return await services.operations.sampleBugTeamCost();
     if (command.kind === "upstream.quota.sample") {
       const [oauth, usage, quality] = await Promise.allSettled([
         services.operations.sampleOAuthRuntime(), sampleUpstreamUsage(), services.operations.samplePoolQuality(),

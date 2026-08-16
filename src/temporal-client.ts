@@ -188,6 +188,35 @@ export class TemporalGateway {
     }
   }
 
+  async ensureBugTeamCostSchedule(): Promise<{ started: boolean; workflowId: string }> {
+    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-bugteam-cost-v1`;
+    if (!this.config.bugTeam.monitor.enabled) {
+      try {
+        const handle = this.client.workflow.getHandle(workflowId);
+        const description = await handle.describe();
+        if (description.status.name === "RUNNING") await handle.terminate("BugTeam cost monitor disabled by configuration");
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
+      }
+      return { started: false, workflowId };
+    }
+    try {
+      await this.client.workflow.start("bugTeamCostScheduleWorkflow", {
+        taskQueue: this.runtime.taskQueue,
+        workflowId,
+        args: [{
+          intervalMs: this.config.bugTeam.monitor.sampleIntervalSeconds * 1000,
+          activityStartToCloseTimeout: `${Math.max(30, Math.ceil(this.config.bugTeam.requestTimeoutMs * 2 / 1000) + 5)}s`,
+          maximumAttempts: 1,
+        }],
+      });
+      return { started: true, workflowId };
+    } catch (error) {
+      if (error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError") return { started: false, workflowId };
+      throw error;
+    }
+  }
+
   async ensureIdleProbeSchedule(): Promise<{ started: boolean; workflowId: string; provisionWorkflowId: string }> {
     const workflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-probe-v4`;
     const provisionWorkflowId = `${this.runtime.scoreScheduleWorkflowId}-idle-account-provision-v1`;

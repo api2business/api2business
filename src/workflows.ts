@@ -1,5 +1,5 @@
 import { continueAsNew, log, proxyActivities, sleep, workflowInfo } from "@temporalio/workflow";
-import type { AppCommand, OperationRequest, ScheduledIdleProbeInput, ScheduledScoreRefreshInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
+import type { AppCommand, OperationRequest, ScheduledBugTeamCostInput, ScheduledIdleProbeInput, ScheduledScoreRefreshInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
 
 export interface Activities {
   executeOperation(request: OperationRequest): Promise<unknown>;
@@ -91,4 +91,28 @@ export async function idleAccountProbeScheduleWorkflow(input: ScheduledIdleProbe
     await sleep(input.intervalMs);
   }
   await continueAsNew<typeof idleAccountProbeScheduleWorkflow>(input);
+}
+
+export async function bugTeamCostScheduleWorkflow(input: ScheduledBugTeamCostInput): Promise<void> {
+  const activity = proxyActivities<Activities>({
+    startToCloseTimeout: input.activityStartToCloseTimeout,
+    scheduleToCloseTimeout: input.activityStartToCloseTimeout,
+    retry: { maximumAttempts: 1 },
+  });
+  for (let iteration = 0; iteration < 500; iteration += 1) {
+    const roundStartedAt = Date.now();
+    try {
+      await activity.executeOperation({
+        operationId: `${workflowInfo().runId}:bugteam-cost:${iteration}`,
+        command: { kind: "bugteam.cost.sample" },
+      });
+    } catch (error) {
+      log.warn("BugTeam cost sample deferred to next round", {
+        iteration,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    await sleep(Math.max(1, input.intervalMs - (Date.now() - roundStartedAt)));
+  }
+  await continueAsNew<typeof bugTeamCostScheduleWorkflow>(input);
 }

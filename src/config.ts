@@ -42,6 +42,21 @@ export interface EnvSecretRef {
   envKey: string;
 }
 
+export interface BugTeamConfig {
+  baseUrl: string;
+  requestTimeoutMs: number;
+  customerToken: SecretRef;
+  customerAccount: SecretRef;
+  customerPassword: SecretRef;
+  monitor: {
+    enabled: boolean;
+    product: string;
+    sampleIntervalSeconds: number;
+    expectedOutputApiUsd: number;
+    historyHours: number;
+  };
+}
+
 export interface ScorePolicy {
   reliabilityWeight: number;
   failoverWeight: number;
@@ -114,6 +129,7 @@ export interface AppConfig {
     cli: { workDir: string; executable: string; entrypoint: string; mainServerHost: string; timeoutMs: number };
   };
   webAuth: { username: string; cookieName: string; sessionTtlSeconds: number };
+  bugTeam: BugTeamConfig;
   sub2api: {
     baseUrl: string;
     requestTimeoutMs: number;
@@ -517,6 +533,11 @@ export function loadConfig(path: string): AppConfig {
   const automaticRefresh = object(monitor.automaticRefresh, "monitor.automaticRefresh");
   const monitorCli = object(monitor.cli, "monitor.cli");
   const webAuth = object(raw.webAuth, "webAuth");
+  const bugTeam = object(raw.bugTeam, "bugTeam");
+  const bugTeamCustomerToken = object(bugTeam.customerToken, "bugTeam.customerToken");
+  const bugTeamCustomerAccount = object(bugTeam.customerAccount, "bugTeam.customerAccount");
+  const bugTeamCustomerPassword = object(bugTeam.customerPassword, "bugTeam.customerPassword");
+  const bugTeamMonitor = object(bugTeam.monitor, "bugTeam.monitor");
   const adminCredentials = object(sub2api.adminCredentials, "sub2api.adminCredentials");
   const scoreDatabase = object(sub2api.scoreDatabase, "sub2api.scoreDatabase");
   const lottery = object(raw.lottery, "lottery");
@@ -705,6 +726,36 @@ export function loadConfig(path: string): AppConfig {
       username: stringValue(webAuth, "username", "webAuth"),
       cookieName: stringValue(webAuth, "cookieName", "webAuth"),
       sessionTtlSeconds: integerValue(webAuth, "sessionTtlSeconds", "webAuth", 300),
+    },
+    bugTeam: {
+      baseUrl: (() => {
+        const baseUrl = stringValue(bugTeam, "baseUrl", "bugTeam").replace(/\/$/u, "");
+        const parsed = new URL(baseUrl);
+        if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+          throw new Error("bugTeam.baseUrl must be an HTTPS URL without credentials");
+        }
+        return baseUrl;
+      })(),
+      requestTimeoutMs: integerValue(bugTeam, "requestTimeoutMs", "bugTeam", 1000, 120000),
+      customerToken: {
+        sourceRef: stringValue(bugTeamCustomerToken, "sourceRef", "bugTeam.customerToken"),
+        sourceKey: stringValue(bugTeamCustomerToken, "sourceKey", "bugTeam.customerToken"),
+      },
+      customerAccount: {
+        sourceRef: stringValue(bugTeamCustomerAccount, "sourceRef", "bugTeam.customerAccount"),
+        sourceKey: stringValue(bugTeamCustomerAccount, "sourceKey", "bugTeam.customerAccount"),
+      },
+      customerPassword: {
+        sourceRef: stringValue(bugTeamCustomerPassword, "sourceRef", "bugTeam.customerPassword"),
+        sourceKey: stringValue(bugTeamCustomerPassword, "sourceKey", "bugTeam.customerPassword"),
+      },
+      monitor: {
+        enabled: booleanValue(bugTeamMonitor, "enabled", "bugTeam.monitor"),
+        product: stringValue(bugTeamMonitor, "product", "bugTeam.monitor"),
+        sampleIntervalSeconds: integerValue(bugTeamMonitor, "sampleIntervalSeconds", "bugTeam.monitor", 60, 86400),
+        expectedOutputApiUsd: numberValue(bugTeamMonitor, "expectedOutputApiUsd", "bugTeam.monitor", 0.01, 1000000),
+        historyHours: integerValue(bugTeamMonitor, "historyHours", "bugTeam.monitor", 1, 168),
+      },
     },
     sub2api: {
       baseUrl: stringValue(sub2api, "baseUrl", "sub2api").replace(/\/$/u, ""),

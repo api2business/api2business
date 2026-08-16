@@ -32,6 +32,25 @@ webAuth:
   cookieName: api2business_session
   sessionTtlSeconds: 43200
 
+bugTeam:
+  baseUrl: https://bugteam.team
+  requestTimeoutMs: 30000
+  customerToken:
+    sourceRef: platform-infra/api2business.env
+    sourceKey: BUGTEAM_CUSTOMER_TOKEN
+  customerAccount:
+    sourceRef: platform-infra/api2business.env
+    sourceKey: BUGTEAM_CUSTOMER_ACCOUNT
+  customerPassword:
+    sourceRef: platform-infra/api2business.env
+    sourceKey: BUGTEAM_CUSTOMER_PASSWORD
+  monitor:
+    enabled: true
+    product: team_1h
+    sampleIntervalSeconds: 60
+    expectedOutputApiUsd: 30
+    historyHours: 24
+
 webProbe:
   enabled: false
   productId: api2business

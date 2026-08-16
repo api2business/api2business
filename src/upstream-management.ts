@@ -526,15 +526,17 @@ export class UpstreamManagementService {
   async submitUpdate(id: number, input: {
     suffix?: unknown;
     rateCnyPerApiUsd?: unknown;
+    groupIds?: unknown;
     operationId?: string | null;
   }): Promise<Record<string, unknown>> {
     if (!positiveInteger(id)) throw new Error("上游账号 ID 无效");
     const suffix = input.suffix === undefined ? undefined : validateSuffix(String(input.suffix));
     const rateCnyPerApiUsd = input.rateCnyPerApiUsd === undefined ? undefined : validateRate(input.rateCnyPerApiUsd);
+    const groupIds = input.groupIds === undefined ? undefined : validateGroupIds(input.groupIds);
     const idempotency = operationId(input.operationId, `upstream-update-${id}`);
     return await this.submitOperation(idempotency, {
       action: "update",
-      input: { id, suffix, rateCnyPerApiUsd },
+      input: { id, suffix, rateCnyPerApiUsd, groupIds },
     });
   }
 
@@ -1183,6 +1185,7 @@ export class UpstreamManagementService {
   async update(id: number, input: {
     suffix?: unknown;
     rateCnyPerApiUsd?: unknown;
+    groupIds?: unknown;
   }): Promise<Record<string, unknown>> {
     const account = await this.accountQuery(id);
     if (!account) throw new UpstreamManagementError("上游账号不存在", 404, { operation: "update", accountId: id });
@@ -1195,8 +1198,10 @@ export class UpstreamManagementService {
       name = formatUpstreamName(account.baseUrl, suffix, rate);
     }
     // 名称和切号模板一次性写入，避免更新费率时产生两次远程 mutation。
+    const groupIds = input.groupIds === undefined ? undefined : validateGroupIds(input.groupIds);
     await this.runtime.configureApiKeyAccounts([id], {
       ...(name && name !== account.name ? { name } : {}),
+      ...(groupIds ? { group_ids: groupIds } : {}),
       credentials: {
         pool_mode: false,
         temp_unschedulable_enabled: true,

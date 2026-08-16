@@ -27,6 +27,7 @@ export async function dispatchDirect(services: DispatcherServices, command: AppC
     || command.kind === "upstream.quota.sample"
     || command.kind === "upstream.usage.sample"
     || command.kind === "pool.quality.sample"
+    || command.kind === "bugteam.cost.sample"
     || command.kind === "oauth.runtime.sample"
     || command.kind === "upstream.benchmark"
     || command.kind === "account.import"

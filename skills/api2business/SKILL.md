@@ -98,9 +98,18 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 充值候选使用 `upstreams recharge-candidates --over-api`；同时分析当前欠费和最新额度低于 YAML `lowBalanceCny` 的账号，分别回看锚点前 `lookbackHours` 小时。
 - 新增上游时省略 `--rate`，由 YAML 提供创建占位费率；worker 创建成功后自动探测额度与有效倍率，并将有效倍率同步为最终费率。
   倍率写回使用 Sub2API 原生批量更新并做排队回读，超时只保留可见 warning，不重复创建账号。
+- 已有上游分组调整使用 `upstreams update --id <account-id> --groups <id,id,...> --confirm --over-api`，
+  通过原生批量更新替换业务分组并在原异步作业终态回读。
 - 多个同钱包 API Key 只对实际充值动作记一笔充值；创建、模板和探活隔离作业按账号 ID 幂等回读。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
 - 手工收入明细使用 `cash ledger --period YYYY-MM --over-api`，汇总使用 `profit daily`。
+- BugTeam 客户 API 使用 `bugteam` CLI 命令组，配置中的 `bugTeam.customerToken`、`customerAccount`、`customerPassword` 只能引用仓库外 Secret：
+  - 只读：`bugteam login`、`balance`、`inventory --product <id> --quantity N`、`pickup order-status --id <id>`、`recoveries list`。
+  - 订单：`pickup order-create --product <id> --quantity N [--idempotency-key <key>]`；创建必须 `--confirm`，超时不得重复下单。
+  - 履约：`pickup download --id <id> --format sub2|cpa --output <path>`、`pickup push --id <id> --hub-id <id> --confirm`、`pickup take --id <id> --confirm`。
+  - 401 修复：`recoveries claim --id <id> --ticket-stdin --output <path> --confirm`，Ticket 从 stdin 读取，必须复用同一 `--idempotency-key` 进行重试。
+  - 余额兑换：`redeem --code-stdin --confirm`，CDK 不得出现在 argv、日志或输出中。
+  - 下载和领取只输出路径、字节数、SHA256 与版本摘要，绝不输出账号 JSON、Token 或 Ticket。
 - 错误聚合与诊断：
   - `--group` 按错误记录的实际请求分组筛选；
   - 默认排除内部 monitor 用户和 `api2business-probe-*` 探活流量；

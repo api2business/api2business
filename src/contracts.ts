@@ -16,6 +16,7 @@ export type AppCommand =
   | { kind: "upstream.quota.sample" }
   | { kind: "upstream.usage.sample" }
   | { kind: "pool.quality.sample" }
+  | { kind: "bugteam.cost.sample" }
   | { kind: "oauth.runtime.sample" }
   | { kind: "upstream.benchmark"; benchmarkRunId: string; accountId: number; model: string }
   | { kind: "account.idle-probe.run"; accountIds: number[]; rounds: number }
@@ -50,6 +51,9 @@ export interface ScheduledIdleProbeInput extends WorkflowOptions {
   roundTimeoutMs: number;
   provisionTimeoutMs: number;
 }
+export interface ScheduledBugTeamCostInput extends WorkflowOptions {
+  intervalMs: number;
+}
 
 export function usesWorkflow(command: AppCommand): boolean {
   return command.kind === "scores.refresh"
@@ -62,6 +66,7 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "upstream.quota.sample"
     || command.kind === "upstream.usage.sample"
     || command.kind === "pool.quality.sample"
+    || command.kind === "bugteam.cost.sample"
     || command.kind === "oauth.runtime.sample"
     || command.kind === "upstream.benchmark"
     || command.kind === "account.idle-probe.run"

@@ -19,6 +19,7 @@ import { parseAccountIdSelector } from "../../../../src/account-batch-economics"
 import { runBoundedProcess } from "../../../../src/bounded-process";
 import { parseManualPriorityAssignments } from "./priority-plan-input";
 import { readSecret } from "../../../../src/secrets";
+import { BugTeamClient } from "./bugteam-client";
 
 type Row = Record<string, unknown>;
 
@@ -76,6 +77,16 @@ interface Parsed {
   apiKeyStdin: boolean;
   templateOnly: boolean;
   priorities: string | null;
+  product: string | null;
+  quantity: number | null;
+  output: string | null;
+  format: "sub2" | "cpa" | null;
+  hubId: string | null;
+  state: string | null;
+  beforeId: string | null;
+  idempotencyKey: string | null;
+  ticketStdin: boolean;
+  codeStdin: boolean;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -102,8 +113,8 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--priority", "--priorities", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search"]);
-  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
+  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index]!;
@@ -183,6 +194,10 @@ function parseArgs(args: string[]): Parsed {
     page: integer("--page"), search: value(args, "--search"), apiKeyStdin: args.includes("--api-key-stdin"),
     templateOnly: args.includes("--template-only"),
     priorities: value(args, "--priorities"),
+    product: value(args, "--product"), quantity: integer("--quantity"), output: value(args, "--output"),
+    format: value(args, "--format") as "sub2" | "cpa" | null, hubId: value(args, "--hub-id"),
+    state: value(args, "--state"), beforeId: value(args, "--before-id"), idempotencyKey: value(args, "--idempotency-key"),
+    ticketStdin: args.includes("--ticket-stdin"), codeStdin: args.includes("--code-stdin"),
   };
 }
 
@@ -243,16 +258,70 @@ function help(): Record<string, unknown> {
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
       "upstreams create --base-url <https-url> --suffix <name> [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
-      "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--template-only] [--confirm] --over-api",
+      "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api",
       "upstreams recharge --id <account-id> --recharge-cny <CNY> [--confirm] --over-api",
       "upstreams status --id <workflow-id> --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
       "cash ledger [--period YYYY-MM --page N] --over-api",
       "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api",
+      "bugteam login|balance|inventory --product <id> --quantity N|pickup order-create|order-status|download|push|take|recoveries list|recoveries claim|redeem",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
   };
+}
+
+async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConfig>): Promise<Record<string, unknown>> {
+  const client = new BugTeamClient(config);
+  const [group, action, subaction] = parsed.command;
+  if (group === "bugteam" && action === "login") {
+    await client.login();
+    return { ok: true, action: "bugteam-login", authenticated: true, valuesPrinted: false };
+  }
+  if (group === "bugteam" && action === "balance") return await client.balance();
+  if (group === "bugteam" && action === "inventory") {
+    if (!parsed.product || parsed.quantity === null || parsed.quantity < 1) throw new Error("bugteam inventory requires --product and positive --quantity");
+    return await client.inventory(parsed.product, parsed.quantity);
+  }
+  if (group !== "bugteam" || action !== "pickup" && action !== "recoveries" && action !== "redeem") throw new Error(`unknown command: ${parsed.command.join(" ")}`);
+  if (action === "pickup" && subaction === "order-create") {
+    if (!parsed.product || parsed.quantity === null || parsed.quantity < 1) throw new Error("bugteam pickup order-create requires --product and positive --quantity");
+    const key = parsed.idempotencyKey ?? `bugteam-order-${crypto.randomUUID()}`;
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "bugteam-order-create", product: parsed.product, quantity: parsed.quantity, idempotencyKey: key, hint: "add --confirm to execute" };
+    return await client.createOrder(parsed.product, parsed.quantity, key);
+  }
+  if (action === "pickup" && subaction === "order-status") {
+    if (!parsed.id) throw new Error("bugteam pickup order-status requires --id");
+    return await client.orderStatus(parsed.id);
+  }
+  if (action === "pickup" && subaction === "download") {
+    if (!parsed.id || !parsed.output) throw new Error("bugteam pickup download requires --id and --output");
+    if (parsed.format !== "sub2" && parsed.format !== "cpa") throw new Error("bugteam pickup download requires --format sub2 or cpa");
+    return await client.download(parsed.id, parsed.format, parsed.output);
+  }
+  if (action === "pickup" && (subaction === "take" || subaction === "push")) {
+    if (!parsed.id) throw new Error(`bugteam pickup ${subaction} requires --id`);
+    if (!parsed.confirm) return { ok: true, mutation: false, action: `bugteam-${subaction}`, orderId: parsed.id, hubId: parsed.hubId, hint: "add --confirm to execute" };
+    const key = parsed.idempotencyKey ?? `bugteam-${subaction}-${parsed.id}`;
+    return subaction === "take"
+      ? await client.take(parsed.id, key)
+      : parsed.hubId ? await client.push(parsed.id, parsed.hubId, key) : (() => { throw new Error("bugteam pickup push requires --hub-id"); })();
+  }
+  if (action === "recoveries" && subaction === "list") return await client.recoveries(parsed.state, parsed.limit ?? 50, parsed.beforeId);
+  if (action === "recoveries" && subaction === "claim") {
+    if (!parsed.id || !parsed.output || !parsed.ticketStdin) throw new Error("bugteam recoveries claim requires --id --output --ticket-stdin");
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "bugteam-recovery-claim", recoveryId: parsed.id, output: parsed.output, hint: "add --confirm to execute" };
+    const ticket = (await Bun.stdin.text()).trim();
+    return await client.claim(parsed.id, ticket, parsed.idempotencyKey ?? `bugteam-recovery-${parsed.id}`, parsed.output);
+  }
+  if (action === "redeem") {
+    if (!parsed.codeStdin) throw new Error("bugteam redeem requires --code-stdin");
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "bugteam-redeem", hint: "add --confirm to execute" };
+    const code = (await Bun.stdin.text()).trim();
+    if (!code) throw new Error("--code-stdin received empty stdin");
+    return await client.redeem(code, parsed.idempotencyKey ?? `bugteam-redeem-${crypto.randomUUID()}`);
+  }
+  throw new Error(`unknown command: ${parsed.command.join(" ")}`);
 }
 
 function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
@@ -511,8 +580,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "upstreams" && action === "update") {
     const id = Number(parsed.id);
     if (!Number.isSafeInteger(id) || id <= 0) throw new Error("upstreams update requires a positive --id");
-    if (parsed.suffix === null && parsed.rate === null && !parsed.templateOnly) throw new Error("upstreams update requires --suffix, --rate, or --template-only");
-    const input = { ...(parsed.suffix === null ? {} : { suffix: parsed.suffix }), ...(parsed.rate === null ? {} : { rateCnyPerApiUsd: parsed.rate }) };
+    if (parsed.suffix === null && parsed.rate === null && parsed.groups === null && !parsed.templateOnly) throw new Error("upstreams update requires --suffix, --rate, --groups, or --template-only");
+    const input = {
+      ...(parsed.suffix === null ? {} : { suffix: parsed.suffix }),
+      ...(parsed.rate === null ? {} : { rateCnyPerApiUsd: parsed.rate }),
+      ...(parsed.groups === null ? {} : { groupIds: parsed.groups.split(",").map(Number) }),
+    };
     if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-update", accountId: id, plan: input, hint: "add --confirm to execute" };
     return await client.upstreamUpdate(id, input, `upstream-update-${id}-${crypto.randomUUID()}`);
   }
@@ -917,6 +990,7 @@ export async function runCli(args: string[]): Promise<void> {
       refreshIntervalMinutes: config.monitor.refreshIntervalMinutes, recentCallLimit: config.monitor.recentCallLimit,
       automaticCreditEnabled: config.lottery.automaticCredit.enabled, valuesPrinted: false,
     }, parsed.json);
+    if (parsed.command[0] === "bugteam") return emit(await bugTeamCommand(parsed, config), parsed.json);
     if (parsed.command.join(" ") === "scores aggregate-smoke") return emit(aggregateSmoke(), parsed.json);
     if (parsed.command[0] === "native") {
       const action = parsed.command[1];

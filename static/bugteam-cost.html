@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111412" />
+  <link rel="icon" href="/api2business-icon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+  <link rel="apple-touch-icon" href="/favicon-192.png" />
+  <title>BugTeam 实时成本 | Api2Business</title>
+  <link rel="stylesheet" href="/styles.css?v=bugteam-cost-v1" />
+  <script src="/app.js?v=bugteam-cost-v1" type="module"></script>
+  <script src="/bugteam-cost.js?v=bugteam-cost-v1" type="module"></script>
+</head>
+<body data-page="bugteam-cost">
+  <div data-shell></div>
+  <main class="workspace bugteam-cost-workspace">
+    <header class="page-head bugteam-cost-head">
+      <div><p class="eyebrow">BUGTEAM / TEAM 1H</p><h1>实时成本监控</h1><p id="bugteam-sample-state" class="live-head-sample">正在读取持久化采样</p></div>
+      <div class="bugteam-cost-actions">
+        <div class="profile-tabs" role="group" aria-label="历史范围">
+          <button class="profile-tab is-active" type="button" data-history-hours="6">6 小时</button>
+          <button class="profile-tab" type="button" data-history-hours="24">24 小时</button>
+        </div>
+        <span id="bugteam-state" class="state-badge" data-state="refreshing">读取中</span>
+        <button id="bugteam-refresh" class="icon-command" type="button" title="立即刷新" aria-label="立即刷新">↻</button>
+      </div>
+    </header>
+
+    <section class="metric-strip bugteam-cost-metrics" aria-label="BugTeam 当前指标">
+      <div><span>当前未售</span><strong id="bugteam-available">—</strong><small>个账号</small></div>
+      <div><span>浮动单价</span><strong id="bugteam-unit-price">—</strong><small>人民币 / 个</small></div>
+      <div><span>预期成本范围</span><strong id="bugteam-cost-range">—</strong><small>人民币 / API 美元</small></div>
+      <div><span>单号吃满速度</span><strong id="bugteam-fill-rate">—</strong><small>API 美元 / 小时</small></div>
+      <div><span>剩余有效时间</span><strong id="bugteam-remaining">—</strong><small id="bugteam-sampled-at">采样时间 —</small></div>
+    </section>
+
+    <section class="bugteam-chart-section" aria-label="BugTeam 成本历史趋势">
+      <div class="quota-charts bugteam-cost-charts">
+        <figure><figcaption><span>剩余未售</span><small id="bugteam-available-window">最近 6 小时</small></figcaption><svg id="bugteam-available-chart" viewBox="0 0 1000 150" role="img" aria-label="BugTeam 剩余未售历史"></svg></figure>
+        <figure><figcaption><span>浮动单价</span><small id="bugteam-price-window">最近 6 小时</small></figcaption><svg id="bugteam-price-chart" viewBox="0 0 1000 150" role="img" aria-label="BugTeam 浮动单价历史"></svg></figure>
+        <figure><figcaption><span>预期成本范围</span><small id="bugteam-cost-window">30 API 美元预期产出</small></figcaption><svg id="bugteam-cost-chart" viewBox="0 0 1000 150" role="img" aria-label="BugTeam 单号预期成本范围历史"></svg></figure>
+        <figure><figcaption><span>单号吃满速度</span><small id="bugteam-speed-window">最近 6 小时</small></figcaption><svg id="bugteam-speed-chart" viewBox="0 0 1000 150" role="img" aria-label="BugTeam 单号吃满速度历史"></svg></figure>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

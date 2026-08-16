@@ -38,6 +38,7 @@ import {
 import { collectUserBalanceLiability } from "./user-balance-liability";
 import { collectDailyProfitFacts } from "./daily-profit-facts";
 import { buildDailyProfitReport } from "./daily-profit";
+import { BugTeamCostMonitor } from "./bugteam-cost-monitor";
 import { readAccountImportCosts } from "./account-import-cost-ledger";
 import { readUpstreamRechargeCosts } from "./upstream-recharge-ledger";
 import { runBoundedProcess } from "./bounded-process";
@@ -145,6 +146,7 @@ function object(value: unknown): Record<string, unknown> {
 export class OperationsService {
   private readonly idleProbe: IdleAccountProbeService;
   private readonly upstreamBenchmark: UpstreamBenchmarkService;
+  private readonly bugTeamCostMonitor: BugTeamCostMonitor;
 
   constructor(
     private readonly config: AppConfig,
@@ -155,6 +157,7 @@ export class OperationsService {
   ) {
     this.idleProbe = new IdleAccountProbeService(config, reads, runtime, probeIsolation);
     this.upstreamBenchmark = new UpstreamBenchmarkService(config, store, probeIsolation);
+    this.bugTeamCostMonitor = new BugTeamCostMonitor(config, store);
   }
 
   async createUpstreamBenchmark(accountId: number, model: string) {
@@ -311,6 +314,54 @@ export class OperationsService {
 
   async health(): Promise<void> {
     await this.store.health();
+  }
+
+  async sampleBugTeamCost() {
+    if (!this.config.bugTeam.monitor.enabled) throw new Error("BugTeam cost monitor is disabled");
+    return await this.bugTeamCostMonitor.sample();
+  }
+
+  async bugTeamCostSummary(hours: number) {
+    const maximumHours = this.config.bugTeam.monitor.historyHours;
+    const selectedHours = Math.min(maximumHours, Math.max(1, hours));
+    const rows = await this.store.getBugTeamCostSamples(
+      this.config.bugTeam.monitor.product,
+      selectedHours,
+    ) as Array<Record<string, unknown>>;
+    const numberOrNull = (value: unknown) => value === null || value === undefined ? null : Number(value);
+    const history = rows.map((row) => ({
+      sampledAt: row.sampled_at,
+      status: row.status,
+      available: numberOrNull(row.available),
+      unitPriceCny: numberOrNull(row.unit_price_cny),
+      minimumUnitPriceCny: numberOrNull(row.minimum_unit_price_cny),
+      maximumUnitPriceCny: numberOrNull(row.maximum_unit_price_cny),
+      minimumRemainingSeconds: numberOrNull(row.minimum_remaining_seconds),
+      maximumRemainingSeconds: numberOrNull(row.maximum_remaining_seconds),
+      expectedCostCnyPerApiUsd: numberOrNull(row.expected_cost_cny_per_api_usd),
+      minimumExpectedCostCnyPerApiUsd: numberOrNull(row.minimum_expected_cost_cny_per_api_usd),
+      maximumExpectedCostCnyPerApiUsd: numberOrNull(row.maximum_expected_cost_cny_per_api_usd),
+      fillRateApiUsdPerHour: numberOrNull(row.fill_rate_api_usd_per_hour),
+      error: row.error_summary ?? null,
+    }));
+    const latest = history.findLast((sample) => sample.status !== "error") ?? null;
+    const lastFailure = history.findLast((sample) => sample.status === "error") ?? null;
+    return {
+      ok: true,
+      product: this.config.bugTeam.monitor.product,
+      expectedOutputApiUsd: this.config.bugTeam.monitor.expectedOutputApiUsd,
+      sampling: {
+        enabled: this.config.bugTeam.monitor.enabled,
+        intervalSeconds: this.config.bugTeam.monitor.sampleIntervalSeconds,
+        historyHours: selectedHours,
+      },
+      latest,
+      lastError: lastFailure && (!latest || String(lastFailure.sampledAt) > String(latest.sampledAt))
+        ? { sampledAt: lastFailure.sampledAt, message: lastFailure.error }
+        : null,
+      history,
+      valuesPrinted: false,
+    };
   }
 
   async recoverConnection(error: unknown): Promise<boolean> {

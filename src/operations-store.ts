@@ -183,6 +183,25 @@ export class OperationsStore {
       );
       CREATE INDEX IF NOT EXISTS api2business_pool_quality_samples_time_idx
         ON api2business_pool_quality_samples(sampled_at DESC);
+      CREATE TABLE IF NOT EXISTS api2business_bugteam_cost_samples (
+        sampled_at timestamptz NOT NULL,
+        product text NOT NULL,
+        status text NOT NULL CHECK (status IN ('ok','empty','error')),
+        available integer,
+        unit_price_cny numeric,
+        minimum_unit_price_cny numeric,
+        maximum_unit_price_cny numeric,
+        minimum_remaining_seconds integer,
+        maximum_remaining_seconds integer,
+        expected_cost_cny_per_api_usd numeric,
+        minimum_expected_cost_cny_per_api_usd numeric,
+        maximum_expected_cost_cny_per_api_usd numeric,
+        fill_rate_api_usd_per_hour numeric,
+        error_summary text,
+        PRIMARY KEY (sampled_at, product)
+      );
+      CREATE INDEX IF NOT EXISTS api2business_bugteam_cost_samples_product_time_idx
+        ON api2business_bugteam_cost_samples(product, sampled_at DESC);
       CREATE TABLE IF NOT EXISTS api2business_idle_probe_rounds (
         id uuid PRIMARY KEY,
         operation_id text NOT NULL UNIQUE,
@@ -513,6 +532,40 @@ export class OperationsStore {
            SELECT sampled_at FROM api2business_pool_quality_samples
            ORDER BY sampled_at DESC LIMIT 13
          )
+      ORDER BY sampled_at
+    `;
+  }
+
+  async addBugTeamCostSample(sample: import("./bugteam-cost-monitor").BugTeamCostSample) {
+    await this.sql`
+      INSERT INTO api2business_bugteam_cost_samples (
+        sampled_at, product, status, available, unit_price_cny,
+        minimum_unit_price_cny, maximum_unit_price_cny,
+        minimum_remaining_seconds, maximum_remaining_seconds,
+        expected_cost_cny_per_api_usd, minimum_expected_cost_cny_per_api_usd,
+        maximum_expected_cost_cny_per_api_usd, fill_rate_api_usd_per_hour,
+        error_summary
+      ) VALUES (${sample.sampledAt}, ${sample.product}, ${sample.status}, ${sample.available},
+        ${sample.unitPriceCny}, ${sample.minimumUnitPriceCny}, ${sample.maximumUnitPriceCny},
+        ${sample.minimumRemainingSeconds}, ${sample.maximumRemainingSeconds},
+        ${sample.expectedCostCnyPerApiUsd}, ${sample.minimumExpectedCostCnyPerApiUsd},
+        ${sample.maximumExpectedCostCnyPerApiUsd}, ${sample.fillRateApiUsdPerHour},
+        ${sample.errorSummary})
+      ON CONFLICT (sampled_at, product) DO NOTHING
+    `;
+  }
+
+  async getBugTeamCostSamples(product: string, hours: number) {
+    return await this.sql`
+      SELECT sampled_at, product, status, available, unit_price_cny,
+        minimum_unit_price_cny, maximum_unit_price_cny,
+        minimum_remaining_seconds, maximum_remaining_seconds,
+        expected_cost_cny_per_api_usd, minimum_expected_cost_cny_per_api_usd,
+        maximum_expected_cost_cny_per_api_usd, fill_rate_api_usd_per_hour,
+        error_summary
+      FROM api2business_bugteam_cost_samples
+      WHERE product=${product}
+        AND sampled_at >= now() - (${hours}::text || ' hours')::interval
       ORDER BY sampled_at
     `;
   }

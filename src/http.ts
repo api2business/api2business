@@ -34,6 +34,7 @@ const persistentSnapshotApiPaths = [
   /^\/api\/upstreams\/pool-quality(?:\/|$)/u,
   /^\/api\/upstreams\/(?:quota-summary|usage-cache|recharge-candidates)$/u,
   /^\/api\/oauth\/runtime-summary$/u,
+  /^\/api\/bugteam\/cost-monitor$/u,
   /^\/api\/admin\/errors(?:\/|$)/u,
   /^\/api\/operations\/priority-(?:automation|history)$/u,
   /^\/api\/operations\/idle-probe\/(?:history|summary)$/u,
@@ -176,8 +177,14 @@ export function createHandler(
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/upstream-quality-assets.js") {
         return await staticFile("upstream-quality-assets.js", "text/javascript; charset=utf-8");
       }
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/history-chart.js") {
+        return await staticFile("history-chart.js", "text/javascript; charset=utf-8");
+      }
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/bugteam-cost.js") {
+        return await staticFile("bugteam-cost.js", "text/javascript; charset=utf-8");
+      }
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
-      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html" } as Record<string, string>)[url.pathname];
+      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
@@ -264,6 +271,13 @@ export function createHandler(
         }
         return json(await operations.oauthRuntimeSummary(profile));
       }
+      if (request.method === "GET" && url.pathname === "/api/bugteam/cost-monitor") {
+        const hours = positiveInteger(url.searchParams.get("hours"), 6);
+        if (hours === null || ![6, 24].includes(hours)) {
+          return json({ ok: false, error: "hours must be 6 or 24" }, 400);
+        }
+        return json(await operations.bugTeamCostSummary(hours));
+      }
       if (request.method === "POST" && url.pathname === "/api/upstreams/usage-cache/restore") {
         try { return json(await operations.restoreUpstreamUsageSuccess(await body(request))); }
         catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
@@ -334,6 +348,7 @@ export function createHandler(
         return json(await upstreams.submitUpdate(id, {
           suffix: input.suffix,
           rateCnyPerApiUsd: input.rateCnyPerApiUsd,
+          groupIds: input.groupIds,
           operationId: typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
         }));
       }
