@@ -26,6 +26,27 @@ function durationRange(minimum, maximum) {
   return Number(minimum) === Number(maximum) ? format(minimum) : `${format(minimum)}–${format(maximum)}`
 }
 
+const carriedMetricKeys = [
+  'unitPriceCny', 'minimumUnitPriceCny', 'maximumUnitPriceCny',
+  'minimumRemainingSeconds', 'maximumRemainingSeconds',
+  'expectedCostCnyPerApiUsd', 'minimumExpectedCostCnyPerApiUsd',
+  'maximumExpectedCostCnyPerApiUsd', 'fillRateApiUsdPerHour',
+]
+
+function carryForwardEmptySamples(points) {
+  let lastValid = null
+  return points.map((point) => {
+    if (point.status === 'ok') {
+      lastValid = Object.fromEntries(carriedMetricKeys.map((key) => [key, point[key]]))
+      return { ...point, chartMissing: false }
+    }
+    if (point.status !== 'empty') return { ...point, chartMissing: false }
+    return lastValid === null
+      ? { ...point, chartMissing: carriedMetricKeys.some((key) => point[key] !== null && point[key] !== undefined) }
+      : { ...point, ...lastValid, chartMissing: true }
+  })
+}
+
 async function requestSummary() {
   const response = await fetch(`/api/bugteam/cost-monitor?hours=${selectedHours}`, {
     headers: { accept: 'application/json' },
@@ -48,6 +69,11 @@ function drawChart(selector, points, options) {
 
 function render(data) {
   const latest = data.latest
+  const points = data.history ?? []
+  const chartPoints = carryForwardEmptySamples(points)
+  const displayLatest = latest?.status === 'empty'
+    ? chartPoints.findLast((point) => String(point.sampledAt) === String(latest.sampledAt)) ?? latest
+    : latest
   const state = $('#bugteam-state')
   const windowText = `最近 ${selectedHours} 小时`
   for (const selector of ['#bugteam-available-window', '#bugteam-price-window', '#bugteam-speed-window']) $(selector).textContent = windowText
@@ -65,38 +91,30 @@ function render(data) {
       ? `最近采样失败：${data.lastError.message}`
       : `每 ${data.sampling.intervalSeconds} 秒采样 · ${data.product}`
     $('#bugteam-available').textContent = latest.available ?? '—'
-    $('#bugteam-unit-price').textContent = latest.unitPriceCny === null ? '—' : `¥${number(latest.unitPriceCny, 2)}`
-    $('#bugteam-cost-range').textContent = latest.minimumExpectedCostCnyPerApiUsd === null
+    $('#bugteam-unit-price').textContent = displayLatest.unitPriceCny === null ? '—' : `¥${number(displayLatest.unitPriceCny, 2)}`
+    $('#bugteam-cost-range').textContent = displayLatest.expectedCostCnyPerApiUsd === null
       ? '—'
-      : `¥${number(latest.minimumExpectedCostCnyPerApiUsd, 4)}–${number(latest.maximumExpectedCostCnyPerApiUsd, 4)}`
-    $('#bugteam-fill-rate').textContent = latest.fillRateApiUsdPerHour === null ? '—' : number(latest.fillRateApiUsdPerHour, 2)
-    $('#bugteam-remaining').textContent = durationRange(latest.minimumRemainingSeconds, latest.maximumRemainingSeconds)
+      : `¥${number(displayLatest.expectedCostCnyPerApiUsd, 4)}`
+    $('#bugteam-fill-rate').textContent = displayLatest.fillRateApiUsdPerHour === null ? '—' : number(displayLatest.fillRateApiUsdPerHour, 2)
+    $('#bugteam-remaining').textContent = durationRange(displayLatest.minimumRemainingSeconds, displayLatest.maximumRemainingSeconds)
     $('#bugteam-sampled-at').textContent = `采样时间 ${time(latest.sampledAt)}`
   }
 
-  const points = data.history ?? []
   drawChart('#bugteam-available-chart', points, {
     series: [{ key: 'available', className: 'chart-bugteam-stock', label: '未售' }],
     valueFormatter: (value) => number(value, 0), unit: '个', ariaLabel: 'BugTeam 剩余未售趋势',
   })
-  drawChart('#bugteam-price-chart', points, {
-    series: [
-      { key: 'unitPriceCny', className: 'chart-bugteam-price', label: '当前单价' },
-      { key: 'minimumUnitPriceCny', className: 'chart-bugteam-price-min', label: '最低单价' },
-      { key: 'maximumUnitPriceCny', className: 'chart-bugteam-price-max', label: '最高单价' },
-    ],
-    valueFormatter: (value) => number(value, 2), unit: '人民币/个', ariaLabel: 'BugTeam 浮动单价趋势',
+  drawChart('#bugteam-price-chart', chartPoints, {
+    series: [{ key: 'unitPriceCny', className: 'chart-bugteam-price', label: '最低价车次' }],
+    valueFormatter: (value) => number(value, 2), unit: '人民币/个', ariaLabel: 'BugTeam 最低价车次浮动单价趋势', missingKey: 'chartMissing',
   })
-  drawChart('#bugteam-cost-chart', points, {
-    series: [
-      { key: 'minimumExpectedCostCnyPerApiUsd', className: 'chart-bugteam-cost-min', label: '成本下界' },
-      { key: 'maximumExpectedCostCnyPerApiUsd', className: 'chart-bugteam-cost-max', label: '成本上界' },
-    ],
-    valueFormatter: (value) => number(value, 4), unit: '人民币/API美元', ariaLabel: 'BugTeam 单号预期成本范围趋势',
+  drawChart('#bugteam-cost-chart', chartPoints, {
+    series: [{ key: 'expectedCostCnyPerApiUsd', className: 'chart-bugteam-price', label: '预期成本' }],
+    valueFormatter: (value) => number(value, 4), unit: '人民币/API美元', ariaLabel: 'BugTeam 最低价车次单号预期成本趋势', missingKey: 'chartMissing',
   })
-  drawChart('#bugteam-speed-chart', points, {
+  drawChart('#bugteam-speed-chart', chartPoints, {
     series: [{ key: 'fillRateApiUsdPerHour', className: 'chart-bugteam-speed', label: '吃满速度' }],
-    valueFormatter: (value) => number(value, 2), unit: 'API美元/小时', ariaLabel: 'BugTeam 单号吃满速度趋势',
+    valueFormatter: (value) => number(value, 2), unit: 'API美元/小时', ariaLabel: 'BugTeam 单号吃满速度趋势', missingKey: 'chartMissing',
   })
 }
 

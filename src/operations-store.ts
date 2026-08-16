@@ -555,6 +555,40 @@ export class OperationsStore {
     `;
   }
 
+  async getLatestSuccessfulBugTeamCostSample(product: string): Promise<import("./bugteam-cost-monitor").BugTeamCostSample | null> {
+    const rows = await this.sql`
+      SELECT sampled_at, product, status, available, unit_price_cny,
+        minimum_unit_price_cny, maximum_unit_price_cny,
+        minimum_remaining_seconds, maximum_remaining_seconds,
+        expected_cost_cny_per_api_usd, minimum_expected_cost_cny_per_api_usd,
+        maximum_expected_cost_cny_per_api_usd, fill_rate_api_usd_per_hour,
+        error_summary
+      FROM api2business_bugteam_cost_samples
+      WHERE product=${product} AND status='ok'
+      ORDER BY sampled_at DESC
+      LIMIT 1
+    ` as Array<Record<string, unknown>>;
+    const row = rows[0];
+    if (!row) return null;
+    const numeric = (value: unknown) => value === null || value === undefined ? null : Number(value);
+    return {
+      sampledAt: String(row.sampled_at),
+      product: String(row.product),
+      status: "ok",
+      available: numeric(row.available),
+      unitPriceCny: numeric(row.unit_price_cny),
+      minimumUnitPriceCny: numeric(row.minimum_unit_price_cny),
+      maximumUnitPriceCny: numeric(row.maximum_unit_price_cny),
+      minimumRemainingSeconds: numeric(row.minimum_remaining_seconds),
+      maximumRemainingSeconds: numeric(row.maximum_remaining_seconds),
+      expectedCostCnyPerApiUsd: numeric(row.expected_cost_cny_per_api_usd),
+      minimumExpectedCostCnyPerApiUsd: numeric(row.minimum_expected_cost_cny_per_api_usd),
+      maximumExpectedCostCnyPerApiUsd: numeric(row.maximum_expected_cost_cny_per_api_usd),
+      fillRateApiUsdPerHour: numeric(row.fill_rate_api_usd_per_hour),
+      errorSummary: row.error_summary === null || row.error_summary === undefined ? null : String(row.error_summary),
+    };
+  }
+
   async getBugTeamCostSamples(product: string, hours: number) {
     return await this.sql`
       SELECT sampled_at, product, status, available, unit_price_cny,

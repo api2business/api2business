@@ -15,7 +15,7 @@ export function finiteChartValue(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null }) {
+export function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null, missingKey = null }) {
   const chartWidth = 1000
   if (points.length < 2) return `<text x="${chartWidth / 2}" y="78" text-anchor="middle" class="chart-empty">至少需要两个采样点</text>`
   const chartPoints = points
@@ -59,20 +59,29 @@ export function historyChartMarkup(points, { series, valueFormatter, unit = '', 
     const current = valuesByPoint.at(-1)
     const clippedHigh = upperBound === null ? '' : valid.filter(({ value }) => value > upperBound).map(({ index, value }) => `<path class="${className} chart-clipped-point" d="M ${x(index) - 4} ${plotTop + 7} L ${x(index)} ${plotTop + 1} L ${x(index) + 4} ${plotTop + 7} Z"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(value))}${unit ? ` ${escapeHtml(unit)}` : ''}（超出图表上限 ${escapeHtml(formatValue(upperBound))}）</title></path>`).join('')
     const clippedLow = lowerBound === null ? '' : valid.filter(({ value }) => value < lowerBound).map(({ index, value }) => `<path class="${className} chart-clipped-point" d="M ${x(index) - 4} ${plotBottom - 7} L ${x(index)} ${plotBottom - 1} L ${x(index) + 4} ${plotBottom - 7} Z"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(value))}${unit ? ` ${escapeHtml(unit)}` : ''}（低于图表下限 ${escapeHtml(formatValue(lowerBound))}）</title></path>`).join('')
-    const polylines = segments.map((values) => `<polyline class="${className}" points="${values.map(({ index, value }) => `${x(index)},${y(value)}`).join(' ')}"/>`).join('')
-    const currentPoint = current === null || current === undefined ? '' : `<circle class="${className} chart-latest-point" cx="${x(current.index)}" cy="${y(current.value)}" r="3"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(current.value))}${unit ? ` ${escapeHtml(unit)}` : ''}</title></circle>`
+    const polylines = missingKey === null
+      ? segments.map((values) => `<polyline class="${className}" points="${values.map(({ index, value }) => `${x(index)},${y(value)}`).join(' ')}"/>`).join('')
+      : valuesByPoint.slice(1).map((value, index) => {
+          const previous = valuesByPoint[index]
+          if (previous === null || value === null) return ''
+          const missing = Boolean(chartPoints[index]?.[missingKey] || chartPoints[index + 1]?.[missingKey])
+          return `<line class="${className} chart-series-segment${missing ? ' chart-missing-segment' : ''}" x1="${x(previous.index)}" y1="${y(previous.value)}" x2="${x(value.index)}" y2="${y(value.value)}"/>`
+        }).join('')
+    const currentMissing = current && missingKey !== null && Boolean(chartPoints[current.index]?.[missingKey])
+    const currentPoint = current === null || current === undefined ? '' : `<circle class="${className} chart-latest-point${currentMissing ? ' chart-missing-point' : ''}" cx="${x(current.index)}" cy="${y(current.value)}" r="3"><title>${escapeHtml(label ?? key)}：${escapeHtml(formatValue(current.value))}${unit ? ` ${escapeHtml(unit)}` : ''}${currentMissing ? '（缺数据，沿用最近值）' : ''}</title></circle>`
     return `${polylines}${currentPoint}${clippedHigh}${clippedLow}`
   }).join('')
   const first = new Date(chartPoints[0].sampledAt), last = new Date(chartPoints.at(-1).sampledAt)
   const label = (date) => date.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false })
-  const legend = series.map(({ className, label: seriesLabel }) => `<span class="history-chart-legend-item ${className}">${escapeHtml(seriesLabel ?? '')}</span>`).join('')
+  const hasMissing = missingKey !== null && chartPoints.some((point) => Boolean(point[missingKey]))
+  const legend = `${series.map(({ className, label: seriesLabel }) => `<span class="history-chart-legend-item ${className}">${escapeHtml(seriesLabel ?? '')}</span>`).join('')}${hasMissing ? '<span class="history-chart-legend-item chart-missing-legend">缺数据沿用</span>' : ''}`
   const hoverWidth = (plotRight - plotLeft) / Math.max(1, chartPoints.length - 1)
   const hoverTargets = chartPoints.map((point, index) => {
     const at = new Date(point.sampledAt)
     const details = series.map(({ key, label: seriesLabel }) => {
       const value = Number(point[key])
       return `${seriesLabel ?? key}：${point[key] == null || !Number.isFinite(value) ? '无数据' : `${formatValue(value)}${unit ? ` ${unit}` : ''}`}`
-    }).join('\n')
+    }).join('\n') + (missingKey !== null && point[missingKey] ? '\n缺数据，沿用最近值' : '')
     const left = Math.max(plotLeft, x(index) - hoverWidth / 2)
     const right = Math.min(plotRight, x(index) + hoverWidth / 2)
     return `<g class="chart-hover-column" data-tooltip="${escapeHtml(`${label(at)}\n${details}`)}"><line x1="${x(index)}" y1="${plotTop}" x2="${x(index)}" y2="${plotBottom}"/><rect x="${left}" y="${plotTop}" width="${Math.max(8, right - left)}" height="${plotBottom - plotTop}"/></g>`

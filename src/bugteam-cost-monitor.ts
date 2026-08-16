@@ -25,10 +25,6 @@ function finiteNumber(value: unknown, field: string, minimum = 0): number {
   return number;
 }
 
-function priceForRemaining(baseUnitPriceFen: number, billingBaseSeconds: number, remainingSeconds: number): number {
-  return Math.round(baseUnitPriceFen * remainingSeconds / billingBaseSeconds) / 100;
-}
-
 export function projectBugTeamCostSample(
   inventory: Record<string, unknown>,
   config: AppConfig["bugTeam"]["monitor"],
@@ -43,24 +39,18 @@ export function projectBugTeamCostSample(
     expectedCostCnyPerApiUsd: null, minimumExpectedCostCnyPerApiUsd: null,
     maximumExpectedCostCnyPerApiUsd: null, fillRateApiUsdPerHour: null, errorSummary: null,
   };
-  const baseUnitPriceFen = finiteNumber(inventory.base_unit_price_fen, "base_unit_price_fen", 1);
-  const billingBaseSeconds = finiteNumber(inventory.billing_base_seconds, "billing_base_seconds", 1);
   const estimatedUnitPriceFen = finiteNumber(inventory.estimated_unit_price_fen, "estimated_unit_price_fen");
   const minimumRemainingSeconds = finiteNumber(inventory.minimum_remaining_seconds, "minimum_remaining_seconds", 1);
-  const maximumRemainingSeconds = finiteNumber(inventory.maximum_remaining_seconds, "maximum_remaining_seconds", 1);
-  const lowerSeconds = Math.min(minimumRemainingSeconds, maximumRemainingSeconds);
-  const upperSeconds = Math.max(minimumRemainingSeconds, maximumRemainingSeconds);
   const unitPriceCny = estimatedUnitPriceFen / 100;
-  const minimumUnitPriceCny = priceForRemaining(baseUnitPriceFen, billingBaseSeconds, lowerSeconds);
-  const maximumUnitPriceCny = priceForRemaining(baseUnitPriceFen, billingBaseSeconds, upperSeconds);
+  const expectedCostCnyPerApiUsd = unitPriceCny / config.expectedOutputApiUsd;
   return {
     sampledAt, product: config.product, status: "ok", available, unitPriceCny,
-    minimumUnitPriceCny, maximumUnitPriceCny,
-    minimumRemainingSeconds: lowerSeconds, maximumRemainingSeconds: upperSeconds,
-    expectedCostCnyPerApiUsd: unitPriceCny / config.expectedOutputApiUsd,
-    minimumExpectedCostCnyPerApiUsd: minimumUnitPriceCny / config.expectedOutputApiUsd,
-    maximumExpectedCostCnyPerApiUsd: maximumUnitPriceCny / config.expectedOutputApiUsd,
-    fillRateApiUsdPerHour: config.expectedOutputApiUsd * 3600 / lowerSeconds,
+    minimumUnitPriceCny: unitPriceCny, maximumUnitPriceCny: unitPriceCny,
+    minimumRemainingSeconds, maximumRemainingSeconds: minimumRemainingSeconds,
+    expectedCostCnyPerApiUsd,
+    minimumExpectedCostCnyPerApiUsd: expectedCostCnyPerApiUsd,
+    maximumExpectedCostCnyPerApiUsd: expectedCostCnyPerApiUsd,
+    fillRateApiUsdPerHour: config.expectedOutputApiUsd * 3600 / minimumRemainingSeconds,
     errorSummary: null,
   };
 }
@@ -80,13 +70,25 @@ export class BugTeamCostMonitor {
     const sampledAt = new Date().toISOString();
     try {
       this.client ??= new BugTeamClient(this.config);
-      const first = await this.client.inventory(this.config.bugTeam.monitor.product, 1);
-      const available = finiteNumber(first.available, "available");
+      const inventory = await this.client.inventory(this.config.bugTeam.monitor.product, 1);
+      const available = finiteNumber(inventory.available, "available");
       if (!Number.isInteger(available)) throw new Error("BugTeam inventory field available is invalid");
-      const inventory = available > 1
-        ? await this.client.inventory(this.config.bugTeam.monitor.product, available)
-        : first;
-      const sample = projectBugTeamCostSample(inventory, this.config.bugTeam.monitor, sampledAt);
+      let sample = projectBugTeamCostSample(inventory, this.config.bugTeam.monitor, sampledAt);
+      if (sample.status === "empty") {
+        const previous = await this.store.getLatestSuccessfulBugTeamCostSample(sample.product);
+        if (previous) sample = {
+          ...sample,
+          unitPriceCny: previous.unitPriceCny,
+          minimumUnitPriceCny: previous.minimumUnitPriceCny,
+          maximumUnitPriceCny: previous.maximumUnitPriceCny,
+          minimumRemainingSeconds: previous.minimumRemainingSeconds,
+          maximumRemainingSeconds: previous.maximumRemainingSeconds,
+          expectedCostCnyPerApiUsd: previous.expectedCostCnyPerApiUsd,
+          minimumExpectedCostCnyPerApiUsd: previous.minimumExpectedCostCnyPerApiUsd,
+          maximumExpectedCostCnyPerApiUsd: previous.maximumExpectedCostCnyPerApiUsd,
+          fillRateApiUsdPerHour: previous.fillRateApiUsdPerHour,
+        };
+      }
       await this.store.addBugTeamCostSample(sample);
       return sample;
     } catch (error) {

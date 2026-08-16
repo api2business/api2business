@@ -10,7 +10,7 @@ const monitor = {
   historyHours: 24,
 } satisfies AppConfig["bugTeam"]["monitor"];
 
-test("projects BugTeam inventory into per-account cost and fill rate", () => {
+test("projects only the lowest-priced BugTeam train into per-account cost and fill rate", () => {
   const sample = projectBugTeamCostSample({
     available: 69,
     base_unit_price_fen: 360,
@@ -24,9 +24,12 @@ test("projects BugTeam inventory into per-account cost and fill rate", () => {
   expect(sample.available).toBe(69);
   expect(sample.unitPriceCny).toBe(1.78);
   expect(sample.minimumUnitPriceCny).toBe(1.78);
-  expect(sample.maximumUnitPriceCny).toBe(1.8);
+  expect(sample.maximumUnitPriceCny).toBe(1.78);
+  expect(sample.minimumRemainingSeconds).toBe(1783);
+  expect(sample.maximumRemainingSeconds).toBe(1783);
+  expect(sample.expectedCostCnyPerApiUsd).toBeCloseTo(1.78 / 30);
   expect(sample.minimumExpectedCostCnyPerApiUsd).toBeCloseTo(1.78 / 30);
-  expect(sample.maximumExpectedCostCnyPerApiUsd).toBeCloseTo(1.8 / 30);
+  expect(sample.maximumExpectedCostCnyPerApiUsd).toBeCloseTo(1.78 / 30);
   expect(sample.fillRateApiUsdPerHour).toBeCloseTo(30 * 3600 / 1783);
 });
 

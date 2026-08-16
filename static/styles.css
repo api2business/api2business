@@ -415,7 +415,7 @@ button:disabled { cursor: wait; opacity: .48; }
 
 @media (prefers-reduced-motion: reduce) {
   .query-command.is-loading .query-spinner { animation: none; }
-  .state-badge[data-state="refreshing"]::before, .icon-command.is-loading { animation: none; }
+  .state-badge[data-state="refreshing"]::before, .icon-command.is-loading, .icon-command.is-loading .icon-command-glyph { animation: none; }
 }
 
 .upstream-metrics { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
@@ -546,6 +546,11 @@ button:disabled { cursor: wait; opacity: .48; }
 .history-chart-legend { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .history-chart-legend-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .history-chart-legend-item::before { width: 13px; height: 2px; content: ""; background: currentColor; }
+.chart-series-segment { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.chart-missing-segment { stroke-dasharray: 5 5; }
+.chart-missing-point { stroke-dasharray: 2 2; }
+.history-chart-legend-item.chart-missing-legend { color: var(--muted); }
+.history-chart-legend-item.chart-missing-legend::before { background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px); }
 .history-chart-legend-item.chart-sample-speed, .history-chart-legend-item.chart-cost { color: var(--warning); }
 .history-chart-legend-item.chart-rolling-speed, .history-chart-legend-item.chart-schedulable, .history-chart-legend-item.chart-pool-quality-rolling { color: var(--info); }
 .history-chart-legend-item.chart-rolling-cost { color: var(--info); }
@@ -568,6 +573,9 @@ button:disabled { cursor: wait; opacity: .48; }
 .bugteam-cost-head { align-items: center; }
 .bugteam-cost-actions { display: flex; align-items: center; gap: 10px; }
 .bugteam-cost-actions .profile-tabs { margin: 0; }
+.bugteam-cost-actions .icon-command.is-loading { animation: none; }
+.bugteam-cost-actions .icon-command-glyph { display: inline-block; }
+.bugteam-cost-actions .icon-command.is-loading .icon-command-glyph { animation: query-spin .7s linear infinite; }
 .bugteam-cost-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .bugteam-cost-metrics small { display: block; margin-top: 8px; color: var(--muted); font: 10px/1.3 var(--mono); }
 .bugteam-cost-metrics strong { font-size: clamp(17px, 1.6vw, 25px); overflow-wrap: anywhere; }
