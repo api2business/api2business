@@ -23,6 +23,8 @@ type Config struct {
 	AutomaticRefreshEnabled                                    bool
 	IdleProbeEnabled                                           bool
 	IdleProbeIntervalSeconds, IdleProbeTimeoutSeconds          int
+	BugTeamCostMonitorEnabled                                  bool
+	BugTeamCostIntervalSeconds                                 int
 }
 
 type fileConfig struct {
@@ -46,6 +48,12 @@ type fileConfig struct {
 			QuotaSampleTimeoutSeconds  int `yaml:"quotaSampleTimeoutSeconds"`
 		} `yaml:"upstreamManagement"`
 	} `yaml:"operations"`
+	BugTeam struct {
+		Monitor struct {
+			Enabled               bool `yaml:"enabled"`
+			SampleIntervalSeconds int  `yaml:"sampleIntervalSeconds"`
+		} `yaml:"monitor"`
+	} `yaml:"bugTeam"`
 	Temporal struct {
 		AddressEnv               string `yaml:"addressEnv"`
 		Namespace                string `yaml:"namespace"`
@@ -135,6 +143,7 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 		QuotaTimeoutSeconds:        raw.Operations.UpstreamManagement.QuotaSampleTimeoutSeconds,
 		AutomationPollMilliseconds: raw.Operations.AutomationPollMilliseconds,
 		IdleProbeEnabled:           raw.Sub2API.IdleProbe.Enabled, IdleProbeIntervalSeconds: raw.Sub2API.IdleProbe.IntervalSeconds,
-		IdleProbeTimeoutSeconds: raw.Sub2API.IdleProbe.RoundTimeoutSeconds,
+		IdleProbeTimeoutSeconds:   raw.Sub2API.IdleProbe.RoundTimeoutSeconds,
+		BugTeamCostMonitorEnabled: raw.BugTeam.Monitor.Enabled, BugTeamCostIntervalSeconds: raw.BugTeam.Monitor.SampleIntervalSeconds,
 	}, nil
 }

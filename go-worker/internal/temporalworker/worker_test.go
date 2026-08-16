@@ -87,6 +87,7 @@ func TestConfiguredScheduleIdentitiesRemainStable(t *testing.T) {
 		IdleProbe:          "api2business-native-score-refresh-schedule-idle-account-probe-v5",
 		IdleProvision:      "api2business-native-score-refresh-schedule-idle-account-provision-v1",
 		PriorityAutomation: "api2business-native-score-refresh-schedule-priority-automation-v3",
+		BugTeamCost:        "api2business-native-score-refresh-schedule-bugteam-cost-v1",
 	}
 	if identities != expected {
 		t.Fatalf("schedule identities changed: %#v", identities)

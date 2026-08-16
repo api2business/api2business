@@ -101,7 +101,7 @@ func scheduleOptions(id, taskQueue string) client.StartWorkflowOptions {
 }
 
 type scheduleIdentities struct {
-	Score, Quota, IdleProbe, IdleProvision, PriorityAutomation string
+	Score, Quota, IdleProbe, IdleProvision, PriorityAutomation, BugTeamCost string
 }
 
 const minimumPriorityAutomationPollMilliseconds = 60 * 1000
@@ -121,6 +121,7 @@ func configuredScheduleIdentities(cfg Config) scheduleIdentities {
 		IdleProbe:          base + "-idle-account-probe-v5",
 		IdleProvision:      base + "-idle-account-provision-v1",
 		PriorityAutomation: base + "-priority-automation-v3",
+		BugTeamCost:        base + "-bugteam-cost-v1",
 	}
 }
 
@@ -165,6 +166,15 @@ func ensureSchedules(c client.Client, cfg Config) error {
 				return err
 			}
 		}
+	}
+	if cfg.BugTeamCostMonitorEnabled && cfg.BugTeamCostIntervalSeconds > 0 {
+		if err := startWorkflow(c, scheduleOptions(identities.BugTeamCost, cfg.TaskQueue), "bugTeamCostScheduleWorkflow", ScheduleInput{
+			IntervalMS: cfg.BugTeamCostIntervalSeconds * 1000, ActivityStartToCloseTimeout: cfg.ActivityTimeout, MaximumAttempts: 1,
+		}); err != nil {
+			return err
+		}
+	} else if err := terminateIfRunning(c, cfg.Namespace, identities.BugTeamCost, "BugTeam cost monitor disabled by configuration"); err != nil {
+		return err
 	}
 	if cfg.AutomationPollMilliseconds > 0 {
 		for _, legacy := range []string{base + "-priority-automation-v1", base + "-priority-automation-v2"} {
@@ -265,6 +275,7 @@ func Run(ctx context.Context, cfg Config) error {
 	w.RegisterWorkflowWithOptions(ScoreRefreshScheduleWorkflow, workflow.RegisterOptions{Name: "scoreRefreshScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(UpstreamQuotaScheduleWorkflow, workflow.RegisterOptions{Name: "upstreamQuotaScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(IdleAccountProbeScheduleWorkflow, workflow.RegisterOptions{Name: "idleAccountProbeScheduleWorkflow"})
+	w.RegisterWorkflowWithOptions(BugTeamCostScheduleWorkflow, workflow.RegisterOptions{Name: "bugTeamCostScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(PriorityAutomationScheduleWorkflow, workflow.RegisterOptions{Name: "priorityAutomationScheduleWorkflow"})
 	activityTimeout, parseErr := time.ParseDuration(cfg.ActivityTimeout)
 	if parseErr != nil || activityTimeout <= 0 {

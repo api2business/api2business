@@ -111,6 +111,18 @@ func IdleAccountProbeScheduleWorkflow(ctx workflow.Context, input ScheduleInput)
 	return workflow.NewContinueAsNewError(ctx, IdleAccountProbeScheduleWorkflow, input)
 }
 
+func BugTeamCostScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
+	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions(input.ActivityStartToCloseTimeout, 1))
+	for iteration := 0; iteration < 500; iteration++ {
+		request := OperationRequest{OperationID: fmt.Sprintf("%s:bugteam-cost:%d", workflow.GetInfo(ctx).WorkflowExecution.RunID, iteration), Command: map[string]any{"kind": "bugteam.cost.sample"}}
+		_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, nil)
+		if err := workflow.Sleep(ctx, time.Duration(input.IntervalMS)*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return workflow.NewContinueAsNewError(ctx, BugTeamCostScheduleWorkflow, input)
+}
+
 func PriorityAutomationScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
 	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions(input.ActivityStartToCloseTimeout, 1))
 	intervalMS := input.IntervalMS
