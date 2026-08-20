@@ -112,6 +112,9 @@ export class AdminHttpClient {
       body: JSON.stringify({ amountCny, operationId }),
     }, 30000);
   }
+  upstreamRecover(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/recover", { method: "POST", headers: { "Idempotency-Key": operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000);
+  }
   upstreamJob(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/upstreams/jobs/${encodeURIComponent(id)}`);
   }
@@ -179,11 +182,36 @@ export class AdminHttpClient {
   accountImportStatus(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/account-import/jobs/${encodeURIComponent(id)}`);
   }
+  bugTeamPurchaseOptions(): Promise<Record<string, unknown>> {
+    return this.request("/api/bugteam/purchase/options");
+  }
+  bugTeamCostSummary(): Promise<Record<string, unknown>> {
+    return this.request("/api/bugteam/cost-monitor?hours=6");
+  }
+  bugTeamCostSample(): Promise<Record<string, unknown>> {
+    return this.request("/api/bugteam/cost-monitor/sample", { method: "POST" });
+  }
+  bugTeamPurchaseImport(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("/api/bugteam/purchase/jobs", {
+      method: "POST", body: JSON.stringify(input),
+    }, 30000);
+  }
+  bugTeamPurchaseImportStatus(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/bugteam/purchase/jobs/${encodeURIComponent(id)}`);
+  }
   accountImportWorkerJob(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/internal/account-import-jobs/${encodeURIComponent(id)}`);
   }
   updateAccountImportWorkerJob(id: string, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request(`/api/internal/account-import-jobs/${encodeURIComponent(id)}`, {
+      method: "POST", body: JSON.stringify(patch),
+    });
+  }
+  bugTeamPurchaseWorkerJob(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/internal/bugteam-purchase-jobs/${encodeURIComponent(id)}`);
+  }
+  updateBugTeamPurchaseWorkerJob(id: string, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request(`/api/internal/bugteam-purchase-jobs/${encodeURIComponent(id)}`, {
       method: "POST", body: JSON.stringify(patch),
     });
   }

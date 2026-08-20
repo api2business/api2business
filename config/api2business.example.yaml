@@ -48,7 +48,7 @@ bugTeam:
     enabled: true
     product: team_1h
     sampleIntervalSeconds: 60
-    expectedOutputApiUsd: 30
+    expectedOutputApiUsd: 28
     historyHours: 24
 
 webProbe:
@@ -324,6 +324,7 @@ operations:
   accountImportDefaults:
     priority: 1
     capacity: 3
+    rateMultiplier: 1000
     importTimeoutMs: 600000
     groupIds: [2, 3]
     sourceProxyId: 3
@@ -539,6 +540,14 @@ operations:
           - "524"
         durationMinutes: 3
         description: 上游连接或响应超时
+      - errorCode: 499
+        keywords:
+          - recovered upstream error 524
+          - "error code: 524"
+          - "status code: 524"
+          - "524"
+        durationMinutes: 3
+        description: 上游 524 被网关记录为 499 时的响应超时
       - errorCode: 529
         keywords:
           - overloaded
@@ -560,7 +569,7 @@ operations:
       free: 3.8
       k12: 20
       plus: 135
-      team: 140
+      team: 28
   rechargeDenominationsCny: [10, 20, 50]
   planTtlMinutes: 30
   auditLimit: 200

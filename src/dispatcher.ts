@@ -28,6 +28,8 @@ export async function dispatchDirect(services: DispatcherServices, command: AppC
     || command.kind === "upstream.usage.sample"
     || command.kind === "pool.quality.sample"
     || command.kind === "bugteam.cost.sample"
+    || command.kind === "upstream.apikey.cutoff"
+    || command.kind === "bugteam.purchase.import"
     || command.kind === "oauth.runtime.sample"
     || command.kind === "upstream.benchmark"
     || command.kind === "account.import"
@@ -70,6 +72,16 @@ export class ApplicationDispatcher {
   async workflowStatus(workflowId: string): Promise<unknown> {
     if (!this.temporal) throw new Error("workflow status requires Temporal");
     return await this.temporal.status(workflowId);
+  }
+
+  async signalApiKeyCutoffRestore(workflowId: string): Promise<unknown> {
+    if (!this.temporal) throw new Error("workflow signal requires Temporal");
+    return await this.temporal.signalApiKeyCutoffRestore(workflowId);
+  }
+
+  async signalRunningApiKeyCutoffsRestore(): Promise<unknown> {
+    if (!this.temporal) throw new Error("workflow signal requires Temporal");
+    return await this.temporal.signalRunningApiKeyCutoffsRestore();
   }
 }
 

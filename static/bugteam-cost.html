@@ -8,9 +8,9 @@
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>BugTeam 实时成本 | Api2Business</title>
-  <link rel="stylesheet" href="/styles.css?v=bugteam-cost-v2" />
-  <script src="/app.js?v=bugteam-cost-v2" type="module"></script>
-  <script src="/bugteam-cost.js?v=bugteam-cost-v2" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=import-load-factor-v1" />
+  <script src="/app.js?v=import-load-factor-v1" type="module"></script>
+  <script src="/bugteam-cost.js?v=import-load-factor-v1" type="module"></script>
 </head>
 <body data-page="bugteam-cost">
   <div data-shell></div>
@@ -23,6 +23,7 @@
           <button class="profile-tab" type="button" data-history-hours="24">24 小时</button>
         </div>
         <span id="bugteam-state" class="state-badge" data-state="refreshing">读取中</span>
+        <button id="bugteam-sample-now" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>立即采样</span></button>
         <button id="bugteam-refresh" class="icon-command" type="button" title="立即刷新" aria-label="立即刷新"><span class="icon-command-glyph" aria-hidden="true">↻</span></button>
       </div>
     </header>
@@ -35,11 +36,32 @@
       <div><span>剩余有效时间</span><strong id="bugteam-remaining">—</strong><small id="bugteam-sampled-at">采样时间 —</small></div>
     </section>
 
+    <section class="bugteam-purchase" aria-labelledby="bugteam-purchase-title">
+      <form id="bugteam-purchase-form" class="bugteam-purchase-form">
+        <header><div><p class="eyebrow">QUICK BUY / TEAM 1H</p><h2 id="bugteam-purchase-title">一键购买并导入</h2></div><span id="bugteam-purchase-state" class="state-badge">等待下单</span></header>
+        <div class="bugteam-purchase-settings">
+          <label><span>购买数量</span><input id="bugteam-purchase-quantity" type="number" min="1" value="1" required /></label>
+          <label><span>优先级</span><input id="bugteam-purchase-priority" type="number" min="1" max="1000" required /></label>
+          <label><span>容量</span><input id="bugteam-purchase-capacity" type="number" min="1" value="16" required /></label>
+          <label><span>负载因子</span><input id="bugteam-purchase-rate-multiplier" type="number" min="1" max="1000000" step="1" value="1000" required /></label>
+          <div class="bugteam-purchase-quote"><span>当前预计</span><strong id="bugteam-purchase-quote">—</strong><small id="bugteam-purchase-stock">等待库存</small></div>
+        </div>
+        <fieldset class="group-picker"><legend>目标分组</legend><div id="bugteam-purchase-groups"></div></fieldset>
+        <button id="bugteam-purchase-submit" class="primary-command" type="submit" disabled>一键购买并导入</button>
+      </form>
+      <section class="import-console bugteam-purchase-console" aria-label="购买导入作业">
+        <header><div><p class="eyebrow">JOB STREAM</p><h2>购买导入结果</h2></div><code id="bugteam-purchase-job-id">JOB —</code></header>
+        <div id="bugteam-purchase-summary" class="import-summary">等待提交购买作业</div>
+        <div class="import-log-heading"><span>作业日志</span><small>报价、下单、履约、导入与记账</small></div>
+        <ol id="bugteam-purchase-logs" class="import-logs"><li class="empty">暂无日志</li></ol>
+      </section>
+    </section>
+
     <section class="bugteam-chart-section" aria-label="BugTeam 成本历史趋势">
       <div class="quota-charts bugteam-cost-charts">
         <figure><figcaption><span>剩余未售</span><small id="bugteam-available-window">最近 6 小时</small></figcaption><svg id="bugteam-available-chart" viewBox="0 0 1000 150" role="img" aria-label="BugTeam 剩余未售历史"></svg></figure>
         <figure><figcaption><span>浮动单价</span><small id="bugteam-price-window">最近 6 小时</small></figcaption><svg id="bugteam-price-chart" viewBox="0 0 1000 150" role="img" aria-label="BugTeam 浮动单价历史"></svg></figure>
-        <figure><figcaption><span>预期成本</span><small id="bugteam-cost-window">30 API 美元预期产出</small></figcaption><svg id="bugteam-cost-chart" viewBox="0 0 1000 150" role="img" aria-label="BugTeam 最低价车次单号预期成本历史"></svg></figure>
+        <figure><figcaption><span>预期成本</span><small id="bugteam-cost-window">读取配置口径</small></figcaption><svg id="bugteam-cost-chart" viewBox="0 0 1000 150" role="img" aria-label="BugTeam 最低价车次单号预期成本历史"></svg></figure>
         <figure><figcaption><span>单号吃满速度</span><small id="bugteam-speed-window">最近 6 小时</small></figcaption><svg id="bugteam-speed-chart" viewBox="0 0 1000 150" role="img" aria-label="BugTeam 单号吃满速度历史"></svg></figure>
       </div>
     </section>

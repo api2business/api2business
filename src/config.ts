@@ -215,6 +215,7 @@ export interface AppConfig {
     accountImportDefaults: {
       priority: number;
       capacity: number;
+      rateMultiplier: number;
       importTimeoutMs: number;
       groupIds: number[];
       sourceProxyId: number;
@@ -888,6 +889,7 @@ export function loadConfig(path: string): AppConfig {
       accountImportDefaults: {
         priority: integerValue(accountImportDefaults, "priority", "operations.accountImportDefaults", 1, 1000),
         capacity: integerValue(accountImportDefaults, "capacity", "operations.accountImportDefaults", 1, 100000),
+        rateMultiplier: integerValue(accountImportDefaults, "rateMultiplier", "operations.accountImportDefaults", 1, 1000000),
         importTimeoutMs: integerValue(accountImportDefaults, "importTimeoutMs", "operations.accountImportDefaults", 1000, 600000),
         groupIds: integers(accountImportDefaults, "groupIds", "operations.accountImportDefaults", 1, Number.MAX_SAFE_INTEGER),
         sourceProxyId: integerValue(accountImportDefaults, "sourceProxyId", "operations.accountImportDefaults", 3),

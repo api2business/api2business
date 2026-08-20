@@ -9,7 +9,8 @@ export interface NormalizedAccountImportInput {
   accountCount: number;
   fingerprint: string;
   platform: "openai" | "grok";
-  source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number; platform: "openai" | "grok" };
+  accountType: "oauth" | "apikey";
+  source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number; platform: "openai" | "grok"; accountType: "oauth" | "apikey" };
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -60,14 +61,22 @@ function accountPlatform(account: unknown): "openai" | "grok" {
   throw new Error(`账号 platform 只允许 openai 或 grok，收到 ${value || "空值"}`);
 }
 
+function accountType(account: unknown): "oauth" | "apikey" {
+  const value = String(object(account)?.type ?? "oauth").trim().toLowerCase();
+  if (value === "oauth" || value === "apikey") return value;
+  throw new Error(`账号 type 只允许 oauth 或 apikey，收到 ${value || "空值"}`);
+}
+
 function canonicalize(payloads: Record<string, unknown>[], format: "json" | "zip"): NormalizedAccountImportInput {
   const accounts: unknown[] = [];
   const platforms = new Set<"openai" | "grok">();
+  const accountTypes = new Set<"oauth" | "apikey">();
   const seen = new Set<string>();
   let duplicates = 0;
   for (const payload of payloads) {
     for (const account of payload.accounts as unknown[]) {
       platforms.add(accountPlatform(account));
+      accountTypes.add(accountType(account));
       const identity = accountIdentity(account);
       if (identity && seen.has(identity)) { duplicates += 1; continue; }
       if (identity) seen.add(identity);
@@ -76,14 +85,17 @@ function canonicalize(payloads: Record<string, unknown>[], format: "json" | "zip
   }
   if (accounts.length < 1 || accounts.length > 100) throw new Error("去重后的账号数量必须为 1 至 100");
   if (platforms.size !== 1) throw new Error("同一导入批次不能混合 openai 和 grok 账号");
+  if (accountTypes.size !== 1) throw new Error("同一导入批次不能混合 OAuth 和 API Key 账号");
   const platform = [...platforms][0]!;
+  const selectedAccountType = [...accountTypes][0]!;
   const content = JSON.stringify({ accounts, proxies: [] });
   return {
     content,
     accountCount: accounts.length,
     fingerprint: createHash("sha256").update(content).digest("hex").slice(0, 16),
     platform,
-    source: { format, jsonFileCount: payloads.length, duplicateAccountCount: duplicates, platform },
+    accountType: selectedAccountType,
+    source: { format, jsonFileCount: payloads.length, duplicateAccountCount: duplicates, platform, accountType: selectedAccountType },
   };
 }
 

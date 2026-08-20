@@ -49,6 +49,7 @@ interface Parsed {
   file: string | null;
   priority: number | null;
   capacity: number | null;
+  rateMultiplier: number | null;
   groups: string | null;
   proxyId: number | null;
   accounts: string | null;
@@ -113,7 +114,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -183,6 +184,11 @@ function parseArgs(args: string[]): Parsed {
       : value(args, "--enabled") === "false" ? false
       : (() => { throw new Error("--enabled must be true or false"); })(),
     file: value(args, "--file"), priority: integer("--priority"), capacity: integer("--capacity"),
+    rateMultiplier: (() => {
+      const parsed = integer("--rate-multiplier");
+      if (parsed !== null && (parsed < 1 || parsed > 1000000)) throw new Error("--rate-multiplier must be an integer from 1 to 1000000");
+      return parsed;
+    })(),
     groups: value(args, "--groups"), proxyId: integer("--proxy-id"),
     externalCostsJson: value(args, "--external-costs-json"),
     baseUrl: value(args, "--base-url"), suffix: value(args, "--suffix"),
@@ -229,7 +235,7 @@ function help(): Record<string, unknown> {
       "priority plan manual-create --over-api --priorities ACCOUNT_ID:PRIORITY[,ACCOUNT_ID:PRIORITY...]",
       "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
-      "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
+      "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
       "accounts delete --accounts <id-or-range,...> [--confirm] --over-api",
@@ -260,11 +266,13 @@ function help(): Record<string, unknown> {
       "upstreams create --base-url <https-url> --suffix <name> [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
       "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api",
       "upstreams recharge --id <account-id> --recharge-cny <CNY> [--confirm] --over-api",
+      "upstreams recover --accounts <id-or-range,...> [--confirm] --over-api",
       "upstreams status --id <workflow-id> --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
       "cash ledger [--period YYYY-MM --page N] --over-api",
       "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api",
-      "bugteam login|balance|inventory --product <id> --quantity N|pickup order-create|order-status|download|push|take|recoveries list|recoveries claim|redeem",
+      "bugteam login|balance|inventory --product <id> --quantity N|shelves --product <id>|cost-monitor get [--include-records]|sample|pickup order-create|order-status|download|push|take|recoveries list|recoveries claim|redeem",
+      "bugteam purchase-import options|create --quantity N [--priority 1 --capacity 16 --rate-multiplier 1000 --groups 2,3 --proxy-id 3] [--confirm] --over-api|status --id <job-id> --over-api",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
@@ -282,6 +290,10 @@ async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConf
   if (group === "bugteam" && action === "inventory") {
     if (!parsed.product || parsed.quantity === null || parsed.quantity < 1) throw new Error("bugteam inventory requires --product and positive --quantity");
     return await client.inventory(parsed.product, parsed.quantity);
+  }
+  if (group === "bugteam" && action === "shelves") {
+    if (!parsed.product) throw new Error("bugteam shelves requires --product");
+    return await client.inventoryShelves(parsed.product);
   }
   if (group !== "bugteam" || action !== "pickup" && action !== "recoveries" && action !== "redeem") throw new Error(`unknown command: ${parsed.command.join(" ")}`);
   if (action === "pickup" && subaction === "order-create") {
@@ -501,6 +513,50 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   const client = new AdminHttpClient(config, target);
   const [group, action] = parsed.command;
   if (group === "web" && action === "screenshot") return await runWebScreenshot(parsed, config, target);
+  if (group === "bugteam" && action === "cost-monitor") {
+    const phase = parsed.command[2];
+    if (phase === "get") {
+      const summary = await client.bugTeamCostSummary();
+      if (parsed.includeRecords) return summary;
+      return {
+        ...summary,
+        historyCount: Array.isArray(summary.history) ? summary.history.length : 0,
+        history: undefined,
+      };
+    }
+    if (phase === "sample") return await client.bugTeamCostSample();
+    throw new Error("bugteam cost-monitor requires get or sample");
+  }
+  if (group === "bugteam" && action === "purchase-import") {
+    const phase = parsed.command[2];
+    if (phase === "options") return await client.bugTeamPurchaseOptions();
+    if (phase === "status") {
+      if (!parsed.id) throw new Error("bugteam purchase-import status requires --id");
+      return await client.bugTeamPurchaseImportStatus(parsed.id);
+    }
+    if (phase === "create") {
+      if (parsed.quantity === null || parsed.quantity < 1) throw new Error("bugteam purchase-import create requires positive --quantity");
+      const defaults = config.operations.accountImportDefaults;
+      const input = {
+        quantity: parsed.quantity,
+        priority: parsed.priority ?? defaults.priority,
+        capacity: parsed.capacity ?? 16,
+        rateMultiplier: parsed.rateMultiplier ?? defaults.rateMultiplier,
+        groupIds: (parsed.groups ?? defaults.groupIds.join(",")).split(",").map(Number),
+        sourceProxyId: parsed.proxyId ?? defaults.sourceProxyId,
+        perAccountProxy: false,
+      };
+      if (!parsed.confirm) return {
+        ok: true,
+        mutation: false,
+        action: "bugteam-purchase-import",
+        input,
+        hint: "add --confirm to execute",
+      };
+      return await client.bugTeamPurchaseImport(input);
+    }
+    throw new Error("bugteam purchase-import requires options, create, or status");
+  }
   if (group === "upstreams" && action === "list") return await client.upstreams(parsed.page ?? 1, parsed.search);
   if (group === "upstreams" && action === "usage") {
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
@@ -599,6 +655,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       plan: { amountCny: parsed.rechargeCny }, hint: "add --confirm to execute",
     };
     return await client.upstreamRecharge(id, parsed.rechargeCny, `upstream-recharge-${id}-${crypto.randomUUID()}`);
+  }
+  if (group === "upstreams" && action === "recover") {
+    if (!parsed.accounts) throw new Error("upstreams recover requires --accounts");
+    const accountIds = parseAccountIdSelector(parsed.accounts);
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-recover", accountIds, hint: "add --confirm to execute" };
+    return await client.upstreamRecover(accountIds, `upstream-recover-${crypto.randomUUID()}`);
   }
   if (group === "payments" && action === "alipay-revenue") {
     return await client.alipayRevenue({ day: parsed.day, period: parsed.period });
@@ -717,7 +779,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const zip = parsed.file.toLowerCase().endsWith(".zip");
     return await client.accountImport({ content: readFileSync(parsed.file, zip ? "base64" : "utf8"), inputFormat: zip ? "zip" : "json",
       priority: parsed.priority ?? defaults.priority,
-      capacity: parsed.capacity ?? defaults.capacity, groupIds, sourceProxyId: parsed.proxyId ?? defaults.sourceProxyId,
+      capacity: parsed.capacity ?? defaults.capacity,
+      rateMultiplier: parsed.rateMultiplier ?? defaults.rateMultiplier,
+      groupIds, sourceProxyId: parsed.proxyId ?? defaults.sourceProxyId,
       unitCostCny: parsed.unitCostCny, planType, confirm: parsed.confirm });
   }
   if (group === "accounts" && action === "lifecycle") {
@@ -990,7 +1054,9 @@ export async function runCli(args: string[]): Promise<void> {
       refreshIntervalMinutes: config.monitor.refreshIntervalMinutes, recentCallLimit: config.monitor.recentCallLimit,
       automaticCreditEnabled: config.lottery.automaticCredit.enabled, valuesPrinted: false,
     }, parsed.json);
-    if (parsed.command[0] === "bugteam") return emit(await bugTeamCommand(parsed, config), parsed.json);
+    if (parsed.command[0] === "bugteam" && !["purchase-import", "cost-monitor"].includes(parsed.command[1] ?? "")) {
+      return emit(await bugTeamCommand(parsed, config), parsed.json);
+    }
     if (parsed.command.join(" ") === "scores aggregate-smoke") return emit(aggregateSmoke(), parsed.json);
     if (parsed.command[0] === "native") {
       const action = parsed.command[1];

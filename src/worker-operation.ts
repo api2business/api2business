@@ -7,6 +7,7 @@ import type { OperationsService } from "./operations-service";
 import type { TemporalGateway } from "./temporal-client";
 import type { UpstreamManagementService } from "./upstream-management";
 import type { UpstreamUsageResult } from "./upstream-usage";
+import type { BugTeamPurchaseImportService } from "./bugteam-purchase-import-service";
 
 export interface WorkerOperationServices {
   dispatcher: ApplicationDispatcher;
@@ -16,6 +17,7 @@ export interface WorkerOperationServices {
   lifecycle: AccountLifecycleService;
   upstreams: UpstreamManagementService;
   temporal: TemporalGateway | null;
+  purchases: BugTeamPurchaseImportService;
 }
 
 export function createWorkerOperationExecutor(services: WorkerOperationServices) {
@@ -33,6 +35,16 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
     if (command.kind === "upstream.usage.sample") return await sampleUpstreamUsage();
     if (command.kind === "pool.quality.sample") return await services.operations.samplePoolQuality();
     if (command.kind === "bugteam.cost.sample") return await services.operations.sampleBugTeamCost();
+    if (command.kind === "upstream.apikey.cutoff") {
+      if (command.phase === "disable") return await services.upstreams.beginApiKeyCutoff(command);
+      if (command.phase === "guard") return await services.upstreams.guardApiKeyCutoff();
+      if (command.phase === "restore") return await services.upstreams.restoreApiKeyCutoff(command.accountIds ?? [], command);
+      throw new Error("API Key cutoff start phase must be handled by workflow");
+    }
+    if (command.kind === "bugteam.purchase.import") {
+      const job = await services.purchases.runWorker(command.jobId);
+      return { ok: true, jobId: job.id, state: job.state, valuesPrinted: false };
+    }
     if (command.kind === "upstream.quota.sample") {
       const [oauth, usage, quality] = await Promise.allSettled([
         services.operations.sampleOAuthRuntime(), sampleUpstreamUsage(), services.operations.samplePoolQuality(),
@@ -67,11 +79,22 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
     if (command.kind === "account.import") {
       const job = await services.imports.runWorker(command.jobId);
       let postImportOAuthSample: Record<string, unknown> | null = null;
+      let postImportApiKeyCutoff: Record<string, unknown> | null = null;
       if (job.state === "succeeded" && services.temporal) {
         try { postImportOAuthSample = await services.temporal.submit({ kind: "oauth.runtime.sample" }); }
         catch (error) { postImportOAuthSample = { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+        if (job.source.platform === "openai" && job.source.accountType === "oauth") {
+          try {
+            postImportApiKeyCutoff = await services.temporal.submit({
+              kind: "upstream.apikey.cutoff", phase: "start", operationId: crypto.randomUUID(), durationSeconds: 120,
+              trigger: job.settings?.cutoffTrigger ?? "account-import",
+            });
+          } catch (error) {
+            postImportApiKeyCutoff = { ok: false, error: error instanceof Error ? error.message : String(error) };
+          }
+        }
       }
-      return { ok: true, jobId: job.id, state: job.state, postImportOAuthSample, valuesPrinted: false };
+      return { ok: true, jobId: job.id, state: job.state, postImportOAuthSample, postImportApiKeyCutoff, valuesPrinted: false };
     }
     if (command.kind === "account.lifecycle.detect") {
       const job = await services.lifecycle.runDetectWorker(command.jobId);
@@ -132,6 +155,7 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
       }
       else if (pending.action === "update") result = await services.upstreams.update(pending.input.id, pending.input);
       else if (pending.action === "recharge") result = await services.upstreams.recharge(pending.input.id, pending.input);
+      else if (pending.action === "recover") result = await services.upstreams.recover(pending.input.accountIds);
       else if (pending.action === "isolation") result = await services.upstreams.ensureProbeIsolation(pending.input.accountIds);
       else if (pending.action === "template") result = await services.upstreams.applyTemplate(pending.input.accountIds);
       else {

@@ -12,6 +12,8 @@ import { SingleConnectionSub2ApiReadExecutor } from "./sub2api-read-executor";
 import { UpstreamManagementService } from "./upstream-management";
 import { createWorkerOperationExecutor } from "./worker-operation";
 import { ProbeIsolationService } from "./probe-isolation";
+import { BugTeamClient } from "./bugteam-client";
+import { BugTeamPurchaseImportService } from "./bugteam-purchase-import-service";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -45,24 +47,32 @@ const operations = new OperationsService(
   probeIsolation,
 );
 const imports = new AccountImportService(config, reads, temporal, null, context.runtime);
+const purchases = new BugTeamPurchaseImportService(config, temporal);
 const lifecycle = new AccountLifecycleService(config, reads, temporal, null, context.runtime);
 const upstreams = new UpstreamManagementService(config, reads, temporal, context.runtime, probeIsolation);
 const workerImports = new AccountImportService(config, reads, null, {
   get: async (id) => imports.workerGet(id),
   patch: async (id, patch) => { imports.applyWorkerPatch(id, patch); },
 }, context.runtime);
+const workerPurchases = new BugTeamPurchaseImportService(config, null, {
+  get: async (id) => purchases.workerGet(id),
+  patch: async (id, patch) => { purchases.applyWorkerPatch(id, patch); },
+}, new BugTeamClient(config), {
+  submit: async (input) => await imports.submit(input as never),
+  get: async (id) => imports.get(id),
+});
 const workerLifecycle = new AccountLifecycleService(config, reads, null, {
   get: async (id) => lifecycle.workerGet(id),
   patch: async (id, patch) => { lifecycle.applyWorkerPatch(id, patch); },
 }, context.runtime);
 const executeWorkerOperation = createWorkerOperationExecutor({
   dispatcher, scores: context.monitor, operations, imports: workerImports,
-  lifecycle: workerLifecycle, upstreams, temporal,
+  lifecycle: workerLifecycle, upstreams, temporal, purchases: workerPurchases,
 });
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, purchases, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation),
 });
 
 console.log(JSON.stringify({

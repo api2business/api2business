@@ -25,7 +25,6 @@ export function validateFailoverRules(rules: FailoverRule[]): void {
   if (!Array.isArray(rules) || rules.length === 0) {
     throw new Error("failover rules must be a non-empty array");
   }
-  const seen = new Set<string>();
   for (const [index, rule] of rules.entries()) {
     if (!Number.isSafeInteger(rule.error_code) || rule.error_code < 100 || rule.error_code > 599) {
       throw new Error(`failover rule ${index + 1} has an invalid error code`);
@@ -39,9 +38,6 @@ export function validateFailoverRules(rules: FailoverRule[]): void {
     for (const keyword of rule.keywords) {
       const normalized = String(keyword).trim().toLowerCase();
       if (!normalized) throw new Error(`failover rule ${index + 1} contains an empty keyword`);
-      const duplicateKey = `${rule.error_code}:${normalized}`;
-      if (seen.has(duplicateKey)) throw new Error(`duplicate failover keyword: ${rule.error_code}/${keyword}`);
-      seen.add(duplicateKey);
       if (forbiddenFailoverKeywordFragments.some((fragment) => normalized.includes(fragment))) {
         throw new Error(`unsupported model must not trigger account failover: ${JSON.stringify(keyword)}`);
       }

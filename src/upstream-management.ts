@@ -3,6 +3,8 @@ import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { TemporalGateway } from "./temporal-client";
 import type { ProbeIsolationService } from "./probe-isolation";
+import { dirname, join } from "node:path";
+import { readApiKeyCutoffEvents, recordApiKeyCutoffEvent, type ApiKeyCutoffTrigger } from "./api-key-cutoff-ledger";
 import {
   queryUpstreamUsageConcurrently,
   type UpstreamUsageResult,
@@ -89,6 +91,7 @@ export type UpstreamWorkerOperation =
   | { action: "create"; input: UpstreamCreateInput }
   | { action: "update"; input: { id: number; suffix?: string; rateCnyPerApiUsd?: number } }
   | { action: "recharge"; input: { id: number; amountCny: number; operationId: string; description?: string } }
+  | { action: "recover"; input: { accountIds: number[] } }
   | { action: "isolation"; input: { accountIds: number[] } }
   | { action: "template"; input: { accountIds: number[] } }
   | { action: "usage"; input: { accountIds: number[] } };
@@ -379,6 +382,14 @@ export class UpstreamManagementService {
     return readUpstreamRechargeCosts(this.config.operations.upstreamRechargeLedgerPath);
   }
 
+  private apiKeyCutoffLedgerPath(): string {
+    return join(dirname(this.config.operations.accountImportLedgerPath), "api-key-cutoff-events.jsonl");
+  }
+
+  apiKeyCutoffHistory() {
+    return readApiKeyCutoffEvents(this.apiKeyCutoffLedgerPath(), 100);
+  }
+
   private async recordRecharge(input: {
     operationId: string;
     account: UpstreamAccount;
@@ -393,7 +404,7 @@ export class UpstreamManagementService {
       accountName: input.account.name,
       baseUrl: input.account.baseUrl,
       suffix: input.account.suffix ?? "unknown",
-      rateCnyPerApiUsd: input.account.rateCnyPerApiUsd ?? 0.0,
+      rateCnyPerApiUsd: input.account.rateCnyPerApiUsd,
       amountCny: input.amountCny,
       description: input.description,
     }));
@@ -561,6 +572,22 @@ export class UpstreamManagementService {
     return await this.submitOperation(idempotency, { action: "usage", input: { accountIds: ids } });
   }
 
+  async submitRecovery(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds.map(Number))].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !positiveInteger(id))) throw new Error("上游恢复需要至少一个有效账号 ID");
+    const idempotency = operationId(operationIdValue, "upstream-recover");
+    return await this.submitOperation(idempotency, { action: "recover", input: { accountIds: ids } });
+  }
+
+  async recover(accountIds: number[]): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !positiveInteger(id))) throw new Error("上游恢复需要至少一个有效账号 ID");
+    if (!this.runtime) throw new UpstreamManagementError("Api2Business Sub2API runtime mutation service 不可用", 503, { operation: "recovery" });
+    await this.runtime.recoverAccounts(ids, this.config.operations.upstreamManagement.mutationTimeoutMs);
+    const accounts = await Promise.all(ids.map((id) => this.accountQuery(id)));
+    return { ok: true, operation: "recover", recoveredAccountIds: ids, accounts: accounts.filter(Boolean), recovered: ids.length };
+  }
+
   async submitTemplate(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
     const ids = [...new Set(accountIds.map(Number))];
     if (ids.some((id) => !positiveInteger(id))) throw new Error("上游账号 ID 无效");
@@ -589,6 +616,98 @@ export class UpstreamManagementService {
 
   configuredUnprobedFallbackRate(): number {
     return this.config.operations.upstreamManagement.unprobedFallbackRateCnyPerApiUsd;
+  }
+
+  async availableOAuthAccountCount(): Promise<number> {
+    const query = await this.reads.query<Row>({
+      key: "oauth-api-key-cutoff-oauth-availability",
+      kind: "oauth-api-key-cutoff-oauth-availability",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: "SELECT COUNT(*)::int AS available_count FROM accounts WHERE deleted_at IS NULL AND LOWER(type) = 'oauth' AND status = 'active' AND COALESCE(schedulable, false) = true",
+      parameters: [],
+    });
+    return Math.max(0, Number(query.rows[0]?.available_count ?? 0));
+  }
+
+  async assertOAuthAvailableForApiKeyCutoff(): Promise<number> {
+    const availableCount = await this.availableOAuthAccountCount();
+    if (availableCount < 1) throw new UpstreamManagementError("OAuth 池没有可用账号，已拒绝切断 API Key", 409, { availableOAuthCount: availableCount });
+    return availableCount;
+  }
+
+  async guardApiKeyCutoff(): Promise<Record<string, unknown>> {
+    const availableOAuthCount = await this.availableOAuthAccountCount();
+    return { ok: true, availableOAuthCount, shouldRestore: availableOAuthCount < 1, valuesRedacted: true };
+  }
+
+  async beginApiKeyCutoff(context: { operationId: string; durationSeconds: number; trigger?: ApiKeyCutoffTrigger }): Promise<Record<string, unknown>> {
+    if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
+    const availableOAuthCount = await this.assertOAuthAvailableForApiKeyCutoff();
+    const query = await this.reads.query<Row>({
+      key: "oauth-api-key-cutoff-targets",
+      kind: "oauth-api-key-cutoff-targets",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: `SELECT id FROM accounts
+        WHERE deleted_at IS NULL AND LOWER(platform) = 'openai' AND LOWER(type) = 'apikey'
+          AND COALESCE(schedulable, false) = true
+        ORDER BY id`,
+      parameters: [],
+    });
+    const accountIds = query.rows.map((row) => positiveInteger(row.id)).filter((id): id is number => id !== null);
+    if (accountIds.length) await this.runtime.setSchedulableAccounts(accountIds, false, this.config.operations.upstreamManagement.mutationTimeoutMs);
+    const verify = accountIds.length ? await this.reads.query<Row>({
+      key: `oauth-api-key-cutoff-verify:${accountIds.join(",")}`,
+      kind: "oauth-api-key-cutoff-verify",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: "SELECT id FROM accounts WHERE deleted_at IS NULL AND id = ANY(string_to_array($1::text, $2::text)::bigint[]) AND COALESCE(schedulable, false) = false",
+      parameters: [accountIds.join(","), ","],
+    }) : null;
+    const verified = (verify?.rows ?? []).map((row) => positiveInteger(row.id)).filter((id): id is number => id !== null);
+    if (verified.length !== accountIds.length) throw new Error(`API Key 上游关闭回读不一致：${verified.length}/${accountIds.length}`);
+    recordApiKeyCutoffEvent(this.apiKeyCutoffLedgerPath(), {
+      id: `${context.operationId}:cutoff`, operationId: context.operationId,
+      occurredAt: new Date().toISOString(), action: "cutoff",
+      beforeCount: accountIds.length, afterCount: 0,
+      trigger: context.trigger ?? "manual", durationSeconds: context.durationSeconds,
+      result: "success",
+    });
+    return { ok: true, accountIds, disabledCount: accountIds.length, verifiedCount: verified.length, availableOAuthCount, valuesRedacted: true };
+  }
+
+  async restoreApiKeyCutoff(accountIds: number[], context: { operationId: string; durationSeconds: number; trigger?: ApiKeyCutoffTrigger; restoreReason?: string }): Promise<Record<string, unknown>> {
+    if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
+    const requested = [...new Set(accountIds)].filter(positiveInteger).sort((left, right) => left - right);
+    if (requested.length === 0) {
+      recordApiKeyCutoffEvent(this.apiKeyCutoffLedgerPath(), {
+        id: `${context.operationId}:restore`, operationId: context.operationId,
+        occurredAt: new Date().toISOString(), action: "restore",
+        beforeCount: 0, afterCount: 0, trigger: context.trigger ?? "manual",
+        durationSeconds: context.durationSeconds, restoreReason: context.restoreReason,
+        result: "success",
+      });
+      return { ok: true, accountIds: [], restoredCount: 0, skippedCount: 0, valuesRedacted: true };
+    }
+    const query = await this.reads.query<Row>({
+      key: `oauth-api-key-cutoff-restore-targets:${requested.join(",")}`,
+      kind: "oauth-api-key-cutoff-restore-targets",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: "SELECT id FROM accounts WHERE deleted_at IS NULL AND id = ANY(string_to_array($1::text, $2::text)::bigint[]) AND LOWER(platform) = 'openai' AND LOWER(type) = 'apikey' AND COALESCE(schedulable, false) = false",
+      parameters: [requested.join(","), ","],
+    });
+    const targets = query.rows.map((row) => positiveInteger(row.id)).filter((id): id is number => id !== null);
+    if (targets.length) await this.runtime.setSchedulableAccounts(targets, true, this.config.operations.upstreamManagement.mutationTimeoutMs);
+    recordApiKeyCutoffEvent(this.apiKeyCutoffLedgerPath(), {
+      id: `${context.operationId}:restore`, operationId: context.operationId,
+      occurredAt: new Date().toISOString(), action: "restore",
+      beforeCount: 0, afterCount: targets.length,
+      trigger: context.trigger ?? "manual", durationSeconds: context.durationSeconds,
+      restoreReason: context.restoreReason, result: "success",
+    });
+    return { ok: true, accountIds: targets, restoredCount: targets.length, skippedCount: requested.length - targets.length, valuesRedacted: true };
   }
 
   async workflowStatus(id: string): Promise<Record<string, unknown>> {
@@ -653,7 +772,7 @@ export class UpstreamManagementService {
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
           AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
-          AND RTRIM(a.credentials->>'base_url', '/') = RTRIM($1::text, '/')
+          AND regexp_replace(RTRIM(a.credentials->>'base_url', '/'), '/v1$', '') = $1::text
         GROUP BY a.id
         ORDER BY a.id`,
       parameters: [normalizeUpstreamWallet(baseUrl)],

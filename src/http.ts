@@ -4,6 +4,7 @@ import type { ApplicationDispatcher } from "./dispatcher";
 import type { OperationsService } from "./operations-service";
 import type { AccountLifecycleService, LifecycleJobPatch, LifecycleRequest } from "./account-lifecycle-service";
 import type { AccountImportService, ImportJobPatch, AccountImportRequest } from "./account-import-service";
+import type { BugTeamPurchaseImportService, BugTeamPurchaseJobPatch, BugTeamPurchaseRequest } from "./bugteam-purchase-import-service";
 import { UpstreamManagementError, type UpstreamManagementService } from "./upstream-management";
 import type { AppCommand, OperationRequest } from "./contracts";
 import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
@@ -124,6 +125,7 @@ export function createHandler(
   secureCookies: boolean,
   operations: OperationsService,
   imports: AccountImportService,
+  purchases: BugTeamPurchaseImportService,
   lifecycle: AccountLifecycleService,
   upstreams: UpstreamManagementService,
   reads: Sub2ApiReadClient,
@@ -271,12 +273,51 @@ export function createHandler(
         }
         return json(await operations.oauthRuntimeSummary(profile));
       }
+      if (request.method === "POST" && url.pathname === "/api/oauth/runtime-sample") {
+        return json(await dispatcher.submit({ kind: "oauth.runtime.sample" }), 202);
+      }
+      if (request.method === "GET" && /^\/api\/oauth\/runtime-sample\/[^/]+$/u.test(url.pathname)) {
+        const workflowId = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(await dispatcher.workflowStatus(workflowId));
+      }
       if (request.method === "GET" && url.pathname === "/api/bugteam/cost-monitor") {
         const hours = positiveInteger(url.searchParams.get("hours"), 6);
         if (hours === null || ![6, 24].includes(hours)) {
           return json({ ok: false, error: "hours must be 6 or 24" }, 400);
         }
         return json(await operations.bugTeamCostSummary(hours));
+      }
+      if (request.method === "POST" && url.pathname === "/api/oauth/api-key-cutoff") {
+        const input = await body(request);
+        const durationSeconds = input.durationSeconds === undefined ? 120 : Number(input.durationSeconds);
+        if (!Number.isInteger(durationSeconds) || durationSeconds < 30 || durationSeconds > 3600) {
+          return json({ ok: false, error: "durationSeconds must be an integer from 30 to 3600" }, 400);
+        }
+        const availableOAuthCount = await upstreams.assertOAuthAvailableForApiKeyCutoff();
+        const startedAt = new Date().toISOString();
+        const submitted = await dispatcher.submit({ kind: "upstream.apikey.cutoff", phase: "start", operationId: crypto.randomUUID(), durationSeconds, trigger: "manual" });
+        return json({ ...submitted, startedAt, durationSeconds, availableOAuthCount }, 202);
+      }
+      if (request.method === "GET" && url.pathname === "/api/oauth/api-key-cutoff/history") {
+        return json({ ok: true, events: upstreams.apiKeyCutoffHistory(), valuesPrinted: false });
+      }
+      if (request.method === "POST" && url.pathname === "/api/oauth/api-key-cutoff/restore") {
+        return json(await dispatcher.signalRunningApiKeyCutoffsRestore(), 202);
+      }
+      if (request.method === "GET" && /^\/api\/oauth\/api-key-cutoff\/[^/]+$/u.test(url.pathname)) {
+        const workflowId = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(await dispatcher.workflowStatus(workflowId));
+      }
+      if (request.method === "POST" && /^\/api\/oauth\/api-key-cutoff\/[^/]+\/restore$/u.test(url.pathname)) {
+        const workflowId = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(await dispatcher.signalApiKeyCutoffRestore(workflowId), 202);
+      }
+      if (request.method === "POST" && url.pathname === "/api/bugteam/cost-monitor/sample") {
+        return json(await dispatcher.submit({ kind: "bugteam.cost.sample" }), 202);
+      }
+      if (request.method === "GET" && /^\/api\/bugteam\/cost-monitor\/jobs\/[^/]+$/u.test(url.pathname)) {
+        const workflowId = decodeURIComponent(url.pathname.split("/")[5]!);
+        return json(await dispatcher.workflowStatus(workflowId));
       }
       if (request.method === "POST" && url.pathname === "/api/upstreams/usage-cache/restore") {
         try { return json(await operations.restoreUpstreamUsageSuccess(await body(request))); }
@@ -361,7 +402,29 @@ export function createHandler(
           description: typeof input.description === "string" ? input.description : undefined,
         }));
       }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/recover") {
+        const input = await body(request);
+        try {
+          const accountIds = normalizeAccountIds(input.accountIds);
+          return json(await upstreams.submitRecovery(accountIds, typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key")), 202);
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
       if (request.method === "GET" && url.pathname === "/api/account-import/options") return json(imports.options());
+      if (request.method === "GET" && url.pathname === "/api/bugteam/purchase/options") return json(purchases.options());
+      if (request.method === "POST" && url.pathname === "/api/bugteam/purchase/jobs") {
+        try {
+          return json({ ok: true, job: await purchases.submit(await body(request) as unknown as BugTeamPurchaseRequest) }, 202);
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
+      if (request.method === "GET" && /^\/api\/bugteam\/purchase\/jobs\/[^/]+$/u.test(url.pathname)) {
+        const id = decodeURIComponent(url.pathname.split("/")[5]!);
+        const job = purchases.get(id);
+        return job ? json({ ok: true, job }) : json({ ok: false, error: "购买作业不存在" }, 404);
+      }
       if (request.method === "POST" && url.pathname === "/api/account-import/preview") {
         const input = await body(request);
         if (typeof input.content !== "string" || (input.inputFormat !== "json" && input.inputFormat !== "zip")) {
@@ -376,9 +439,10 @@ export function createHandler(
           || (input.perAccountProxy !== undefined && typeof input.perAccountProxy !== "boolean")
           || (input.inputFormat !== undefined && input.inputFormat !== "json" && input.inputFormat !== "zip")
           || (input.planType !== "k12" && input.planType !== "plus" && input.planType !== "team" && input.planType !== "free")
+          || (input.rateMultiplier !== undefined && (!Number.isInteger(input.rateMultiplier) || input.rateMultiplier < 1 || input.rateMultiplier > 1000000))
           || !Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0
           || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
-          return json({ ok: false, error: "导入参数无效：账号类型只允许 k12、plus、team 或 free，账号单价须为正数人民币且最多两位小数" }, 400);
+          return json({ ok: false, error: "导入参数无效：账号类型、账号单价或负载因子无效" }, 400);
         }
         return json({ ok: true, job: await imports.submit(input) }, 202);
       }
@@ -457,6 +521,17 @@ export function createHandler(
         const id = decodeURIComponent(url.pathname.split("/")[4]!);
         const job = imports.workerGet(id);
         return job ? json({ ok: true, job, valuesPrinted: false }) : json({ ok: false, error: "导入作业不存在" }, 404);
+      }
+      if (request.method === "GET" && /^\/api\/internal\/bugteam-purchase-jobs\/[^/]+$/u.test(url.pathname)) {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        const job = purchases.workerGet(id);
+        return job ? json({ ok: true, job, valuesPrinted: false }) : json({ ok: false, error: "购买作业不存在" }, 404);
+      }
+      if (request.method === "POST" && /^\/api\/internal\/bugteam-purchase-jobs\/[^/]+$/u.test(url.pathname)) {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const id = decodeURIComponent(url.pathname.split("/")[4]!);
+        return json(purchases.applyWorkerPatch(id, await body(request) as BugTeamPurchaseJobPatch));
       }
       if (request.method === "POST" && /^\/api\/internal\/account-import-jobs\/[^/]+$/u.test(url.pathname)) {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);

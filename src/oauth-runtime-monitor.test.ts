@@ -46,6 +46,53 @@ test("calculates adjacent-sample and one-hour rolling speeds on the same timelin
   expect(history[2]?.rollingApiAmountUsdPerHour).toBeCloseTo(90);
 });
 
+test("folds burst samples into the configured sampling interval instead of hourly spike amplification", () => {
+  const base: OAuthRuntimeSample = {
+    sampledAt: "2026-08-02T01:00:00Z", profile: "codex", apiAmountUsdTotal: 80,
+    expectedApiAmountUsd: 160, remainingExpectedApiAmountUsd: 80,
+    accountCount: 4, normalCount: 4, rateLimitedCount: 0, errorCount: 0,
+  };
+  const history = oauthRuntimeHistory([
+    base,
+    { ...base, sampledAt: "2026-08-02T01:05:00Z", apiAmountUsdTotal: 90 },
+    { ...base, sampledAt: "2026-08-02T01:05:10Z", apiAmountUsdTotal: 91 },
+    { ...base, sampledAt: "2026-08-02T01:05:20Z", apiAmountUsdTotal: 92 },
+  ], 1, 8, 300);
+  expect(history[1]?.sampleApiAmountUsdPerHour).toBeCloseTo(120);
+  expect(history[2]?.sampleApiAmountUsdPerHour).toBeCloseTo(127.742, 3);
+  expect(history[3]?.sampleApiAmountUsdPerHour).toBeCloseTo(135, 3);
+  expect(history[3]?.rollingApiAmountUsdPerHour).toBeCloseTo(135, 3);
+});
+
+test("leaves burst speed unknown until a full configured sampling interval exists", () => {
+  const base: OAuthRuntimeSample = {
+    sampledAt: "2026-08-02T01:00:00Z", profile: "codex", apiAmountUsdTotal: 80,
+    expectedApiAmountUsd: 160, remainingExpectedApiAmountUsd: 80,
+    accountCount: 4, normalCount: 4, rateLimitedCount: 0, errorCount: 0,
+  };
+  const history = oauthRuntimeHistory([
+    base,
+    { ...base, sampledAt: "2026-08-02T01:00:10Z", apiAmountUsdTotal: 81 },
+  ], 1, 8, 300);
+  expect(history[1]?.sampleApiAmountUsdPerHour).toBeNull();
+  expect(history[1]?.rollingApiAmountUsdPerHour).toBeCloseTo(360);
+});
+
+test("falls back to a stable rolling rate immediately after the pool baseline changes", () => {
+  const base: OAuthRuntimeSample = {
+    sampledAt: "2026-08-02T01:00:00Z", profile: "codex", apiAmountUsdTotal: 80,
+    expectedApiAmountUsd: 160, remainingExpectedApiAmountUsd: 80,
+    accountCount: 4, normalCount: 4, rateLimitedCount: 0, errorCount: 0,
+  };
+  const history = oauthRuntimeHistory([
+    base,
+    { ...base, sampledAt: "2026-08-02T01:05:00Z", apiAmountUsdTotal: 90 },
+    { ...base, sampledAt: "2026-08-02T01:05:10Z", apiAmountUsdTotal: 90, accountCount: 5 },
+  ], 1, 8, 300);
+  expect(history[2]?.sampleApiAmountUsdPerHour).toBeCloseTo(120);
+  expect(history[2]?.rollingApiAmountUsdPerHour).toBeCloseTo(120);
+});
+
 test("clamps a cumulative output rollback to zero sample speed", () => {
   const base: OAuthRuntimeSample = {
     sampledAt: "2026-08-02T01:00:00Z", profile: "codex", apiAmountUsdTotal: 80,

@@ -79,6 +79,7 @@ export class Sub2ApiRuntimeService {
     importTimeoutMs: number;
     priority: number;
     capacity: number;
+    rateMultiplier?: number;
     groupIds: number[];
     proxyId: number;
     proxyCandidateIds: number[];
@@ -95,6 +96,7 @@ export class Sub2ApiRuntimeService {
       throw new Error("runtime import requires exactly one supported account platform");
     }
     const platform = [...platforms][0]!;
+    const rateMultiplier = input.rateMultiplier ?? 1;
     const requestKey = runtimeImportIdempotencyKey(input.operationKey, { payload, ...input, content: undefined, operationKey: undefined });
     const createdIds: number[] = [];
     const updatedIds: number[] = [];
@@ -109,6 +111,7 @@ export class Sub2ApiRuntimeService {
         type: "oauth",
         priority: input.priority,
         concurrency: input.capacity,
+        rate_multiplier: rateMultiplier,
         proxy_id: input.proxyId,
         group_ids: input.groupIds,
         confirm_mixed_channel_risk: true,
@@ -135,6 +138,7 @@ export class Sub2ApiRuntimeService {
         credentials: this.apiKeyCredentials(account.credentials),
         priority: input.priority,
         concurrency: input.capacity,
+        rate_multiplier: rateMultiplier,
         proxy_id: input.proxyId,
         group_ids: input.groupIds,
       }));
@@ -163,6 +167,7 @@ export class Sub2ApiRuntimeService {
           },
           priority: input.priority,
           concurrency: input.capacity,
+          rate_multiplier: rateMultiplier,
           proxy_id: input.proxyId,
           group_ids: input.groupIds,
           confirm_mixed_channel_risk: true,
@@ -190,6 +195,7 @@ export class Sub2ApiRuntimeService {
         group_ids: input.groupIds,
         proxy_id: input.proxyId,
         concurrency: input.capacity,
+        rate_multiplier: rateMultiplier,
         priority: input.priority,
         auto_pause_on_expired: accounts.every((account) => account.auto_pause_on_expired !== false),
         update_existing: true,
@@ -266,6 +272,21 @@ export class Sub2ApiRuntimeService {
       throw new Error(`Sub2API bulk API-key configuration updated ${success}/${ids.length}, failed ${failed}`);
     }
     return { accountIds: ids, configured: success, result };
+  }
+
+  async setSchedulableAccounts(accountIds: number[], schedulable: boolean, timeoutMs?: number): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+      throw new Error("bulk schedulable update requires stable positive account IDs");
+    }
+    const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update", {
+      account_ids: ids,
+      schedulable,
+    }, undefined, timeoutMs);
+    const failed = Number(result.failed ?? 0);
+    const success = Number(result.success ?? ids.length);
+    if (failed > 0 || success !== ids.length) throw new Error(`Sub2API bulk schedulable update updated ${success}/${ids.length}, failed ${failed}`);
+    return { accountIds: ids, schedulable, configured: success, result };
   }
 
   async updateAccount(accountId: number, patch: Row, timeoutMs?: number): Promise<unknown> {

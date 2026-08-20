@@ -15,12 +15,14 @@ export interface AccountImportRequest {
   inputFormat?: "json" | "zip";
   priority: number;
   capacity: number;
+  rateMultiplier?: number;
   groupIds: number[];
   sourceProxyId: number;
   perAccountProxy?: boolean;
   unitCostCny: number;
   planType: OAuthPlanType;
   platform?: "openai" | "grok";
+  cutoffTrigger?: "account-import" | "bugteam-import";
   confirm: boolean;
 }
 
@@ -29,7 +31,7 @@ export interface ImportJob {
   id: string; state: "queued" | "running" | "succeeded" | "failed"; createdAt: string;
   completedAt: string | null; fingerprint: string; accountCount: number; settings: Omit<AccountImportRequest, "content">;
   inputArchive: { stored: true; fileName: string };
-  source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number; platform: "openai" | "grok" };
+  source: { format: "json" | "zip"; jsonFileCount: number; duplicateAccountCount: number; platform: "openai" | "grok"; accountType: "oauth" | "apikey" };
   logs: ImportLog[]; result: Record<string, unknown> | null; accounting: Record<string, unknown> | null; error: string | null;
   workflow?: { workflowId: string; runId: string; state: "submitted" };
 }
@@ -54,6 +56,7 @@ function validate(input: AccountImportRequest): void {
   }
   if (!Number.isInteger(input.priority) || input.priority < 1 || input.priority > 1000) throw new Error("优先级必须为 1 至 1000");
   if (!Number.isInteger(input.capacity) || input.capacity < 1 || input.capacity > 100000) throw new Error("容量必须为正整数");
+  if (input.rateMultiplier !== undefined && (!Number.isInteger(input.rateMultiplier) || input.rateMultiplier < 1 || input.rateMultiplier > 1000000)) throw new Error("负载因子必须为 1 至 1000000 的整数");
   if (!Array.isArray(input.groupIds) || input.groupIds.length === 0 || input.groupIds.some((id) => !Number.isInteger(id) || id < 1)) throw new Error("至少选择一个有效分组");
   if (!Number.isInteger(input.sourceProxyId) || input.sourceProxyId < 3) throw new Error("代理池基准 ID 必须是不小于 3 的正整数");
   if (input.perAccountProxy !== undefined && typeof input.perAccountProxy !== "boolean") throw new Error("逐账号代理选项必须是布尔值");
@@ -151,6 +154,7 @@ export class AccountImportService {
     const selectedPlatform = input.platform ?? parsed.platform;
     const normalizedInput: AccountImportRequest = {
       ...input,
+      rateMultiplier: input.rateMultiplier ?? this.config.operations.accountImportDefaults.rateMultiplier,
       platform: selectedPlatform,
       planType: selectedPlatform === "grok" ? "free" : input.planType,
       groupIds: selectedPlatform === "grok" && input.groupIds.length === 2
@@ -163,7 +167,7 @@ export class AccountImportService {
     const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, selectedContent);
     const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null,
       accountCount: parsed.accountCount, fingerprint: parsed.fingerprint, source: { ...parsed.source, platform: selectedPlatform },
-      settings: { priority: normalizedInput.priority, capacity: normalizedInput.capacity, groupIds: [...new Set(normalizedInput.groupIds)], sourceProxyId: normalizedInput.sourceProxyId, perAccountProxy: normalizedInput.perAccountProxy, unitCostCny: normalizedInput.unitCostCny, planType: normalizedInput.planType, platform: normalizedInput.platform, confirm: normalizedInput.confirm },
+      settings: { priority: normalizedInput.priority, capacity: normalizedInput.capacity, rateMultiplier: normalizedInput.rateMultiplier, groupIds: [...new Set(normalizedInput.groupIds)], sourceProxyId: normalizedInput.sourceProxyId, perAccountProxy: normalizedInput.perAccountProxy, unitCostCny: normalizedInput.unitCostCny, planType: normalizedInput.planType, platform: normalizedInput.platform, confirm: normalizedInput.confirm },
       inputArchive: { stored: true, fileName: archiveFileName },
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);
@@ -292,6 +296,7 @@ export class AccountImportService {
           importTimeoutMs: this.config.operations.accountImportDefaults.importTimeoutMs,
           priority: job.settings.priority,
           capacity: job.settings.capacity,
+          rateMultiplier: job.settings.rateMultiplier ?? this.config.operations.accountImportDefaults.rateMultiplier,
           groupIds: job.settings.groupIds,
           proxyId: plan.initialProxyId,
           proxyCandidateIds: plan.proxyCandidateIds,

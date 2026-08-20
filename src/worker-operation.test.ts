@@ -88,3 +88,49 @@ test("worker executor persists automation failure deferral before retry", async 
   await expect(execute({ operationId: "automation-1", command: { kind: "priority.automation.run" } })).rejects.toThrow("dispatch failed");
   expect(deferred).toBe(1);
 });
+
+test("successful OpenAI OAuth imports submit an independent 120 second API Key cutoff", async () => {
+  const submitted: Array<Record<string, unknown>> = [];
+  const execute = createWorkerOperationExecutor({
+    imports: {
+      runWorker: async () => ({
+        id: "import-1",
+        state: "succeeded",
+        source: { platform: "openai", accountType: "oauth" },
+      }),
+    },
+    temporal: { submit: async (command: Record<string, unknown>) => {
+      submitted.push(command);
+      return { ok: true, workflowId: `workflow-${submitted.length}`, runId: `run-${submitted.length}`, state: "submitted" };
+    } },
+  } as never);
+
+  const result = await execute({ operationId: "operation-1", command: { kind: "account.import", jobId: "import-1" } }) as Record<string, unknown>;
+
+  expect(submitted).toEqual([
+    { kind: "oauth.runtime.sample" },
+    expect.objectContaining({ kind: "upstream.apikey.cutoff", phase: "start", durationSeconds: 120 }),
+  ]);
+  expect(result.postImportApiKeyCutoff).toEqual(expect.objectContaining({ workflowId: "workflow-2" }));
+});
+
+test("API Key imports do not trigger the OAuth post-import cutoff", async () => {
+  const submitted: Array<Record<string, unknown>> = [];
+  const execute = createWorkerOperationExecutor({
+    imports: {
+      runWorker: async () => ({
+        id: "import-2",
+        state: "succeeded",
+        source: { platform: "openai", accountType: "apikey" },
+      }),
+    },
+    temporal: { submit: async (command: Record<string, unknown>) => {
+      submitted.push(command);
+      return { ok: true, workflowId: "workflow-1", runId: "run-1", state: "submitted" };
+    } },
+  } as never);
+
+  await execute({ operationId: "operation-2", command: { kind: "account.import", jobId: "import-2" } });
+
+  expect(submitted).toEqual([{ kind: "oauth.runtime.sample" }]);
+});

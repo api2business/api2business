@@ -9,6 +9,7 @@ interface AccountRow extends Record<string, unknown> {
   access_token_sha256: unknown;
   priority: unknown;
   concurrency: unknown;
+  rate_multiplier: unknown;
   proxy_id: unknown;
   proxy_name: unknown;
   group_ids: unknown;
@@ -25,6 +26,7 @@ export interface AccountImportPreflightSettings {
   platform: "openai" | "grok";
   priority: number;
   capacity: number;
+  rateMultiplier?: number;
   groupIds: number[];
   sourceProxyId: number;
   perAccountProxy?: boolean;
@@ -80,7 +82,8 @@ function groupIds(value: unknown): number[] {
 function baseAligned(row: AccountRow, settings: AccountImportPreflightSettings): boolean {
   const id = integer(row.id);
   const groups = new Set(groupIds(row.group_ids));
-  if (id === null || integer(row.priority) !== settings.priority || integer(row.concurrency) !== settings.capacity) return false;
+  if (id === null || integer(row.priority) !== settings.priority || integer(row.concurrency) !== settings.capacity
+    || (settings.rateMultiplier !== undefined && Number(row.rate_multiplier) !== settings.rateMultiplier)) return false;
   if (settings.groupIds.some((groupId) => !groups.has(groupId))) return false;
   return true;
 }
@@ -107,6 +110,7 @@ export async function accountImportPreflight(
   const normalizedSettings = {
     priority: settings.priority,
     capacity: settings.capacity,
+    rateMultiplier: settings.rateMultiplier,
     groupIds: [...new Set(settings.groupIds)].sort((a, b) => a - b),
     sourceProxyId: settings.sourceProxyId,
     perAccountProxy: settings.perAccountProxy === true,
@@ -134,6 +138,7 @@ export async function accountImportPreflight(
         COALESCE(a.extra->>'access_token_sha256', '') AS access_token_sha256,
         a.priority,
         a.concurrency,
+        a.rate_multiplier,
         a.proxy_id,
         COALESCE(p.name, '') AS proxy_name,
         COALESCE(LOWER(a.credentials->>'plan_type'), '') AS plan_type,
@@ -152,11 +157,11 @@ export async function accountImportPreflight(
       )
       SELECT 'account'::text AS row_kind,
         account.id, account.user_id, account.access_token_sha256,
-        account.priority, account.concurrency, account.proxy_id, account.proxy_name, account.plan_type, account.group_ids
+        account.priority, account.concurrency, account.rate_multiplier, account.proxy_id, account.proxy_name, account.plan_type, account.group_ids
       FROM matched_accounts account
       UNION ALL
       SELECT 'proxy'::text AS row_kind,
-        proxy.id, ''::text, ''::text, NULL::int, NULL::int, NULL::bigint, ''::text, ''::text, '{}'::bigint[]
+        proxy.id, ''::text, ''::text, NULL::int, NULL::int, NULL::numeric, NULL::bigint, ''::text, ''::text, '{}'::bigint[]
       FROM matching_proxies proxy
       ORDER BY row_kind, id
     `,

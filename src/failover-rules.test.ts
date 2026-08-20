@@ -29,6 +29,13 @@ test("preserves the legacy upstream wrapper phrase", () => {
     .not.toThrow();
 });
 
+test("allows duplicate keywords accepted by the Sub2API native template", () => {
+  expect(() => validateFailoverRules([
+    rule(502, ["upstream service temporarily unavailable"]),
+    rule(502, ["upstream service temporarily unavailable"]),
+  ])).not.toThrow();
+});
+
 test("keeps model capacity and billing/authentication matches explicit", () => {
   expect(() => validateFailoverRules([
     rule(429, ["selected model is at capacity", "concurrency limit exceeded for account"]),

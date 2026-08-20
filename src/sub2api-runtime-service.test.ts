@@ -31,11 +31,11 @@ test("keeps OpenAI OAuth on the codex-session import endpoint", async () => {
     operationKey: "openai-import-test",
     importTimeoutMs: 120000,
     content: JSON.stringify({ accounts: [{ name: "codex-a", platform: "openai", type: "oauth", credentials: { access_token: "token" } }] }),
-    priority: 1, capacity: 16, groupIds: [2, 3], proxyId: 14, proxyCandidateIds: [14], perAccountProxy: false,
+    priority: 1, capacity: 16, rateMultiplier: 1000, groupIds: [2, 3], proxyId: 14, proxyCandidateIds: [14], perAccountProxy: false,
   });
   expect(calls).toEqual([expect.objectContaining({
     path: "/admin/accounts/import/codex-session",
-    body: expect.objectContaining({ update_existing: true }),
+    body: expect.objectContaining({ update_existing: true, rate_multiplier: 1000 }),
     timeoutMs: 120000,
   })]);
 });

@@ -229,7 +229,7 @@ test("recharge recovery covers every API-key account in the normalized wallet", 
 test("wallet recovery query filters the normalized wallet in SQL", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   const wallet = source.slice(source.indexOf("  private async walletAccounts("), source.indexOf("  private async resolveCreatedAccount("));
-  expect(wallet).toContain("RTRIM(a.credentials->>'base_url', '/') = RTRIM($1::text, '/')");
+  expect(wallet).toContain("regexp_replace(RTRIM(a.credentials->>'base_url', '/'), '/v1$', '') = $1::text");
   expect(wallet).toContain("parameters: [normalizeUpstreamWallet(baseUrl)]");
 });
 

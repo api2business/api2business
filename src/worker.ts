@@ -21,6 +21,8 @@ import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { ProbeIsolationService } from "./probe-isolation";
 import { idleProbeScheduleFreshness } from "./idle-probe-schedule-watchdog";
 import { scoreScheduleFreshness } from "./score-schedule-watchdog";
+import { BugTeamClient } from "./bugteam-client";
+import { BugTeamPurchaseImportService, type BugTeamPurchaseJob } from "./bugteam-purchase-import-service";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -56,6 +58,25 @@ const accountImports = new AccountImportService(config, remoteReads, null, {
     await internal.updateAccountImportWorkerJob(id, patch as Record<string, unknown>);
   },
 }, runtime);
+const bugTeamPurchases = new BugTeamPurchaseImportService(config, null, {
+  get: async (id): Promise<BugTeamPurchaseJob | null> => {
+    const response = await internal.bugTeamPurchaseWorkerJob(id);
+    return response.job && typeof response.job === "object" ? response.job as BugTeamPurchaseJob : null;
+  },
+  patch: async (id, patch): Promise<void> => {
+    await internal.updateBugTeamPurchaseWorkerJob(id, patch as Record<string, unknown>);
+  },
+}, new BugTeamClient(config), {
+  submit: async (input): Promise<ImportJob> => {
+    const response = await internal.accountImport(input);
+    if (!response.job || typeof response.job !== "object") throw new Error("账号导入 API 未返回作业");
+    return response.job as ImportJob;
+  },
+  get: async (id): Promise<ImportJob | null> => {
+    const response = await internal.accountImportStatus(id);
+    return response.job && typeof response.job === "object" ? response.job as ImportJob : null;
+  },
+});
 const accountLifecycle = new AccountLifecycleService(config, remoteReads, null, {
   get: async (id): Promise<LifecycleJob | null> => {
     const response = await internal.accountLifecycleWorkerJob(id);
@@ -93,6 +114,15 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
   if (command.kind === "upstream.usage.sample") return await sampleUpstreamUsage();
   if (command.kind === "pool.quality.sample") return await operations.samplePoolQuality();
   if (command.kind === "bugteam.cost.sample") return await operations.sampleBugTeamCost();
+  if (command.kind === "upstream.apikey.cutoff") {
+    if (command.phase === "disable") return await upstreams.beginApiKeyCutoff(command);
+    if (command.phase === "guard") return await upstreams.guardApiKeyCutoff();
+    if (command.phase === "restore") return await upstreams.restoreApiKeyCutoff(command.accountIds ?? [], command);
+  }
+  if (command.kind === "bugteam.purchase.import") {
+    const job = await bugTeamPurchases.runWorker(command.jobId);
+    return { ok: true, jobId: job.id, state: job.state, valuesPrinted: false };
+  }
   if (command.kind === "upstream.quota.sample") {
     const [oauth, usage, quality] = await Promise.allSettled([
       operations.sampleOAuthRuntime(),
@@ -138,6 +168,7 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
   if (command.kind === "account.import") {
     const job = await accountImports.runWorker(command.jobId);
     let postImportOAuthSample: Record<string, unknown> | null = null;
+    let postImportApiKeyCutoff: Record<string, unknown> | null = null;
     if (job.state === "succeeded" && temporalGateway) {
       try {
         postImportOAuthSample = await temporalGateway.submit({ kind: "oauth.runtime.sample" });
@@ -147,8 +178,18 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
           error: error instanceof Error ? error.message : String(error),
         };
       }
+      if (job.source.platform === "openai" && job.source.accountType === "oauth") {
+        try {
+          postImportApiKeyCutoff = await temporalGateway.submit({
+            kind: "upstream.apikey.cutoff", phase: "start", operationId: crypto.randomUUID(), durationSeconds: 120,
+            trigger: job.settings?.cutoffTrigger ?? "account-import",
+          });
+        } catch (error) {
+          postImportApiKeyCutoff = { ok: false, error: error instanceof Error ? error.message : String(error) };
+        }
+      }
     }
-    return { ok: true, jobId: job.id, state: job.state, postImportOAuthSample, valuesPrinted: false };
+    return { ok: true, jobId: job.id, state: job.state, postImportOAuthSample, postImportApiKeyCutoff, valuesPrinted: false };
   }
   if (command.kind === "account.lifecycle.detect") {
     const job = await accountLifecycle.runDetectWorker(command.jobId);
@@ -214,6 +255,7 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
       }
     } else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
     else if (pending.action === "recharge") result = await upstreams.recharge(pending.input.id, pending.input);
+    else if (pending.action === "recover") result = await upstreams.recover(pending.input.accountIds);
     else if (pending.action === "isolation") result = await upstreams.ensureProbeIsolation(pending.input.accountIds);
     else if (pending.action === "template") result = await upstreams.applyTemplate(pending.input.accountIds);
     else {

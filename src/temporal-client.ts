@@ -67,16 +67,21 @@ export class TemporalGateway {
     const operation: OperationRequest = { operationId: randomUUID(), command };
     let handle;
     try {
+      const purchase = command.kind === "bugteam.purchase.import";
+      const cutoff = command.kind === "upstream.apikey.cutoff";
+      const workflowExecutionTimeout = cutoff
+        ? `${command.durationSeconds + 300}s`
+        : purchase ? "2h" : this.config.temporal.workflowExecutionTimeout;
       handle = await this.connection.withDeadline(
         Date.now() + this.config.temporal.submissionTimeoutMs,
-        async () => await this.client.workflow.start("operationWorkflowV2", {
+        async () => await this.client.workflow.start(cutoff ? "apiKeyCutoffWorkflow" : "operationWorkflowV2", {
           taskQueue: this.runtime.taskQueue,
           workflowId: `api2business-${command.kind.replaceAll(".", "-")}-${operation.operationId}`,
-          workflowExecutionTimeout: this.config.temporal.workflowExecutionTimeout,
+          workflowExecutionTimeout,
           args: [{
             operation,
-            activityStartToCloseTimeout: this.config.temporal.activityStartToCloseTimeout,
-            maximumAttempts: this.config.temporal.retry.maximumAttempts,
+            activityStartToCloseTimeout: cutoff ? this.config.temporal.activityStartToCloseTimeout : purchase ? "2h" : this.config.temporal.activityStartToCloseTimeout,
+            maximumAttempts: cutoff || purchase ? 1 : this.config.temporal.retry.maximumAttempts,
           }],
         }),
       );
@@ -98,6 +103,22 @@ export class TemporalGateway {
       try { await handle.result(); } catch (caught) { error = caught instanceof Error ? caught.message : String(caught); }
     }
     return { ok: state === "completed" || !terminal, workflowId, runId: description.runId, state, terminal, result, error };
+  }
+
+  async signalApiKeyCutoffRestore(workflowId: string): Promise<Record<string, unknown>> {
+    await this.client.workflow.getHandle(workflowId).signal("restore-now");
+    return { ok: true, workflowId, signaled: true };
+  }
+
+  async signalRunningApiKeyCutoffsRestore(): Promise<Record<string, unknown>> {
+    const workflowIds: string[] = [];
+    for await (const execution of this.client.workflow.list({
+      query: 'WorkflowType = "apiKeyCutoffWorkflow" AND ExecutionStatus = "Running"',
+    })) workflowIds.push(execution.workflowId);
+    await Promise.all(workflowIds.map(async (workflowId) => {
+      await this.client.workflow.getHandle(workflowId).signal("restore-now");
+    }));
+    return { ok: true, workflowIds, signaledCount: workflowIds.length };
   }
 
   async ensureScoreSchedule(): Promise<{ started: boolean; workflowId: string }> {

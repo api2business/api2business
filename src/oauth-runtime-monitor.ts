@@ -106,19 +106,41 @@ export function summarizeOAuthRuntimeSamples(samples: OAuthRuntimeSample[], wind
   };
 }
 
-export function oauthRuntimeHistory(samples: OAuthRuntimeSample[], windowHours = 1, displayHours = 8) {
+function sampleRateAt(
+  ordered: OAuthRuntimeSample[],
+  index: number,
+  minimumIntervalSeconds: number,
+): number | null {
+  const current = ordered[index];
+  if (!current || index === 0) return null;
+  const currentAt = Date.parse(current.sampledAt);
+  const minimumIntervalMs = Math.max(1, minimumIntervalSeconds) * 1000;
+  for (let baselineIndex = index - 1; baselineIndex >= 0; baselineIndex -= 1) {
+    const baseline = ordered[baselineIndex]!;
+    if (baseline.accountCount !== current.accountCount) break;
+    const elapsedMs = currentAt - Date.parse(baseline.sampledAt);
+    if (elapsedMs <= 0) continue;
+    if (elapsedMs < minimumIntervalMs) continue;
+    return Math.max(0, current.apiAmountUsdTotal - baseline.apiAmountUsdTotal) / (elapsedMs / 3_600_000);
+  }
+  return null;
+}
+
+export function oauthRuntimeHistory(
+  samples: OAuthRuntimeSample[],
+  windowHours = 1,
+  displayHours = 8,
+  minimumSampleIntervalSeconds = 300,
+) {
   const ordered = [...samples].sort((left, right) => Date.parse(left.sampledAt) - Date.parse(right.sampledAt));
   const history = ordered.map((sample, index) => {
-    const previous = ordered[index - 1];
-    const sampleElapsedHours = previous
-      ? (Date.parse(sample.sampledAt) - Date.parse(previous.sampledAt)) / 3_600_000
-      : 0;
-    const sampleApiAmountUsdPerHour = previous && sampleElapsedHours > 0
-      ? Math.max(0, sample.apiAmountUsdTotal - previous.apiAmountUsdTotal) / sampleElapsedHours
-      : null;
     const cutoff = Date.parse(sample.sampledAt) - windowHours * 3_600_000;
     const prior = ordered.slice(0, index + 1).filter((row) => Date.parse(row.sampledAt) >= cutoff);
     const summary = summarizeOAuthRuntimeSamples(prior, windowHours);
+    const directSampleRate = sampleRateAt(ordered, index, minimumSampleIntervalSeconds);
+    const minimumIntervalHours = Math.max(1, minimumSampleIntervalSeconds) / 3600;
+    const sampleApiAmountUsdPerHour = directSampleRate
+      ?? (summary.burnWindowHours >= minimumIntervalHours ? summary.apiAmountUsdPerHour : null);
     return {
       sampledAt: sample.sampledAt,
       apiAmountUsdTotal: sample.apiAmountUsdTotal,

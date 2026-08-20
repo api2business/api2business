@@ -62,10 +62,13 @@ export class BugTeamClient {
   inventory(product: string, quantity: number): Promise<Json> {
     return this.request(`/api/customer/inventory?product=${encodeURIComponent(product)}&quantity=${quantity}`);
   }
-  createOrder(product: string, quantity: number, idempotencyKey: string): Promise<Json> {
+  inventoryShelves(product: string): Promise<Json> {
+    return this.request(`/api/customer/inventory/shelves?product=${encodeURIComponent(product)}`);
+  }
+  createOrder(product: string, quantity: number, idempotencyKey: string, expiryBucketStart?: string): Promise<Json> {
     return this.request("/api/customer/pickup/orders", {
       method: "POST", headers: { "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ product, quantity }),
+      body: JSON.stringify({ product, quantity, ...(expiryBucketStart ? { expiry_bucket_start: expiryBucketStart } : {}) }),
     }, Math.max(this.timeoutMs, 120000));
   }
   orderStatus(orderId: string): Promise<Json> { return this.request(`/api/customer/pickup/orders/${encodeURIComponent(orderId)}`); }

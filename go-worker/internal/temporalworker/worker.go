@@ -272,6 +272,7 @@ func Run(ctx context.Context, cfg Config) error {
 	defer c.Close()
 	w := worker.New(c, cfg.TaskQueue, worker.Options{})
 	w.RegisterWorkflowWithOptions(OperationWorkflow, workflow.RegisterOptions{Name: "operationWorkflowV2"})
+	w.RegisterWorkflowWithOptions(ApiKeyCutoffWorkflow, workflow.RegisterOptions{Name: "apiKeyCutoffWorkflow"})
 	w.RegisterWorkflowWithOptions(ScoreRefreshScheduleWorkflow, workflow.RegisterOptions{Name: "scoreRefreshScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(UpstreamQuotaScheduleWorkflow, workflow.RegisterOptions{Name: "upstreamQuotaScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(IdleAccountProbeScheduleWorkflow, workflow.RegisterOptions{Name: "idleAccountProbeScheduleWorkflow"})

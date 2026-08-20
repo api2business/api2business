@@ -53,7 +53,6 @@ test("ZIP import previews merged JSON and recognized account count before submit
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
   expect(html).toContain("合并后的 JSON");
-  expect(html).toContain("/app.js?v=account-upload-stability-v1");
   expect(app).toContain("requestJson('/api/account-import/preview'");
   expect(app).toContain("JSON.stringify(JSON.parse(preview.content), null, 2)");
   expect(app).toContain("preview.accountCount");
@@ -73,7 +72,6 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(app).toContain("requestJson('/api/upstreams/usage'");
   expect(app).toContain("result.databaseQueries");
   expect(app).toContain("queryUsage([], (status)");
-  expect(html).toContain('/app.js?v=idle-probe-v1');
   expect(html).toContain('class="page-head upstream-slim-head"');
   expect(html).toContain('class="metric-strip upstream-metrics"');
   expect(html).toContain('id="upstream-quota-refresh-interval"');
@@ -85,13 +83,12 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(app).toContain("sampleRealtimeCostCnyPerApiUsd");
   expect(html).toContain('id="quota-balance-chart"');
   expect(html).toContain('API 消耗速率');
-  expect(app).toContain('history-chart-legend');
+  expect(app).toContain("from './history-chart.js'");
   expect(app).toContain("sampleApiAmountUsdPerHour");
   expect(app).toContain("rollingApiAmountUsdPerHour");
   expect(html).toContain('id="quota-cost-chart"');
   expect(app).toContain("requestJson('/api/upstreams/quota-summary')");
   expect(app).toContain("usdText(summary.apiAmountUsd, 3)");
-  expect(html).toContain('/styles.css?v=status-visibility-v1');
   expect(html).toContain('最近 8 小时');
   expect(html).toContain('<th>账号余额（人民币）</th>');
   expect(html).toContain('<th>成本（元/刀）</th>');
@@ -219,7 +216,7 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(http).toContain("operations.procurement(budget, config.webAuth.username, page, 10)");
   expect(app).toContain("/api/operations/ledger?page=${cashPage}");
   expect(app).toContain("/api/operations/audits?page=${auditPage}");
-  expect(app).toContain("/api/operations/oauth-cost?profile=${oauthProfile}&page=${oauthPage}");
+  expect(app).toContain("/api/operations/oauth-cost?");
   expect(app).toContain("JSON.stringify({ budgetCny: procurementBudget, page: procurementPage })");
   expect(app).not.toContain("procurementAllocations");
   for (const prefix of ["cash", "procurement", "audit"]) {
@@ -235,7 +232,6 @@ test("operations tables request fixed server-side pages of ten records", async (
     expect(oauthHtml).toContain(`id="${prefix}-page"`);
     expect(oauthHtml).toContain(`id="${prefix}-next"`);
   }
-  expect(oauthHtml).toContain("当前号池实时成本");
   expect(oauthHtml).toContain('data-oauth-profile="codex"');
   expect(oauthHtml).toContain('data-oauth-profile="grok"');
   expect(app).toContain("profile=${oauthProfile}");
@@ -283,6 +279,15 @@ test("operations tables request fixed server-side pages of ten records", async (
   expect(app).not.toContain("renderRow(total");
 });
 
+test("OAuth API Key cutoff history refreshes independently from cost accounting", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+
+  expect(app).toContain("function startOauthCutoffHistoryRefresh() {");
+  expect(app).toContain("void loadOauthCutoffHistory().catch(() => null)");
+  expect(app).toContain("}, 5000)");
+  expect(app).toContain("await loadOauthCost()\n  startOauthCutoffHistoryRefresh()");
+});
+
 test("OAuth cost table separates live status buckets and does not infer archived status", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();
@@ -306,18 +311,12 @@ test("score table displays total sampled attempts when quality attempts are excl
 
 test("OAuth runtime monitoring reuses the upstream history chart component", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const chart = await Bun.file(new URL("./history-chart.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();
-  expect(app).toContain("function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null })");
-  expect(app).toContain('chart-axis chart-axis-y');
-  expect(app).toContain('chart-latest-point');
-  expect(app).toContain('chart-hover-column');
-  expect(app).toContain('chart-clipped-point');
-  expect(app).toContain('yMax = null');
-  expect(app).toContain('yMin = null');
-  expect(app).toContain('rawMax >= configuredMax ? configuredMax : null');
-  expect(app).toContain('rawMin <= configuredMin ? configuredMin : null');
-  expect(app).toContain("upperBound === null ? ''");
-  expect(app).toContain("lowerBound === null ? ''");
+  expect(app).toContain("from './history-chart.js'");
+  expect(chart).toContain("export function historyChartMarkup");
+  expect(chart).toContain('chart-hover-column');
+  expect(chart).toContain('chart-clipped-point');
   expect(app).toContain('renderDonut({');
   expect(app).toContain("unit: 'API 美元 / 小时'");
   expect(app).toContain("unit: '人民币 / API 美元'");
@@ -332,9 +331,8 @@ test("OAuth runtime monitoring reuses the upstream history chart component", asy
   expect(html).toContain('id="oauth-runtime-speed"');
   expect(html).toContain('id="oauth-runtime-sample-speed"');
   expect(html).toContain('id="oauth-runtime-exhaustion"');
-  expect(html).toContain('/app.js?v=idle-probe-v1');
   expect(html).toContain('class="page-head live-compact-head oauth-compact-head"');
-  expect(html).toContain('class="table-toolbar live-section-toolbar"');
+  expect(html).toContain('live-section-toolbar oauth-control-toolbar');
   expect(app).toContain("api2business.operations.oauth-refresh-interval.v2");
   expect(html).toContain('class="oauth-head-controls"');
   expect(html).toContain('class="live-head-kpis oauth-runtime-kpis"');

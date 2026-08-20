@@ -548,13 +548,28 @@ export class OperationsService {
       rateLimitedCount: Number(row.rate_limited_count),
       errorCount: Number(row.error_count),
     }));
+    const apiKeyCount = await this.reads.query<{ schedulable_count: number }>({
+      key: "oauth-api-key-schedulable-count",
+      kind: "oauth-api-key-schedulable-count",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: "SELECT COUNT(*)::int AS schedulable_count FROM accounts WHERE deleted_at IS NULL AND LOWER(platform) = 'openai' AND LOWER(type) = 'apikey' AND COALESCE(schedulable, false) = true",
+      parameters: [],
+    });
     return {
       ok: true,
       profile,
       windowHours: calculationWindowHours,
       displayHours,
+      sampleIntervalSeconds: this.config.operations.upstreamManagement.quotaSampleIntervalSeconds,
       ...summarizeOAuthRuntimeSamples(samples, calculationWindowHours),
-      history: oauthRuntimeHistory(samples, calculationWindowHours, displayHours),
+      history: oauthRuntimeHistory(
+        samples,
+        calculationWindowHours,
+        displayHours,
+        this.config.operations.upstreamManagement.quotaSampleIntervalSeconds,
+      ),
+      apiKeySchedulableCount: Number(apiKeyCount.rows[0]?.schedulable_count ?? 0),
       valuesPrinted: false,
     };
   }

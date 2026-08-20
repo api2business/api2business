@@ -36,3 +36,10 @@ test("reusing an upstream recharge idempotency key for another amount is rejecte
   recordUpstreamRechargeCost(input(path));
   expect(() => recordUpstreamRechargeCost({ ...input(path), amountCny: 50 })).toThrow("幂等键已用于其他账号或金额");
 });
+
+test("upstream recharge ledger accepts accounts without an API USD rate", () => {
+  const directory = mkdtempSync(join(tmpdir(), "api2business-upstream-ledger-no-rate-"));
+  const path = join(directory, "ledger", "upstream.jsonl");
+  recordUpstreamRechargeCost({ ...input(path), rateCnyPerApiUsd: null });
+  expect(readUpstreamRechargeCosts(path)[0]?.rateCnyPerApiUsd).toBeNull();
+});

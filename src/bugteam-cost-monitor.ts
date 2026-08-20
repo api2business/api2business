@@ -1,6 +1,7 @@
 import type { AppConfig } from "./config";
 import type { OperationsStore } from "./operations-store";
 import { BugTeamClient } from "./bugteam-client";
+import { selectLowestBugTeamShelf } from "./bugteam-pricing";
 
 export interface BugTeamCostSample {
   sampledAt: string;
@@ -19,39 +20,51 @@ export interface BugTeamCostSample {
   errorSummary: string | null;
 }
 
-function finiteNumber(value: unknown, field: string, minimum = 0): number {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < minimum) throw new Error(`BugTeam inventory field ${field} is invalid`);
-  return number;
-}
-
 export function projectBugTeamCostSample(
-  inventory: Record<string, unknown>,
+  shelves: Record<string, unknown>,
+  pricing: Record<string, unknown>,
   config: AppConfig["bugTeam"]["monitor"],
   sampledAt = new Date().toISOString(),
 ): BugTeamCostSample {
-  const available = finiteNumber(inventory.available, "available");
-  if (!Number.isInteger(available)) throw new Error("BugTeam inventory field available is invalid");
-  if (available === 0) return {
-    sampledAt, product: config.product, status: "empty", available,
+  const selected = selectLowestBugTeamShelf(shelves, pricing, 1);
+  if (!selected) return {
+    sampledAt, product: config.product, status: "empty", available: 0,
     unitPriceCny: null, minimumUnitPriceCny: null, maximumUnitPriceCny: null,
     minimumRemainingSeconds: null, maximumRemainingSeconds: null,
     expectedCostCnyPerApiUsd: null, minimumExpectedCostCnyPerApiUsd: null,
     maximumExpectedCostCnyPerApiUsd: null, fillRateApiUsdPerHour: null, errorSummary: null,
   };
-  const estimatedUnitPriceFen = finiteNumber(inventory.estimated_unit_price_fen, "estimated_unit_price_fen");
-  const minimumRemainingSeconds = finiteNumber(inventory.minimum_remaining_seconds, "minimum_remaining_seconds", 1);
-  const unitPriceCny = estimatedUnitPriceFen / 100;
+  const unitPriceCny = selected.unitPriceFen / 100;
   const expectedCostCnyPerApiUsd = unitPriceCny / config.expectedOutputApiUsd;
   return {
-    sampledAt, product: config.product, status: "ok", available, unitPriceCny,
+    sampledAt, product: config.product, status: "ok", available: selected.available, unitPriceCny,
     minimumUnitPriceCny: unitPriceCny, maximumUnitPriceCny: unitPriceCny,
-    minimumRemainingSeconds, maximumRemainingSeconds: minimumRemainingSeconds,
+    minimumRemainingSeconds: selected.remainingSeconds, maximumRemainingSeconds: selected.remainingSeconds,
     expectedCostCnyPerApiUsd,
     minimumExpectedCostCnyPerApiUsd: expectedCostCnyPerApiUsd,
     maximumExpectedCostCnyPerApiUsd: expectedCostCnyPerApiUsd,
-    fillRateApiUsdPerHour: config.expectedOutputApiUsd * 3600 / minimumRemainingSeconds,
+    fillRateApiUsdPerHour: config.expectedOutputApiUsd * 3600 / selected.remainingSeconds,
     errorSummary: null,
+  };
+}
+
+export function repriceRetainedBugTeamCostSample(
+  previous: BugTeamCostSample,
+  config: AppConfig["bugTeam"]["monitor"],
+): Pick<BugTeamCostSample,
+  "expectedCostCnyPerApiUsd" | "minimumExpectedCostCnyPerApiUsd"
+  | "maximumExpectedCostCnyPerApiUsd" | "fillRateApiUsdPerHour"> {
+  const expectedCost = (unitPriceCny: number | null) => unitPriceCny == null
+    ? null
+    : unitPriceCny / config.expectedOutputApiUsd;
+  const remainingSeconds = previous.minimumRemainingSeconds ?? previous.maximumRemainingSeconds;
+  return {
+    expectedCostCnyPerApiUsd: expectedCost(previous.unitPriceCny),
+    minimumExpectedCostCnyPerApiUsd: expectedCost(previous.minimumUnitPriceCny),
+    maximumExpectedCostCnyPerApiUsd: expectedCost(previous.maximumUnitPriceCny),
+    fillRateApiUsdPerHour: remainingSeconds == null || remainingSeconds <= 0
+      ? null
+      : config.expectedOutputApiUsd * 3600 / remainingSeconds,
   };
 }
 
@@ -70,10 +83,11 @@ export class BugTeamCostMonitor {
     const sampledAt = new Date().toISOString();
     try {
       this.client ??= new BugTeamClient(this.config);
-      const inventory = await this.client.inventory(this.config.bugTeam.monitor.product, 1);
-      const available = finiteNumber(inventory.available, "available");
-      if (!Number.isInteger(available)) throw new Error("BugTeam inventory field available is invalid");
-      let sample = projectBugTeamCostSample(inventory, this.config.bugTeam.monitor, sampledAt);
+      const [shelves, pricing] = await Promise.all([
+        this.client.inventoryShelves(this.config.bugTeam.monitor.product),
+        this.client.inventory(this.config.bugTeam.monitor.product, 1),
+      ]);
+      let sample = projectBugTeamCostSample(shelves, pricing, this.config.bugTeam.monitor, sampledAt);
       if (sample.status === "empty") {
         const previous = await this.store.getLatestSuccessfulBugTeamCostSample(sample.product);
         if (previous) sample = {
@@ -83,10 +97,7 @@ export class BugTeamCostMonitor {
           maximumUnitPriceCny: previous.maximumUnitPriceCny,
           minimumRemainingSeconds: previous.minimumRemainingSeconds,
           maximumRemainingSeconds: previous.maximumRemainingSeconds,
-          expectedCostCnyPerApiUsd: previous.expectedCostCnyPerApiUsd,
-          minimumExpectedCostCnyPerApiUsd: previous.minimumExpectedCostCnyPerApiUsd,
-          maximumExpectedCostCnyPerApiUsd: previous.maximumExpectedCostCnyPerApiUsd,
-          fillRateApiUsdPerHour: previous.fillRateApiUsdPerHour,
+          ...repriceRetainedBugTeamCostSample(previous, this.config.bugTeam.monitor),
         };
       }
       await this.store.addBugTeamCostSample(sample);

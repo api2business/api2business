@@ -88,6 +88,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 ## 领域操作
 
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
+- 账号导入可用 `--rate-multiplier <正整数>` 调整负载因子；省略时读取
+  `operations.accountImportDefaults.rateMultiplier`，普通导入与 BugTeam 购买导入共用该字段。
 - OAuth 退役计划可用 `--plan-type` 限定账号类型：
   - 默认 `--selection dead` 选择错误账号；`free`、`plus` 和 `team` 的限流账号也按死亡处理，`k12` 限流账号保留；
   - 显式 `--selection all` 选择指定单一类型的全部当前账号，且只允许用于整池范围。
@@ -104,11 +106,15 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
 - 手工收入明细使用 `cash ledger --period YYYY-MM --over-api`，汇总使用 `profit daily`。
 - BugTeam 客户 API 使用 `bugteam` CLI 命令组，配置中的 `bugTeam.customerToken`、`customerAccount`、`customerPassword` 只能引用仓库外 Secret：
-  - 只读：`bugteam login`、`balance`、`inventory --product <id> --quantity N`、`pickup order-status --id <id>`、`recoveries list`。
+  - 只读：`bugteam login`、`balance`、`inventory --product <id> --quantity N`、`shelves --product <id>`、`pickup order-status --id <id>`、`recoveries list`。
+  - 实时成本：`bugteam cost-monitor get --over-api` 读取最新摘要，显式增加 `--include-records` 才展开 6 小时历史；`bugteam cost-monitor sample --over-api` 提交一次采样，并用返回的 workflow ID 查询原作业。
   - 订单：`pickup order-create --product <id> --quantity N [--idempotency-key <key>]`；创建必须 `--confirm`，超时不得重复下单。
   - 履约：`pickup download --id <id> --format sub2|cpa --output <path>`、`pickup push --id <id> --hub-id <id> --confirm`、`pickup take --id <id> --confirm`。
   - 401 修复：`recoveries claim --id <id> --ticket-stdin --output <path> --confirm`，Ticket 从 stdin 读取，必须复用同一 `--idempotency-key` 进行重试。
   - 余额兑换：`redeem --code-stdin --confirm`，CDK 不得出现在 argv、日志或输出中。
+  - 一键购买导入：先用 `bugteam purchase-import options --over-api` 回读默认值；
+    再用 `bugteam purchase-import create --quantity N --confirm --over-api` 提交，
+    并只用 `bugteam purchase-import status --id <job-id> --over-api` 跟踪原作业。
   - 下载和领取只输出路径、字节数、SHA256 与版本摘要，绝不输出账号 JSON、Token 或 Ticket。
 - 错误聚合与诊断：
   - `--group` 按错误记录的实际请求分组筛选；

@@ -18,7 +18,8 @@ test("merges JSON files from ZIP and removes duplicate OAuth identities", () => 
   });
   const normalized = normalizeAccountImportInput(Buffer.from(zip).toString("base64"), "zip");
   expect(normalized.accountCount).toBe(2);
-  expect(normalized.source).toEqual({ format: "zip", jsonFileCount: 3, duplicateAccountCount: 1, platform: "openai" });
+  expect(normalized.source).toEqual({ format: "zip", jsonFileCount: 3, duplicateAccountCount: 1, platform: "openai", accountType: "oauth" });
+  expect(normalized.accountType).toBe("oauth");
   expect(normalized.platform).toBe("openai");
   expect((JSON.parse(normalized.content) as { accounts: unknown[]; proxies: unknown[] }).accounts).toHaveLength(2);
 });
@@ -31,14 +32,14 @@ test("rejects unsafe ZIP paths", () => {
 test("keeps JSON input compatible while projecting canonical content", () => {
   const normalized = normalizeAccountImportInput(payload("user-a"), "json");
   expect(normalized.accountCount).toBe(1);
-  expect(normalized.source).toEqual({ format: "json", jsonFileCount: 1, duplicateAccountCount: 0, platform: "openai" });
+  expect(normalized.source).toEqual({ format: "json", jsonFileCount: 1, duplicateAccountCount: 0, platform: "openai", accountType: "oauth" });
 });
 
 test("merges newline-delimited and array-wrapped Sub2API JSON payloads", () => {
   const ndjson = `${payload("user-a")}\n${payload("user-b")}\n${payload("user-a")}\n`;
   const normalizedNdjson = normalizeAccountImportInput(ndjson, "json");
   expect(normalizedNdjson.accountCount).toBe(2);
-  expect(normalizedNdjson.source).toEqual({ format: "json", jsonFileCount: 3, duplicateAccountCount: 1, platform: "openai" });
+  expect(normalizedNdjson.source).toEqual({ format: "json", jsonFileCount: 3, duplicateAccountCount: 1, platform: "openai", accountType: "oauth" });
 
   const normalizedArray = normalizeAccountImportInput(JSON.stringify([
     JSON.parse(payload("user-a")),

@@ -1,4 +1,4 @@
-import { continueAsNew, log, proxyActivities, sleep, workflowInfo } from "@temporalio/workflow";
+import { condition, continueAsNew, defineSignal, log, proxyActivities, setHandler, sleep, workflowInfo } from "@temporalio/workflow";
 import type { AppCommand, OperationRequest, ScheduledBugTeamCostInput, ScheduledIdleProbeInput, ScheduledScoreRefreshInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
 
 export interface Activities {
@@ -9,6 +9,8 @@ interface OperationWorkflowInput extends WorkflowOptions {
   operation: OperationRequest;
 }
 
+export const restoreNowSignal = defineSignal("restore-now");
+
 function activities(options: WorkflowOptions): Activities {
   return proxyActivities<Activities>({
     startToCloseTimeout: options.activityStartToCloseTimeout,
@@ -18,6 +20,25 @@ function activities(options: WorkflowOptions): Activities {
 
 export async function operationWorkflow(input: OperationWorkflowInput): Promise<unknown> {
   return await activities(input).executeOperation(input.operation);
+}
+
+export async function apiKeyCutoffWorkflow(input: OperationWorkflowInput): Promise<unknown> {
+  const activity = activities(input);
+  const command = input.operation.command;
+  if (command.kind !== "upstream.apikey.cutoff" || command.phase !== "start") throw new Error("API Key cutoff workflow requires a start command");
+  const disabled = await activity.executeOperation({
+    operationId: `${command.operationId}:disable`,
+    command: { ...command, phase: "disable" },
+  }) as { accountIds?: number[] };
+  const accountIds = Array.isArray(disabled.accountIds) ? disabled.accountIds : [];
+  let restoreNow = false;
+  setHandler(restoreNowSignal, () => { restoreNow = true; });
+  const completedBySignal = await condition(() => restoreNow, command.durationSeconds * 1000);
+  const restore = await activity.executeOperation({
+    operationId: `${command.operationId}:restore`,
+    command: { ...command, phase: "restore", accountIds, restoreReason: completedBySignal ? "立即恢复" : "到期自动恢复" },
+  });
+  return { ...(restore && typeof restore === "object" ? restore : {}), restoreReason: completedBySignal ? "立即恢复" : "到期自动恢复", restore };
 }
 
 export async function scoreRefreshScheduleWorkflow(input: ScheduledScoreRefreshInput): Promise<void> {

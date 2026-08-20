@@ -15,7 +15,7 @@ export interface UpstreamRechargeCostEntry {
   accountName: string;
   baseUrl: string;
   suffix: string;
-  rateCnyPerApiUsd: number;
+  rateCnyPerApiUsd: number | null;
   amountCny: number;
   description: string;
 }
@@ -33,7 +33,8 @@ function parseEntry(value: unknown, line: number): UpstreamRechargeCostEntry {
   if (row.version !== 1 || row.source !== "upstream-recharge" || row.currency !== "CNY"
     || requiredStrings.some((key) => typeof row[key] !== "string" || !(row[key] as string).trim())
     || !Number.isSafeInteger(row.accountId) || Number(row.accountId) < 1
-    || !Number.isFinite(row.rateCnyPerApiUsd) || Number(row.rateCnyPerApiUsd) <= 0
+    || (row.rateCnyPerApiUsd !== null
+      && (!Number.isFinite(row.rateCnyPerApiUsd) || Number(row.rateCnyPerApiUsd) <= 0))
     || !Number.isFinite(row.amountCny) || Number(row.amountCny) <= 0
     || Math.abs(Math.round(Number(row.amountCny) * 100) - Number(row.amountCny) * 100) > 1e-8
     || !/^\d{4}-\d{2}-\d{2}$/u.test(String(row.occurredOn))) {
@@ -41,7 +42,7 @@ function parseEntry(value: unknown, line: number): UpstreamRechargeCostEntry {
   }
   return {
     ...row,
-    rateCnyPerApiUsd: Number(row.rateCnyPerApiUsd),
+    rateCnyPerApiUsd: row.rateCnyPerApiUsd === null ? null : Number(row.rateCnyPerApiUsd),
     amountCny: money(Number(row.amountCny)),
   } as unknown as UpstreamRechargeCostEntry;
 }
@@ -73,7 +74,7 @@ export function recordUpstreamRechargeCost(input: {
   accountName: string;
   baseUrl: string;
   suffix: string;
-  rateCnyPerApiUsd: number;
+  rateCnyPerApiUsd: number | null;
   amountCny: number;
   description?: string;
 }): { currency: "CNY"; mutation: boolean; entry: UpstreamRechargeCostEntry; pathPrinted: false } {
@@ -83,7 +84,10 @@ export function recordUpstreamRechargeCost(input: {
     || Math.abs(Math.round(input.amountCny * 100) - input.amountCny * 100) > 1e-8) {
     throw new Error("充值金额必须为正数人民币且最多两位小数");
   }
-  if (!Number.isFinite(input.rateCnyPerApiUsd) || input.rateCnyPerApiUsd <= 0) throw new Error("费率必须为正数");
+  if (input.rateCnyPerApiUsd !== null
+    && (!Number.isFinite(input.rateCnyPerApiUsd) || input.rateCnyPerApiUsd <= 0)) {
+    throw new Error("费率必须为正数或留空");
+  }
   const operationId = input.operationId.trim();
   if (!operationId || operationId.length > 160 || /[\r\n]/u.test(operationId)) throw new Error("充值幂等键无效");
   const existing = readUpstreamRechargeCosts(input.path).find((entry) => entry.operationId === operationId);

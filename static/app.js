@@ -1172,6 +1172,9 @@ let oauthCurrentRemainingExpected = null
 let oauthRefreshTimer = null
 let oauthRefreshCountdownTimer = null
 let oauthRefreshDueAt = null
+let oauthCutoffCountdownTimer = null
+let oauthCutoffDueAt = null
+let oauthCutoffRunning = false
 let oauthCostLoading = false
 let procurementPage = 1
 let procurementBudget = null
@@ -1544,6 +1547,8 @@ function renderOauthForecast() {
 
 function renderOauthRuntimeSummary(summary) {
   oauthRuntimeSnapshot = summary
+  const apiKeyCount = $('#oauth-api-key-schedulable')
+  if (apiKeyCount) { apiKeyCount.textContent = number(summary.apiKeySchedulableCount); apiKeyCount.dataset.value = String(summary.apiKeySchedulableCount ?? 0) }
   $('#oauth-runtime-consumed').textContent = summary.consumedApiAmountUsd == null ? '暂不可计算' : usdText(summary.consumedApiAmountUsd, 3)
   $('#oauth-runtime-state').textContent = `${summary.sampledAt ? time(summary.sampledAt) : '尚无采样'}${summary.warning ? ` · ${summary.warning}` : ''}`
   const points = Array.isArray(summary.history) ? summary.history : []
@@ -1567,7 +1572,6 @@ function renderOauthRuntimeSummary(summary) {
 
 function renderOauthCost(data) {
   const profileLabel = data.profile === 'grok' ? 'Grok' : 'Codex'
-  $('#oauth-cost-pool-title').textContent = `${profileLabel} 当前号池实时成本`
   const pool = data.pool ?? { total: data.total ?? {}, groups: data.groups ?? [] }
   const total = pool.total ?? {}
   oauthCurrentRemainingExpected = total.remainingExpectedApiAmountUsd ?? total.remainingIdealApiAmountUsd ?? null
@@ -1794,6 +1798,7 @@ async function loadOauthCost({ automatic = false } = {}) {
   button.setAttribute('aria-busy', 'true')
   $('#oauth-cost-state').textContent = automatic ? '自动刷新中，正在通过单连接队列核算…' : '正在通过单连接队列核算…'
   try {
+    const cutoffHistoryRequest = loadOauthCutoffHistory().catch(() => null)
     const runtimeRequest = requestJson(`/api/oauth/runtime-summary?profile=${oauthProfile}`)
       .then(renderOauthRuntimeSummary)
       .catch((error) => {
@@ -1801,7 +1806,7 @@ async function loadOauthCost({ automatic = false } = {}) {
       })
     const data = await requestJson(`/api/operations/oauth-cost?profile=${oauthProfile}&page=${oauthPage}&archivedPage=${oauthArchivedPage}`, {}, 60000)
     renderOauthCost(data)
-    await runtimeRequest
+    await Promise.all([runtimeRequest, cutoffHistoryRequest])
   } catch (error) {
     $('#oauth-cost-state').textContent = `核算失败：${error instanceof Error ? error.message : String(error)}`
     throw error
@@ -1843,7 +1848,142 @@ async function operationsPage() {
   await Promise.all([loadOperations({ showCached: true }), loadProcurement()])
 }
 
+function renderOauthApiKeyCutoffCountdown() {
+  const state = $('#oauth-api-key-cutoff-state')
+  if (!state) return
+  if (oauthCutoffDueAt === null) {
+    state.textContent = '默认 2 分钟，完成后自动恢复'
+    return
+  }
+  const seconds = Math.max(0, Math.ceil((oauthCutoffDueAt - Date.now()) / 1000))
+  if (seconds === 0) {
+    state.textContent = '正在恢复 API Key 调度…'
+    return
+  }
+  const minutes = Math.floor(seconds / 60)
+  state.textContent = `API Key 已切断，${minutes}分${String(seconds % 60).padStart(2, '0')}秒后自动恢复`
+}
+
+let oauthCutoffLogs = []
+let oauthCutoffHistoryLoading = false
+let oauthCutoffHistoryTimer = null
+function readOauthCutoffLogs() { return oauthCutoffLogs }
+function saveOauthCutoffLogs(rows) { oauthCutoffLogs = rows.slice(-100) }
+function cutoffTriggerLabel(row) {
+  const source = row.trigger === 'bugteam-import' ? 'BugTeam 导入' : row.trigger === 'account-import' ? '账号导入' : '手动'
+  if (row.action === 'restore') return `${source} · ${row.restoreReason ?? '自动恢复'}`
+  return `${source} · 计划 ${number(row.durationSeconds)} 秒`
+}
+async function loadOauthCutoffHistory() {
+  if (oauthCutoffHistoryLoading) return
+  oauthCutoffHistoryLoading = true
+  try {
+    const data = await requestJson('/api/oauth/api-key-cutoff/history')
+    oauthCutoffLogs = (data.events ?? []).map((row) => ({
+      ...row,
+      trigger: cutoffTriggerLabel(row),
+      resultLabel: row.action === 'restore' ? `成功 · 恢复 ${number(row.afterCount)} 个` : '成功',
+    }))
+    renderOauthCutoffLogs()
+  } finally {
+    oauthCutoffHistoryLoading = false
+  }
+}
+function startOauthCutoffHistoryRefresh() {
+  if (oauthCutoffHistoryTimer !== null) clearInterval(oauthCutoffHistoryTimer)
+  oauthCutoffHistoryTimer = setInterval(() => {
+    void loadOauthCutoffHistory().catch(() => null)
+  }, 5000)
+}
+function renderOauthCutoffLogs() {
+  const body = $('#oauth-cutoff-log-body'); if (!body) return
+  const rows = readOauthCutoffLogs().slice().reverse()
+  body.innerHTML = rows.length ? rows.map((row) => `<tr data-result="${escapeHtml(row.result ?? 'pending')}"><td>${escapeHtml(time(row.occurredAt))}</td><td>${row.action === 'restore' ? '恢复' : '切断'}</td><td>${number(row.beforeCount)}</td><td>${number(row.afterCount)}</td><td>${escapeHtml(row.trigger ?? '—')}</td><td>${escapeHtml(row.resultLabel ?? '进行中')}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">暂无调度记录</td></tr>'
+}
+
+async function cutoffOauthApiKeys() {
+  if (oauthCutoffRunning) return
+  const button = $('#oauth-api-key-cutoff')
+  const buttonLabel = button.querySelector('span:last-child')
+  const durationSeconds = Number($('#oauth-api-key-cutoff-duration').value)
+  if (!Number.isInteger(durationSeconds) || durationSeconds < 30 || durationSeconds > 3600) {
+    $('#oauth-api-key-cutoff-state').textContent = '时长必须为 30–3600 秒'
+    return
+  }
+  oauthCutoffRunning = true
+  button.disabled = true
+  button.classList.add('is-loading')
+  try {
+    const submitted = await requestJson('/api/oauth/api-key-cutoff', { method: 'POST', body: JSON.stringify({ durationSeconds }) })
+    const cutoffLog = {
+      id: `${submitted.workflowId}:cutoff`, workflowId: submitted.workflowId,
+      occurredAt: submitted.startedAt, action: 'cutoff',
+      beforeCount: Number($('#oauth-api-key-schedulable')?.dataset.value ?? 0), afterCount: 0,
+      trigger: `手动 · 计划 ${number(durationSeconds)} 秒`, result: 'pending', resultLabel: '切断已提交',
+    }
+    const logs = readOauthCutoffLogs(); logs.push(cutoffLog); saveOauthCutoffLogs(logs); renderOauthCutoffLogs()
+    const apiKeyCount = $('#oauth-api-key-schedulable'); if (apiKeyCount) { apiKeyCount.textContent = '0'; apiKeyCount.dataset.value = '0' }
+    oauthCutoffDueAt = Date.parse(submitted.startedAt) + durationSeconds * 1000
+    $('#oauth-api-key-restore').disabled = false
+    renderOauthApiKeyCutoffCountdown()
+    button.classList.remove('is-loading')
+    if (buttonLabel) buttonLabel.textContent = 'API Key 已切断'
+    void loadOauthCost().catch(() => null)
+    if (oauthCutoffCountdownTimer !== null) clearInterval(oauthCutoffCountdownTimer)
+    oauthCutoffCountdownTimer = setInterval(renderOauthApiKeyCutoffCountdown, 1000)
+    for (;;) {
+      const status = await requestJson(`/api/oauth/api-key-cutoff/${encodeURIComponent(submitted.workflowId)}`)
+      if (status.terminal) {
+        if (status.state !== 'completed') throw new Error(status.error ?? `切断作业${status.state ?? '失败'}`)
+        if (status.result?.ok === false) throw new Error(status.result.error ?? 'API Key 恢复失败')
+        $('#oauth-api-key-cutoff-state').textContent = `已恢复 API Key 调度 · 恢复 ${status.result?.restoredCount ?? 0} 个`
+        oauthCutoffDueAt = null
+        clearInterval(oauthCutoffCountdownTimer)
+        oauthCutoffCountdownTimer = null
+        await loadOauthCost()
+        await loadOauthCutoffHistory()
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+  } catch (error) {
+    $('#oauth-api-key-cutoff-state').textContent = error instanceof Error ? error.message : String(error)
+    oauthCutoffDueAt = null
+    if (oauthCutoffCountdownTimer !== null) clearInterval(oauthCutoffCountdownTimer)
+    oauthCutoffCountdownTimer = null
+    const failedLabel = error instanceof Error ? error.message : String(error)
+    const failed = readOauthCutoffLogs().map((item) => item.result === 'pending' ? { ...item, result: 'failed', resultLabel: failedLabel } : item)
+    saveOauthCutoffLogs(failed); renderOauthCutoffLogs()
+    await loadOauthCost().catch(() => null)
+  } finally {
+    oauthCutoffRunning = false
+    $('#oauth-api-key-restore').disabled = false
+    button.disabled = false
+    button.classList.remove('is-loading')
+    if (buttonLabel) buttonLabel.textContent = '临时切断 API Key'
+  }
+}
+
+async function restoreOauthApiKeysNow() {
+  const button = $('#oauth-api-key-restore')
+  button.disabled = true
+  button.classList.add('is-loading')
+  try {
+    const result = await requestJson('/api/oauth/api-key-cutoff/restore', { method: 'POST' })
+    $('#oauth-api-key-cutoff-state').textContent = result.signaledCount > 0
+      ? `已向 ${result.signaledCount} 个切断作业发送立即恢复请求…`
+      : '当前没有运行中的 API Key 切断作业'
+  } catch (error) {
+    button.disabled = false
+    $('#oauth-api-key-cutoff-state').textContent = error instanceof Error ? error.message : String(error)
+  } finally {
+    button.classList.remove('is-loading')
+    if (!oauthCutoffRunning) button.disabled = false
+  }
+}
+
 async function oauthCostPage() {
+  renderOauthCutoffLogs()
   document.querySelectorAll('[data-oauth-profile]').forEach((button) => {
     button.addEventListener('click', async () => {
       const selected = button.dataset.oauthProfile
@@ -1876,7 +2016,22 @@ async function oauthCostPage() {
   $('#oauth-next').addEventListener('click', async () => { oauthPage += 1; await loadOauthCost() })
   $('#oauth-archived-prev').addEventListener('click', async () => { oauthArchivedPage -= 1; await loadOauthCost() })
   $('#oauth-archived-next').addEventListener('click', async () => { oauthArchivedPage += 1; await loadOauthCost() })
+  $('#oauth-api-key-cutoff').addEventListener('click', () => void cutoffOauthApiKeys())
+  $('#oauth-api-key-restore').addEventListener('click', () => void restoreOauthApiKeysNow())
+  $('#oauth-runtime-sample').addEventListener('click', async () => {
+    const button = $('#oauth-runtime-sample'); button.disabled = true; button.classList.add('is-loading')
+    try {
+      const submitted = await requestJson('/api/oauth/runtime-sample', { method: 'POST' })
+      for (;;) {
+        const status = await requestJson(`/api/oauth/runtime-sample/${encodeURIComponent(submitted.workflowId)}`)
+        if (status.terminal) { if (status.state !== 'completed') throw new Error(status.error ?? '采样失败'); await loadOauthCost(); break }
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+    } catch (error) { $('#oauth-cost-state').textContent = error instanceof Error ? error.message : String(error) }
+    finally { button.disabled = false; button.classList.remove('is-loading') }
+  })
   await loadOauthCost()
+  startOauthCutoffHistoryRefresh()
   scheduleOauthCostRefresh()
 }
 
@@ -1904,6 +2059,7 @@ async function accountImportPage() {
   const confirmButton = $('#import-confirm-submit')
   $('#import-priority').value = defaults.priority
   $('#import-capacity').value = defaults.capacity
+  $('#import-rate-multiplier').value = defaults.rateMultiplier
   $('#import-proxy').value = defaults.sourceProxyId
   $('#import-per-account-proxy').checked = defaults.perAccountProxy === true
   const planType = $('#import-plan-type')
@@ -2088,7 +2244,7 @@ async function accountImportPage() {
     const accounting = job.accounting ? ` · 已记账 ${job.accounting.recordedCount} 个 / ${cny(job.accounting.totalCostCny)}` : ''
     const source = job.source?.format === 'zip' ? `ZIP ${job.source.jsonFileCount} 个 JSON · 包内去重 ${job.source.duplicateAccountCount}` : 'JSON'
     const platform = job.source?.platform === 'grok' ? 'Grok' : 'GPT'
-    $('#import-summary').textContent = `${source} · ${platform} · ${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
+    $('#import-summary').textContent = `${source} · ${platform} · ${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · 负载因子 ${job.settings.rateMultiplier} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
     const recordedCount = Number(job.accounting?.recordedCount)
     const acquisitionCost = Number(job.accounting?.totalCostCny)
     const expectedPerAccount = Number(options.initialExpectedApiUsdPerAccount?.[job.settings.planType])
@@ -2118,9 +2274,12 @@ async function accountImportPage() {
     if (confirmDialog.open) confirmDialog.close()
     try {
       const groupIds = [...document.querySelectorAll('#import-groups input:checked')].map((input) => Number(input.value))
+      const rateMultiplier = Number($('#import-rate-multiplier').value)
+      if (!Number.isInteger(rateMultiplier) || rateMultiplier < 1 || rateMultiplier > 1000000) throw new Error('负载因子必须为 1 至 1000000 的整数')
       const response = await requestJson('/api/account-import/jobs', { method: 'POST', body: JSON.stringify({
         content: importInputFormat === 'zip' ? importContent : $('#import-json').value, inputFormat: importInputFormat,
         priority: Number($('#import-priority').value), capacity: Number($('#import-capacity').value),
+        rateMultiplier,
         groupIds, sourceProxyId: Number($('#import-proxy').value),
         perAccountProxy: $('#import-per-account-proxy').checked,
         unitCostCny: Number($('#import-unit-cost').value), planType: confirmedPlanType,

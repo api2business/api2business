@@ -17,6 +17,8 @@ export type AppCommand =
   | { kind: "upstream.usage.sample" }
   | { kind: "pool.quality.sample" }
   | { kind: "bugteam.cost.sample" }
+  | { kind: "upstream.apikey.cutoff"; phase: "start" | "disable" | "guard" | "restore"; operationId: string; durationSeconds: number; accountIds?: number[]; trigger?: "manual" | "account-import" | "bugteam-import"; restoreReason?: string }
+  | { kind: "bugteam.purchase.import"; jobId: string }
   | { kind: "oauth.runtime.sample" }
   | { kind: "upstream.benchmark"; benchmarkRunId: string; accountId: number; model: string }
   | { kind: "account.idle-probe.run"; accountIds: number[]; rounds: number }
@@ -67,6 +69,8 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "upstream.usage.sample"
     || command.kind === "pool.quality.sample"
     || command.kind === "bugteam.cost.sample"
+    || command.kind === "upstream.apikey.cutoff"
+    || command.kind === "bugteam.purchase.import"
     || command.kind === "oauth.runtime.sample"
     || command.kind === "upstream.benchmark"
     || command.kind === "account.idle-probe.run"
