@@ -1191,7 +1191,7 @@ export class UpstreamManagementService {
       ])].sort((left, right) => left - right);
       const actualGroups = [...account.groupIds].sort((left, right) => left - right);
       if (input.rateWasSpecified && account.priority === priority && account.capacity === capacity
-        && account.proxyId === settings.proxyId
+        && (account.proxyId ?? 0) === settings.proxyId
         && JSON.stringify(actualGroups) === JSON.stringify(expectedGroups)) {
         return {
           ok: true,
@@ -1248,7 +1248,7 @@ export class UpstreamManagementService {
         const actualGroupIds = [...resolvedAccount.groupIds].sort((left, right) => left - right);
         if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
         const needsRuntimeSettings = resolvedAccount.priority !== priority || resolvedAccount.capacity !== capacity
-          || resolvedAccount.proxyId !== settings.proxyId || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds);
+          || (resolvedAccount.proxyId ?? 0) !== settings.proxyId || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds);
         // Sub2API 原生批量更新同时写运行参数和切号模板，避免创建流程产生两次远程 mutation。
         await this.runtime.configureApiKeyAccounts(
           [resolvedAccountId],

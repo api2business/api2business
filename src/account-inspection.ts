@@ -88,7 +88,7 @@ export async function verifyImportedAccounts(
     if (Number(row.capacity) !== settings.capacity) reasons.push("capacity-mismatch");
     const groups = integerArray(row.groupIds);
     if (settings.groupIds.some((id) => !groups.includes(id))) reasons.push("group-mismatch");
-    if (!proxyCandidateIds.includes(Number(row.proxyId))) reasons.push(row.proxyId === null ? "proxy-unbound" : "proxy-outside-pool");
+    if (!proxyCandidateIds.includes(Number(row.proxyId ?? 0))) reasons.push(row.proxyId === null ? "proxy-unbound" : "proxy-outside-pool");
     else if (proxyOptions.sharedProxyId !== undefined && strictProxyAccountIds.has(Number(row.id))
       && Number(row.proxyId) !== proxyOptions.sharedProxyId) reasons.push("shared-proxy-mismatch");
     return { ...row, aligned: reasons.length === 0, reasons };

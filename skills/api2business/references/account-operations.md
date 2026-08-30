@@ -1,7 +1,7 @@
 # 账号操作
 
 - JSON、NDJSON、对象数组和 ZIP 导入先预检、聚合、去重和生成计划，再使用原生批量接口写入。
-- 类型、单价、分组、并发、优先级和代理策略必须在确认时再次展示。
+- 类型、单价、分组、并发、优先级和代理策略必须在确认时再次展示；默认代理策略为直连。
 - 退役和结算必须先生成计划，再显式确认；默认只退役错误账号。
 - 整池退役计划可通过 `--plan-type k12|plus|team|free|all` 限定账号类型：
   - `k12` 只选择错误状态；
@@ -13,6 +13,9 @@
     - 显式 `--selection all` 会选择指定单一类型的正常、限流和错误账号；
     - `--selection all` 只允许与 `--scope pool` 一起使用。
 - 作业终态通过排队读取核对，不以 HTTP 受理或前端成功文本代替。
+- `operations.accountImportDefaults.sourceProxyId: 0` 表示 OAuth/API-key 导入不绑定账号级
+  Proxy；Sub2API 原生批量创建时省略创建 payload 的 `proxy_id`，更新接口使用 `proxy_id: 0`
+  表示清除绑定。
 - 退役删除使用 `operations.accountLifecycle.deleteBatchSize` 分批调用 Sub2API 原生批量接口；单批超时只记录失败并继续后续批次，最终以排队回读确定剩余账号。
 - 结算账本按计划指纹幂等写入；失败作业存在 `remainingAccountIds` 时可从原计划恢复，不重复记账。
 - API 重启会丢失尚未持久化到作业控制面的 API 进程内状态；发现此情况时禁止重建计划，先用原计划日志冻结的剩余账号范围做受控批量补偿，并记录为运行面改进项。

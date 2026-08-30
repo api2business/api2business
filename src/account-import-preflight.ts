@@ -9,7 +9,7 @@ interface AccountRow extends Record<string, unknown> {
   access_token_sha256: unknown;
   priority: unknown;
   concurrency: unknown;
-  rate_multiplier: unknown;
+  load_factor: unknown;
   proxy_id: unknown;
   proxy_name: unknown;
   group_ids: unknown;
@@ -83,7 +83,9 @@ function baseAligned(row: AccountRow, settings: AccountImportPreflightSettings):
   const id = integer(row.id);
   const groups = new Set(groupIds(row.group_ids));
   if (id === null || integer(row.priority) !== settings.priority || integer(row.concurrency) !== settings.capacity
-    || (settings.rateMultiplier !== undefined && Number(row.rate_multiplier) !== settings.rateMultiplier)) return false;
+    || (settings.rateMultiplier !== undefined && Number(row.load_factor) !== settings.rateMultiplier)) return false;
+  const currentProxyId = integer(row.proxy_id) ?? 0;
+  if (settings.sourceProxyId === 0 && currentProxyId !== 0) return false;
   if (settings.groupIds.some((groupId) => !groups.has(groupId))) return false;
   return true;
 }
@@ -138,7 +140,7 @@ export async function accountImportPreflight(
         COALESCE(a.extra->>'access_token_sha256', '') AS access_token_sha256,
         a.priority,
         a.concurrency,
-        a.rate_multiplier,
+        a.load_factor,
         a.proxy_id,
         COALESCE(p.name, '') AS proxy_name,
         COALESCE(LOWER(a.credentials->>'plan_type'), '') AS plan_type,
@@ -157,7 +159,7 @@ export async function accountImportPreflight(
       )
       SELECT 'account'::text AS row_kind,
         account.id, account.user_id, account.access_token_sha256,
-        account.priority, account.concurrency, account.rate_multiplier, account.proxy_id, account.proxy_name, account.plan_type, account.group_ids
+        account.priority, account.concurrency, account.load_factor, account.proxy_id, account.proxy_name, account.plan_type, account.group_ids
       FROM matched_accounts account
       UNION ALL
       SELECT 'proxy'::text AS row_kind,
@@ -167,9 +169,11 @@ export async function accountImportPreflight(
     `,
     parameters: [userIds.join(","), accessHashes.join(","), settings.sourceProxyId, settings.platform],
   });
-  const proxyCandidateIds = result.rows.filter((row) => row.row_kind === "proxy")
-    .map((row) => integer(row.id)).filter((id): id is number => id !== null)
-    .sort((a, b) => a - b);
+  const proxyCandidateIds = settings.sourceProxyId === 0
+    ? [0]
+    : result.rows.filter((row) => row.row_kind === "proxy")
+      .map((row) => integer(row.id)).filter((id): id is number => id !== null)
+      .sort((a, b) => a - b);
   if (proxyCandidateIds.length === 0) throw new Error("代理池中没有与基准代理相同 host/port 的可用代理");
   const byUser = new Map<string, AccountRow[]>();
   const byAccess = new Map<string, AccountRow[]>();
@@ -188,7 +192,7 @@ export async function accountImportPreflight(
     const item = identities[offset]!;
     const matches = item.userId ? byUser.get(item.userId) ?? [] : byAccess.get(item.accessTokenSha256) ?? [];
     if (matches.length === 1 && credentialsAligned(matches[0]!, item) && baseAligned(matches[0]!, settings)
-      && proxyCandidateIds.includes(integer(matches[0]!.proxy_id) ?? -1)) {
+      && proxyCandidateIds.includes(integer(matches[0]!.proxy_id) ?? 0)) {
       const match = matches[0]!;
       const existing = { index: offset + 1, accountId: integer(match.id)! };
       skipped.push(existing);

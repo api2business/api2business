@@ -6,6 +6,36 @@ import type {
 
 type Row = Record<string, unknown>;
 
+const RESPONSE_EVIDENCE_LIMIT = 512;
+
+function sanitizeResponseEvidence(value: unknown): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  return raw
+    .replace(/bearer\s+[A-Za-z0-9._~+\/-]+/giu, "Bearer [redacted]")
+    .replace(/(api[_ -]?key|authorization|token|secret|password)\s*[:=]\s*[^,\s}]+/giu, "$1=[redacted]")
+    .slice(0, RESPONSE_EVIDENCE_LIMIT);
+}
+
+export function projectResponseEvidence(row: Row): Row {
+  const sources = [
+    ["upstreamErrorDetail", row.upstream_error_detail],
+    ["systemLogText", row.system_log_text],
+    ["upstreamErrorMessage", row.upstream_error_message],
+    ["errorBody", row.error_body],
+    ["errorMessage", row.error_message],
+  ] as const;
+  const source = sources.find(([, value]) => String(value ?? "").trim());
+  const summary = source ? sanitizeResponseEvidence(source[1]) : null;
+  return {
+    available: summary !== null,
+    source: source?.[0] ?? null,
+    length: source ? String(source[1] ?? "").length : 0,
+    summary,
+    truncated: summary !== null && String(source?.[1] ?? "").length > RESPONSE_EVIDENCE_LIMIT,
+  };
+}
+
 const stablePhraseSql = `
 JSONB_BUILD_OBJECT(
   'selectedModelAtCapacity', LOWER(message_text) LIKE '%selected model is at capacity%',
@@ -85,6 +115,15 @@ const projectionColumnsSql = `
   provider_error_code,
   provider_error_type,
   is_business_limited,
+  error_message,
+  error_body,
+  upstream_error_message,
+  upstream_error_detail,
+  COALESCE((
+    SELECT STRING_AGG(l.message, ' ' ORDER BY l.created_at, l.id)
+    FROM ops_system_logs l
+    WHERE l.request_id = request_id
+  ), '') AS system_log_text,
   CASE
     WHEN COALESCE(is_business_limited, false) THEN 'quota'
     WHEN LOWER(COALESCE(error_phase, '')) = 'auth' THEN 'auth'
@@ -179,6 +218,7 @@ export function projectErrorDetailRow(row: Row, timezone: string): Row {
       (integer(row.recorded_status_code) ?? 0) >= 400 ||
       String(row.error_type ?? "").toLowerCase() === "cyber_policy",
     stablePhrases: row.stable_phrases ?? {},
+    responseEvidence: projectResponseEvidence(row),
     createdAt: timestamp(row.created_at, timezone),
   };
 }

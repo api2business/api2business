@@ -58,7 +58,7 @@ function validate(input: AccountImportRequest): void {
   if (!Number.isInteger(input.capacity) || input.capacity < 1 || input.capacity > 100000) throw new Error("容量必须为正整数");
   if (input.rateMultiplier !== undefined && (!Number.isInteger(input.rateMultiplier) || input.rateMultiplier < 1 || input.rateMultiplier > 1000000)) throw new Error("负载因子必须为 1 至 1000000 的整数");
   if (!Array.isArray(input.groupIds) || input.groupIds.length === 0 || input.groupIds.some((id) => !Number.isInteger(id) || id < 1)) throw new Error("至少选择一个有效分组");
-  if (!Number.isInteger(input.sourceProxyId) || input.sourceProxyId < 3) throw new Error("代理池基准 ID 必须是不小于 3 的正整数");
+  if (!Number.isInteger(input.sourceProxyId) || input.sourceProxyId < 0) throw new Error("代理池基准 ID 必须为 0 或正整数；0 表示无代理");
   if (input.perAccountProxy !== undefined && typeof input.perAccountProxy !== "boolean") throw new Error("逐账号代理选项必须是布尔值");
   if (!Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0
     || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
@@ -264,7 +264,7 @@ export class AccountImportService {
       }
       this.log(job, "proxy", "planned", job.settings.perAccountProxy === true
         ? `代理池候选 ${plan.proxyCandidateIds.length} 个，将为每个新建账号独立随机分配`
-        : `代理池候选 ${plan.proxyCandidateIds.length} 个，整批共用 Proxy #${plan.initialProxyId}（原生批量导入）`);
+        : `代理配置为无代理，整批使用直连（原生批量导入）`);
       await this.persistWorkerJob(job);
       if (plan.sourceIndexes.length === 0) {
         job.result = completedWithoutWrites(job, plan, correctedAccountIds);
@@ -417,7 +417,7 @@ function completedWithoutWrites(job: ImportJob, plan: AccountImportPreflightPlan
     settings: {
       ...job.settings,
       assignmentMode: job.settings.perAccountProxy === true ? "per-account-random" : "batch-shared",
-      sharedProxyId: job.settings.perAccountProxy === true ? null : plan.initialProxyId,
+      sharedProxyId: job.settings.perAccountProxy === true ? null : (plan.initialProxyId === 0 ? null : plan.initialProxyId),
       proxyCandidateCount: plan.proxyCandidateIds.length,
     },
     result: {
@@ -464,7 +464,7 @@ export function recoveredImportOutput(
       failed: 0,
       failures: [],
       proxyAssignments: [],
-      sharedProxyId: job.settings.perAccountProxy === true ? null : plan.initialProxyId,
+      sharedProxyId: job.settings.perAccountProxy === true ? null : (plan.initialProxyId === 0 ? null : plan.initialProxyId),
     },
     valuesPrinted: false,
   };

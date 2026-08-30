@@ -892,7 +892,7 @@ export function loadConfig(path: string): AppConfig {
         rateMultiplier: integerValue(accountImportDefaults, "rateMultiplier", "operations.accountImportDefaults", 1, 1000000),
         importTimeoutMs: integerValue(accountImportDefaults, "importTimeoutMs", "operations.accountImportDefaults", 1000, 600000),
         groupIds: integers(accountImportDefaults, "groupIds", "operations.accountImportDefaults", 1, Number.MAX_SAFE_INTEGER),
-        sourceProxyId: integerValue(accountImportDefaults, "sourceProxyId", "operations.accountImportDefaults", 3),
+        sourceProxyId: integerValue(accountImportDefaults, "sourceProxyId", "operations.accountImportDefaults", 0),
         perAccountProxy: booleanValue(accountImportDefaults, "perAccountProxy", "operations.accountImportDefaults"),
         planType: (() => {
           const value = stringValue(accountImportDefaults, "planType", "operations.accountImportDefaults");
@@ -911,7 +911,7 @@ export function loadConfig(path: string): AppConfig {
         groupIds: upstreamGroupIds,
         priority: integerValue(upstreamManagement, "priority", "operations.upstreamManagement", 1, 1000),
         capacity: integerValue(upstreamManagement, "capacity", "operations.upstreamManagement", 1, 100000),
-        proxyId: integerValue(upstreamManagement, "proxyId", "operations.upstreamManagement", 1),
+        proxyId: integerValue(upstreamManagement, "proxyId", "operations.upstreamManagement", 0),
         createBootstrapRateCnyPerApiUsd: numberValue(
           upstreamManagement,
           "createBootstrapRateCnyPerApiUsd",

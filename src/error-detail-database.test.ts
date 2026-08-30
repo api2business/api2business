@@ -63,3 +63,16 @@ test("native error list keeps business-limited rows visible", () => {
   expect(row.category).toBe("quota");
   expect(row.customerVisible).toBeTrue();
 });
+
+test("response evidence is bounded and redacts credentials", () => {
+  const row = projectErrorDetailRow({
+    id: 1,
+    error_message: "upstream request failed",
+    upstream_error_detail: "Bearer secret-token authorization=sk-secret",
+    created_at: new Date("2026-08-21T00:00:00Z"),
+  }, "Asia/Shanghai");
+  expect(row.responseEvidence).toMatchObject({ available: true, source: "upstreamErrorDetail" });
+  expect(JSON.stringify(row.responseEvidence)).not.toContain("secret-token");
+  expect(JSON.stringify(row.responseEvidence)).not.toContain("sk-secret");
+  expect(String((row.responseEvidence as Record<string, unknown>).summary).length).toBeLessThanOrEqual(512);
+});

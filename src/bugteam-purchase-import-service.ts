@@ -83,7 +83,7 @@ function validate(input: BugTeamPurchaseRequest): void {
   if (!Number.isInteger(input.capacity) || input.capacity < 1 || input.capacity > 100000) throw new Error("容量必须为正整数");
   if (input.rateMultiplier !== undefined && (!Number.isInteger(input.rateMultiplier) || input.rateMultiplier < 1 || input.rateMultiplier > 1000000)) throw new Error("负载因子必须为 1 至 1000000 的整数");
   if (!Array.isArray(input.groupIds) || input.groupIds.length === 0 || input.groupIds.some((id) => !Number.isInteger(id) || id < 1)) throw new Error("至少选择一个有效分组");
-  if (!Number.isInteger(input.sourceProxyId) || input.sourceProxyId < 3) throw new Error("代理池基准 ID 必须不小于 3");
+  if (!Number.isInteger(input.sourceProxyId) || input.sourceProxyId < 0) throw new Error("代理池基准 ID 必须为 0 或正整数；0 表示无代理");
 }
 
 export class BugTeamPurchaseImportService {

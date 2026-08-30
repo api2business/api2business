@@ -10,7 +10,7 @@ import { nativeAll, nativeLogs, nativeStart, nativeStatus, nativeStop } from "..
 import { TemporalGateway } from "../../../../src/temporal-client";
 import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
-import { emitErrorDiagnosis } from "./error-diagnose-output";
+import { emitErrorDiagnosis, emitErrorInspection } from "./error-diagnose-output";
 import { emitPriorityPlan } from "./priority-plan-output";
 import { emitAccountEconomics, emitAccountImportEconomics } from "./account-economics-output";
 import { emitOAuthEconomics } from "./oauth-economics-output";
@@ -21,6 +21,7 @@ import { parseManualPriorityAssignments } from "./priority-plan-input";
 import { readSecret } from "../../../../src/secrets";
 import { BugTeamClient } from "./bugteam-client";
 import { PublicRecoveryClient } from "./public-recovery-client";
+import { readRechargeWalletSnapshot, validateRechargeIdempotencyKey, verifyRechargeWorkflow } from "./upstream-recharge";
 
 type Row = Record<string, unknown>;
 
@@ -216,10 +217,11 @@ function help(): Record<string, unknown> {
     commands: [
       "config validate",
       "backend check",
-      "scores get|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
+      "scores get|pool-quality|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
-      "errors diagnose [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
+      "errors diagnose [--request-id <request-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
+      "errors inspect --request-id <request-id>",
       "errors list [--limit N]",
       "errors get --request-id <request-id>",
       "users impact --start <ISO> --end <ISO> [--affected-only]",
@@ -237,7 +239,7 @@ function help(): Record<string, unknown> {
       "priority plan manual-create --over-api --priorities ACCOUNT_ID:PRIORITY[,ACCOUNT_ID:PRIORITY...]",
       "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
-      "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 3] [--confirm] --over-api",
+      "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
       "accounts delete --accounts <id-or-range,...> [--confirm] --over-api",
@@ -267,7 +269,8 @@ function help(): Record<string, unknown> {
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
       "upstreams create --base-url <https-url> --suffix <name> [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
       "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api",
-      "upstreams recharge --id <account-id> --recharge-cny <CNY> [--confirm] --over-api",
+      "upstreams recharge --base-url <https-url> --recharge-cny <CNY> [--idempotency-key <key>] [--confirm] --over-api",
+      "upstreams recharge-status --id <workflow-id> --over-api",
       "upstreams recover --accounts <id-or-range,...> [--confirm] --over-api",
       "upstreams status --id <workflow-id> --over-api",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
@@ -275,7 +278,7 @@ function help(): Record<string, unknown> {
       "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api",
       "bugteam login|balance|inventory --product <id> --quantity N|shelves --product <id>|cost-monitor get [--include-records]|sample|pickup order-create|order-status|download|push|take|recoveries list|recoveries claim|redeem",
       "bugteam public-recovery health|status|reclaim|download --base-url <https-origin> --card-code-stdin [--mode 401] [--confirm] [--output <path>]",
-      "bugteam purchase-import options|create --quantity N [--priority 1 --capacity 16 --rate-multiplier 1000 --groups 2,3 --proxy-id 3] [--confirm] --over-api|status --id <job-id> --over-api",
+      "bugteam purchase-import options|create --quantity N [--priority 1 --capacity 16 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api|status --id <job-id> --over-api",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
@@ -632,6 +635,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (!parsed.id) throw new Error("upstreams status requires --id");
     return await client.upstreamJob(parsed.id);
   }
+  if (group === "upstreams" && action === "recharge-status") {
+    if (!parsed.id) throw new Error("upstreams recharge-status requires --id");
+    return await verifyRechargeWorkflow(client, { workflowId: parsed.id });
+  }
   if (group === "upstreams" && action === "create") {
     if (!parsed.baseUrl || !parsed.suffix) throw new Error("upstreams create requires --base-url and --suffix");
     if (!parsed.apiKeyStdin) throw new Error("upstreams create requires --api-key-stdin; API keys are never accepted in argv");
@@ -669,15 +676,80 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await client.upstreamUpdate(id, input, `upstream-update-${id}-${crypto.randomUUID()}`);
   }
   if (group === "upstreams" && action === "recharge") {
-    const id = Number(parsed.id);
-    if (!Number.isSafeInteger(id) || id <= 0 || parsed.rechargeCny === null) {
-      throw new Error("upstreams recharge requires a positive --id and --recharge-cny");
+    if (parsed.rechargeCny === null || !parsed.baseUrl) {
+      throw new Error("upstreams recharge requires --base-url and --recharge-cny");
     }
+    if (parsed.id) throw new Error("upstreams recharge accepts --base-url, not --id");
+    const walletSnapshot = await readRechargeWalletSnapshot(client, parsed.baseUrl);
+    const walletAccountIds = walletSnapshot.accountIds;
+    if (walletAccountIds.length === 0) throw new Error(`upstreams recharge found no API-key accounts for wallet ${walletSnapshot.baseUrl}`);
+    const accountId = walletAccountIds[0]!;
+    const operationId = validateRechargeIdempotencyKey(
+      parsed.idempotencyKey ?? `upstream-recharge-${accountId}-${crypto.randomUUID()}`,
+    );
     if (!parsed.confirm) return {
-      ok: true, mutation: false, action: "upstream-recharge", accountId: id,
-      plan: { amountCny: parsed.rechargeCny }, hint: "add --confirm to execute",
+      ok: true, mutation: false, action: "upstream-recharge", accountId,
+      wallet: {
+        baseUrl: walletSnapshot.baseUrl,
+        accountIds: walletAccountIds.slice(0, 100),
+        accountCount: walletAccountIds.length,
+        accountIdsTruncated: walletAccountIds.length > 100,
+        advertisedPages: walletSnapshot.advertisedPages,
+        pagesRead: walletSnapshot.pagesRead,
+      },
+      idempotencyKey: operationId,
+      plan: { amountCny: parsed.rechargeCny },
+      hint: "add --confirm to execute; timeout retry must reuse this --idempotency-key",
     };
-    return await client.upstreamRecharge(id, parsed.rechargeCny, `upstream-recharge-${id}-${crypto.randomUUID()}`);
+    let submitted: Record<string, unknown>;
+    try {
+      submitted = await client.upstreamRecharge(accountId, parsed.rechargeCny, operationId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}; recharge submission outcome may be unknown; reuse --idempotency-key ${operationId} for any retry, never generate a new key`);
+    }
+    const workflowId = typeof submitted.workflowId === "string" && submitted.workflowId.trim() ? submitted.workflowId : null;
+    let verification: Record<string, unknown>;
+    if (!workflowId) {
+      verification = {
+        ok: false,
+        verificationStatus: "unavailable",
+        reason: "recharge submission response did not include workflowId",
+      };
+    } else {
+      try {
+        verification = await verifyRechargeWorkflow(client, {
+          workflowId,
+          expected: {
+            baseUrl: walletSnapshot.baseUrl,
+            amountCny: parsed.rechargeCny,
+            operationId,
+            anchorAccountId: accountId,
+            walletAccountIds,
+          },
+        });
+      } catch (error) {
+        verification = {
+          ok: false,
+          verificationStatus: "unavailable",
+          reason: "initial read-only recharge verification failed",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    const verificationStatus = String(verification.verificationStatus ?? "unavailable");
+    return {
+      ...submitted,
+      action: "upstream-recharge",
+      accountId,
+      wallet: { baseUrl: walletSnapshot.baseUrl, accountIds: walletAccountIds.slice(0, 100), accountCount: walletAccountIds.length, accountIdsTruncated: walletAccountIds.length > 100 },
+      idempotencyKey: operationId,
+      verification,
+      warning: verificationStatus === "verified"
+        ? null
+        : "充值已提交；初始核验尚未达到 verified，不要用新幂等键重复充值，请按 next 查询原 workflow。",
+      next: workflowId ? `upstreams recharge-status --id ${workflowId} --over-api` : null,
+    };
   }
   if (group === "upstreams" && action === "recover") {
     if (!parsed.accounts) throw new Error("upstreams recover requires --accounts");
@@ -896,6 +968,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   }
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "scores" && action === "get") return await client.scores();
+  if (group === "scores" && action === "pool-quality") return await client.poolQuality();
   if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
   if (group === "scores" && action === "rank") {
     return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account, parsed.group);
@@ -918,12 +991,28 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   }
   if (group === "errors" && action === "diagnose") {
     return await client.errorDiagnose(
-      parsed.limit ?? config.monitor.errorAggregateLimit,
+      parsed.requestId ? 1 : (parsed.limit ?? config.monitor.errorAggregateLimit),
       parsed.top ?? config.monitor.errorAggregateTop,
       parsed.account,
       parsed.group,
-      null,
+      parsed.requestId ? [parsed.requestId] : null,
     );
+  }
+  if (group === "errors" && action === "inspect") {
+    if (!parsed.requestId) throw new Error("errors inspect requires --request-id");
+    const [diagnosis, detail] = await Promise.all([
+      client.errorDiagnose(1, parsed.top ?? config.monitor.errorAggregateTop, null, null, [parsed.requestId]),
+      client.errorRequest(parsed.requestId),
+    ]);
+    return {
+      ok: true,
+      mode: "error-inspect",
+      requestId: parsed.requestId,
+      queryPlan: { parallel: true, operations: ["errors.diagnose", "errors.get"] },
+      diagnosis,
+      detail,
+      valuesPrinted: false,
+    };
   }
   if (group === "errors" && action === "list") {
     return await client.errorList(parsed.limit ?? config.monitor.errorAggregateLimit);
@@ -1109,6 +1198,7 @@ export async function runCli(args: string[]): Promise<void> {
       || parsed.command.join(" ") === "accounts oauth-economics"
       || parsed.command.join(" ") === "accounts inspect"
       || parsed.command.join(" ") === "upstreams recharge-candidates"
+      || parsed.command.join(" ") === "upstreams recharge-status"
       || (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle")
       || parsed.command.join(" ") === "payments alipay-revenue"
     );
@@ -1124,8 +1214,10 @@ export async function runCli(args: string[]): Promise<void> {
     const output = { target: targetId, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...result as Record<string, unknown> };
     if (parsed.command.join(" ") === "scores rank") emitScoreRanking(output, parsed.json);
     else if (parsed.command.join(" ") === "scores priority-plan") emitPriorityPlan(output, parsed.json);
+    else if (parsed.command.join(" ") === "scores pool-quality") emitPoolQuality(output, parsed.json);
     else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
     else if (parsed.command.join(" ") === "errors diagnose") emitErrorDiagnosis(output, parsed.json);
+    else if (parsed.command.join(" ") === "errors inspect") emitErrorInspection(output, parsed.json);
     else if (parsed.command.join(" ") === "users impact") emitUserImpact(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts economics") emitAccountEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts import-economics") emitAccountImportEconomics(output, parsed.json);
@@ -1137,6 +1229,33 @@ export async function runCli(args: string[]): Promise<void> {
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);
     process.exitCode = 1;
+  }
+}
+
+function emitPoolQuality(value: Record<string, unknown>, json: boolean): void {
+  if (json) return emit(value, true);
+  const participation = Array.isArray(value.participation) ? value.participation : [];
+  console.log(
+    `API2BUSINESS POOL QUALITY score=${String(value.score ?? "-")}`
+    + ` grade=${String(value.grade ?? "-")}`
+    + ` window=${String(value.recentCallLimit ?? "-")}`
+    + ` attempts=${String(value.observedAttempts ?? "-")}`
+    + ` success=${String(value.successRequests ?? "-")}`
+    + ` failure=${String(value.failureRequests ?? "-")}`
+    + ` failover=${String(value.failoverRequests ?? "-")}/${String(value.failoverRecovered ?? "-")}`
+    + ` ttftP95Ms=${String(value.ttftP95Ms ?? "-")}`
+    + ` sampledAt=${String(value.sampledAt ?? "-")}`,
+  );
+  console.log(`PARTICIPANTS ${participation.length}`);
+  console.log("ATTEMPTS  RATIO  ACCOUNT");
+  for (const item of participation) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    console.log([
+      String(row.attempts ?? 0).padStart(8),
+      String(row.ratio ?? 0).padStart(6),
+      String(row.accountName ?? `#${String(row.accountId ?? "-")}`),
+    ].join("  "));
   }
 }
 

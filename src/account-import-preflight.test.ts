@@ -9,8 +9,8 @@ test("skips only uniquely matched accounts whose runtime settings are aligned", 
   const reads = {
     query: async () => ({
       rows: [
-        { row_kind: "account", id: 41, user_id: "user-aligned", access_token_sha256: tokenHash("token-a"), priority: 1, concurrency: 5, proxy_id: 141, proxy_name: "proxy-141", plan_type: "k12", group_ids: [2, 3] },
-        { row_kind: "account", id: 42, user_id: "user-stale", access_token_sha256: tokenHash("token-b"), priority: 1, concurrency: 10, proxy_id: 142, proxy_name: "proxy-142", plan_type: "free", group_ids: [2, 3] },
+        { row_kind: "account", id: 41, user_id: "user-aligned", access_token_sha256: tokenHash("token-a"), priority: 1, concurrency: 5, load_factor: 1000, rate_multiplier: 1, proxy_id: 141, proxy_name: "proxy-141", plan_type: "k12", group_ids: [2, 3] },
+        { row_kind: "account", id: 42, user_id: "user-stale", access_token_sha256: tokenHash("token-b"), priority: 1, concurrency: 10, load_factor: 900, rate_multiplier: 1000, proxy_id: 142, proxy_name: "proxy-142", plan_type: "free", group_ids: [2, 3] },
         { row_kind: "proxy", id: 141 },
         { row_kind: "proxy", id: 142 },
       ],
@@ -24,7 +24,7 @@ test("skips only uniquely matched accounts whose runtime settings are aligned", 
     { credentials: { chatgpt_user_id: "user-stale", access_token: "token-b" } },
   ], proxies: [] });
   const plan = await accountImportPreflight(content, {
-    platform: "openai", priority: 1, capacity: 5, groupIds: [2, 3], sourceProxyId: 3, planType: "k12",
+    platform: "openai", priority: 1, capacity: 5, rateMultiplier: 1000, groupIds: [2, 3], sourceProxyId: 3, planType: "k12",
   }, reads);
   expect(plan.skipped).toEqual([{ index: 1, accountId: 41 }]);
   expect(plan.sourceIndexes).toEqual([2]);

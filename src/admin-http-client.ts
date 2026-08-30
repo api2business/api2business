@@ -53,6 +53,9 @@ export class AdminHttpClient {
   creditTest(execute: boolean): Promise<Record<string, unknown>> { return this.request("/api/admin/credit-test", { method: "POST", body: JSON.stringify({ execute }) }); }
   serviceStatus(): Promise<Record<string, unknown>> { return this.request("/api/status"); }
   scores(): Promise<Record<string, unknown>> { return this.request("/api/scores"); }
+  poolQuality(): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/pool-quality", {}, 60000);
+  }
   rankScores(recentCallLimit: number, accountSelector: string | null, groupSelector: string | null): Promise<Record<string, unknown>> {
     return this.request("/api/scores/rank", {
       method: "POST",

@@ -532,6 +532,21 @@ test("pool quality is sampled separately above the account table with participat
   expect(source).toContain("最近 ${number(data.recentCallLimit)} 次");
 });
 
+test("hides manual rate suffixes from upstream names in user-facing views", async () => {
+  const source = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const start = source.indexOf("function displayAccountName(value, baseUrl = '')");
+  const end = source.indexOf("\nfunction scoreAccountDisplayName", start);
+  const displayAccountName = new Function(`${source.slice(start, end)}; return displayAccountName`)();
+  expect(displayAccountName("https://hyueapi.com pro 0.2", "https://hyueapi.com")).toBe("https://hyueapi.com pro");
+  expect(displayAccountName("https://cf.sheapi.cc plus 0.08", "https://cf.sheapi.cc")).toBe("https://cf.sheapi.cc plus");
+  expect(displayAccountName("https://foo.test Grok-0.24", "https://foo.test")).toBe("https://foo.test Grok-0.24");
+  expect(source).toContain("function displayAccountName(value, baseUrl = '')");
+  expect(source).toContain("displayAccountName(item.accountName ?? item.wallet, item.baseUrl)");
+  expect(source).toContain("displayAccountName(row.name, row.baseUrl)");
+  expect(source).toContain("displayAccountName(result.accountName, result.baseUrl)");
+  expect(source).toContain("displayAccountName(row.accountName, row.baseUrl)");
+});
+
 test("pool errors expose requester identity", async () => {
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
   const source = await Bun.file(new URL("./app.js", import.meta.url)).text();

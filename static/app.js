@@ -255,9 +255,21 @@ function scoreAsset(row) {
   return { upstream, usageResult, balanceCny, probeCost }
 }
 
+function displayAccountName(value, baseUrl = '') {
+  const raw = String(value ?? '').trim()
+  if (!raw) return '—'
+  const normalizedBaseUrl = String(baseUrl ?? '').trim().replace(/\/+$/u, '')
+  const rateSuffix = /\s+\d+(?:\.\d{1,6})?$/u
+  if (normalizedBaseUrl && raw.startsWith(`${normalizedBaseUrl} `)) {
+    const rest = raw.slice(normalizedBaseUrl.length).trim().replace(rateSuffix, '').trim()
+    return rest ? `${normalizedBaseUrl} ${rest}` : normalizedBaseUrl
+  }
+  return /^https?:\/\/\S+\s+\S+\s+\d+(?:\.\d{1,6})?$/u.test(raw) ? raw.replace(rateSuffix, '').trim() : raw
+}
+
 function scoreAccountDisplayName(row, upstream) {
   if (upstream?.baseUrl && upstream?.suffix) return `${upstream.baseUrl} ${upstream.suffix}`
-  return String(row.accountName ?? '—')
+  return displayAccountName(row.accountName)
 }
 
 function scoreSortValue(row, key) {
@@ -595,11 +607,11 @@ function renderPoolQuality(data) {
   renderDonut({
     ring, detail: $('#pool-participation-detail'), items: participation,
     center: number(data.participationAttempts ?? data.observedAttempts), centerLabel: '调用', emptyDetail: '暂无参与样本',
-    itemLabel: (item) => item.accountName ?? item.wallet ?? `账号 #${item.accountId}`,
+    itemLabel: (item) => displayAccountName(item.accountName ?? item.wallet, item.baseUrl) || `账号 #${item.accountId}`,
     itemDetail: (item) => `${percent(item.ratio)} · ${number(item.attempts)} 次 · ${item.costRateCnyPerApiUsd == null ? '成本未知' : `¥${number(item.costRateCnyPerApiUsd, 4)}/刀 ${item.costSource === 'detected' ? '探测' : '手工'}`}`,
   })
   $('#pool-participation-legend').innerHTML = participation.length ? participation.map((item, index) => {
-    const label = item.accountName ?? item.wallet ?? `账号 #${item.accountId}`
+    const label = displayAccountName(item.accountName ?? item.wallet, item.baseUrl) || `账号 #${item.accountId}`
     const cost = item.costRateCnyPerApiUsd == null ? '成本未知' : `¥${number(item.costRateCnyPerApiUsd, 4)}/刀`
     const source = item.costSource === 'detected' ? '探测' : item.costSource === 'manual' ? '手工' : ''
     return `<li><i style="--participation-color:${poolParticipationColors[index % poolParticipationColors.length]}"></i><span title="${escapeHtml(label)}"><b>${escapeHtml(label)}</b><em>${escapeHtml(cost)}${source ? ` · ${source}` : ''}</em></span><strong>${percent(item.ratio)}</strong><small>${number(item.attempts)} 次</small></li>`
@@ -634,7 +646,7 @@ function renderPoolQualityErrors(data) {
       ['请求 ID', requestId],
       ['模型', `${row.model ?? 'unknown'}${row.upstreamModel && row.upstreamModel !== row.model ? ` → ${row.upstreamModel}` : ''}`],
       ['用户', `${row.userEmail ?? '未知用户'}${row.userId == null ? '' : ` #${row.userId}`}`],
-      ['账号', `${row.accountName ?? '—'} #${row.accountId ?? '—'}`],
+      ['账号', `${displayAccountName(row.accountName, row.baseUrl)} #${row.accountId ?? '—'}`],
       ['状态', `记录 ${row.clientStatusCode ?? '—'} / 上游 ${row.upstreamStatusCode ?? '—'}`],
       ['端点', endpoint],
       ['分类', row.scoreable ? '计分失败' : `已排除 · ${row.exclusionReason ?? '未分类'}`],
@@ -643,7 +655,7 @@ function renderPoolQualityErrors(data) {
       ['上游错误', row.upstreamErrorMessage ?? '—'],
       ['上游详情', row.upstreamErrorDetail ?? '—'],
     ]
-    return `<tr class="pool-error-row" data-pool-error-row="${index}" tabindex="0" aria-expanded="false"><td><time>${time(row.createdAt)}</time></td><td class="pool-error-model"><b>${escapeHtml(row.model ?? 'unknown')}</b>${row.upstreamModel && row.upstreamModel !== row.model ? `<small>→ ${escapeHtml(row.upstreamModel)}</small>` : ''}</td><td class="account-cell pool-error-user"><b>${escapeHtml(row.userEmail ?? '未知用户')}</b><small>${row.userId == null ? '未记录 ID' : `#${number(row.userId)}`}</small></td><td class="account-cell"><b>${escapeHtml(row.accountName ?? '—')}</b><small>#${number(row.accountId)}</small></td><td class="pool-error-status"><b>${escapeHtml(row.clientStatusCode ?? '—')}</b><span>/</span><b>${escapeHtml(row.upstreamStatusCode ?? '—')}</b></td><td class="pool-error-endpoint">${escapeHtml(endpoint)}</td><td>${row.stream ? '流式' : '同步'}${row.failoverTriggered ? '<small class="pool-error-failover">触发切号</small>' : ''}</td><td class="pool-error-summary" title="${escapeHtml(message)}">${escapeHtml(message)}</td></tr><tr class="pool-error-detail" data-pool-error-detail="${index}" hidden><td colspan="8"><dl>${detail.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl></td></tr>`
+    return `<tr class="pool-error-row" data-pool-error-row="${index}" tabindex="0" aria-expanded="false"><td><time>${time(row.createdAt)}</time></td><td class="pool-error-model"><b>${escapeHtml(row.model ?? 'unknown')}</b>${row.upstreamModel && row.upstreamModel !== row.model ? `<small>→ ${escapeHtml(row.upstreamModel)}</small>` : ''}</td><td class="account-cell pool-error-user"><b>${escapeHtml(row.userEmail ?? '未知用户')}</b><small>${row.userId == null ? '未记录 ID' : `#${number(row.userId)}`}</small></td><td class="account-cell"><b>${escapeHtml(displayAccountName(row.accountName, row.baseUrl))}</b><small>#${number(row.accountId)}</small></td><td class="pool-error-status"><b>${escapeHtml(row.clientStatusCode ?? '—')}</b><span>/</span><b>${escapeHtml(row.upstreamStatusCode ?? '—')}</b></td><td class="pool-error-endpoint">${escapeHtml(endpoint)}</td><td>${row.stream ? '流式' : '同步'}${row.failoverTriggered ? '<small class="pool-error-failover">触发切号</small>' : ''}</td><td class="pool-error-summary" title="${escapeHtml(message)}">${escapeHtml(message)}</td></tr><tr class="pool-error-detail" data-pool-error-detail="${index}" hidden><td colspan="8"><dl>${detail.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl></td></tr>`
   }).join('') : '<tr><td colspan="8" class="empty">当前口径没有错误记录</td></tr>'
   $('#pool-error-page').textContent = `${number(pagination.page)} / ${number(pagination.totalPages)} · ${number(pagination.total)} 条`
   $('#pool-error-prev').disabled = pagination.page <= 1
@@ -775,7 +787,7 @@ async function scoresPage() {
     $('#score-upstream-create-capacity').value = String(defaults.capacity ?? 16)
     const defaultIds = (defaults.groupIds ?? [2, 3]).map(Number)
     $('#score-upstream-create-groups').innerHTML = (options.groups ?? []).map((group) => `<label><input type="checkbox" value="${escapeHtml(group.id)}" ${defaultIds.includes(Number(group.id)) ? 'checked' : ''}/><span>${escapeHtml(group.name)} <b>#${escapeHtml(group.id)}</b></span></label>`).join('')
-    $('#score-upstream-create-state').textContent = '创建时将自动配置号池、Proxy #3、切号模板，以及账号专属私有探活分组和 API Key。'
+    $('#score-upstream-create-state').textContent = '创建时将自动配置号池、直连（无账号级 Proxy）、切号模板，以及账号专属私有探活分组和 API Key。'
     $('#score-upstream-create-state').removeAttribute('data-state')
     $('#score-upstream-create-logs').innerHTML = '<li class="empty">等待提交</li>'
     createOperationId = upstreamOperationId('score-upstream-create')
@@ -824,7 +836,7 @@ async function scoresPage() {
   const openScoreEdit = (row) => {
     activeScoreUpstream = row
     $('#score-upstream-edit-id').textContent = `#${row.id}`
-    $('#score-upstream-edit-summary').textContent = `${row.name} · ${row.status === 'active' && row.schedulable ? '当前可调度' : '当前不可调度'} · 已充值 ${cny(row.rechargeCny)}`
+    $('#score-upstream-edit-summary').textContent = `${displayAccountName(row.name, row.baseUrl)} · ${row.status === 'active' && row.schedulable ? '当前可调度' : '当前不可调度'} · 已充值 ${cny(row.rechargeCny)}`
     $('#score-upstream-edit-base-url').textContent = row.baseUrl
     $('#score-upstream-edit-key-prefix').textContent = `Key ${row.keyPrefix ?? '—'}`
     $('#score-upstream-edit-suffix').value = row.suffix ?? ''
@@ -845,7 +857,7 @@ async function scoresPage() {
       activeBenchmarkAccount = row
       const accountId = Number(row.id)
       $('#score-benchmark-id').textContent = `#${row.id}`
-      $('#score-benchmark-summary').textContent = `${row.name} · ${row.baseUrl} · ${scoreBenchmarkOptions?.provider ?? 'apitest.work compatible'}`
+      $('#score-benchmark-summary').textContent = `${displayAccountName(row.name, row.baseUrl)} · ${row.baseUrl} · ${scoreBenchmarkOptions?.provider ?? 'apitest.work compatible'}`
       $('#score-benchmark-model').value = scoreBenchmarkOptions?.model ?? ''
       const latest = scoreBenchmarksById.get(Number(row.id))
       $('#score-benchmark-result').innerHTML = benchmarkMarkup(latest)
@@ -2239,12 +2251,13 @@ async function accountImportPage() {
     const sharedProxyId = runtimeSettings.sharedProxyId ?? result?.sharedProxyId
     const proxyOutcome = perAccountProxy
       ? (assignments.length ? ` · 已分配 ${assignments.filter((item) => item?.bound).length} 个账号 / 使用 ${usedProxies} 个 Proxy` : '')
-      : (sharedProxyId ? ` · 整批共用 Proxy #${sharedProxyId}` : '')
+      : (sharedProxyId ? ` · 整批共用 Proxy #${sharedProxyId}` : ' · 直连（无账号级 Proxy）')
     const outcome = result ? ` · 新建 ${result.createdIds?.length ?? 0} · 更新 ${result.updatedIds?.length ?? 0} · 跳过 ${result.skippedIds?.length ?? result.skipped ?? 0} · 失败 ${result.failed ?? 0}${proxyOutcome}` : ''
     const accounting = job.accounting ? ` · 已记账 ${job.accounting.recordedCount} 个 / ${cny(job.accounting.totalCostCny)}` : ''
     const source = job.source?.format === 'zip' ? `ZIP ${job.source.jsonFileCount} 个 JSON · 包内去重 ${job.source.duplicateAccountCount}` : 'JSON'
     const platform = job.source?.platform === 'grok' ? 'Grok' : 'GPT'
-    $('#import-summary').textContent = `${source} · ${platform} · ${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · 负载因子 ${job.settings.rateMultiplier} · ${labels} · 代理池基准 #${job.settings.sourceProxyId}${outcome}${accounting}`
+    const proxyPolicy = Number(job.settings.sourceProxyId) === 0 ? '直连（无账号级 Proxy）' : `代理池基准 #${job.settings.sourceProxyId}`
+    $('#import-summary').textContent = `${source} · ${platform} · ${job.accountCount} 个账号 · SHA256 ${job.fingerprint} · 类型 ${job.settings.planType.toUpperCase()} · 单价 ${cny(job.settings.unitCostCny)} / 个 · 优先级 ${job.settings.priority} · 容量 ${job.settings.capacity} · 负载因子 ${job.settings.rateMultiplier} · ${labels} · ${proxyPolicy}${outcome}${accounting}`
     const recordedCount = Number(job.accounting?.recordedCount)
     const acquisitionCost = Number(job.accounting?.totalCostCny)
     const expectedPerAccount = Number(options.initialExpectedApiUsdPerAccount?.[job.settings.planType])
@@ -2398,8 +2411,9 @@ function upstreamUsageMarkup(result, manualRate = null) {
   const multiplier = upstreamMultiplierPresentation(result, manualRate)
   const warning = result.warning ? `<p>${escapeHtml(result.warning)}</p>` : ''
   const error = result.error ? `<p>${escapeHtml(result.error)}</p>` : ''
+  const displayName = displayAccountName(result.accountName, result.baseUrl) || `账号 #${result.accountId}`
   return `<article class="upstream-usage-result" data-ok="${result.ok === true}">
-    <header><div><b>${escapeHtml(result.accountName ?? `账号 #${result.accountId}`)}</b><small>#${escapeHtml(result.accountId)} · ${escapeHtml(result.provider ?? 'unknown')}</small></div><small>${number(result.durationMs)} ms</small></header>
+    <header><div><b>${escapeHtml(displayName)}</b><small>#${escapeHtml(result.accountId)} · ${escapeHtml(result.provider ?? 'unknown')}</small></div><small>${number(result.durationMs)} ms</small></header>
     <dl><dt>账号余额</dt><dd><b>${escapeHtml(balance.primary)}</b><small>${escapeHtml(balance.secondary)}</small></dd><dt>探测成本</dt><dd><b>${escapeHtml(multiplier.primary)}</b><small>${escapeHtml(multiplier.secondary)}</small><small>${escapeHtml(multiplier.comparison)}</small></dd><dt>已用额度</dt><dd>${quota.used == null ? '—' : `${escapeHtml(number(quota.used, 2))} USD`}</dd><dt>Token</dt><dd>${usage.totalTokens == null ? '—' : compact(usage.totalTokens)}</dd><dt>请求</dt><dd>${usage.requestCount == null ? '—' : number(usage.requestCount)}</dd><dt>API 费用</dt><dd>${usage.actualCostUsd == null ? usage.costUsd == null ? '—' : usd(usage.costUsd) : usd(usage.actualCostUsd)}</dd><dt>查询时间</dt><dd>${time(result.queriedAt)}</dd></dl>${warning}${error}
   </article>`
 }
@@ -2644,10 +2658,11 @@ async function upstreamsPage() {
       const usage = usageResult?.usage ?? {}
       const balance = upstreamBalancePresentation(usageResult)
       const multiplier = upstreamMultiplierPresentation(usageResult, row.rateCnyPerApiUsd)
+      const displayName = displayAccountName(row.name, row.baseUrl)
       const manualRate = row.rateCnyPerApiUsd == null ? '—' : `¥${number(row.rateCnyPerApiUsd, 6)}`
       const detectedRate = multiplier.primary === '未知' ? '探测 —' : `探测 ${multiplier.primary}`
-      return `<tr class="upstream-row" data-id="${escapeHtml(row.id)}" tabindex="0" role="button" aria-label="编辑 ${escapeHtml(row.name)}">
-        <td class="upstream-id-cell"><b><a class="upstream-url-link" href="${escapeHtml(row.baseUrl)}" target="_blank" rel="noreferrer">${escapeHtml(row.name)}</a></b><small>#${escapeHtml(row.id)} · ${escapeHtml(row.baseUrl)}</small></td>
+      return `<tr class="upstream-row" data-id="${escapeHtml(row.id)}" tabindex="0" role="button" aria-label="编辑 ${escapeHtml(displayName)}">
+        <td class="upstream-id-cell"><b><a class="upstream-url-link" href="${escapeHtml(row.baseUrl)}" target="_blank" rel="noreferrer">${escapeHtml(displayName)}</a></b><small>#${escapeHtml(row.id)} · ${escapeHtml(row.baseUrl)}</small></td>
         <td class="upstream-muted">${escapeHtml(row.keyPrefix ?? '—')}</td>
         <td>${escapeHtml(row.suffix ?? '—')}</td>
         <td class="upstream-rate upstream-cost-cell" data-mismatch="${multiplier.mismatch}"><strong>${manualRate}</strong><small>${escapeHtml(detectedRate)}</small><small>${escapeHtml(multiplier.comparison)}</small></td>
@@ -2688,7 +2703,7 @@ async function upstreamsPage() {
     activeUpstream = row
     editRechargeOperationId = upstreamOperationId(`upstream-recharge-${row.id}`)
     $('#upstream-edit-id').textContent = `#${row.id}`
-    $('#upstream-edit-summary').textContent = `${row.name} · ${row.status === 'active' && row.schedulable ? '当前可调度' : '当前不可调度'} · 已充值 ${cny(row.rechargeCny)}`
+    $('#upstream-edit-summary').textContent = `${displayAccountName(row.name, row.baseUrl)} · ${row.status === 'active' && row.schedulable ? '当前可调度' : '当前不可调度'} · 已充值 ${cny(row.rechargeCny)}`
     $('#upstream-edit-base-url').textContent = row.baseUrl
     $('#upstream-edit-key-prefix').textContent = `Key ${row.keyPrefix ?? '—'}`
     $('#upstream-edit-suffix').value = row.suffix ?? ''
@@ -2787,7 +2802,7 @@ async function upstreamsPage() {
     event.target.click()
   })
   $('#upstream-create').addEventListener('click', () => {
-    $('#upstream-create-state').textContent = '创建时将自动配置号池、Proxy #3、切号模板，以及账号专属私有探活分组和 API Key。'
+    $('#upstream-create-state').textContent = '创建时将自动配置号池、直连（无账号级 Proxy）、切号模板，以及账号专属私有探活分组和 API Key。'
     $('#upstream-create-state').removeAttribute('data-state')
     createOperationId = upstreamOperationId('upstream-create')
     resetJobLog('create')

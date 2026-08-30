@@ -13,6 +13,9 @@ services:
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
     command: ["bun", "src/api.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}", "--runtime", "compose"]
+    mem_limit: 2g
+    memswap_limit: 3g
+    pids_limit: 512
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 15s
@@ -33,6 +36,9 @@ services:
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
       - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
     command: ["/usr/local/bin/api2business-temporal-worker", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}", "--runtime", "compose"]
+    mem_limit: 2g
+    memswap_limit: 3g
+    pids_limit: 512
     depends_on: [api]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/"]
@@ -53,4 +59,7 @@ services:
       API2BUSINESS_CONFIG_PATH: ${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}
       API2BUSINESS_RUNTIME_ID: compose
     command: ["bunx", "vite", "--config", "vite.config.ts", "--host", "0.0.0.0"]
+    mem_limit: 2g
+    memswap_limit: 3g
+    pids_limit: 256
     depends_on: [api]

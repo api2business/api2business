@@ -130,22 +130,19 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   const openAIErrorRules = parsed.operations.upstreamManagement.failoverRules.filter(
     (rule) => rule.keywords.includes("openai_error"),
   );
-  const contextRoomRules = parsed.operations.upstreamManagement.failoverRules.filter(
-    (rule) => rule.keywords.includes("ran out of room in the model's context window"),
-  );
-  const selectedModelKeywords = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.5", "codex-auto-review"];
-  const selectedModelRules = parsed.operations.upstreamManagement.failoverRules.filter(
-    (rule) => selectedModelKeywords.some((model) => rule.keywords.includes(model)),
-  );
   expect(config).toContain("errorCode: 502");
   expect(config).toContain("errorCode: 524");
   expect(badResponseRule?.duration_minutes).toBe(3);
   expect(openAIErrorRules.map((rule) => rule.error_code)).toEqual([400]);
-  expect(contextRoomRules.map((rule) => [rule.error_code, rule.duration_minutes])).toEqual([[400, 3]]);
-  expect(selectedModelRules.map((rule) => [rule.error_code, rule.duration_minutes])).toEqual([[400, 3]]);
-  expect(selectedModelRules[0]?.keywords.filter((keyword) => selectedModelKeywords.includes(keyword)))
-    .toEqual(selectedModelKeywords);
-  expect(selectedModelRules[0]?.keywords).not.toContain("gpt-5.6-luna");
+  expect(parsed.operations.upstreamManagement.failoverRules
+    .find((rule) => rule.error_code === 400)?.keywords)
+    .not.toContain("ran out of room in the model's context window");
+  expect(parsed.operations.upstreamManagement.failoverRules
+    .flatMap((rule) => rule.keywords))
+    .not.toContain("no available accounts");
+  expect(parsed.operations.upstreamManagement.failoverRules
+    .flatMap((rule) => rule.keywords))
+    .not.toContain("gpt-5.6-luna");
   expect(config).not.toContain("input must be a list");
   expect(config).not.toContain("input exceeds the context window of this model");
   expect(config).not.toContain("context_length_exceeded");

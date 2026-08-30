@@ -42,6 +42,15 @@ selected_errors AS (
     o.provider_error_code,
     o.provider_error_type,
     o.is_business_limited,
+    o.error_message,
+    o.error_body,
+    o.upstream_error_message,
+    o.upstream_error_detail,
+    COALESCE((
+      SELECT STRING_AGG(l.message, ' ' ORDER BY l.created_at, l.id)
+      FROM ops_system_logs l
+      WHERE l.request_id = o.request_id
+    ), '') AS system_log_text,
     o.created_at,
     LOWER(
       COALESCE(o.error_message, '') || ' ' ||
@@ -169,6 +178,11 @@ error_chains AS (
       'errorType', error_type,
       'providerErrorCode', provider_error_code,
       'providerErrorType', provider_error_type,
+      'errorMessage', error_message,
+      'errorBody', error_body,
+      'upstreamErrorMessage', upstream_error_message,
+      'upstreamErrorDetail', upstream_error_detail,
+      'systemLogText', system_log_text,
       'businessLimited', COALESCE(is_business_limited, false),
       'stablePhrase', stable_phrase,
       'signature', signature,
@@ -194,6 +208,11 @@ failover_event_chains AS (
       'errorType', 'failover_event',
       'providerErrorCode', NULL,
       'providerErrorType', NULL,
+      'errorMessage', NULL,
+      'errorBody', NULL,
+      'upstreamErrorMessage', NULL,
+      'upstreamErrorDetail', NULL,
+      'systemLogText', NULL,
       'businessLimited', false,
       'stablePhrase', 'failover_switch',
       'signature', CONCAT(COALESCE(NULLIF(l.extra->>'upstream_status', '')::int, 0), ':upstream:failover_event:-:failover_switch'),

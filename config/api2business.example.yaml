@@ -327,7 +327,7 @@ operations:
     rateMultiplier: 1000
     importTimeoutMs: 600000
     groupIds: [2, 3]
-    sourceProxyId: 3
+    sourceProxyId: 0
     perAccountProxy: false
     planType: k12
     freeCostThresholdCny: 1
@@ -339,7 +339,7 @@ operations:
     groupIds: [2, 3]
     priority: 1
     capacity: 16
-    proxyId: 3
+    proxyId: 0
     # 创建接口要求名称包含正费率；创建完成后会立即探测并回写真实倍率。
     createBootstrapRateCnyPerApiUsd: 1
     # 创建时未指定成本且探测不到有效倍率时使用的回退费率。
@@ -356,6 +356,11 @@ operations:
       recommendationLimit: 20
       retiredSuppliers: []
     failoverRules:
+      - errorCode: 422
+        keywords:
+          - upstream request failed
+        durationMinutes: 3
+        description: 上游实际返回 422 且统一包装为 upstream request failed 时短暂切号
       - errorCode: 429
         keywords:
           - usage limit reached
@@ -388,13 +393,9 @@ operations:
           - rate_limit_error
           - bad_response_status_code
           - openai_error
-          - ran out of room in the model's context window
-          - gpt-5.6-sol
-          - gpt-5.6-terra
-          - gpt-5.5
-          - codex-auto-review
+          - no tool output found for custom tool call
         durationMinutes: 3
-        description: 上游明确返回指定模型故障、模型容量、临时过载、包装层故障或供应商上下文空间故障
+        description: 上游明确返回指定模型故障、模型容量、临时过载、工具调用状态不一致、包装层故障或供应商上下文空间故障
       - errorCode: 401
         keywords:
           - invalid api key
@@ -433,10 +434,8 @@ operations:
       - errorCode: 500
         keywords:
           - failed to validate api key
-          - do request failed
           - upstream gateway error
           - upstream service temporarily unavailable
-          - service temporarily unavailable
         durationMinutes: 3
         description: 上游明确返回服务或网关故障
       - errorCode: 502
@@ -451,17 +450,13 @@ operations:
           - upstream rate limit exceeded
           - too many pending requests
           - please retry later
-          - insufficient account balance
-          - insufficient balance
           - selected model is at capacity
         durationMinutes: 3
         description: 上游持续过载、容量、限流或余额故障
       - errorCode: 502
         keywords:
           - upstream service temporarily unavailable
-          - upstream request failed
           - upstream response stream was interrupted
-          - service temporarily unavailable
           - 服务暂时不可用
           - origin web server returned an invalid or incomplete response
           - please try again later
@@ -474,10 +469,6 @@ operations:
       - errorCode: 503
         keywords:
           - upstream service temporarily unavailable
-          - upstream request failed
-          - service temporarily unavailable
-          - 服务暂时不可用
-          - temporarily unavailable
           - overloaded
           - origin web server returned an invalid or incomplete response
           - our servers are currently overloaded
@@ -485,7 +476,6 @@ operations:
           - concurrency limit exceeded
           - selected model is at capacity
           - too many pending requests
-          - please retry later
           - rate_limit_exceeded
           - rate_limit_error
           - unexpected eof
@@ -499,7 +489,6 @@ operations:
           - concurrency limit exceeded
           - concurrency limit exceeded for account
           - upstream service temporarily unavailable
-          - service temporarily unavailable
           - upstream gateway error
           - gateway timeout
           - upstream timeout
@@ -529,7 +518,6 @@ operations:
         keywords:
           - upstream request failed
           - upstream service temporarily unavailable
-          - service temporarily unavailable
           - overloaded
           - concurrency limit exceeded
           - origin web server returned an invalid or incomplete response

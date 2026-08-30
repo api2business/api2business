@@ -53,6 +53,10 @@ function identity(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 24);
 }
 
+function createProxyField(proxyId: number): { proxy_id?: number } {
+  return proxyId > 0 ? { proxy_id: proxyId } : {};
+}
+
 export function runtimeImportIdempotencyKey(operationKey: string, value: unknown): string {
   if (!operationKey.trim()) throw new Error("runtime import operation key is required");
   return `api2business-runtime-import-${identity({ operationKey, value })}`;
@@ -111,8 +115,8 @@ export class Sub2ApiRuntimeService {
         type: "oauth",
         priority: input.priority,
         concurrency: input.capacity,
-        rate_multiplier: rateMultiplier,
-        proxy_id: input.proxyId,
+        load_factor: rateMultiplier,
+        ...createProxyField(input.proxyId),
         group_ids: input.groupIds,
         confirm_mixed_channel_risk: true,
       }));
@@ -138,8 +142,8 @@ export class Sub2ApiRuntimeService {
         credentials: this.apiKeyCredentials(account.credentials),
         priority: input.priority,
         concurrency: input.capacity,
-        rate_multiplier: rateMultiplier,
-        proxy_id: input.proxyId,
+        load_factor: rateMultiplier,
+        ...createProxyField(input.proxyId),
         group_ids: input.groupIds,
       }));
       const result = await this.client.mutate<Row>("POST", "/admin/accounts/data", {
@@ -167,8 +171,8 @@ export class Sub2ApiRuntimeService {
           },
           priority: input.priority,
           concurrency: input.capacity,
-          rate_multiplier: rateMultiplier,
-          proxy_id: input.proxyId,
+          load_factor: rateMultiplier,
+          ...createProxyField(input.proxyId),
           group_ids: input.groupIds,
           confirm_mixed_channel_risk: true,
         };
@@ -193,9 +197,9 @@ export class Sub2ApiRuntimeService {
       const result = await this.client.mutate<CodexImportResult>("POST", "/admin/accounts/import/codex-session", {
         contents: credentials,
         group_ids: input.groupIds,
-        proxy_id: input.proxyId,
+        ...createProxyField(input.proxyId),
         concurrency: input.capacity,
-        rate_multiplier: rateMultiplier,
+        load_factor: rateMultiplier,
         priority: input.priority,
         auto_pause_on_expired: accounts.every((account) => account.auto_pause_on_expired !== false),
         update_existing: true,
@@ -217,6 +221,12 @@ export class Sub2ApiRuntimeService {
     }
 
     const importedIds = [...createdIds, ...updatedIds];
+    if (input.proxyId === 0 && importedIds.length > 0) {
+      await this.client.mutate("POST", "/admin/accounts/bulk-update", {
+        account_ids: importedIds,
+        proxy_id: 0,
+      }, undefined, input.importTimeoutMs);
+    }
     const proxyAssignments: Array<Record<string, unknown>> = [];
     if (input.perAccountProxy && importedIds.length > 0) {
       for (const [offset, accountId] of importedIds.entries()) {
@@ -246,9 +256,11 @@ export class Sub2ApiRuntimeService {
   }
 
   async createApiKeyAccount(account: Row, idempotencyKey: string, timeoutMs?: number): Promise<Record<string, unknown>> {
+    const { proxy_id: requestedProxyId, ...accountWithoutProxy } = account;
     return await this.client.mutate("POST", "/admin/accounts/batch", {
       accounts: [{
-        ...account,
+        ...accountWithoutProxy,
+        ...createProxyField(Number(requestedProxyId ?? 0)),
         credentials: this.apiKeyCredentials(account.credentials),
         confirm_mixed_channel_risk: true,
       }],

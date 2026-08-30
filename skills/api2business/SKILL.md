@@ -7,6 +7,15 @@ description: >-
 
 # Api2Business
 
+## 当前 Sub2API 架构
+
+- 唯一 Sub2API 运行面是 NC01 的 `sub2api-nc01-native`。
+- 唯一 Sub2API 业务数据库是 NC01 本地专用 PostgreSQL
+  `127.0.0.1:55432/sub2api`。
+- `api.pikapython.com`、`api.hwpod.com` 和 `sub.api2business.com` 只是入口或代理，
+  不代表数据库 authority。
+- 禁止将旧 PK01 或 `NC01-DOCKER` 的数据库地址写入配置、Secret、CLI 参数或示例。
+
 ## 工作区
 
 - 新部署先克隆 `https://github.com/api2business/api2business.git`，再从克隆后的仓库加载本 skill。
@@ -88,16 +97,35 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 ## 领域操作
 
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
-- 账号导入可用 `--rate-multiplier <正整数>` 调整负载因子；省略时读取
-  `operations.accountImportDefaults.rateMultiplier`，普通导入与 BugTeam 购买导入共用该字段。
+- 账号导入可用历史参数名 `--rate-multiplier <正整数>` 调整负载因子；该参数在导入
+  payload 中必须写入 Sub2API 原生 `load_factor`，不得写入计费倍率
+  `rate_multiplier`。省略时读取 `operations.accountImportDefaults.rateMultiplier`，普通导入与
+  BugTeam 购买导入共用该字段。
 - OAuth 退役计划可用 `--plan-type` 限定账号类型：
   - 默认 `--selection dead` 选择错误账号；`free`、`plus` 和 `team` 的限流账号也按死亡处理，`k12` 限流账号保留；
   - 显式 `--selection all` 选择指定单一类型的全部当前账号，且只允许用于整池范围。
+- 退役清理边界：
+  - 用户说“清理账号”或“退役账号”时，只允许处理 `platform=openai` 且 `type=oauth` 的账号。
+  - API-key 账号禁止进入退役结算、删除或清理流程，即使它们属于同一业务池。
+  - API-key 账号只能通过独立的上游管理流程处理，不得使用 OAuth 生命周期入口替代。
 - 对缺少采购成本记录的整池账号，先用 `--scope pool --plan-type <type> --unit-cost-cny <CNY>`
   显式声明本批结算单价；该模式只支持单一账号类型，并在计划与确认回读中固定成本。
 - 退役删除按 `operations.accountLifecycle.deleteBatchSize` 分批调用原生批量接口；单批失败会跳过并继续，终态只以排队回读为准，失败且有剩余账号时复用原计划恢复。
 - 上游、评分和优先级读取 `references/upstream-scheduling.md`。
+- 池级质量调查使用 `scores pool-quality --over-api`，账号分项使用
+  `scores rank --calls <N> --over-api`；两者均为只读查询。
 - 充值候选使用 `upstreams recharge-candidates --over-api`；同时分析当前欠费和最新额度低于 YAML `lowBalanceCny` 的账号，分别回看锚点前 `lookbackHours` 小时。
+- 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api`；同一规范化 `base_url` 是共享钱包，只记账一次并统一恢复该站点全部 API-key 账号。
+- 充值确认后 CLI 立即返回异步 workflow ID，并做一次非阻塞只读状态与账号快照核验；最终一致性使用 `upstreams recharge-status --id <workflow-id> --over-api`。
+- 核验状态为 `pending`、`snapshot_mismatch` 或 `unavailable` 时，只表示作业未完成或读模型暂未追上，不代表充值失败；必须继续查询原 workflow。
+- 充值请求超时重试时必须复用相同的 `--idempotency-key`，禁止生成新 key 重复提交同一笔充值。
+- CLI 在提交传输异常时会回显本次幂等键和“结果未知”提示；只有复用该键重试，不能把传输异常当成未提交而生成新键。
+- 精确错误链使用 `errors diagnose --request-id <request-id> --over-api`；输出会区分模板未命中、模板命中后切号耗尽和已恢复。
+- 一次性排障优先使用 `errors inspect --request-id <request-id> --over-api`；CLI 会并行取得诊断链和请求详情，避免手工串联 `errors diagnose` 与 `errors get`。
+- `errors diagnose --request-id` 和 `errors get --request-id` 会返回限长脱敏的 `responseEvidence`，包含来源、长度和摘要；正文缺失时明确显示 `available=false`，不得据此臆测上游业务原因。
+- 切号模板只在确认为响应提交前未触发且运行态规则缺失时增强；
+  已触发切号但候选耗尽不通过模板扩张处理，详见 `references/upstream-scheduling.md`。
+- 模板同步使用 `upstreams template --confirm --over-api`，默认只处理 API-key 上游账号，完成后必须查询原 `workflow status` 回读 `verifiedCount`、`failedCount` 和 `misalignedCount`。
 - 新增上游时省略 `--rate`，由 YAML 提供创建占位费率；worker 创建成功后自动探测额度与有效倍率，并将有效倍率同步为最终费率。
   倍率写回使用 Sub2API 原生批量更新并做排队回读，超时只保留可见 warning，不重复创建账号。
 - 已有上游分组调整使用 `upstreams update --id <account-id> --groups <id,id,...> --confirm --over-api`，
@@ -131,6 +159,12 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 快照型 API 不再叠加通用 HTTP 响应缓存；
   - 成功后原子替换，失败保留上一份成功快照；
   - 账号评分默认每 5 分钟刷新，并在进程重启后优先回显持久化快照。
+- Sub2API 业务查询统一通过 Api2Business 排队 broker 读取 NC01 本地专用库；
+  CLI、Web、worker 和人工脚本不得直连旧 PK01 数据库。
+- 账号级代理默认策略：OAuth 导入、Plus/Team 账号和 API-key 上游默认直连，不绑定
+  Sub2API Proxy；配置中的 `sourceProxyId: 0`、`proxyId: 0` 表示无代理。
+- 只有用户显式选择并且 owning 配置允许时才启用账号级代理；这不影响 NC01 host-Docker
+  的出网代理配置。
 - 账号导入成功后异步触发一次 OAuth 实时成本采样；该采样独立于导入作业，不延长导入终态，失败只作为采样作业失败记录。
 - 手动验证同一采样路径使用 `accounts oauth-runtime-sample --over-api`，返回独立 Temporal workflow ID。
 - 上游智商评测：

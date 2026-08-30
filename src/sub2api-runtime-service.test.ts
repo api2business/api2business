@@ -16,7 +16,7 @@ test("imports Grok OAuth through native batch create and preserves Grok fields",
     priority: 1, capacity: 16, groupIds: [6], proxyId: 14, proxyCandidateIds: [14], perAccountProxy: false,
   });
   expect(calls[0]?.path).toBe("/admin/accounts/batch");
-  expect(calls[0]?.body).toEqual({ accounts: [expect.objectContaining({ platform: "grok", type: "oauth", priority: 1, concurrency: 16, proxy_id: 14, group_ids: [6] })] });
+  expect(calls[0]?.body).toEqual({ accounts: [expect.objectContaining({ platform: "grok", type: "oauth", priority: 1, concurrency: 16, load_factor: 1, proxy_id: 14, group_ids: [6] })] });
   expect(output).toEqual(expect.objectContaining({ ok: true, result: expect.objectContaining({ createdIds: [451], failed: 0 }) }));
 });
 
@@ -35,7 +35,7 @@ test("keeps OpenAI OAuth on the codex-session import endpoint", async () => {
   });
   expect(calls).toEqual([expect.objectContaining({
     path: "/admin/accounts/import/codex-session",
-    body: expect.objectContaining({ update_existing: true, rate_multiplier: 1000 }),
+    body: expect.objectContaining({ update_existing: true, load_factor: 1000 }),
     timeoutMs: 120000,
   })]);
 });
@@ -61,7 +61,7 @@ test("uses native batch create when OpenAI preflight proves every account is new
     path: "/admin/accounts/batch",
     body: { accounts: [expect.objectContaining({
       platform: "openai", type: "oauth", priority: 1, concurrency: 16,
-      proxy_id: 14, group_ids: [2, 3], confirm_mixed_channel_risk: true,
+      load_factor: 1, proxy_id: 14, group_ids: [2, 3], confirm_mixed_channel_risk: true,
       extra: expect.objectContaining({ access_token_sha256: expect.any(String), import_source: "api2business-batch" }),
     })] },
     timeoutMs: 120000,
@@ -90,6 +90,25 @@ test("keeps access-token-only OpenAI imports on the session normalization path",
     proxyCandidateIds: [14], perAccountProxy: false, createOnly: true,
   });
   expect(calls).toEqual(["/admin/accounts/import/codex-session"]);
+});
+
+test("imports API-key accounts with load factor without changing billing multiplier", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {
+    calls.push({ path, body });
+    return { account_created: 1, account_failed: 0 };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  await runtime.importAccounts({
+    operationKey: "api-key-import-test",
+    importTimeoutMs: 120000,
+    content: JSON.stringify({ accounts: [{ name: "api-key-a", platform: "openai", type: "apikey", credentials: { api_key: "redacted" } }] }),
+    priority: 1, capacity: 16, rateMultiplier: 1000, groupIds: [3], proxyId: 14, proxyCandidateIds: [14], perAccountProxy: false,
+  });
+  expect(calls).toEqual([{ path: "/admin/accounts/data", body: expect.objectContaining({
+    data: { accounts: [expect.objectContaining({ load_factor: 1000, credentials: expect.objectContaining({ api_key: "redacted" }) })], proxies: [] },
+  }) }]);
+  expect((calls[0]?.body.data as { accounts: Array<Record<string, unknown>> }).accounts[0]).not.toHaveProperty("rate_multiplier");
 });
 
 test("API-key creation uses the native batch endpoint and YAML-owned mutation timeout", async () => {
