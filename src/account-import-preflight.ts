@@ -31,6 +31,7 @@ export interface AccountImportPreflightSettings {
   sourceProxyId: number;
   perAccountProxy?: boolean;
   planType: OAuthPlanType;
+  allowDuplicate?: boolean;
 }
 
 export interface AccountImportPreflightPlan {
@@ -118,6 +119,7 @@ export async function accountImportPreflight(
     perAccountProxy: settings.perAccountProxy === true,
     planType: settings.planType,
     platform: settings.platform,
+    allowDuplicate: settings.allowDuplicate === true,
   };
   const key = createHash("sha256").update(JSON.stringify({ userIds, accessHashes, settings: normalizedSettings })).digest("hex");
   const result = await reads.query<AccountRow>({
@@ -191,7 +193,7 @@ export async function accountImportPreflight(
   for (let offset = 0; offset < accounts.length; offset += 1) {
     const item = identities[offset]!;
     const matches = item.userId ? byUser.get(item.userId) ?? [] : byAccess.get(item.accessTokenSha256) ?? [];
-    if (matches.length === 1 && credentialsAligned(matches[0]!, item) && baseAligned(matches[0]!, settings)
+    if (settings.allowDuplicate !== true && matches.length === 1 && credentialsAligned(matches[0]!, item) && baseAligned(matches[0]!, settings)
       && proxyCandidateIds.includes(integer(matches[0]!.proxy_id) ?? 0)) {
       const match = matches[0]!;
       const existing = { index: offset + 1, accountId: integer(match.id)! };
@@ -200,7 +202,7 @@ export async function accountImportPreflight(
       continue;
     }
     const account = record(accounts[offset]);
-    if (matches.length === 1) {
+    if (settings.allowDuplicate !== true && matches.length === 1) {
       const accountId = integer(matches[0]!.id);
       if (accountId !== null) pendingExisting.push({ index: offset + 1, accountId });
     }

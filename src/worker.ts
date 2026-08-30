@@ -178,7 +178,7 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
           error: error instanceof Error ? error.message : String(error),
         };
       }
-      if (job.source.platform === "openai" && job.source.accountType === "oauth") {
+      if (job.source.platform === "openai" && job.source.accountType === "oauth" && job.settings?.cutoffTrigger !== "public-recovery") {
         try {
           postImportApiKeyCutoff = await temporalGateway.submit({
             kind: "upstream.apikey.cutoff", phase: "start", operationId: crypto.randomUUID(), durationSeconds: 120,

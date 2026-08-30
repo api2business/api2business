@@ -1,7 +1,7 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-export type ApiKeyCutoffTrigger = "manual" | "account-import" | "bugteam-import";
+export type ApiKeyCutoffTrigger = "manual" | "account-import" | "bugteam-import" | "public-recovery";
 
 export interface ApiKeyCutoffEvent {
   id: string;

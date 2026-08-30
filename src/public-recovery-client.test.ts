@@ -14,11 +14,11 @@ test("public recovery validates an HTTPS origin", () => {
 test("health and reclaim use card_codes and reclaim mode 401", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
-  globalThis.fetch = async (input, init) => {
+  globalThis.fetch = (async (input, init) => {
     const url = new URL(String(input));
     requests.push({ path: url.pathname, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
     return new Response(JSON.stringify({ ok: true, healthy: true, need_reclaim: 0, message: "account@example.com team-secret", data: { tasks: [{ status: "ready" }] } }), { status: 200 });
-  };
+  }) as typeof fetch;
   try {
     const client = new PublicRecoveryClient("https://30d.team", 1000);
     expect(await client.health("team-redacted-test")).toMatchObject({ action: "public-recovery-health", healthy: true, needReclaim: 0, taskCount: 1, message: "[redacted] [redacted]", valuesPrinted: false });
@@ -36,7 +36,7 @@ test("download writes atomically, returns a digest, and refuses overwrite", asyn
   const directory = await mkdtemp(join(tmpdir(), "public-recovery-"));
   const originalFetch = globalThis.fetch;
   let call = 0;
-  globalThis.fetch = async (input) => {
+  globalThis.fetch = (async (input) => {
     call += 1;
     const url = new URL(String(input));
     if (call === 1) {
@@ -46,7 +46,7 @@ test("download writes atomically, returns a digest, and refuses overwrite", asyn
     expect(url.pathname).toBe("/api/redeem/orders/order-safe/download");
     expect(url.searchParams.get("token")).toBe("token-safe");
     return new Response("{\"accounts\":[]}", { status: 200 });
-  };
+  }) as typeof fetch;
   const output = join(directory, "recovered.json");
   try {
     const client = new PublicRecoveryClient("https://30d.team", 1000);

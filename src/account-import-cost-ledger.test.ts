@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { accountImportBatchId, readAccountImportCosts, recordAccountImportCosts, recordAccountImportPlanTypeCorrections } from "./account-import-cost-ledger";
+import { accountImportBatchId, readAccountImportCosts, recordAccountImportCosts, recordAccountImportCostCorrections, recordAccountImportPlanTypeCorrections } from "./account-import-cost-ledger";
 
 test("records CNY account costs once per stable account id", () => {
   const directory = mkdtempSync(join(tmpdir(), "api2business-cost-ledger-"));
@@ -102,6 +102,36 @@ test("corrects an imported plan type without changing acquisition cost", () => {
       expect.objectContaining({ accountId: 377, planType: "k12", amountCny: 0.01 }),
       expect.objectContaining({ accountId: 378, planType: "k12", amountCny: 0.01 }),
       expect.objectContaining({ accountId: 379, planType: "k12", amountCny: 0.01 }),
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("corrects an imported cost with an auditable adjustment", () => {
+  const directory = mkdtempSync(join(tmpdir(), "api2business-cost-ledger-cost-correction-"));
+  const path = join(directory, "costs.jsonl");
+  try {
+    recordAccountImportCosts({
+      path,
+      fingerprint: "recovery-batch",
+      accountIds: [1473],
+      unitCostCny: 18.5,
+      planType: "team",
+      occurredOn: "2026-08-30",
+    });
+    const correction = recordAccountImportCostCorrections({
+      path,
+      accountIds: [1473],
+      unitCostCny: 0.01,
+      occurredAt: "2026-08-30T16:00:00.000Z",
+    });
+    const repeated = recordAccountImportCostCorrections({ path, accountIds: [1473], unitCostCny: 0.01 });
+
+    expect(correction).toMatchObject({ correctedAccountIds: [1473], correctedCount: 1, totalAdjustmentCny: -18.49 });
+    expect(repeated).toMatchObject({ correctedCount: 0, skippedAccountIds: [1473] });
+    expect(readAccountImportCosts(path)).toEqual([
+      expect.objectContaining({ accountId: 1473, unitCostCny: 0.01, amountCny: 0.01 }),
     ]);
   } finally {
     rmSync(directory, { recursive: true, force: true });

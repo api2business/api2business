@@ -21,6 +21,7 @@ import { parseManualPriorityAssignments } from "./priority-plan-input";
 import { readSecret } from "../../../../src/secrets";
 import { BugTeamClient } from "./bugteam-client";
 import { PublicRecoveryClient } from "./public-recovery-client";
+import { PublicRecoveryJobManager, type RecoveryStage } from "./public-recovery-job";
 import { readRechargeWalletSnapshot, validateRechargeIdempotencyKey, verifyRechargeWorkflow } from "./upstream-recharge";
 
 type Row = Record<string, unknown>;
@@ -67,6 +68,8 @@ interface Parsed {
   externalCostsJson: string | null;
   baseUrl: string | null;
   mode: string | null;
+  accountId: number | null;
+  stage: string | null;
   suffix: string | null;
   rate: number | null;
   rechargeCny: number | null;
@@ -117,7 +120,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -194,7 +197,7 @@ function parseArgs(args: string[]): Parsed {
     })(),
     groups: value(args, "--groups"), proxyId: integer("--proxy-id"),
     externalCostsJson: value(args, "--external-costs-json"),
-    baseUrl: value(args, "--base-url"), mode: value(args, "--mode"), suffix: value(args, "--suffix"),
+    baseUrl: value(args, "--base-url"), mode: value(args, "--mode"), accountId: integer("--account-id"), stage: value(args, "--stage"), suffix: value(args, "--suffix"),
     rate: decimal("--rate"), rechargeCny: decimal("--recharge-cny"),
     amountCny: decimal("--amount-cny"), direction: value(args, "--direction"),
     category: value(args, "--category"), description: value(args, "--description"),
@@ -278,6 +281,9 @@ function help(): Record<string, unknown> {
       "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api",
       "bugteam login|balance|inventory --product <id> --quantity N|shelves --product <id>|cost-monitor get [--include-records]|sample|pickup order-create|order-status|download|push|take|recoveries list|recoveries claim|redeem",
       "bugteam public-recovery health|status|reclaim|download --base-url <https-origin> --card-code-stdin [--mode 401] [--confirm] [--output <path>]",
+      "bugteam public-recovery start --account-id <Sub2API账号ID> --base-url <https-origin> --card-code-stdin --output <path> --plan-type <type> --confirm（新账号固定按 ¥0.01 记账）",
+      "bugteam public-recovery import --account-id <原OAuth账号ID> --file <已下载JSON> --plan-type <type> --confirm（保留原账号并创建复活副本，固定按 ¥0.01 记账）",
+      "bugteam public-recovery status|logs|continue|retry --id <job-id> [--stage health|reclaim|status|download|import-submit|import-status|verify] [--card-code-stdin] [--confirm]",
       "bugteam purchase-import options|create --quantity N [--priority 1 --capacity 16 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api|status --id <job-id> --over-api",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
@@ -288,23 +294,76 @@ function help(): Record<string, unknown> {
 async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConfig>): Promise<Record<string, unknown>> {
   if (parsed.command[0] === "bugteam" && parsed.command[1] === "public-recovery") {
     const action = parsed.command[2];
-    if (!parsed.baseUrl) throw new Error("bugteam public-recovery requires --base-url");
-    if (!parsed.codeStdin) throw new Error("bugteam public-recovery requires --card-code-stdin; the redemption code is never accepted in argv");
-    const cardCode = (await Bun.stdin.text()).trim();
-    if (!cardCode) throw new Error("--card-code-stdin received empty stdin");
-    const client = new PublicRecoveryClient(parsed.baseUrl, config.bugTeam.requestTimeoutMs);
-    if (action === "health") return await client.health(cardCode);
-    if (action === "status") return await client.status(cardCode);
-    if (action === "reclaim") {
-      if (parsed.mode !== null && parsed.mode !== "401") throw new Error("public recovery only supports --mode 401");
-      if (!parsed.confirm) return { ok: true, mutation: false, action: "public-recovery-reclaim", mode: "401", hint: "add --confirm to execute" };
-      return await client.reclaim(cardCode, "401");
-    }
-    if (action === "download") {
+    const directActions = new Set(["health", "status", "reclaim", "download"]);
+    if (directActions.has(action ?? "")) {
+      if (!parsed.baseUrl) throw new Error("bugteam public-recovery requires --base-url");
+      if (!parsed.codeStdin) throw new Error("bugteam public-recovery requires --card-code-stdin; the redemption code is never accepted in argv");
+      const cardCode = (await Bun.stdin.text()).trim();
+      if (!cardCode) throw new Error("--card-code-stdin received empty stdin");
+      const client = new PublicRecoveryClient(parsed.baseUrl, config.bugTeam.requestTimeoutMs);
+      if (action === "health") return await client.health(cardCode);
+      if (action === "status") return await client.status(cardCode);
+      if (action === "reclaim") {
+        if (parsed.mode !== null && parsed.mode !== "401") throw new Error("public recovery only supports --mode 401");
+        if (!parsed.confirm) return { ok: true, mutation: false, action: "public-recovery-reclaim", mode: "401", hint: "add --confirm to execute" };
+        return await client.reclaim(cardCode, "401");
+      }
       if (!parsed.output) throw new Error("bugteam public-recovery download requires --output");
       return await client.download(cardCode, parsed.output);
     }
-    throw new Error("bugteam public-recovery requires health, status, reclaim, or download");
+    const target = config.runtime.cliTargets[config.runtime.overApiTarget];
+    if (!target || target.mode !== "http") throw new Error("public recovery job requires the configured HTTP over-api target");
+    const manager = new PublicRecoveryJobManager(config, target);
+    if (action === "start") {
+      if (parsed.accountId === null || !parsed.baseUrl || !parsed.output || !parsed.planType) {
+        throw new Error("public-recovery start requires --account-id, --base-url, --output, and --plan-type");
+      }
+      if (parsed.planType !== "k12" && parsed.planType !== "plus" && parsed.planType !== "team" && parsed.planType !== "free") throw new Error("--plan-type must be k12, plus, team, or free");
+      if (!parsed.confirm) return { ok: true, mutation: false, action: "public-recovery-job", accountId: parsed.accountId, baseUrl: parsed.baseUrl, output: parsed.output, unitCostCny: 0.01, planType: parsed.planType, hint: "add --confirm to create and run the job" };
+      if (!parsed.codeStdin) throw new Error("public-recovery start requires --card-code-stdin");
+      const cardCode = (await Bun.stdin.text()).trim();
+      if (!cardCode) throw new Error("--card-code-stdin received empty stdin");
+      await manager.assertOAuthAccount(parsed.accountId);
+      const job = await manager.create({ accountId: parsed.accountId, baseUrl: parsed.baseUrl, outputPath: parsed.output, unitCostCny: 0.01, planType: parsed.planType });
+      return await manager.launch(job, parsed.configPath, cardCode);
+    }
+    if (action === "import") {
+      if (parsed.accountId === null || !parsed.file || !parsed.planType) {
+        throw new Error("public-recovery import requires --account-id, --file, and --plan-type");
+      }
+      if (parsed.planType !== "k12" && parsed.planType !== "plus" && parsed.planType !== "team" && parsed.planType !== "free") throw new Error("--plan-type must be k12, plus, team, or free");
+      if (!parsed.confirm) return { ok: true, mutation: false, action: "public-recovery-import", accountId: parsed.accountId, file: parsed.file, planType: parsed.planType, unitCostCny: 0.01, hint: "add --confirm to execute" };
+      return await manager.importDownloaded({ accountId: parsed.accountId, filePath: parsed.file, planType: parsed.planType });
+    }
+    if (!parsed.id) throw new Error(`public-recovery ${action ?? ""} requires --id <job-id>`);
+    const job = await manager.get(parsed.id);
+    if (action === "status") return manager.projectJob(job);
+    if (action === "logs") {
+      const result = manager.projectJob(job);
+      const limit = parsed.limit ?? 100;
+      result.logs = job.logs.slice(-limit);
+      result.logCount = job.logs.length;
+      return result;
+    }
+    if (action === "continue" || action === "retry") {
+      if (!parsed.confirm) return { ok: true, mutation: false, action: `public-recovery-${action}`, jobId: job.id, accountId: job.accountId, stage: action === "retry" ? parsed.stage : job.nextStage, hint: "add --confirm to launch the worker" };
+      const stage = action === "retry" ? parsed.stage : null;
+      const validStages = new Set<RecoveryStage>(["health", "reclaim", "status", "download", "import-submit", "import-status", "verify"]);
+      if (action === "retry" && !stage) throw new Error("public-recovery retry requires --stage");
+      if (stage !== null && !validStages.has(stage as RecoveryStage)) throw new Error("--stage must be health, reclaim, status, download, import-submit, import-status, or verify");
+      const nextStage = (stage ?? job.nextStage) as RecoveryStage | null;
+      const needsCode = PublicRecoveryJobManager.requiresCode(nextStage);
+      if (needsCode && !parsed.codeStdin) throw new Error(`stage ${nextStage} requires --card-code-stdin`);
+      const cardCode = parsed.codeStdin ? (await Bun.stdin.text()).trim() : "";
+      if (needsCode && !cardCode) throw new Error("--card-code-stdin received empty stdin");
+      return await manager.launch(job, parsed.configPath, cardCode, action === "retry" ? nextStage ?? undefined : undefined);
+    }
+    if (action === "worker") {
+      const cardCode = parsed.codeStdin ? (await Bun.stdin.text()).trim() : "";
+      const stage = parsed.stage as RecoveryStage | null;
+      return stage ? await manager.run(job.id, cardCode, stage) : await manager.runChain(job.id, cardCode);
+    }
+    throw new Error("bugteam public-recovery requires health, status, reclaim, download, start, logs, continue, retry, or worker");
   }
   const client = new BugTeamClient(config);
   const [group, action, subaction] = parsed.command;

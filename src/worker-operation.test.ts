@@ -134,3 +134,25 @@ test("API Key imports do not trigger the OAuth post-import cutoff", async () => 
 
   expect(submitted).toEqual([{ kind: "oauth.runtime.sample" }]);
 });
+
+test("public recovery OAuth imports do not trigger the API Key cutoff", async () => {
+  const submitted: Array<Record<string, unknown>> = [];
+  const execute = createWorkerOperationExecutor({
+    imports: {
+      runWorker: async () => ({
+        id: "import-recovery",
+        state: "succeeded",
+        source: { platform: "openai", accountType: "oauth" },
+        settings: { cutoffTrigger: "public-recovery" },
+      }),
+    },
+    temporal: { submit: async (command: Record<string, unknown>) => {
+      submitted.push(command);
+      return { ok: true, workflowId: "workflow-recovery", runId: "run-recovery", state: "submitted" };
+    } },
+  } as never);
+
+  await execute({ operationId: "operation-recovery", command: { kind: "account.import", jobId: "import-recovery" } });
+
+  expect(submitted).toEqual([{ kind: "oauth.runtime.sample" }]);
+});

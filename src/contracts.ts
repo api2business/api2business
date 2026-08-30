@@ -17,7 +17,7 @@ export type AppCommand =
   | { kind: "upstream.usage.sample" }
   | { kind: "pool.quality.sample" }
   | { kind: "bugteam.cost.sample" }
-  | { kind: "upstream.apikey.cutoff"; phase: "start" | "disable" | "guard" | "restore"; operationId: string; durationSeconds: number; accountIds?: number[]; trigger?: "manual" | "account-import" | "bugteam-import"; restoreReason?: string }
+  | { kind: "upstream.apikey.cutoff"; phase: "start" | "disable" | "guard" | "restore"; operationId: string; durationSeconds: number; accountIds?: number[]; trigger?: "manual" | "account-import" | "bugteam-import" | "public-recovery"; restoreReason?: string }
   | { kind: "bugteam.purchase.import"; jobId: string }
   | { kind: "oauth.runtime.sample" }
   | { kind: "upstream.benchmark"; benchmarkRunId: string; accountId: number; model: string }

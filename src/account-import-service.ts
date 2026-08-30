@@ -22,7 +22,8 @@ export interface AccountImportRequest {
   unitCostCny: number;
   planType: OAuthPlanType;
   platform?: "openai" | "grok";
-  cutoffTrigger?: "account-import" | "bugteam-import";
+  cutoffTrigger?: "account-import" | "bugteam-import" | "public-recovery";
+  allowDuplicate?: boolean;
   confirm: boolean;
 }
 
@@ -69,6 +70,9 @@ function validate(input: AccountImportRequest): void {
   }
   if (input.platform !== "openai" && input.platform !== "grok") throw new Error("账号平台识别结果无效");
   if (input.platform === "grok" && input.planType !== "free") throw new Error("Grok 导入当前只支持 free 类型");
+  if (input.allowDuplicate === true && input.cutoffTrigger !== "public-recovery") {
+    throw new Error("allowDuplicate 只允许用于 public-recovery 复活导入");
+  }
 }
 
 function safeMessage(value: string): string {
@@ -167,7 +171,7 @@ export class AccountImportService {
     const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, selectedContent);
     const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null,
       accountCount: parsed.accountCount, fingerprint: parsed.fingerprint, source: { ...parsed.source, platform: selectedPlatform },
-      settings: { priority: normalizedInput.priority, capacity: normalizedInput.capacity, rateMultiplier: normalizedInput.rateMultiplier, groupIds: [...new Set(normalizedInput.groupIds)], sourceProxyId: normalizedInput.sourceProxyId, perAccountProxy: normalizedInput.perAccountProxy, unitCostCny: normalizedInput.unitCostCny, planType: normalizedInput.planType, platform: normalizedInput.platform, confirm: normalizedInput.confirm },
+      settings: { priority: normalizedInput.priority, capacity: normalizedInput.capacity, rateMultiplier: normalizedInput.rateMultiplier, groupIds: [...new Set(normalizedInput.groupIds)], sourceProxyId: normalizedInput.sourceProxyId, perAccountProxy: normalizedInput.perAccountProxy, unitCostCny: normalizedInput.unitCostCny, planType: normalizedInput.planType, platform: normalizedInput.platform, cutoffTrigger: normalizedInput.cutoffTrigger, allowDuplicate: normalizedInput.allowDuplicate, confirm: normalizedInput.confirm },
       inputArchive: { stored: true, fileName: archiveFileName },
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);

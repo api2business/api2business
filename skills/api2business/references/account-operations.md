@@ -22,6 +22,14 @@
 - 导入作业成功后独立提交一次 OAuth 实时成本采样；采样由单独 Temporal 作业执行，不阻塞导入终态，也不替代原有 5 分钟周期采样。
 - 手动回归通过正式 CLI 提交同一采样命令，不重复导入账号。
 
+## 公开复活导入
+
+- `bugteam public-recovery start` 完成 30d.team 健康检查、401 找回、下载、导入和终态回读。
+- 复活导入保留原 OAuth 账号，不执行删除或覆盖；新复活副本固定按 `¥0.01` 采购成本记账。
+- 复活副本允许与现有 OAuth 凭据相同，但只在 `cutoffTrigger=public-recovery` 场景启用该重复导入语义。
+- 复活导入使用直连，并跳过 OAuth 导入后的 API-key 上游切断联动。
+- 已完成下载但需要补导入时使用 `bugteam public-recovery import`，仍须指定一个现存 OAuth 账号作为复活锚点。
+
 ## 空闲探活
 
 - 只探测 `status=active` 且 `schedulable=true` 的正常账号。

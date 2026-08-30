@@ -108,6 +108,28 @@ test("reimports the same OAuth user when the access token fingerprint changed", 
   expect((JSON.parse(plan.content) as { accounts: unknown[] }).accounts).toHaveLength(1);
 });
 
+test("keeps a recovered OAuth identity as a new account when duplicate import is enabled", async () => {
+  const reads = {
+    query: async () => ({
+      rows: [
+        { row_kind: "account", id: 1473, user_id: "user-recovered", access_token_sha256: tokenHash("token"), priority: 1, concurrency: 16, load_factor: 1000, proxy_id: 0, plan_type: "team", group_ids: [2, 3] },
+      ],
+      queueDurationMs: 0, queryDurationMs: 0, totalDurationMs: 0,
+      queryStartedAt: "2026-01-01T00:00:00.000Z", queryCompletedAt: "2026-01-01T00:00:00.000Z",
+      deduplicated: false, cached: false,
+    }),
+  } as unknown as Sub2ApiReadClient;
+  const plan = await accountImportPreflight(JSON.stringify({ accounts: [
+    { credentials: { chatgpt_user_id: "user-recovered", access_token: "token" } },
+  ], proxies: [] }), {
+    platform: "openai", priority: 1, capacity: 16, rateMultiplier: 1000, groupIds: [2, 3], sourceProxyId: 0, planType: "team", allowDuplicate: true,
+  }, reads);
+  expect(plan.skipped).toEqual([]);
+  expect(plan.pendingExisting).toEqual([]);
+  expect(plan.sourceIndexes).toEqual([1]);
+  expect((JSON.parse(plan.content) as { accounts: unknown[] }).accounts).toHaveLength(1);
+});
+
 test("selects the same initial proxy for the same import identity regardless of candidate order", async () => {
   const reads = (proxyIds: number[]) => ({
     query: async () => ({

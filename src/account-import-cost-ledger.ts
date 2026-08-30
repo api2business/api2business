@@ -30,7 +30,19 @@ interface AccountImportPlanTypeCorrectionEntry {
   planType: OAuthPlanType;
 }
 
-type AccountImportLedgerEntry = AccountImportCostEntry | AccountImportPlanTypeCorrectionEntry;
+interface AccountImportCostCorrectionEntry {
+  version: 1;
+  id: string;
+  source: "account-import-cost-correction";
+  occurredAt: string;
+  accountId: number;
+  originalEntryId: string;
+  previousUnitCostCny: number;
+  unitCostCny: number;
+  adjustmentCny: number;
+}
+
+type AccountImportLedgerEntry = AccountImportCostEntry | AccountImportPlanTypeCorrectionEntry | AccountImportCostCorrectionEntry;
 
 function money(value: number): number {
   return Math.round(value * 100) / 100;
@@ -42,6 +54,10 @@ function entryId(accountId: number): string {
 
 function correctionEntryId(accountId: number, planType: OAuthPlanType): string {
   return `account-import-plan-type-correction-${createHash("sha256").update(`${accountId}:${planType}`).digest("hex").slice(0, 16)}`;
+}
+
+function costCorrectionEntryId(accountId: number, unitCostCny: number): string {
+  return `account-import-cost-correction-${createHash("sha256").update(`${accountId}:${money(unitCostCny).toFixed(2)}`).digest("hex").slice(0, 16)}`;
 }
 
 function isPlanType(value: unknown): value is OAuthPlanType {
@@ -67,6 +83,18 @@ function parseEntry(value: unknown, line: number): AccountImportLedgerEntry {
       throw new Error(`账号导入成本账本第 ${line} 行类型更正字段无效`);
     }
     return row as unknown as AccountImportPlanTypeCorrectionEntry;
+  }
+  if (row.version === 1 && row.source === "account-import-cost-correction") {
+    if (typeof row.id !== "string" || !row.id
+      || typeof row.occurredAt !== "string"
+      || !Number.isSafeInteger(row.accountId) || Number(row.accountId) < 1
+      || typeof row.originalEntryId !== "string" || !row.originalEntryId
+      || !Number.isFinite(row.previousUnitCostCny) || Number(row.previousUnitCostCny) <= 0
+      || !Number.isFinite(row.unitCostCny) || Number(row.unitCostCny) <= 0
+      || !Number.isFinite(row.adjustmentCny) || Number(row.adjustmentCny) === 0) {
+      throw new Error(`账号导入成本账本第 ${line} 行成本更正字段无效`);
+    }
+    return row as unknown as AccountImportCostCorrectionEntry;
   }
   if (row.version !== 1 || row.source !== "account-import" || row.currency !== "CNY"
     || typeof row.id !== "string" || !row.id
@@ -111,6 +139,19 @@ export function readAccountImportCosts(path: string): AccountImportCostEntry[] {
     }
     cost.planType = correction.planType;
   }
+  for (const correction of ledger.filter((entry): entry is AccountImportCostCorrectionEntry => entry.source === "account-import-cost-correction")) {
+    const cost = byAccount.get(correction.accountId);
+    if (!cost || cost.id !== correction.originalEntryId) {
+      throw new Error(`账号 ${correction.accountId} 的成本更正找不到原采购记录`);
+    }
+    if (cost.unitCostCny !== correction.previousUnitCostCny
+      || money(cost.amountCny + correction.adjustmentCny) <= 0
+      || money(correction.unitCostCny) !== money(correction.previousUnitCostCny + correction.adjustmentCny)) {
+      throw new Error(`账号 ${correction.accountId} 的成本更正前置金额不一致`);
+    }
+    cost.unitCostCny = money(correction.unitCostCny);
+    cost.amountCny = money(cost.amountCny + correction.adjustmentCny);
+  }
   return costs;
 }
 
@@ -148,6 +189,53 @@ export function recordAccountImportPlanTypeCorrections(input: {
     correctedAccountIds: entries.map((entry) => entry.accountId),
     skippedAccountIds: accountIds.filter((accountId) => !entries.some((entry) => entry.accountId === accountId)),
     correctedCount: entries.length,
+  };
+}
+
+export function recordAccountImportCostCorrections(input: {
+  path: string;
+  accountIds: number[];
+  unitCostCny: number;
+  occurredAt?: string;
+}) {
+  if (!Number.isFinite(input.unitCostCny) || input.unitCostCny <= 0
+    || Math.abs(Math.round(input.unitCostCny * 100) - input.unitCostCny * 100) > 1e-8) {
+    throw new Error("更正后的账号单价必须为正数人民币，最多两位小数");
+  }
+  const accountIds = [...new Set(input.accountIds)].sort((left, right) => left - right);
+  if (accountIds.some((id) => !Number.isSafeInteger(id) || id < 1)) throw new Error("成本更正账号 ID 必须为正整数");
+  const costs = readAccountImportCosts(input.path);
+  const byAccount = new Map(costs.map((entry) => [entry.accountId, entry]));
+  const unitCostCny = money(input.unitCostCny);
+  const occurredAt = input.occurredAt ?? new Date().toISOString();
+  const entries: AccountImportCostCorrectionEntry[] = accountIds.flatMap((accountId) => {
+    const cost = byAccount.get(accountId);
+    if (!cost || cost.unitCostCny === unitCostCny) return [];
+    const adjustmentCny = money(unitCostCny - cost.unitCostCny);
+    return [{
+      version: 1,
+      id: costCorrectionEntryId(accountId, unitCostCny),
+      source: "account-import-cost-correction",
+      occurredAt,
+      accountId,
+      originalEntryId: cost.id,
+      previousUnitCostCny: cost.unitCostCny,
+      unitCostCny,
+      adjustmentCny,
+    }];
+  });
+  if (entries.length > 0) {
+    mkdirSync(dirname(input.path), { recursive: true, mode: 0o700 });
+    appendFileSync(input.path, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+  }
+  return {
+    currency: "CNY" as const,
+    unitCostCny,
+    requestedAccountIds: accountIds,
+    correctedAccountIds: entries.map((entry) => entry.accountId),
+    skippedAccountIds: accountIds.filter((accountId) => !entries.some((entry) => entry.accountId === accountId)),
+    correctedCount: entries.length,
+    totalAdjustmentCny: money(entries.reduce((total, entry) => total + entry.adjustmentCny, 0)),
   };
 }
 
