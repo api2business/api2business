@@ -116,6 +116,12 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
     再用 `bugteam purchase-import create --quantity N --confirm --over-api` 提交，
     并只用 `bugteam purchase-import status --id <job-id> --over-api` 跟踪原作业。
   - 下载和领取只输出路径、字节数、SHA256 与版本摘要，绝不输出账号 JSON、Token 或 Ticket。
+- 30d.team 公开兑换找回使用独立的 `bugteam public-recovery` 命令组，不读取或发送 BugTeam 客户 Token：
+  - 健康检查：`bugteam public-recovery health --base-url https://30d.team --card-code-stdin`。
+  - 401 找回：先不带 `--confirm` 查看计划，再追加 `--confirm` 和 `--mode 401` 执行；兑换码只能经 stdin 输入。
+  - 状态查询：`bugteam public-recovery status --base-url https://30d.team --card-code-stdin`，只输出脱敏状态，不输出下载 Token。
+  - 下载：`bugteam public-recovery download --base-url https://30d.team --card-code-stdin --output <path>`；先查询可下载任务，成功后原子写入并返回字节数与 SHA256，已存在目标文件会拒绝覆盖。
+  - `--base-url` 必须是无凭据、无路径、无查询和无片段的 HTTPS origin；该公开服务与 Api2Business 客户 API、Sub2API 本体均保持边界分离。
 - 错误聚合与诊断：
   - `--group` 按错误记录的实际请求分组筛选；
   - 默认排除内部 monitor 用户和 `api2business-probe-*` 探活流量；

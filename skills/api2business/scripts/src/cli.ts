@@ -20,6 +20,7 @@ import { runBoundedProcess } from "../../../../src/bounded-process";
 import { parseManualPriorityAssignments } from "./priority-plan-input";
 import { readSecret } from "../../../../src/secrets";
 import { BugTeamClient } from "./bugteam-client";
+import { PublicRecoveryClient } from "./public-recovery-client";
 
 type Row = Record<string, unknown>;
 
@@ -64,6 +65,7 @@ interface Parsed {
   period: string | null;
   externalCostsJson: string | null;
   baseUrl: string | null;
+  mode: string | null;
   suffix: string | null;
   rate: number | null;
   rechargeCny: number | null;
@@ -114,8 +116,8 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
-  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
+  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index]!;
@@ -191,7 +193,7 @@ function parseArgs(args: string[]): Parsed {
     })(),
     groups: value(args, "--groups"), proxyId: integer("--proxy-id"),
     externalCostsJson: value(args, "--external-costs-json"),
-    baseUrl: value(args, "--base-url"), suffix: value(args, "--suffix"),
+    baseUrl: value(args, "--base-url"), mode: value(args, "--mode"), suffix: value(args, "--suffix"),
     rate: decimal("--rate"), rechargeCny: decimal("--recharge-cny"),
     amountCny: decimal("--amount-cny"), direction: value(args, "--direction"),
     category: value(args, "--category"), description: value(args, "--description"),
@@ -203,7 +205,7 @@ function parseArgs(args: string[]): Parsed {
     product: value(args, "--product"), quantity: integer("--quantity"), output: value(args, "--output"),
     format: value(args, "--format") as "sub2" | "cpa" | null, hubId: value(args, "--hub-id"),
     state: value(args, "--state"), beforeId: value(args, "--before-id"), idempotencyKey: value(args, "--idempotency-key"),
-    ticketStdin: args.includes("--ticket-stdin"), codeStdin: args.includes("--code-stdin"),
+    ticketStdin: args.includes("--ticket-stdin"), codeStdin: args.includes("--code-stdin") || args.includes("--card-code-stdin"),
   };
 }
 
@@ -272,6 +274,7 @@ function help(): Record<string, unknown> {
       "cash ledger [--period YYYY-MM --page N] --over-api",
       "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api",
       "bugteam login|balance|inventory --product <id> --quantity N|shelves --product <id>|cost-monitor get [--include-records]|sample|pickup order-create|order-status|download|push|take|recoveries list|recoveries claim|redeem",
+      "bugteam public-recovery health|status|reclaim|download --base-url <https-origin> --card-code-stdin [--mode 401] [--confirm] [--output <path>]",
       "bugteam purchase-import options|create --quantity N [--priority 1 --capacity 16 --rate-multiplier 1000 --groups 2,3 --proxy-id 3] [--confirm] --over-api|status --id <job-id> --over-api",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
@@ -280,6 +283,26 @@ function help(): Record<string, unknown> {
 }
 
 async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConfig>): Promise<Record<string, unknown>> {
+  if (parsed.command[0] === "bugteam" && parsed.command[1] === "public-recovery") {
+    const action = parsed.command[2];
+    if (!parsed.baseUrl) throw new Error("bugteam public-recovery requires --base-url");
+    if (!parsed.codeStdin) throw new Error("bugteam public-recovery requires --card-code-stdin; the redemption code is never accepted in argv");
+    const cardCode = (await Bun.stdin.text()).trim();
+    if (!cardCode) throw new Error("--card-code-stdin received empty stdin");
+    const client = new PublicRecoveryClient(parsed.baseUrl, config.bugTeam.requestTimeoutMs);
+    if (action === "health") return await client.health(cardCode);
+    if (action === "status") return await client.status(cardCode);
+    if (action === "reclaim") {
+      if (parsed.mode !== null && parsed.mode !== "401") throw new Error("public recovery only supports --mode 401");
+      if (!parsed.confirm) return { ok: true, mutation: false, action: "public-recovery-reclaim", mode: "401", hint: "add --confirm to execute" };
+      return await client.reclaim(cardCode, "401");
+    }
+    if (action === "download") {
+      if (!parsed.output) throw new Error("bugteam public-recovery download requires --output");
+      return await client.download(cardCode, parsed.output);
+    }
+    throw new Error("bugteam public-recovery requires health, status, reclaim, or download");
+  }
   const client = new BugTeamClient(config);
   const [group, action, subaction] = parsed.command;
   if (group === "bugteam" && action === "login") {
