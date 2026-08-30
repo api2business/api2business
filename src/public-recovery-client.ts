@@ -74,7 +74,7 @@ function statusProjection(payload: Json): Json {
     healthy: payload.healthy,
     needReclaim: payload.need_reclaim ?? payload.needReclaim,
     noAction: payload.no_action ?? payload.noAction,
-    message: typeof payload.message === "string" ? payload.message : undefined,
+    message: typeof payload.message === "string" ? safeError(payload.message) : undefined,
     valuesPrinted: false,
   };
   return Object.fromEntries(Object.entries(projected).filter(([, value]) => value !== undefined));
