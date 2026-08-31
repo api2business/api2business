@@ -33,11 +33,45 @@ test("keeps OpenAI OAuth on the codex-session import endpoint", async () => {
     content: JSON.stringify({ accounts: [{ name: "codex-a", platform: "openai", type: "oauth", credentials: { access_token: "token" } }] }),
     priority: 1, capacity: 16, rateMultiplier: 1000, groupIds: [2, 3], proxyId: 14, proxyCandidateIds: [14], perAccountProxy: false,
   });
-  expect(calls).toEqual([expect.objectContaining({
+  expect(calls[0]).toEqual(expect.objectContaining({
     path: "/admin/accounts/import/codex-session",
-    body: expect.objectContaining({ update_existing: true, load_factor: 1000 }),
+    body: expect.objectContaining({
+      update_existing: true,
+      load_factor: 1000,
+      contents: [expect.stringContaining('"model_mapping":{"gpt-5.2":"gpt-5.2"')],
+    }),
     timeoutMs: 120000,
-  })]);
+  }));
+  expect(calls[1]).toEqual(expect.objectContaining({
+    path: "/admin/accounts/bulk-update",
+    body: expect.objectContaining({ account_ids: [452] }),
+    timeoutMs: 120000,
+  }));
+});
+
+test("persists the default OpenAI OAuth model mapping after codex-session import", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {
+    calls.push({ path, body });
+    if (path === "/admin/accounts/import/codex-session") return { failed: 0, items: [{ index: 1, account_id: 456, action: "created" }] };
+    return { success: 1, failed: 0, success_ids: [456] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  await runtime.importAccounts({
+    operationKey: "openai-model-mapping-persist-test",
+    importTimeoutMs: 120000,
+    content: JSON.stringify({ accounts: [{ platform: "openai", type: "oauth", credentials: { access_token: "token" } }] }),
+    priority: 1, capacity: 16, rateMultiplier: 1000, groupIds: [2, 3], proxyId: 0,
+    proxyCandidateIds: [0], perAccountProxy: false,
+  });
+  expect(calls[1]).toEqual(expect.objectContaining({
+    path: "/admin/accounts/bulk-update",
+    body: expect.objectContaining({
+      account_ids: [456],
+      credentials: { model_mapping: expect.objectContaining({ "gpt-5.6": "gpt-5.6" }) },
+    }),
+  }));
+  expect((calls[1]?.body.credentials as Record<string, unknown>).model_mapping).not.toHaveProperty("gpt-5.6-luna");
 });
 
 test("uses native batch create when OpenAI preflight proves every account is new", async () => {
@@ -57,15 +91,23 @@ test("uses native batch create when OpenAI preflight proves every account is new
     priority: 1, capacity: 16, groupIds: [2, 3], proxyId: 14,
     proxyCandidateIds: [14], perAccountProxy: false, createOnly: true,
   });
-  expect(calls).toEqual([expect.objectContaining({
+  expect(calls[0]).toEqual(expect.objectContaining({
     path: "/admin/accounts/batch",
     body: { accounts: [expect.objectContaining({
       platform: "openai", type: "oauth", priority: 1, concurrency: 16,
       load_factor: 1, proxy_id: 14, group_ids: [2, 3], confirm_mixed_channel_risk: true,
+      credentials: expect.objectContaining({
+        model_mapping: expect.not.objectContaining({ "gpt-5.6-luna": expect.anything() }),
+      }),
       extra: expect.objectContaining({ access_token_sha256: expect.any(String), import_source: "api2business-batch" }),
     })] },
     timeoutMs: 120000,
-  })]);
+  }));
+  expect(calls[1]).toEqual(expect.objectContaining({
+    path: "/admin/accounts/bulk-update",
+    body: expect.objectContaining({ account_ids: [453] }),
+    timeoutMs: 120000,
+  }));
   expect(output).toEqual(expect.objectContaining({
     ok: true,
     result: expect.objectContaining({ createdIds: [453], createdCount: 1, failed: 0 }),
@@ -89,7 +131,59 @@ test("keeps access-token-only OpenAI imports on the session normalization path",
     priority: 1, capacity: 16, groupIds: [2, 3], proxyId: 14,
     proxyCandidateIds: [14], perAccountProxy: false, createOnly: true,
   });
-  expect(calls).toEqual(["/admin/accounts/import/codex-session"]);
+  expect(calls).toEqual(["/admin/accounts/import/codex-session", "/admin/accounts/bulk-update"]);
+});
+
+test("keeps public-recovery OAuth imports unchanged when Luna restriction is disabled", async () => {
+  const calls: Array<{ body: Record<string, unknown> }> = [];
+  const client = { mutate: async (_method: string, _path: string, body: Record<string, unknown>) => {
+    calls.push({ body });
+    return { failed: 0, items: [{ index: 1, account_id: 455, action: "created" }] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  await runtime.importAccounts({
+    operationKey: "public-recovery-import-test",
+    importTimeoutMs: 120000,
+    disableLunaByDefault: false,
+    content: JSON.stringify({ accounts: [{ name: "recovered", platform: "openai", type: "oauth", credentials: { access_token: "token" } }] }),
+    priority: 1, capacity: 16, rateMultiplier: 1000, groupIds: [2, 3], proxyId: 0,
+    proxyCandidateIds: [0], perAccountProxy: false,
+  });
+  const contents = calls[0]?.body.contents as string[];
+  expect(contents).toHaveLength(1);
+  expect(JSON.parse(contents[0]!)).not.toHaveProperty("model_mapping");
+});
+
+test("disables Luna only for verified OpenAI OAuth accounts", async () => {
+  const calls: Array<{ method: string; path: string; body?: Record<string, unknown> }> = [];
+  const client = {
+    getAccount: async (id: number) => ({ id, platform: "openai", type: "oauth" }),
+    mutate: async (method: string, path: string, body?: Record<string, unknown>) => {
+      calls.push({ method, path, body });
+      return { success: 2, failed: 0, success_ids: [1478, 1479] };
+    },
+  } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  const result = await runtime.disableLunaForOpenAIOAuthAccounts([1479, 1478], 120000);
+  expect(result).toMatchObject({ accountIds: [1478, 1479], configured: 2, lunaEnabled: false });
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toEqual(expect.objectContaining({
+    method: "POST",
+    path: "/admin/accounts/bulk-update",
+    body: expect.objectContaining({ account_ids: [1478, 1479] }),
+  }));
+  const mapping = (calls[0]!.body!.credentials as Record<string, unknown>).model_mapping as Record<string, string>;
+  expect(mapping).not.toHaveProperty("gpt-5.6-luna");
+});
+
+test("does not mutate non-OpenAI-OAuth accounts when disabling Luna", async () => {
+  const calls: string[] = [];
+  const runtime = new Sub2ApiRuntimeService({
+    getAccount: async () => ({ platform: "openai", type: "apikey" }),
+    mutate: async (_method: string, path: string) => { calls.push(path); return {}; },
+  } as unknown as Sub2ApiClient);
+  await expect(runtime.disableLunaForOpenAIOAuthAccounts([1480])).rejects.toThrow("not an OpenAI OAuth account");
+  expect(calls).toEqual([]);
 });
 
 test("imports API-key accounts with load factor without changing billing multiplier", async () => {

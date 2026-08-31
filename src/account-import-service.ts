@@ -315,6 +315,7 @@ export class AccountImportService {
           proxyCandidateIds: plan.proxyCandidateIds,
           perAccountProxy: job.settings.perAccountProxy === true,
           createOnly: plan.pendingExisting.length === 0,
+          disableLunaByDefault: job.settings.cutoffTrigger !== "public-recovery",
         });
       } catch (error) {
         if (!isTimeoutError(error)) throw error;

@@ -240,6 +240,11 @@ export class AdminHttpClient {
       method: "POST", body: JSON.stringify({ accountIds }),
     }, 60000);
   }
+  disableLunaForAccounts(accountIds: number[], confirm: boolean): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/accounts/disable-luna", {
+      method: "POST", body: JSON.stringify({ accountIds, confirm }),
+    }, 60000);
+  }
   deleteAccounts(accountIds: number[], confirm: boolean): Promise<Record<string, unknown>> {
     return this.request("/api/admin/accounts/delete", {
       method: "POST", body: JSON.stringify({ accountIds, confirm }),

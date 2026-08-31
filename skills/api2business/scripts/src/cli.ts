@@ -245,6 +245,7 @@ function help(): Record<string, unknown> {
       "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
       "accounts inspect --accounts <id-or-range,...> [--over-api]",
+      "accounts models disable-luna --accounts <id-or-range,...> [--confirm] --over-api",
       "accounts delete --accounts <id-or-range,...> [--confirm] --over-api",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
       "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
@@ -989,6 +990,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "accounts" && action === "inspect") {
     if (!parsed.accounts) throw new Error("accounts inspect requires --accounts");
     return await client.inspectAccounts(parseAccountIdSelector(parsed.accounts));
+  }
+  if (group === "accounts" && action === "models" && parsed.command[2] === "disable-luna") {
+    if (!parsed.accounts) throw new Error("accounts models disable-luna requires --accounts");
+    return await client.disableLunaForAccounts(parseAccountIdSelector(parsed.accounts), parsed.confirm);
   }
   if (group === "priority" && action === "history") return await client.priorityHistory();
   if (group === "priority" && action === "plan") {

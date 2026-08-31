@@ -83,16 +83,6 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
       if (job.state === "succeeded" && services.temporal) {
         try { postImportOAuthSample = await services.temporal.submit({ kind: "oauth.runtime.sample" }); }
         catch (error) { postImportOAuthSample = { ok: false, error: error instanceof Error ? error.message : String(error) }; }
-        if (job.source.platform === "openai" && job.source.accountType === "oauth" && job.settings?.cutoffTrigger !== "public-recovery") {
-          try {
-            postImportApiKeyCutoff = await services.temporal.submit({
-              kind: "upstream.apikey.cutoff", phase: "start", operationId: crypto.randomUUID(), durationSeconds: 120,
-              trigger: job.settings?.cutoffTrigger ?? "account-import",
-            });
-          } catch (error) {
-            postImportApiKeyCutoff = { ok: false, error: error instanceof Error ? error.message : String(error) };
-          }
-        }
       }
       return { ok: true, jobId: job.id, state: job.state, postImportOAuthSample, postImportApiKeyCutoff, valuesPrinted: false };
     }

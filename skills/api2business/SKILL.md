@@ -101,6 +101,13 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   payload 中必须写入 Sub2API 原生 `load_factor`，不得写入计费倍率
   `rate_multiplier`。省略时读取 `operations.accountImportDefaults.rateMultiplier`，普通导入与
   BugTeam 购买导入共用该字段。
+- 普通 OpenAI OAuth 导入若未提供有效的 `credentials.model_mapping`，自动写入当前 OpenAI
+  模型白名单并排除 `gpt-5.6-luna`；已有显式映射保持不变。
+- 已有 OpenAI OAuth 账号可用 `accounts models disable-luna --accounts <id-or-range,...>
+  --confirm --over-api` 通过 Sub2API runtime 批量写入不含 Luna 的模型白名单；命令先校验
+  全部目标均为 OpenAI OAuth，校验失败时不写入任何账号。
+- 该默认限制只作用于普通 OAuth 导入；API-key、Grok OAuth 和
+  `cutoffTrigger=public-recovery` 的复活导入不套用该策略。
 - OAuth 退役计划可用 `--plan-type` 限定账号类型：
   - 默认 `--selection dead` 选择错误账号；`free`、`plus` 和 `team` 的限流账号也按死亡处理，`k12` 限流账号保留；
   - 显式 `--selection all` 选择指定单一类型的全部当前账号，且只允许用于整池范围。
@@ -173,6 +180,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 只有用户显式选择并且 owning 配置允许时才启用账号级代理；这不影响 NC01 host-Docker
   的出网代理配置。
 - 账号导入成功后异步触发一次 OAuth 实时成本采样；该采样独立于导入作业，不延长导入终态，失败只作为采样作业失败记录。
+- 账号导入成功后不再自动提交 API-key 切断作业；API-key 切断仅保留显式手动入口。
 - 手动验证同一采样路径使用 `accounts oauth-runtime-sample --over-api`，返回独立 Temporal workflow ID。
 - 上游智商评测：
   - 提交：`upstreams benchmark --id <account-id> --model <model> --confirm --over-api`；

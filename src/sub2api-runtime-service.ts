@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Sub2ApiClient } from "./sub2api-client";
 import type { AccountRecoveryConfig } from "./account-recovery-config";
+import {
+  applyDefaultOpenAIOAuthModelRestriction,
+  defaultOpenAIOAuthModelMapping,
+  modelMappingForOpenAIOAuthAccount,
+} from "./openai-oauth-import-policy";
 
 type Row = Record<string, unknown>;
 
@@ -90,8 +95,10 @@ export class Sub2ApiRuntimeService {
     proxyCandidateIds: number[];
     perAccountProxy: boolean;
     createOnly?: boolean;
+    disableLunaByDefault?: boolean;
   }): Promise<Record<string, unknown>> {
-    const payload = JSON.parse(input.content) as Row;
+    const content = applyDefaultOpenAIOAuthModelRestriction(input.content, input.disableLunaByDefault !== false);
+    const payload = JSON.parse(content) as Row;
     const accounts = Array.isArray(payload.accounts) ? payload.accounts.map(record).filter((item): item is Row => item !== null) : [];
     if (accounts.length === 0) throw new Error("runtime import contains no accounts");
     const types = new Set(accounts.map((account) => String(account.type ?? "oauth").toLowerCase()));
@@ -107,6 +114,7 @@ export class Sub2ApiRuntimeService {
     const updatedIds: number[] = [];
     const skippedIds: number[] = [];
     const failures: Array<{ index: number; reason: string }> = [];
+    const modelMappingUpdates: Array<{ index: number; accountId: number; mapping: Record<string, string> }> = [];
     let createdCount = 0;
 
     if (platform === "grok") {
@@ -186,6 +194,11 @@ export class Sub2ApiRuntimeService {
         const item = record(items[offset]);
         const accountId = positiveInteger(item?.id);
         if (item?.success === true && accountId) createdIds.push(accountId);
+        if (item?.success === true && accountId) {
+          const account = accounts[offset];
+          const mapping = account ? modelMappingForOpenAIOAuthAccount(account, input.disableLunaByDefault !== false) : null;
+          if (mapping) modelMappingUpdates.push({ index: offset + 1, accountId, mapping });
+        }
         else failures.push({ index: offset + 1, reason: String(item?.error ?? "Sub2API OpenAI batch import failed") });
       }
       if (Number(result.success ?? 0) !== createdIds.length
@@ -217,11 +230,36 @@ export class Sub2ApiRuntimeService {
         else if (accountId && action === "updated") updatedIds.push(accountId);
         else if (accountId && action === "skipped") skippedIds.push(accountId);
         else if (!accountId || action === "failed") failures.push({ index, reason: String(item.message ?? "Sub2API import failed") });
+        if (accountId && (action === "created" || action === "updated")) {
+          const account = accounts[index - 1];
+          const mapping = account ? modelMappingForOpenAIOAuthAccount(account, input.disableLunaByDefault !== false) : null;
+          if (mapping) modelMappingUpdates.push({ index, accountId, mapping });
+        }
       }
       if (Number(result.failed ?? 0) > failures.length) failures.push({ index: 0, reason: "Sub2API import reported unclassified failures" });
     }
 
     const importedIds = [...createdIds, ...updatedIds];
+    const modelMappingGroups = new Map<string, { accountIds: number[]; mapping: Record<string, string> }>();
+    for (const update of modelMappingUpdates) {
+      const key = JSON.stringify(update.mapping);
+      const group = modelMappingGroups.get(key) ?? { accountIds: [], mapping: update.mapping };
+      group.accountIds.push(update.accountId);
+      modelMappingGroups.set(key, group);
+    }
+    for (const group of modelMappingGroups.values()) {
+      const ids = [...new Set(group.accountIds)].sort((left, right) => left - right);
+      const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update", {
+        account_ids: ids,
+        credentials: { model_mapping: group.mapping },
+        confirm_mixed_channel_risk: true,
+      }, undefined, input.importTimeoutMs);
+      const success = Number(result.success ?? ids.length);
+      const failed = Number(result.failed ?? 0);
+      if (failed > 0 || success !== ids.length) {
+        failures.push({ index: 0, reason: `Sub2API OAuth model mapping updated ${success}/${ids.length}, failed ${failed}` });
+      }
+    }
     if (input.proxyId === 0 && importedIds.length > 0) {
       await this.client.mutate("POST", "/admin/accounts/bulk-update", {
         account_ids: importedIds,
@@ -304,6 +342,32 @@ export class Sub2ApiRuntimeService {
 
   async updateAccount(accountId: number, patch: Row, timeoutMs?: number): Promise<unknown> {
     return await this.client.mutate("PUT", `/admin/accounts/${accountId}`, patch, undefined, timeoutMs);
+  }
+
+  async disableLunaForOpenAIOAuthAccounts(accountIds: number[], timeoutMs?: number): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+      throw new Error("Luna restriction requires stable positive account IDs");
+    }
+    const accounts = await Promise.all(ids.map((id) => this.client.getAccount(id, timeoutMs)));
+    for (const [index, account] of accounts.entries()) {
+      const platform = String(account.platform ?? "").trim().toLowerCase();
+      const type = String(account.type ?? "").trim().toLowerCase();
+      if (platform !== "openai" || type !== "oauth") {
+        throw new Error(`account ${ids[index]} is not an OpenAI OAuth account; Luna restriction skipped`);
+      }
+    }
+    const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update", {
+      account_ids: ids,
+      credentials: { model_mapping: defaultOpenAIOAuthModelMapping() },
+      confirm_mixed_channel_risk: true,
+    }, undefined, timeoutMs);
+    const failed = Number(result.failed ?? 0);
+    const success = Number(result.success ?? ids.length);
+    if (failed > 0 || success !== ids.length) {
+      throw new Error(`Sub2API Luna model restriction updated ${success}/${ids.length}, failed ${failed}`);
+    }
+    return { accountIds: ids, configured: success, lunaEnabled: false, result };
   }
 
   async alignRecoveredOAuthAccounts(accountIds: number[], config: AccountRecoveryConfig, timeoutMs?: number): Promise<Record<string, unknown>> {

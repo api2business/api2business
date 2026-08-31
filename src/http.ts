@@ -471,6 +471,21 @@ export function createHandler(
         const input = await body(request);
         return json(await imports.inspect(normalizeAccountIds(input.accountIds)));
       }
+      if (request.method === "POST" && url.pathname === "/api/admin/accounts/disable-luna") {
+        const input = await body(request);
+        const accountIds = normalizeAccountIds(input.accountIds);
+        if (input.confirm !== true) return json({
+          ok: true,
+          mutation: false,
+          action: "disable-luna-for-openai-oauth",
+          accountIds,
+          hint: "confirm=true 才会执行",
+        });
+        return json({ ok: true, mutation: true, ...await runtime.disableLunaForOpenAIOAuthAccounts(
+          accountIds,
+          config.operations.accountImportDefaults.importTimeoutMs,
+        ) });
+      }
       if (request.method === "POST" && url.pathname === "/api/admin/accounts/delete") {
         const input = await body(request);
         const accountIds = normalizeAccountIds(input.accountIds);

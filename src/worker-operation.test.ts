@@ -89,7 +89,7 @@ test("worker executor persists automation failure deferral before retry", async 
   expect(deferred).toBe(1);
 });
 
-test("successful OpenAI OAuth imports submit an independent 120 second API Key cutoff", async () => {
+test("successful OpenAI OAuth imports do not submit an automatic API Key cutoff", async () => {
   const submitted: Array<Record<string, unknown>> = [];
   const execute = createWorkerOperationExecutor({
     imports: {
@@ -109,9 +109,8 @@ test("successful OpenAI OAuth imports submit an independent 120 second API Key c
 
   expect(submitted).toEqual([
     { kind: "oauth.runtime.sample" },
-    expect.objectContaining({ kind: "upstream.apikey.cutoff", phase: "start", durationSeconds: 120 }),
   ]);
-  expect(result.postImportApiKeyCutoff).toEqual(expect.objectContaining({ workflowId: "workflow-2" }));
+  expect(result.postImportApiKeyCutoff).toBeNull();
 });
 
 test("API Key imports do not trigger the OAuth post-import cutoff", async () => {
