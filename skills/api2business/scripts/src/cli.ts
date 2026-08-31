@@ -281,7 +281,7 @@ function help(): Record<string, unknown> {
       "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api",
       "bugteam login|balance|inventory --product <id> --quantity N|shelves --product <id>|cost-monitor get [--include-records]|sample|pickup order-create|order-status|download|push|take|recoveries list|recoveries claim|redeem",
       "bugteam public-recovery health|status|reclaim|download --base-url <https-origin> --card-code-stdin [--mode 401] [--confirm] [--output <path>]",
-      "bugteam public-recovery start --account-id <Sub2API账号ID> --base-url <https-origin> --card-code-stdin --output <path> --plan-type <type> --confirm（新账号固定按 ¥0.01 记账）",
+      "bugteam public-recovery start --account-id <Sub2API账号ID> --base-url <https-origin> --output <path> --plan-type <type> --confirm（仅创建作业并冻结原账号配置；新账号固定按 ¥0.01 记账）",
       "bugteam public-recovery import --account-id <原OAuth账号ID> --file <已下载JSON> --plan-type <type> --confirm（保留原账号并创建复活副本，固定按 ¥0.01 记账）",
       "bugteam public-recovery status|logs|continue|retry --id <job-id> [--stage health|reclaim|status|download|import-submit|import-status|verify] [--card-code-stdin] [--confirm]",
       "bugteam purchase-import options|create --quantity N [--priority 1 --capacity 16 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api|status --id <job-id> --over-api",
@@ -295,7 +295,7 @@ async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConf
   if (parsed.command[0] === "bugteam" && parsed.command[1] === "public-recovery") {
     const action = parsed.command[2];
     const directActions = new Set(["health", "status", "reclaim", "download"]);
-    if (directActions.has(action ?? "")) {
+    if (directActions.has(action ?? "") && (action !== "status" || parsed.baseUrl !== null)) {
       if (!parsed.baseUrl) throw new Error("bugteam public-recovery requires --base-url");
       if (!parsed.codeStdin) throw new Error("bugteam public-recovery requires --card-code-stdin; the redemption code is never accepted in argv");
       const cardCode = (await Bun.stdin.text()).trim();
@@ -319,13 +319,9 @@ async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConf
         throw new Error("public-recovery start requires --account-id, --base-url, --output, and --plan-type");
       }
       if (parsed.planType !== "k12" && parsed.planType !== "plus" && parsed.planType !== "team" && parsed.planType !== "free") throw new Error("--plan-type must be k12, plus, team, or free");
-      if (!parsed.confirm) return { ok: true, mutation: false, action: "public-recovery-job", accountId: parsed.accountId, baseUrl: parsed.baseUrl, output: parsed.output, unitCostCny: 0.01, planType: parsed.planType, hint: "add --confirm to create and run the job" };
-      if (!parsed.codeStdin) throw new Error("public-recovery start requires --card-code-stdin");
-      const cardCode = (await Bun.stdin.text()).trim();
-      if (!cardCode) throw new Error("--card-code-stdin received empty stdin");
-      await manager.assertOAuthAccount(parsed.accountId);
+      if (!parsed.confirm) return { ok: true, mutation: false, action: "public-recovery-job", accountId: parsed.accountId, baseUrl: parsed.baseUrl, output: parsed.output, unitCostCny: 0.01, planType: parsed.planType, hint: "add --confirm to create the job and freeze the original OAuth configuration" };
       const job = await manager.create({ accountId: parsed.accountId, baseUrl: parsed.baseUrl, outputPath: parsed.output, unitCostCny: 0.01, planType: parsed.planType });
-      return await manager.launch(job, parsed.configPath, cardCode);
+      return { ...manager.projectJob(job), mutation: true, hint: `continue with: bugteam public-recovery continue --id ${job.id} --card-code-stdin --confirm` };
     }
     if (action === "import") {
       if (parsed.accountId === null || !parsed.file || !parsed.planType) {
@@ -361,7 +357,8 @@ async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConf
     if (action === "worker") {
       const cardCode = parsed.codeStdin ? (await Bun.stdin.text()).trim() : "";
       const stage = parsed.stage as RecoveryStage | null;
-      return stage ? await manager.run(job.id, cardCode, stage) : await manager.runChain(job.id, cardCode);
+      if (!stage) throw new Error("public-recovery worker requires --stage");
+      return await manager.run(job.id, cardCode, stage);
     }
     throw new Error("bugteam public-recovery requires health, status, reclaim, download, start, logs, continue, retry, or worker");
   }

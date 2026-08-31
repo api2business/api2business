@@ -162,6 +162,23 @@ test("bulk API-key template uses the YAML-owned mutation timeout", async () => {
   expect(calls).toEqual([{ path: "/admin/accounts/bulk-update", timeoutMs: 120000 }]);
 });
 
+test("aligns recovered OAuth accounts with the frozen runtime configuration", async () => {
+  const calls: Array<{ method: string; path: string; body: Record<string, unknown>; timeoutMs?: number }> = [];
+  const client = { mutate: async (method: string, path: string, body: Record<string, unknown>, _key?: string, timeoutMs?: number) => {
+    calls.push({ method, path, body, timeoutMs });
+    return { success: 1, failed: 0, success_ids: [1476] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client);
+  await runtime.alignRecoveredOAuthAccounts([1476], {
+    priority: 1, capacity: 16, loadFactor: 1000, rateMultiplier: 1, groupIds: [2, 3], proxyId: 0,
+    autoPauseOnExpired: true, status: "error", schedulable: false,
+  }, 120000);
+  expect(calls).toEqual([{ method: "POST", path: "/admin/accounts/bulk-update", timeoutMs: 120000, body: {
+    account_ids: [1476], priority: 1, concurrency: 16, load_factor: 1000, rate_multiplier: 1,
+    group_ids: [2, 3], proxy_id: 0, auto_pause_on_expired: true, status: "error", schedulable: false,
+  } }]);
+});
+
 test("corrects account plan types with one native bulk credentials merge", async () => {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = [];
   const client = { mutate: async (method: string, path: string, body: Record<string, unknown>) => {

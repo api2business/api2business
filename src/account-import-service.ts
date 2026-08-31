@@ -4,7 +4,8 @@ import { join } from "node:path";
 import type { AppConfig, OAuthPlanType } from "./config";
 import { accountImportPreflight, type AccountImportPreflightPlan } from "./account-import-preflight";
 import { recordAccountImportCosts, recordAccountImportPlanTypeCorrections } from "./account-import-cost-ledger";
-import { inspectAccounts, verifyImportedAccounts } from "./account-inspection";
+import { inspectAccounts, verifyImportedAccounts, verifyRecoveredOAuthConfig } from "./account-inspection";
+import { normalizeAccountRecoveryConfig, type AccountRecoveryConfig } from "./account-recovery-config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { normalizeAccountImportInput } from "./account-import-input";
 import type { TemporalGateway } from "./temporal-client";
@@ -24,6 +25,7 @@ export interface AccountImportRequest {
   platform?: "openai" | "grok";
   cutoffTrigger?: "account-import" | "bugteam-import" | "public-recovery";
   allowDuplicate?: boolean;
+  recoveryConfig?: AccountRecoveryConfig;
   confirm: boolean;
 }
 
@@ -72,6 +74,12 @@ function validate(input: AccountImportRequest): void {
   if (input.platform === "grok" && input.planType !== "free") throw new Error("Grok 导入当前只支持 free 类型");
   if (input.allowDuplicate === true && input.cutoffTrigger !== "public-recovery") {
     throw new Error("allowDuplicate 只允许用于 public-recovery 复活导入");
+  }
+  if (input.recoveryConfig !== undefined) {
+    if (input.cutoffTrigger !== "public-recovery" || input.allowDuplicate !== true) {
+      throw new Error("recoveryConfig 只允许用于 public-recovery 重复导入");
+    }
+    normalizeAccountRecoveryConfig(input.recoveryConfig);
   }
 }
 
@@ -164,6 +172,7 @@ export class AccountImportService {
       groupIds: selectedPlatform === "grok" && input.groupIds.length === 2
         && input.groupIds.includes(2) && input.groupIds.includes(3) ? [6] : input.groupIds,
       perAccountProxy: input.perAccountProxy ?? this.config.operations.accountImportDefaults.perAccountProxy,
+      recoveryConfig: input.recoveryConfig === undefined ? undefined : normalizeAccountRecoveryConfig(input.recoveryConfig),
     };
     validate(normalizedInput);
     const id = randomUUID();
@@ -171,7 +180,7 @@ export class AccountImportService {
     const archiveFileName = archiveAccountImportContent(this.config.operations.accountImportArchiveDirectory, id, selectedContent);
     const job: ImportJob = { id, state: "queued", createdAt: new Date().toISOString(), completedAt: null,
       accountCount: parsed.accountCount, fingerprint: parsed.fingerprint, source: { ...parsed.source, platform: selectedPlatform },
-      settings: { priority: normalizedInput.priority, capacity: normalizedInput.capacity, rateMultiplier: normalizedInput.rateMultiplier, groupIds: [...new Set(normalizedInput.groupIds)], sourceProxyId: normalizedInput.sourceProxyId, perAccountProxy: normalizedInput.perAccountProxy, unitCostCny: normalizedInput.unitCostCny, planType: normalizedInput.planType, platform: normalizedInput.platform, cutoffTrigger: normalizedInput.cutoffTrigger, allowDuplicate: normalizedInput.allowDuplicate, confirm: normalizedInput.confirm },
+      settings: { priority: normalizedInput.priority, capacity: normalizedInput.capacity, rateMultiplier: normalizedInput.rateMultiplier, groupIds: [...new Set(normalizedInput.groupIds)], sourceProxyId: normalizedInput.sourceProxyId, perAccountProxy: normalizedInput.perAccountProxy, unitCostCny: normalizedInput.unitCostCny, planType: normalizedInput.planType, platform: normalizedInput.platform, cutoffTrigger: normalizedInput.cutoffTrigger, allowDuplicate: normalizedInput.allowDuplicate, recoveryConfig: normalizedInput.recoveryConfig, confirm: normalizedInput.confirm },
       inputArchive: { stored: true, fileName: archiveFileName },
       logs: [], result: null, accounting: null, error: null };
     this.jobs.set(id, job);
@@ -334,14 +343,48 @@ export class AccountImportService {
       const skippedIds = Array.isArray(result?.skippedIds)
         ? result.skippedIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) > 0) : [];
       const verifiedIds = [...new Set([...createdIds, ...updatedIds, ...skippedIds])];
-      if (job.settings.confirm && verifiedIds.length > 0) {
-        output.verification = await verifyImportedAccounts(verifiedIds, job.settings, plan.proxyCandidateIds, this.reads, {
+      if (job.settings.recoveryConfig && createdIds.length === 0) {
+        throw new Error("公开复活导入未创建新的 OAuth 副本");
+      }
+      if (job.settings.recoveryConfig && createdIds.length > 0) {
+        const configured = await this.runtime.alignRecoveredOAuthAccounts(
+          createdIds,
+          normalizeAccountRecoveryConfig(job.settings.recoveryConfig),
+          this.config.operations.accountImportDefaults.importTimeoutMs,
+        );
+        output.recoveryConfiguration = {
+          ok: true,
+          source: "original-account-snapshot",
+          accountIds: configured.accountIds,
+          configured: configured.configured,
+          valuesPrinted: false,
+        };
+        this.log(job, "recovery-configuration", "done", `复活副本已继承原账号运行配置：${configured.configured} 个`);
+        await this.persistWorkerJob(job);
+      }
+      const ordinaryVerificationIds = job.settings.recoveryConfig
+        ? [...new Set([...updatedIds, ...skippedIds])]
+        : verifiedIds;
+      if (job.settings.confirm && ordinaryVerificationIds.length > 0) {
+        output.verification = await verifyImportedAccounts(ordinaryVerificationIds, job.settings, plan.proxyCandidateIds, this.reads, {
           sharedProxyId: job.settings.perAccountProxy === true ? undefined : plan.initialProxyId,
           strictProxyAccountIds: [...createdIds, ...updatedIds],
         });
         const verification = output.verification as Record<string, unknown>;
         this.log(job, "verification", verification.ok === true ? "done" : "failed",
           `账号终态校验 ${verification.aligned}/${verification.selected} 对齐`);
+        await this.persistWorkerJob(job);
+      }
+      if (job.settings.recoveryConfig && createdIds.length > 0) {
+        const recoveredInspection = await inspectAccounts(createdIds, this.reads);
+        output.recoveryVerification = verifyRecoveredOAuthConfig(
+          recoveredInspection,
+          createdIds,
+          normalizeAccountRecoveryConfig(job.settings.recoveryConfig),
+        );
+        const recoveryVerification = output.recoveryVerification as Record<string, unknown>;
+        this.log(job, "recovery-verification", recoveryVerification.ok === true ? "done" : "failed",
+          `复活副本配置回读 ${recoveryVerification.aligned}/${recoveryVerification.selected} 对齐`);
         await this.persistWorkerJob(job);
       }
       if (job.settings.confirm && (createdIds.length > 0 || updatedIds.length > 0)) {
@@ -365,9 +408,12 @@ export class AccountImportService {
         await this.persistWorkerJob(job);
       }
       const verification = output.verification as Record<string, unknown> | undefined;
-      if (output.ok === false || verification?.ok === false) {
+      const recoveryVerification = output.recoveryVerification as Record<string, unknown> | undefined;
+      if (output.ok === false || verification?.ok === false || recoveryVerification?.ok === false) {
         job.state = "failed";
-        job.error = verification?.ok === false ? "导入后的账号配置未全部对齐，请查看 verification.accounts" : importFailure(output);
+        job.error = recoveryVerification?.ok === false
+          ? "复活副本未继承原账号运行配置，请查看 recoveryVerification.accounts"
+          : verification?.ok === false ? "导入后的账号配置未全部对齐，请查看 verification.accounts" : importFailure(output);
         this.log(job, "job", "failed", job.error);
         await this.persistWorkerJob(job);
         return;

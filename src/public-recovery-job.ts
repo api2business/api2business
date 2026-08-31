@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { AdminHttpClient } from "./admin-http-client";
+import { recoveryConfigFromInspection, verifyRecoveredOAuthConfig } from "./account-inspection";
+import type { AccountRecoveryConfig } from "./account-recovery-config";
 import type { AppConfig, HttpCliTarget } from "./config";
 import { PublicRecoveryClient } from "./public-recovery-client";
 
@@ -24,6 +26,8 @@ export interface PublicRecoveryJob {
   updatedAt: string;
   needReclaim: boolean | null;
   importJobId: string | null;
+  revivedAccountIds: number[];
+  recoveryConfig: AccountRecoveryConfig;
   logs: Array<{ timestamp: string; stage: string; state: string; message: string }>;
   result: Json | null;
   error: string | null;
@@ -50,28 +54,22 @@ function stageNeedsCode(stage: RecoveryStage | null): boolean {
   return stage === "health" || stage === "reclaim" || stage === "status" || stage === "download";
 }
 
-function findAccountIds(value: unknown): number[] {
+function createdAccountIds(value: unknown): number[] {
   const ids: number[] = [];
   const visit = (item: unknown) => {
     if (Array.isArray(item)) { item.forEach(visit); return; }
     const row = object(item);
     if (!row) return;
-    for (const key of ["accountId", "account_id", "id"]) {
-      const id = Number(row[key]);
-      if (Number.isSafeInteger(id) && id > 0) ids.push(id);
+    if (Array.isArray(row.createdIds)) {
+      for (const value of row.createdIds) {
+        const id = Number(value);
+        if (Number.isSafeInteger(id) && id > 0) ids.push(id);
+      }
     }
     Object.values(row).forEach(visit);
   };
   visit(value);
   return [...new Set(ids)].sort((a, b) => a - b);
-}
-
-function findAccountType(value: unknown, accountId: number): string | null {
-  if (Array.isArray(value)) return value.map((item) => findAccountType(item, accountId)).find((type): type is string => type !== null) ?? null;
-  const row = object(value);
-  if (!row) return null;
-  if (Number(row.accountId ?? row.account_id ?? row.id) === accountId) return typeof row.type === "string" ? row.type.toLowerCase() : null;
-  return Object.values(row).map((item) => findAccountType(item, accountId)).find((type): type is string => type !== null) ?? null;
 }
 
 function importJobState(value: Json): string {
@@ -89,7 +87,7 @@ function safeStageResult(stage: RecoveryStage, value: Json): Json {
       valuesPrinted: false,
     };
   }
-  if (stage === "verify") return { ok: value.ok, accountId: value.accountId, found: value.found, valuesPrinted: false };
+  if (stage === "verify") return { ok: value.ok, accountIds: value.accountIds, aligned: value.aligned, selected: value.selected, valuesPrinted: false };
   return value;
 }
 
@@ -118,7 +116,9 @@ export class PublicRecoveryJobManager {
 
   async get(id: string): Promise<PublicRecoveryJob> {
     const job = JSON.parse(await readFile(this.path(id), "utf8")) as PublicRecoveryJob;
-    if (job.version !== 1 || job.id !== id || !Array.isArray(job.logs)) throw new Error("public recovery job file is invalid");
+    if (job.version !== 1 || job.id !== id || !Array.isArray(job.logs) || !Array.isArray(job.revivedAccountIds) || !job.recoveryConfig) {
+      throw new Error("public recovery job file lacks the required configuration snapshot; create a new job");
+    }
     return job;
   }
 
@@ -137,6 +137,8 @@ export class PublicRecoveryJobManager {
       nextStage: job.nextStage,
       needReclaim: job.needReclaim,
       importJobId: job.importJobId,
+      revivedAccountIds: job.revivedAccountIds,
+      recoveryConfigCaptured: true,
       output: job.outputPath,
       error: job.error,
       logs: job.logs,
@@ -155,24 +157,28 @@ export class PublicRecoveryJobManager {
     const accountId = positiveAccountId(input.accountId);
     if (input.unitCostCny !== 0.01) throw new Error("public recovery import cost is fixed at ¥0.01");
     new PublicRecoveryClient(input.baseUrl, this.config.bugTeam.requestTimeoutMs);
+    const recoveryConfig = await this.captureRecoveryConfig(accountId);
     const id = randomUUID();
     const now = new Date().toISOString();
     const job: PublicRecoveryJob = {
       version: 1, id, accountId, baseUrl: input.baseUrl, outputPath: resolve(input.outputPath),
       unitCostCny: input.unitCostCny, planType: input.planType, state: "queued", stage: "created",
       nextStage: "health", createdAt: now, updatedAt: now, needReclaim: null, importJobId: null,
+      revivedAccountIds: [], recoveryConfig,
       logs: [], result: null, error: null,
     };
-    this.log(job, "job", "queued", `已创建复活作业，目标账号 ${accountId}`);
+    this.log(job, "job", "queued", `已创建复活作业并冻结原账号运行配置，目标账号 ${accountId}`);
     await this.save(job);
     return job;
   }
 
-  async assertOAuthAccount(accountId: number): Promise<void> {
+  async captureRecoveryConfig(accountId: number): Promise<AccountRecoveryConfig> {
     const result = await this.admin.inspectAccounts([positiveAccountId(accountId)]);
-    const type = findAccountType(result, accountId);
-    if (type === null) throw new Error(`目标账号 ${accountId} 不存在`);
-    if (type !== "oauth") throw new Error(`目标账号 ${accountId} 不是 OAuth 账号，拒绝执行复活导入`);
+    return recoveryConfigFromInspection(result, accountId);
+  }
+
+  async assertOAuthAccount(accountId: number): Promise<void> {
+    await this.captureRecoveryConfig(accountId);
   }
 
   async importDownloaded(input: {
@@ -180,23 +186,23 @@ export class PublicRecoveryJobManager {
     filePath: string;
     planType: "k12" | "plus" | "team" | "free";
   }): Promise<Json> {
-    await this.assertOAuthAccount(input.accountId);
+    const recoveryConfig = await this.captureRecoveryConfig(input.accountId);
     const content = await readFile(resolve(input.filePath), "utf8");
-    const defaults = this.config.operations.accountImportDefaults;
     const response = await this.admin.accountImport({
       content,
       inputFormat: "json",
-      priority: defaults.priority,
-      capacity: defaults.capacity,
-      rateMultiplier: defaults.rateMultiplier,
-      groupIds: defaults.groupIds,
-      sourceProxyId: 0,
+      priority: recoveryConfig.priority,
+      capacity: recoveryConfig.capacity,
+      rateMultiplier: recoveryConfig.loadFactor ?? this.config.operations.accountImportDefaults.rateMultiplier,
+      groupIds: recoveryConfig.groupIds,
+      sourceProxyId: recoveryConfig.proxyId,
       perAccountProxy: false,
       unitCostCny: 0.01,
       planType: input.planType,
       platform: "openai",
       cutoffTrigger: "public-recovery",
       allowDuplicate: true,
+      recoveryConfig,
       confirm: true,
     });
     const imported = object(response.job);
@@ -223,8 +229,8 @@ export class PublicRecoveryJobManager {
       await this.save(job);
     }
     const script = resolve(process.argv[1] ?? "skills/api2business/scripts/api2business-cli.ts");
-    const command = [process.execPath, script, "--config", configPath, "bugteam", "public-recovery", "worker", "--id", job.id, "--card-code-stdin"];
-    if (requestedStage) command.push("--stage", requestedStage);
+    const command = [process.execPath, script, "--config", configPath, "bugteam", "public-recovery", "worker", "--id", job.id, "--stage", next];
+    if (stageNeedsCode(next)) command.push("--card-code-stdin");
     const child = Bun.spawn(command, {
       cwd: this.config.rootDirectory,
       stdin: "pipe",
@@ -262,8 +268,13 @@ export class PublicRecoveryJobManager {
         job.nextStage = "import-submit";
       } else if (stage === "import-submit") {
         const content = await readFile(job.outputPath, "utf8");
-        const defaults = this.config.operations.accountImportDefaults;
-        const response = await this.admin.accountImport({ content, inputFormat: "json", priority: defaults.priority, capacity: defaults.capacity, rateMultiplier: defaults.rateMultiplier, groupIds: defaults.groupIds, sourceProxyId: 0, perAccountProxy: false, unitCostCny: 0.01, planType: job.planType, platform: "openai", cutoffTrigger: "public-recovery", allowDuplicate: true, confirm: true });
+        const response = await this.admin.accountImport({
+          content, inputFormat: "json", priority: job.recoveryConfig.priority, capacity: job.recoveryConfig.capacity,
+          rateMultiplier: job.recoveryConfig.loadFactor ?? this.config.operations.accountImportDefaults.rateMultiplier,
+          groupIds: job.recoveryConfig.groupIds, sourceProxyId: job.recoveryConfig.proxyId, perAccountProxy: false,
+          unitCostCny: 0.01, planType: job.planType, platform: "openai", cutoffTrigger: "public-recovery",
+          allowDuplicate: true, recoveryConfig: job.recoveryConfig, confirm: true,
+        });
         const imported = object(response.job);
         const importJobId = typeof imported?.id === "string" ? imported.id : typeof response.jobId === "string" ? response.jobId : null;
         if (!importJobId) throw new Error("账号导入已受理但未返回可查询的 job ID");
@@ -281,12 +292,16 @@ export class PublicRecoveryJobManager {
           await this.save(job);
           return this.project(job);
         }
+        const createdIds = createdAccountIds(result);
+        if (createdIds.length === 0) throw new Error("账号导入作业未返回新建 OAuth 副本 ID");
+        job.revivedAccountIds = createdIds;
         job.nextStage = "verify";
       } else {
-        const inspection = await this.admin.inspectAccounts([job.accountId]);
-        const ids = findAccountIds(inspection);
-        if (!ids.includes(job.accountId)) throw new Error(`未找到目标账号 ${job.accountId}，导入结果可能未复用原账号`);
-        result = { ok: true, accountId: job.accountId, found: true, valuesPrinted: false };
+        if (job.revivedAccountIds.length === 0) throw new Error("缺少新复活账号 ID，无法验证配置继承");
+        const inspection = await this.admin.inspectAccounts(job.revivedAccountIds);
+        const verification = verifyRecoveredOAuthConfig(inspection, job.revivedAccountIds, job.recoveryConfig);
+        if (verification.ok !== true) throw new Error("新复活账号未继承原账号运行配置");
+        result = { ...verification, accountIds: job.revivedAccountIds, valuesPrinted: false };
         job.nextStage = null; job.stage = "done"; job.state = "succeeded";
       }
       job.result = { ...(job.result ?? {}), [stage]: safeStageResult(stage, result) };
@@ -299,16 +314,6 @@ export class PublicRecoveryJobManager {
       this.log(job, stage, "failed", job.error); await this.save(job);
       return this.project(job);
     }
-  }
-
-  async runChain(id: string, cardCode: string): Promise<Json> {
-    let result = await this.run(id, cardCode);
-    for (let count = 0; count < 8; count += 1) {
-      const job = await this.get(id);
-      if (job.state === "failed" || job.state === "succeeded" || (job.nextStage === "import-status" && job.stage === "import-status")) return result;
-      result = await this.run(id, cardCode);
-    }
-    return result;
   }
 
   projectJob(job: PublicRecoveryJob): Json { return this.project(job); }

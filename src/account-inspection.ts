@@ -1,4 +1,5 @@
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import { normalizeAccountRecoveryConfig, recoveryConfigMismatches, type AccountRecoveryConfig } from "./account-recovery-config";
 
 type Row = Record<string, unknown>;
 
@@ -26,7 +27,7 @@ export async function inspectAccounts(accountIds: number[], reads: Sub2ApiReadCl
     sql: `
       SELECT
         a.id, a.name, a.platform, a.type, a.status, a.schedulable, a.priority,
-        a.concurrency AS capacity, a.proxy_id,
+        a.concurrency AS capacity, a.load_factor, a.rate_multiplier, a.auto_pause_on_expired, a.proxy_id,
         COALESCE(LOWER(a.credentials->>'plan_type'), '') AS plan_type,
         COALESCE(p.name, '') AS proxy_name,
         COALESCE(p.status, '') AS proxy_status,
@@ -52,6 +53,9 @@ export async function inspectAccounts(accountIds: number[], reads: Sub2ApiReadCl
     schedulable: row.schedulable === true,
     priority: integer(row.priority),
     capacity: integer(row.capacity),
+    loadFactor: row.load_factor === null || row.load_factor === undefined ? null : Number(row.load_factor),
+    rateMultiplier: row.rate_multiplier === null || row.rate_multiplier === undefined ? null : Number(row.rate_multiplier),
+    autoPauseOnExpired: typeof row.auto_pause_on_expired === "boolean" ? row.auto_pause_on_expired : null,
     planType: String(row.plan_type ?? "").toLowerCase(),
     proxyId: integer(row.proxy_id),
     proxyName: row.proxy_name ? String(row.proxy_name) : null,
@@ -67,6 +71,36 @@ export async function inspectAccounts(accountIds: number[], reads: Sub2ApiReadCl
     queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs,
     accounts,
   };
+}
+
+export function recoveryConfigFromInspection(value: unknown, accountId: number): AccountRecoveryConfig {
+  const inspection = value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
+  const accounts = Array.isArray(inspection?.accounts) ? inspection.accounts as Row[] : [];
+  const account = accounts.find((row) => Number(row.id) === accountId);
+  if (!account) throw new Error(`目标账号 ${accountId} 不存在`);
+  if (String(account.platform).toLowerCase() !== "openai" || String(account.type).toLowerCase() !== "oauth") {
+    throw new Error(`目标账号 ${accountId} 不是 OpenAI OAuth 账号`);
+  }
+  return normalizeAccountRecoveryConfig(account);
+}
+
+export function verifyRecoveredOAuthConfig(value: unknown, accountIds: number[], expected: AccountRecoveryConfig): Record<string, unknown> {
+  const inspection = value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
+  const rows = Array.isArray(inspection?.accounts) ? inspection.accounts as Row[] : [];
+  const requested = [...new Set(accountIds)].sort((left, right) => left - right);
+  const byId = new Map(rows.map((row) => [Number(row.id), row]));
+  const accounts = requested.map((accountId) => {
+    const account = byId.get(accountId);
+    if (!account) return { accountId, aligned: false, reasons: ["missing"] };
+    const reasons: string[] = [];
+    if (String(account.platform).toLowerCase() !== "openai") reasons.push("platform");
+    if (String(account.type).toLowerCase() !== "oauth") reasons.push("type");
+    try { reasons.push(...recoveryConfigMismatches(account, expected)); }
+    catch { reasons.push("invalid-runtime-config"); }
+    return { accountId, aligned: reasons.length === 0, reasons };
+  });
+  const aligned = accounts.filter((account) => account.aligned).length;
+  return { ok: aligned === requested.length, selected: requested.length, aligned, accounts };
 }
 
 export async function verifyImportedAccounts(

@@ -150,7 +150,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 状态查询：`bugteam public-recovery status --base-url https://30d.team --card-code-stdin`，只输出脱敏状态，不输出下载 Token。
   - 下载：`bugteam public-recovery download --base-url https://30d.team --card-code-stdin --output <path>`；先查询可下载任务，成功后原子写入并返回字节数与 SHA256，已存在目标文件会拒绝覆盖。
   - `--base-url` 必须是无凭据、无路径、无查询和无片段的 HTTPS origin；该公开服务与 Api2Business 客户 API、Sub2API 本体均保持边界分离。
-  - 完整复活作业使用 `start --account-id <Sub2API账号ID>`，按健康检查、401 找回、进度查询、下载、账号导入和终态回读顺序执行；导入前要求目标账号存在且为 OAuth；原账号不删除，新复活账号固定按 `¥0.01` 成本导入。
+  - 完整复活作业使用 `start --account-id <Sub2API账号ID> --confirm` 创建并冻结原 OpenAI OAuth 账号配置，不读取兑换码、不启动 worker；原账号不删除，新复活账号固定按 `¥0.01` 成本导入。
+  - 后续每次 `continue --id <job-id> --confirm` 只推进一个阶段；`health`、`reclaim`、`status` 和 `download` 阶段才追加 `--card-code-stdin`。
+  - 新副本继承冻结的优先级、并发、负载因子、计费倍率、分组、代理、过期暂停、状态和调度开关；`verify` 只核对新副本，任一字段不一致即失败。
   - 已有下载文件需要补导入时使用 `import --account-id <原OAuth账号ID> --file <JSON> --plan-type <type> --confirm`；该入口保留原账号并创建独立复活副本。
   - 作业 ID、阶段、错误和脱敏日志保存在 `.state/public-recovery/<job-id>.json`；使用 `status` 查看摘要，使用 `logs --id <job-id> --limit N` 查看最近日志。
   - 作业失败后使用 `continue --id <job-id> --confirm` 从失败阶段继续，或使用 `retry --id <job-id> --stage <stage> --confirm` 单步重试；需要公开接口的阶段再次使用 `--card-code-stdin`，兑换码不落盘。

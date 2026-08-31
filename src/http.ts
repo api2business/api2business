@@ -438,6 +438,7 @@ export function createHandler(
         if (typeof input.content !== "string" || typeof input.confirm !== "boolean"
           || (input.perAccountProxy !== undefined && typeof input.perAccountProxy !== "boolean")
           || (input.allowDuplicate !== undefined && typeof input.allowDuplicate !== "boolean")
+          || (input.recoveryConfig !== undefined && (!input.recoveryConfig || typeof input.recoveryConfig !== "object" || Array.isArray(input.recoveryConfig)))
           || (input.inputFormat !== undefined && input.inputFormat !== "json" && input.inputFormat !== "zip")
           || (input.planType !== "k12" && input.planType !== "plus" && input.planType !== "team" && input.planType !== "free")
           || (input.rateMultiplier !== undefined && (!Number.isInteger(input.rateMultiplier) || input.rateMultiplier < 1 || input.rateMultiplier > 1000000))

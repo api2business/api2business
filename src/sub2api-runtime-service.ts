@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Sub2ApiClient } from "./sub2api-client";
+import type { AccountRecoveryConfig } from "./account-recovery-config";
 
 type Row = Record<string, unknown>;
 
@@ -303,6 +304,31 @@ export class Sub2ApiRuntimeService {
 
   async updateAccount(accountId: number, patch: Row, timeoutMs?: number): Promise<unknown> {
     return await this.client.mutate("PUT", `/admin/accounts/${accountId}`, patch, undefined, timeoutMs);
+  }
+
+  async alignRecoveredOAuthAccounts(accountIds: number[], config: AccountRecoveryConfig, timeoutMs?: number): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((a, b) => a - b);
+    if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+      throw new Error("recovered OAuth configuration requires stable positive account IDs");
+    }
+    const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update", {
+      account_ids: ids,
+      priority: config.priority,
+      concurrency: config.capacity,
+      ...(config.loadFactor === null ? {} : { load_factor: config.loadFactor }),
+      ...(config.rateMultiplier === null ? {} : { rate_multiplier: config.rateMultiplier }),
+      group_ids: config.groupIds,
+      proxy_id: config.proxyId,
+      ...(config.autoPauseOnExpired === null ? {} : { auto_pause_on_expired: config.autoPauseOnExpired }),
+      status: config.status,
+      schedulable: config.schedulable,
+    }, undefined, timeoutMs);
+    const failed = Number(result.failed ?? 0);
+    const success = Number(result.success ?? ids.length);
+    if (failed > 0 || success !== ids.length) {
+      throw new Error(`Sub2API recovered OAuth configuration updated ${success}/${ids.length}, failed ${failed}`);
+    }
+    return { accountIds: ids, configured: success, result };
   }
 
   async correctAccountPlanTypes(accountIds: number[], planType: "free" | "k12" | "plus" | "team"): Promise<Record<string, unknown>> {

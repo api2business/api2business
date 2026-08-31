@@ -24,10 +24,15 @@
 
 ## 公开复活导入
 
-- `bugteam public-recovery start` 完成 30d.team 健康检查、401 找回、下载、导入和终态回读。
-- 复活导入保留原 OAuth 账号，不执行删除或覆盖；新复活副本固定按 `¥0.01` 采购成本记账。
+- `bugteam public-recovery start` 只创建作业并冻结指定 OpenAI OAuth 原账号的运行配置。
+- 原账号保留，不执行删除或覆盖；新复活副本固定按 `¥0.01` 采购成本记账。
+- 每次 `continue --confirm` 或 `retry --stage <stage> --confirm` 只推进一个阶段。
+  - 阶段依次为 `health`、可选 `reclaim`、`status`、`download`、`import-submit`、`import-status`、`verify`。
+  - 仅公开服务阶段经 `--card-code-stdin` 接收兑换码；兑换码不写入作业、日志或输出。
+- 创建时冻结并对新副本继承优先级、并发、负载因子、计费倍率、分组、代理、过期暂停、状态和可调度状态。
+- 导入后只对新建副本回读这些字段；未创建新副本或任一字段不一致时，作业失败，原账号不受影响。
 - 复活副本允许与现有 OAuth 凭据相同，但只在 `cutoffTrigger=public-recovery` 场景启用该重复导入语义。
-- 复活导入使用直连，并跳过 OAuth 导入后的 API-key 上游切断联动。
+- 复活导入使用原账号冻结的代理设置，并跳过 OAuth 导入后的 API-key 上游切断联动。
 - 已完成下载但需要补导入时使用 `bugteam public-recovery import`，仍须指定一个现存 OAuth 账号作为复活锚点。
 
 ## 空闲探活
