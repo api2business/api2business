@@ -11,6 +11,9 @@ test("error diagnosis uses one bounded query for signatures and failover chains"
   expect(errorDiagnoseQuery).toContain("COUNT(DISTINCT account_id)");
   expect(errorDiagnoseQuery).toContain("rank <= $4");
   expect(errorDiagnoseQuery).toContain("rank <= $5");
+  expect(errorDiagnoseQuery).toContain("LOWER($7::text)");
+  expect(errorDiagnoseQuery).toContain("routing_matrix AS");
+  expect(errorDiagnoseQuery).toContain("JSONB_ARRAY_ELEMENTS(chain.attempts)");
   expect(errorDiagnoseQuery).toContain("a.name = $2::text");
   expect(errorDiagnoseQuery).toContain("g.name = $3::text");
   expect(errorDiagnoseQuery).toContain("request_group.id = o.group_id");
@@ -36,6 +39,7 @@ test("error diagnosis projection exposes bounded facts without raw payloads", ()
       requests: 2,
     }],
     chains: [{ requestId: "request-1", attempts: [{ accountId: 1 }] }],
+    routing_matrix: [{ model: "gpt-5.6-terra", accountId: "1", chains: 1, attempts: 2 }],
   });
   expect(projected.summary).toEqual({
     sampledErrorRows: 5,
@@ -51,6 +55,9 @@ test("error diagnosis projection exposes bounded facts without raw payloads", ()
     failoverWithoutRecovery: 1,
     unclassifiedSignatures: 0,
   });
+  expect(projected.routingMatrix).toEqual([
+    { model: "gpt-5.6-terra", accountId: "1", chains: 1, attempts: 2 },
+  ]);
   expect(JSON.stringify(projected)).not.toContain("errorBody");
   expect(JSON.stringify(projected)).not.toContain("errorMessage");
 });

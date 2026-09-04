@@ -9,6 +9,53 @@ function number(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function record(value: unknown): ScoreRow | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as ScoreRow
+    : null;
+}
+
+type QualityDimensions = {
+  reliabilityScore: number;
+  latencyScore: number;
+  qualityScore: number;
+  reliabilityEvidence: "observed" | "prior";
+  latencyEvidence: "observed" | "prior";
+};
+
+function dimensionScore(
+  row: ScoreRow,
+  keys: string[],
+  prior: number,
+): { score: number; evidence: "observed" | "prior" } {
+  if (number(row.score) === null) return { score: prior, evidence: "prior" };
+  const components = record(row.scoreComponents);
+  const weights = record(components?.weights);
+  if (components === null || weights === null) {
+    throw new Error("scored account is missing scoreComponents.weights for linear priority planning");
+  }
+  const observed = keys.map((key) => ({ value: number(components[key]), weight: number(weights[key]) }))
+    .filter((item) => item.value !== null && item.weight !== null && item.weight > 0);
+  if (observed.length === 0) return { score: prior, evidence: "prior" };
+  const maximum = observed.reduce((sum, item) => sum + item.weight!, 0);
+  const earned = observed.reduce((sum, item) => sum + item.value!, 0);
+  return { score: Math.max(0, Math.min(100, 100 * earned / maximum)), evidence: "observed" };
+}
+
+function qualityDimensions(row: ScoreRow, policy: PriorityPlanPolicy): QualityDimensions {
+  const reliability = dimensionScore(row, ["reliability", "failover"], policy.explorationQualityPrior);
+  const latency = dimensionScore(row, ["latency"], policy.explorationQualityPrior);
+  const qualityWeight = policy.reliabilityWeight + policy.latencyWeight;
+  if (qualityWeight <= 0) throw new Error("sub2api.priorityPlan reliabilityWeight + latencyWeight must be positive");
+  return {
+    reliabilityScore: reliability.score,
+    latencyScore: latency.score,
+    qualityScore: (reliability.score * policy.reliabilityWeight + latency.score * policy.latencyWeight) / qualityWeight,
+    reliabilityEvidence: reliability.evidence,
+    latencyEvidence: latency.evidence,
+  };
+}
+
 function rankingMeasurement(ranking: Record<string, unknown>): Record<string, unknown> {
   return {
     databaseQueries: number(ranking.databaseQueries),
@@ -139,9 +186,10 @@ function buildPriorityProfile(
   if (policy.maximumPriority < policy.minimumPriority) {
     throw new Error("sub2api.priorityPlan.maximumPriority must be >= minimumPriority");
   }
-  const totalWeight = policy.qualityWeight + policy.costWeight + policy.explorationWeight + policy.balanceWeight;
+  const totalWeight = policy.reliabilityWeight + policy.latencyWeight
+    + policy.costWeight + policy.explorationWeight + policy.balanceWeight;
   if (totalWeight <= 0) {
-    throw new Error("sub2api.priorityPlan qualityWeight + costWeight + explorationWeight + balanceWeight must be positive");
+    throw new Error("sub2api.priorityPlan reliabilityWeight + latencyWeight + costWeight + explorationWeight + balanceWeight must be positive");
   }
   const rows = Array.isArray(ranking.accounts)
     ? ranking.accounts.filter((row): row is ScoreRow => typeof row === "object" && row !== null && !Array.isArray(row))
@@ -247,12 +295,13 @@ function buildPriorityProfile(
     return maximumBalance === minimumBalance ? 100 : 100 * (balance - minimumBalance) / (maximumBalance - minimumBalance);
   };
   const baseEconomicScore = (row: ScoreRow): number => {
-    const quality = number(row.score) ?? policy.explorationQualityPrior;
+    const dimensions = qualityDimensions(row, policy);
     const cost = costRate(row)!;
     const costScore = normalizedCostScore(cost, normalizationMinimumCost, normalizationMaximumCost);
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
     const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
-    return (quality * policy.qualityWeight
+    return (dimensions.reliabilityScore * policy.reliabilityWeight
+      + dimensions.latencyScore * policy.latencyWeight
       + costScore * policy.costWeight
       + explorationScore * policy.explorationWeight
       + balanceScore(row) * policy.balanceWeight) / totalWeight;
@@ -260,7 +309,7 @@ function buildPriorityProfile(
   const currentPoolQualityScore = number(ranking.poolQualityScore);
   const dynamicQualityExtraScore = (row: ScoreRow): number => {
     if (currentPoolQualityScore === null || policy.dynamicQualityFeedback.coefficient === 0) return 0;
-    const quality = number(row.score) ?? policy.explorationQualityPrior;
+    const quality = qualityDimensions(row, policy).qualityScore;
     return (policy.dynamicQualityFeedback.targetQualityScore - currentPoolQualityScore)
       * policy.dynamicQualityFeedback.coefficient * quality / 100;
   };
@@ -284,6 +333,7 @@ function buildPriorityProfile(
   const dynamicChanges = ranked.map(({ row, combinedScore }, index) => {
     const accountId = number(row.accountId);
     const score = number(row.score);
+    const dimensions = qualityDimensions(row, policy);
     const cost = costRate(row)!;
     const costScore = normalizedCostScore(cost, normalizationMinimumCost, normalizationMaximumCost);
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
@@ -326,6 +376,11 @@ function buildPriorityProfile(
       accountId,
       accountName: row.accountName,
       score,
+      reliabilityScore: dimensions.reliabilityScore,
+      latencyScore: dimensions.latencyScore,
+      qualityScore: dimensions.qualityScore,
+      reliabilityEvidence: dimensions.reliabilityEvidence,
+      latencyEvidence: dimensions.latencyEvidence,
       costRateCnyPerApiUsd: cost,
       costScore,
       explorationScore,

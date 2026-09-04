@@ -223,7 +223,7 @@ function help(): Record<string, unknown> {
       "scores get|pool-quality|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
-      "errors diagnose [--request-id <request-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
+      "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors inspect --request-id <request-id>",
       "errors list [--limit N]",
       "errors get --request-id <request-id>",
@@ -1056,13 +1056,14 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       parsed.top ?? config.monitor.errorAggregateTop,
       parsed.account,
       parsed.group,
+      parsed.model,
       parsed.requestId ? [parsed.requestId] : null,
     );
   }
   if (group === "errors" && action === "inspect") {
     if (!parsed.requestId) throw new Error("errors inspect requires --request-id");
     const [diagnosis, detail] = await Promise.all([
-      client.errorDiagnose(1, parsed.top ?? config.monitor.errorAggregateTop, null, null, [parsed.requestId]),
+      client.errorDiagnose(1, parsed.top ?? config.monitor.errorAggregateTop, null, null, null, [parsed.requestId]),
       client.errorRequest(parsed.requestId),
     ]);
     return {

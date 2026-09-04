@@ -354,11 +354,13 @@ export class AdminHttpClient {
     top: number,
     account: string | null,
     group: string | null,
+    model: string | null,
     failoverRequestIds: string[] | null = null,
   ): Promise<Record<string, unknown>> {
     const query = new URLSearchParams({ limit: String(limit), top: String(top) });
     if (account) query.set("account", account);
     if (group) query.set("group", group);
+    if (model) query.set("model", model);
     if (failoverRequestIds !== null) query.set("failoverRequestIds", failoverRequestIds.join(","));
     return this.request(`/api/admin/errors/diagnose?${query}`, {}, 60000);
   }

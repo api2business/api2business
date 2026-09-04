@@ -74,7 +74,8 @@ export interface PriorityPlanPolicy {
   eligibleGroupIds: number[];
   requiredConfidence: string;
   requireCurrentAvailable: boolean;
-  qualityWeight: number;
+  reliabilityWeight: number;
+  latencyWeight: number;
   costWeight: number;
   explorationWeight: number;
   explorationTargetAttempts: number;
@@ -488,7 +489,8 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
     eligibleGroupIds: integers(policy, "eligibleGroupIds", path, 1, Number.MAX_SAFE_INTEGER),
     requiredConfidence: stringValue(policy, "requiredConfidence", path),
     requireCurrentAvailable: booleanValue(policy, "requireCurrentAvailable", path),
-    qualityWeight: numberValue(policy, "qualityWeight", path, 0, 100),
+    reliabilityWeight: numberValue(policy, "reliabilityWeight", path, 0, 100),
+    latencyWeight: numberValue(policy, "latencyWeight", path, 0, 100),
     costWeight: numberValue(policy, "costWeight", path, 0, 100),
     explorationWeight: numberValue(policy, "explorationWeight", path, 0, 100),
     explorationTargetAttempts: integerValue(policy, "explorationTargetAttempts", path, 1, 10000),

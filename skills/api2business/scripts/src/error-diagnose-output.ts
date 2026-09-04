@@ -80,6 +80,16 @@ function decorateDiagnosis(value: Row): Row {
   return { ...value, chains };
 }
 
+function accountPath(chain: Row): string {
+  const attempted = rows(chain.attempts)
+    .map((attempt) => {
+      const accountId = String(attempt.accountId ?? "?");
+      const status = String(attempt.upstreamStatusCode ?? attempt.statusCode ?? "-");
+      return `${accountId}(${status})`;
+    });
+  return attempted.length > 0 ? attempted.join(" -> ") : "-";
+}
+
 export function emitErrorDiagnosis(value: Row, json: boolean): void {
   const output = decorateDiagnosis(value);
   const chains = rows(output.chains);
@@ -110,17 +120,36 @@ export function emitErrorDiagnosis(value: Row, json: boolean): void {
       String(row.signature ?? "-"),
     ].join("  "));
   }
+  const routingMatrix = rows(value.routingMatrix);
+  if (routingMatrix.length > 0) {
+    console.log("\nMODEL × ACCOUNT × OBSERVED CHAIN");
+    console.log("MODEL  ACCOUNT  CHAINS  ATTEMPTS  FAILOVER  RECOVERED  VISIBLE");
+    for (const row of routingMatrix) {
+      console.log([
+        String(row.model ?? "unknown").padEnd(20),
+        String(row.accountId ?? "-").padStart(7),
+        String(row.chains ?? 0).padStart(6),
+        String(row.attempts ?? 0).padStart(8),
+        String(row.failoverTriggered ?? 0).padStart(8),
+        String(row.recovered ?? 0).padStart(9),
+        String(row.customerVisible ?? 0).padStart(7),
+      ].join("  "));
+    }
+    console.log("Observed attempts only; candidate exclusions are not emitted by the upstream event log.");
+  }
   if (chains.length === 0) return;
   console.log("\nCUSTOMER-VISIBLE / FAILOVER SAMPLES");
-  console.log("VISIBLE  RECOVERED  FAILOVER  ATTEMPTS  STATUS  REQUEST_ID  FINAL_SIGNATURE");
+  console.log("MODEL  VISIBLE  RECOVERED  FAILOVER  ATTEMPTS  STATUS  REQUEST_ID  ACCOUNT_CHAIN  FINAL_SIGNATURE");
   for (const row of chains) {
     console.log([
+      String(row.model ?? "unknown").padEnd(20),
       (row.customerVisible === true ? "yes" : "no").padEnd(7),
       (row.recovered === true ? "yes" : "no").padEnd(9),
       (row.failoverTriggered === true ? "yes" : "no").padEnd(8),
       String(row.attemptCount ?? 0).padStart(8),
       String(row.finalStatusCode ?? "-").padStart(6),
       String(row.requestId ?? "-").padEnd(36),
+      accountPath(row).padEnd(18),
       String(row.finalSignature ?? "-"),
     ].join("  "));
   }
