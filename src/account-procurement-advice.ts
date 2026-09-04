@@ -127,7 +127,7 @@ export function buildProcurementAdvice(
       row,
       costRange.minimum,
       costRange.maximum,
-      priorityPolicy.qualityWeight,
+      priorityPolicy.reliabilityWeight + priorityPolicy.latencyWeight,
       priorityPolicy.costWeight,
     ));
     const redundancyScore = 100 * (1 - share);

@@ -69,6 +69,7 @@ selected_errors AS (
     )
     AND (COALESCE(o.status_code, 0) >= 400 OR o.error_type = 'cyber_policy')
     AND ($6::text IS NULL OR o.request_id::text = ANY(string_to_array($6::text, ',')))
+    AND ($7::text IS NULL OR LOWER(COALESCE(o.requested_model, o.model, 'unknown')) = LOWER($7::text))
   ORDER BY o.created_at DESC, o.id DESC
   LIMIT $1
 ),
@@ -274,6 +275,27 @@ ranked_chains AS (
       attempt_count DESC, last_at DESC, request_key
   ) AS rank
   FROM request_chains
+),
+routing_matrix AS (
+  SELECT
+    chain.model,
+    attempt->>'accountId' AS account_id,
+    COALESCE(attempt->>'accountName', 'unattributed') AS account_name,
+    COUNT(DISTINCT chain.request_key)::int AS chains,
+    COUNT(*)::int AS attempts,
+    COUNT(DISTINCT chain.request_key) FILTER (WHERE chain.failover_triggered)::int AS failover_triggered,
+    COUNT(DISTINCT chain.request_key) FILTER (WHERE chain.recovered)::int AS recovered,
+    COUNT(DISTINCT chain.request_key) FILTER (WHERE NOT chain.recovered)::int AS customer_visible
+  FROM request_chains chain
+  CROSS JOIN LATERAL JSONB_ARRAY_ELEMENTS(chain.attempts) AS attempt
+  WHERE NULLIF(attempt->>'accountId', '') IS NOT NULL
+  GROUP BY chain.model, attempt->>'accountId', COALESCE(attempt->>'accountName', 'unattributed')
+),
+ranked_routing_matrix AS (
+  SELECT *, ROW_NUMBER() OVER (
+    ORDER BY customer_visible DESC, chains DESC, attempts DESC, model, account_id
+  ) AS rank
+  FROM routing_matrix
 )
 SELECT
   (SELECT COUNT(*)::int FROM classified) AS sampled_error_rows,
@@ -322,7 +344,20 @@ SELECT
     ) ORDER BY (NOT recovered) DESC, failover_triggered DESC,
       attempt_count DESC, last_at DESC, request_key)
     FROM ranked_chains WHERE rank <= $5
-  ), '[]'::jsonb) AS chains
+  ), '[]'::jsonb) AS chains,
+  COALESCE((
+    SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
+      'model', model,
+      'accountId', account_id,
+      'accountName', account_name,
+      'chains', chains,
+      'attempts', attempts,
+      'failoverTriggered', failover_triggered,
+      'recovered', recovered,
+      'customerVisible', customer_visible
+    ) ORDER BY customer_visible DESC, chains DESC, attempts DESC, model, account_id)
+    FROM ranked_routing_matrix WHERE rank <= $4
+  ), '[]'::jsonb) AS routing_matrix
 `;
 
 function integer(value: unknown): number {
@@ -343,10 +378,12 @@ export function projectErrorDiagnoseRow(row: Row): Row {
   };
   const signatures = Array.isArray(row.signatures) ? row.signatures : [];
   const chains = Array.isArray(row.chains) ? row.chains : [];
+  const routingMatrix = Array.isArray(row.routing_matrix) ? row.routing_matrix : [];
   return {
     summary,
     signatures,
     chains,
+    routingMatrix,
     analysisHints: {
       failoverWithoutRecovery: summary.failoverFailedRequests,
       unclassifiedSignatures: signatures.filter((item) =>
@@ -364,6 +401,7 @@ export async function collectErrorDiagnosisFromDatabase(
   top: number,
   accountSelector: string | null = null,
   groupSelector: string | null = null,
+  modelSelector: string | null = null,
   failoverRequestIds: string[] | null = null,
   priority: Sub2ApiReadPriority = "manual",
 ): Promise<Row> {
@@ -381,6 +419,7 @@ export async function collectErrorDiagnosisFromDatabase(
       top,
       accountSelector,
       groupSelector,
+      modelSelector,
       failoverRequestIds,
     ]),
     kind: "errors.diagnose",
@@ -392,6 +431,7 @@ export async function collectErrorDiagnosisFromDatabase(
       top,
       top,
       failoverRequestIds === null ? null : failoverRequestIds.join(","),
+      modelSelector,
     ],
     priority,
     cacheMode: "prefer-cache",
@@ -404,6 +444,9 @@ export async function collectErrorDiagnosisFromDatabase(
   if (groupSelector !== null && integer(summary.sampledErrorRows) === 0) {
     throw new Error(`group selector resolved no recent errors: ${groupSelector}`);
   }
+  if (modelSelector !== null && integer(summary.sampledErrorRows) === 0) {
+    throw new Error(`model selector resolved no recent errors: ${modelSelector}`);
+  }
   return {
     ok: true,
     mode: "error-diagnose-postgresql",
@@ -411,6 +454,7 @@ export async function collectErrorDiagnosisFromDatabase(
     top,
     accountSelector,
     groupSelector,
+    modelSelector,
     groupFilterBasis: "request-group",
     probeNoiseExcluded: true,
     timezone: config.monitor.timezone,

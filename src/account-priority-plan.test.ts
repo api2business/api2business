@@ -17,7 +17,8 @@ const config = {
       eligibleGroupIds: [2, 3],
       requiredConfidence: "high",
       requireCurrentAvailable: true,
-      qualityWeight: 80,
+      reliabilityWeight: 50,
+      latencyWeight: 30,
       costWeight: 20,
       explorationWeight: 0,
       explorationTargetAttempts: 50,
@@ -51,7 +52,8 @@ const config = {
       eligibleGroupIds: [6],
       requiredConfidence: "high",
       requireCurrentAvailable: true,
-      qualityWeight: 85,
+      reliabilityWeight: 65,
+      latencyWeight: 20,
       costWeight: 15,
       explorationWeight: 0,
       explorationTargetAttempts: 50,
@@ -95,6 +97,11 @@ function account(id: number, name: string, score: number, available = true, erro
     schedulable: available,
     currentError: error,
     score,
+    scoreComponents: {
+      reliability: score * 0.5,
+      latency: score * 0.3,
+      weights: { reliability: 50, latency: 30 },
+    },
     priority: 100 + id,
     observedAttempts: 1000,
     failureRate: 0,
@@ -135,7 +142,8 @@ test("OAuth accounts are excluded from scoring-derived priority changes", () => 
 
 test("Codex economic ranking keeps the highest-cost quality leader below better-value accounts", () => {
   const weightedConfig = structuredClone(config);
-  weightedConfig.sub2api.priorityPlan.qualityWeight = 70;
+  weightedConfig.sub2api.priorityPlan.reliabilityWeight = 45;
+  weightedConfig.sub2api.priorityPlan.latencyWeight = 25;
   weightedConfig.sub2api.priorityPlan.costWeight = 30;
   const economicAccount = (id: number, name: string, score: number, cost: number) => ({
     ...account(id, name, score),
@@ -155,9 +163,44 @@ test("Codex economic ranking keeps the highest-cost quality leader below better-
   expect(ranked.at(-1)).toMatchObject({ accountId: 1, rank: 5, costRateCnyPerApiUsd: 0.18 });
 });
 
+test("linear reliability and latency weights can distinguish equal composite quality scores", () => {
+  const splitConfig = structuredClone(config);
+  splitConfig.sub2api.priorityPlan.costWeight = 0;
+  splitConfig.sub2api.priorityPlan.explorationWeight = 0;
+  splitConfig.sub2api.priorityPlan.balanceWeight = 0;
+  const reliableSlow = account(1, "reliable-slow", 80);
+  reliableSlow.scoreComponents = {
+    reliability: 49,
+    latency: 3,
+    weights: { reliability: 50, latency: 30 },
+  };
+  const fastLessReliable = account(2, "fast-less-reliable", 80);
+  fastLessReliable.scoreComponents = {
+    reliability: 30,
+    latency: 27,
+    weights: { reliability: 50, latency: 30 },
+  };
+  const plan = buildAccountPriorityPlan({
+    recentCallLimit: 1000,
+    accounts: [reliableSlow, fastLessReliable],
+  }, splitConfig);
+  const dynamic = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.priorityMode !== "topk-tail")
+    .sort((left, right) => Number(left.rank) - Number(right.rank));
+
+  expect(dynamic.map((row) => row.accountId)).toEqual([2, 1]);
+  expect(dynamic[0]).toMatchObject({
+    reliabilityScore: 60,
+    latencyScore: 90,
+    reliabilityEvidence: "observed",
+    latencyEvidence: "observed",
+  });
+});
+
 test("Codex robust cost normalization puts the highest-quality low-cost account first", () => {
   const weightedConfig = structuredClone(config);
-  weightedConfig.sub2api.priorityPlan.qualityWeight = 45;
+  weightedConfig.sub2api.priorityPlan.reliabilityWeight = 28;
+  weightedConfig.sub2api.priorityPlan.latencyWeight = 17;
   weightedConfig.sub2api.priorityPlan.costWeight = 35;
   weightedConfig.sub2api.priorityPlan.explorationWeight = 8;
   weightedConfig.sub2api.priorityPlan.balanceWeight = 12;
@@ -317,7 +360,11 @@ test("stable ranking inserts a moved leader between unchanged local anchors", ()
     accounts: [leader, peer, tail],
   }, config);
 
-  const degradedLeader = { ...leader, score: 80 };
+  const degradedLeader = {
+    ...leader,
+    score: 80,
+    scoreComponents: { reliability: 40, latency: 24, weights: { reliability: 50, latency: 30 } },
+  };
   const degradedPlan = buildAccountPriorityPlan({
     recentCallLimit: 1000,
     queryDurationMs: 900,
@@ -418,7 +465,8 @@ test("available low-confidence accounts receive weighted exploration while unava
 
 test("small samples use a decaying exploration weight and enter the top exploration band", () => {
   const explorationConfig = structuredClone(config);
-  explorationConfig.sub2api.priorityPlan.qualityWeight = 25;
+  explorationConfig.sub2api.priorityPlan.reliabilityWeight = 15;
+  explorationConfig.sub2api.priorityPlan.latencyWeight = 10;
   explorationConfig.sub2api.priorityPlan.costWeight = 20;
   explorationConfig.sub2api.priorityPlan.explorationWeight = 30;
   explorationConfig.sub2api.priorityPlan.explorationTargetAttempts = 50;
@@ -440,7 +488,8 @@ test("small samples use a decaying exploration weight and enter the top explorat
 
 test("a schedulable zero-sample account enters exploration before it has a quality score", () => {
   const explorationConfig = structuredClone(config);
-  explorationConfig.sub2api.priorityPlan.qualityWeight = 25;
+  explorationConfig.sub2api.priorityPlan.reliabilityWeight = 15;
+  explorationConfig.sub2api.priorityPlan.latencyWeight = 10;
   explorationConfig.sub2api.priorityPlan.costWeight = 20;
   explorationConfig.sub2api.priorityPlan.explorationWeight = 30;
   explorationConfig.sub2api.priorityPlan.explorationTargetAttempts = 50;
@@ -475,7 +524,17 @@ test("stable ranking remains distributed and ordered through repeated local move
     const position = iteration % 19;
     const firstScore = rankedRows[position].score;
     rankedRows[position].score = rankedRows[position + 1].score;
+    rankedRows[position].scoreComponents = {
+      reliability: rankedRows[position].score * 0.5,
+      latency: rankedRows[position].score * 0.3,
+      weights: { reliability: 50, latency: 30 },
+    };
     rankedRows[position + 1].score = firstScore;
+    rankedRows[position + 1].scoreComponents = {
+      reliability: firstScore * 0.5,
+      latency: firstScore * 0.3,
+      weights: { reliability: 50, latency: 30 },
+    };
     const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, config);
     const dynamic = (plan.changes as Array<Record<string, unknown>>)
       .filter((row) => row.priorityMode === "stable-rank" || row.priorityMode === "normalized-rebalance");
@@ -574,7 +633,8 @@ test("codex and grok use independent anchors and merge into one adjustment plan"
     accounts: [
       account(1, "https://codex-a.example plus 0.1", 90),
       grokAccount,
-      { ...grokAccount, accountId: 11, accountName: "https://grok-b.example grok 0.05", score: 70, priority: 300,
+      { ...grokAccount, accountId: 11, accountName: "https://grok-b.example grok 0.05", score: 70,
+        scoreComponents: { reliability: 45.5, latency: 17.5, weights: { reliability: 65, latency: 20 } }, priority: 300,
         usage: { costRateCnyPerApiUsd: 0.05 } },
     ],
   }, config);

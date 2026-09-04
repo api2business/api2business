@@ -1700,6 +1700,7 @@ export class OperationsService {
     top: number,
     accountSelector: string | null,
     groupSelector: string | null,
+    modelSelector: string | null,
     failoverRequestIds: string[] | null,
   ) {
     return await collectErrorDiagnosisFromDatabase(
@@ -1709,6 +1710,7 @@ export class OperationsService {
       top,
       accountSelector,
       groupSelector,
+      modelSelector,
       failoverRequestIds,
       "manual",
     );

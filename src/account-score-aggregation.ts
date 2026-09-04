@@ -128,7 +128,13 @@ export function mergeAccountScores(rows: Row[]): Row[] {
           return value === null ? null : Math.round(value * 100_000_000) / 100_000_000;
         })(),
       },
-      scoreComponents: { reliability, latency, availability, availableWeight },
+      scoreComponents: {
+        reliability,
+        latency,
+        availability,
+        availableWeight,
+        weights: { reliability: 60, latency: 25 },
+      },
       aggregation: {
         scope: "unique-account-across-groups",
         groupCount: groupNames.length,

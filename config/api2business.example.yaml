@@ -182,7 +182,8 @@ sub2api:
     eligibleGroupIds: [2, 3]
     requiredConfidence: high
     requireCurrentAvailable: true
-    qualityWeight: 45
+    reliabilityWeight: 28
+    latencyWeight: 17
     costWeight: 35
     explorationWeight: 8
     explorationTargetAttempts: 50
@@ -224,7 +225,8 @@ sub2api:
     eligibleGroupIds: [6]
     requiredConfidence: high
     requireCurrentAvailable: true
-    qualityWeight: 85
+    reliabilityWeight: 65
+    latencyWeight: 20
     costWeight: 15
     explorationWeight: 0
     explorationTargetAttempts: 50

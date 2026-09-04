@@ -797,6 +797,7 @@ export function createHandler(
           top,
           url.searchParams.get("account"),
           url.searchParams.get("group"),
+          url.searchParams.get("model"),
           url.searchParams.has("failoverRequestIds")
             ? (url.searchParams.get("failoverRequestIds") ?? "")
               .split(",").filter((value) => /^[0-9a-f-]{36}$/iu.test(value))

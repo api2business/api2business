@@ -75,7 +75,7 @@
     - 最终错误仍由 Sub2API 运行面产生；
     - Api2Business 只负责模板声明、批量写入和回读校验。
 - 调度先按账号质量和成本形成排序，再生成有界优先级计划。
-- 只使用权重调整质量、成本、余额和探索，不增加隐式硬门槛。
+- 调度质量拆为可靠性和延迟两个连续维度：`reliabilityWeight`、`latencyWeight`、成本、余额和探索共同线性加权；不使用 `qualityWeight`，不增加隐式硬门槛。
 - 优先使用探测成本；探测成本缺失时再使用手工成本。
 - 充值候选分析：
   - `upstreams recharge-candidates --over-api` 同时列出当前欠费账号和最新人民币余额低于
@@ -92,5 +92,6 @@
 - 自动调整每轮有界超时，失败后跳过本轮并从结束时间计算下一轮。
 - 任何真实写操作先展示计划，再显式确认并回读验证。
 - 单个请求的切号判定优先使用 `errors inspect --request-id <request-id> --over-api`；该入口并行取得诊断链和请求详情。需要只看聚合诊断时才使用 `errors diagnose --request-id <request-id> --over-api`，不要用大范围错误列表推断单请求是否命中模板。
+- 按模型排障使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api`。返回的模型 × 账号 × 链矩阵与样本链均来自已持久化尝试；运行面未记录的候选排除原因必须标记为未知，不能反推。
 - 精确诊断中的 `responseEvidence` 只展示限长脱敏摘要；`available=false` 表示运行面没有持久化可读正文，不能把包装层错误文本当作供应商业务原因。
 - 模板变更使用 `upstreams template --confirm --over-api`，默认范围为全部 API-key 上游账号，必须以原工作流回读的 `verifiedCount`、`failedCount` 和 `misalignedCount` 收口。
