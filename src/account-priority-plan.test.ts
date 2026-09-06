@@ -12,6 +12,14 @@ const config = {
     },
   },
   sub2api: {
+    scorePolicy: {
+      ttftFullScoreMs: 5_000,
+      ttftZeroScoreMs: 55_000,
+    },
+    grokScorePolicy: {
+      ttftFullScoreMs: 7_000,
+      ttftZeroScoreMs: 70_000,
+    },
     priorityPlan: {
       platform: "openai",
       eligibleGroupIds: [2, 3],
@@ -20,11 +28,13 @@ const config = {
       reliabilityWeight: 50,
       latencyWeight: 30,
       costWeight: 20,
+      evidenceWeight: 0,
+      evidenceTargetAttempts: 50,
+      evidenceTargetFirstTokenSamples: 20,
       explorationWeight: 0,
       explorationTargetAttempts: 50,
       explorationQualityPrior: 0,
       balanceWeight: 0,
-      dynamicQualityFeedback: { targetQualityScore: 85, coefficient: 0 },
       referenceScore: 92,
       pointsPerScore: 10,
       minimumChange: 5,
@@ -55,11 +65,13 @@ const config = {
       reliabilityWeight: 65,
       latencyWeight: 20,
       costWeight: 15,
+      evidenceWeight: 0,
+      evidenceTargetAttempts: 50,
+      evidenceTargetFirstTokenSamples: 20,
       explorationWeight: 0,
       explorationTargetAttempts: 50,
       explorationQualityPrior: 0,
       balanceWeight: 0,
-      dynamicQualityFeedback: { targetQualityScore: 85, coefficient: 0 },
       referenceScore: 80,
       pointsPerScore: 8,
       minimumChange: 5,
@@ -163,7 +175,7 @@ test("Codex economic ranking keeps the highest-cost quality leader below better-
   expect(ranked.at(-1)).toMatchObject({ accountId: 1, rank: 5, costRateCnyPerApiUsd: 0.18 });
 });
 
-test("linear reliability and latency weights can distinguish equal composite quality scores", () => {
+test("linear reliability and raw TTFT weights can distinguish equal composite quality scores", () => {
   const splitConfig = structuredClone(config);
   splitConfig.sub2api.priorityPlan.costWeight = 0;
   splitConfig.sub2api.priorityPlan.explorationWeight = 0;
@@ -174,12 +186,14 @@ test("linear reliability and latency weights can distinguish equal composite qua
     latency: 3,
     weights: { reliability: 50, latency: 30 },
   };
+  reliableSlow.ttftP95Ms = 50_000;
   const fastLessReliable = account(2, "fast-less-reliable", 80);
   fastLessReliable.scoreComponents = {
     reliability: 30,
     latency: 27,
     weights: { reliability: 50, latency: 30 },
   };
+  fastLessReliable.ttftP95Ms = 5_000;
   const plan = buildAccountPriorityPlan({
     recentCallLimit: 1000,
     accounts: [reliableSlow, fastLessReliable],
@@ -191,9 +205,85 @@ test("linear reliability and latency weights can distinguish equal composite qua
   expect(dynamic.map((row) => row.accountId)).toEqual([2, 1]);
   expect(dynamic[0]).toMatchObject({
     reliabilityScore: 60,
-    latencyScore: 90,
+    latencyScore: 100,
     reliabilityEvidence: "observed",
     latencyEvidence: "observed",
+  });
+});
+
+test("TTFT penalty is linearly proportional to the eligible account latency range", () => {
+  const latencyConfig = structuredClone(config);
+  latencyConfig.sub2api.priorityPlan.reliabilityWeight = 50;
+  latencyConfig.sub2api.priorityPlan.latencyWeight = 30;
+  latencyConfig.sub2api.priorityPlan.costWeight = 20;
+  const accounts = [5_000, 30_000, 55_000].map((ttftP95Ms, index) => {
+    const row = account(index + 1, `latency-${ttftP95Ms}`, 80);
+    row.ttftP95Ms = ttftP95Ms;
+    (row as Record<string, unknown>).firstTokenSamples = 20;
+    (row as Record<string, unknown>).firstTokenCoverage = 1;
+    row.usage = { costRateCnyPerApiUsd: 0.1 };
+    return row;
+  });
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts }, latencyConfig);
+  const rows = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.priorityMode !== "topk-tail")
+    .sort((left, right) => Number(left.rank) - Number(right.rank));
+
+  expect(plan.latencyNormalizationRange).toMatchObject({
+    strategy: "linear-penalty",
+    evidenceSource: "required-confidence",
+    evidenceCount: 3,
+    minimumTtftP95Ms: 5_000,
+    maximumTtftP95Ms: 55_000,
+  });
+  expect(rows.map((row) => Number(row.latencyPenalty))).toEqual([0, 50, 100]);
+  expect(rows.map((row) => Number(row.latencyScore))).toEqual([100, 50, 0]);
+  expect(Number(rows[0]?.baseCombinedScore) - Number(rows[1]?.baseCombinedScore)).toBeCloseTo(15);
+  expect(Number(rows[1]?.baseCombinedScore) - Number(rows[2]?.baseCombinedScore)).toBeCloseTo(15);
+});
+
+test("TTFT penalty uses absolute configured boundaries instead of an outlier-driven range", () => {
+  const accounts = [5_000, 55_000, 105_000].map((ttftP95Ms, index) => {
+    const row = account(index + 1, `absolute-latency-${ttftP95Ms}`, 80);
+    row.ttftP95Ms = ttftP95Ms;
+    (row as Record<string, unknown>).firstTokenSamples = 20;
+    (row as Record<string, unknown>).firstTokenCoverage = 1;
+    return row;
+  });
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts }, config);
+  const rows = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.priorityMode !== "topk-tail")
+    .sort((left, right) => Number(left.rank) - Number(right.rank));
+
+  expect(plan.latencyNormalizationRange).toMatchObject({
+    minimumTtftP95Ms: 5_000,
+    maximumTtftP95Ms: 55_000,
+  });
+  expect(rows.map((row) => Number(row.latencyPenalty))).toEqual([0, 100, 100]);
+  expect(rows.map((row) => Number(row.latencyScore))).toEqual([100, 0, 0]);
+});
+
+test("missing TTFT keeps the existing prior latency score without inventing a penalty", () => {
+  const row = account(1, "missing-ttft", 80);
+  row.ttftP95Ms = null as unknown as number;
+  row.scoreComponents = {
+    reliability: 40,
+    latency: 7.5,
+    latencyEvidence: "prior",
+    weights: { reliability: 50, latency: 30 },
+  };
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [row] }, config);
+  const change = (plan.changes as Array<Record<string, unknown>>)
+    .find((item) => item.accountId === 1)!;
+
+  expect(change).toMatchObject({
+    latencyScore: 25,
+    latencyPenalty: null,
+    latencyEvidence: "prior",
+  });
+  expect(plan.latencyNormalizationRange).toMatchObject({
+    evidenceSource: "none",
+    evidenceCount: 0,
   });
 });
 
@@ -204,7 +294,6 @@ test("Codex robust cost normalization puts the highest-quality low-cost account 
   weightedConfig.sub2api.priorityPlan.costWeight = 35;
   weightedConfig.sub2api.priorityPlan.explorationWeight = 8;
   weightedConfig.sub2api.priorityPlan.balanceWeight = 12;
-  weightedConfig.sub2api.priorityPlan.dynamicQualityFeedback = { targetQualityScore: 85, coefficient: 2 };
   const economicAccount = (id: number, name: string, score: number, cost: number, balance: number) => ({
     ...account(id, name, score),
     detectedCostRateCnyPerApiUsd: cost,
@@ -233,15 +322,38 @@ test("Codex robust cost normalization puts the highest-quality low-cost account 
     .filter((row) => [307, 308, 37].includes(Number(row.accountId)))
     .sort((left, right) => Number(left.rank) - Number(right.rank));
 
-  expect(ranked.map((row) => row.accountId)).toEqual([37, 307, 308]);
+  expect(ranked.map((row) => row.accountId)).toEqual([307, 37, 308]);
   expect(ranked.find((row) => row.accountId === 37)?.combinedScore)
     .toBeGreaterThan(Number(ranked.find((row) => row.accountId === 308)?.combinedScore));
-  expect(plan.costNormalizationRange).toEqual({
-    lowerPercentile: 0.1,
-    upperPercentile: 0.9,
-    minimumCostRateCnyPerApiUsd: 0.05,
-    maximumCostRateCnyPerApiUsd: 0.2,
+  expect(plan.costNormalizationRange).toMatchObject({
+    strategy: "linear-penalty",
+    evidenceSource: "required-confidence",
+    evidenceCount: 13,
+    minimumCostRateCnyPerApiUsd: 0.01,
+    maximumCostRateCnyPerApiUsd: 1,
   });
+});
+
+test("cost penalty is linearly proportional to the observed CNY cost range", () => {
+  const weightedConfig = structuredClone(config);
+  weightedConfig.sub2api.priorityPlan.reliabilityWeight = 45;
+  weightedConfig.sub2api.priorityPlan.latencyWeight = 20;
+  weightedConfig.sub2api.priorityPlan.costWeight = 35;
+  const equalQuality = (id: number, cost: number) => ({
+    ...account(id, `cost-${cost}`, 80),
+    usage: { costRateCnyPerApiUsd: cost },
+  });
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    equalQuality(1, 0.05),
+    equalQuality(2, 0.1),
+    equalQuality(3, 0.15),
+  ] }, weightedConfig);
+  const rows = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.priorityMode !== "topk-tail")
+    .sort((left, right) => Number(left.accountId) - Number(right.accountId));
+  expect(rows.map((row) => Number(row.costPenalty)).map((value) => Math.round(value))).toEqual([0, 50, 100]);
+  expect(Number(rows[0]?.baseCombinedScore) - Number(rows[1]?.baseCombinedScore)).toBeCloseTo(17.5);
+  expect(Number(rows[1]?.baseCombinedScore) - Number(rows[2]?.baseCombinedScore)).toBeCloseTo(17.5);
 });
 
 test("reserve policy dynamically lowers priority as weekly quota is depleted", () => {
@@ -647,20 +759,48 @@ test("codex and grok use independent anchors and merge into one adjustment plan"
   expect(plan.priorities).not.toHaveProperty("11");
 });
 
-test("dynamic pool-quality feedback is positive below target and negative above target", () => {
-  const feedbackConfig = structuredClone(config);
-  feedbackConfig.sub2api.priorityPlan.dynamicQualityFeedback = {
-    targetQualityScore: 85,
-    coefficient: 2,
-  };
-  const rows = [account(1, "quality-leader 0.08", 90), account(2, "quality-follower 0.08", 60)];
-  const below = buildAccountPriorityPlan({ recentCallLimit: 1000, poolQualityScore: 75, accounts: rows }, feedbackConfig);
-  const above = buildAccountPriorityPlan({ recentCallLimit: 1000, poolQualityScore: 95, accounts: rows }, feedbackConfig);
-  const belowLeader = (below.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 1)!;
-  const aboveLeader = (above.changes as Array<Record<string, unknown>>).find((row) => row.accountId === 1)!;
+test("independent evidence score linearly lowers a low-sample account without excluding it", () => {
+  const evidenceConfig = structuredClone(config);
+  evidenceConfig.sub2api.priorityPlan.reliabilityWeight = 35;
+  evidenceConfig.sub2api.priorityPlan.latencyWeight = 20;
+  evidenceConfig.sub2api.priorityPlan.costWeight = 32;
+  evidenceConfig.sub2api.priorityPlan.evidenceWeight = 10;
+  evidenceConfig.sub2api.priorityPlan.explorationWeight = 2;
+  evidenceConfig.sub2api.priorityPlan.balanceWeight = 1;
+  const mature = account(1, "mature 0.08", 80);
+  mature.firstTokenSamples = 20;
+  mature.firstTokenCoverage = 1;
+  const lowEvidence = account(2, "low-evidence 0.08", 80);
+  lowEvidence.observedAttempts = 4;
+  lowEvidence.firstTokenSamples = 0;
+  lowEvidence.firstTokenCoverage = 0;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [mature, lowEvidence] }, evidenceConfig);
+  const rows = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.priorityMode !== "topk-tail")
+    .sort((left, right) => Number(left.rank) - Number(right.rank));
 
-  expect(Number(belowLeader.dynamicQualityExtraScore)).toBeCloseTo(18);
-  expect(Number(aboveLeader.dynamicQualityExtraScore)).toBeCloseTo(-18);
-  expect(Number(belowLeader.combinedScore)).toBeGreaterThan(Number(belowLeader.baseCombinedScore));
-  expect(Number(aboveLeader.combinedScore)).toBeLessThan(Number(aboveLeader.baseCombinedScore));
+  expect(rows.map((row) => row.accountId)).toEqual([1, 2]);
+  expect(rows[0]).toMatchObject({ evidenceScore: 100 });
+  expect(Number(rows[1]?.evidenceScore)).toBeCloseTo(4);
+  expect(plan.eligibleCount).toBe(2);
+});
+
+test("cost normalization ignores a low-confidence failed cheap account when trusted evidence exists", () => {
+  const trustedConfig = structuredClone(config);
+  trustedConfig.sub2api.priorityPlan.evidenceWeight = 0;
+  const reliable = account(1, "reliable 0.1", 80);
+  const expensive = account(2, "expensive 0.2", 80);
+  const failedCheap = account(3, "failed-cheap 0.035", 0);
+  expensive.usage = { costRateCnyPerApiUsd: 0.2 };
+  failedCheap.usage = { costRateCnyPerApiUsd: 0.035 };
+  failedCheap.confidence = "low";
+  failedCheap.failureRate = 1;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [reliable, expensive, failedCheap] }, trustedConfig);
+
+  expect(plan.costNormalizationRange).toMatchObject({
+    evidenceSource: "required-confidence",
+    evidenceCount: 2,
+    minimumCostRateCnyPerApiUsd: 0.1,
+    maximumCostRateCnyPerApiUsd: 0.2,
+  });
 });

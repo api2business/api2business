@@ -132,6 +132,56 @@ SELECT usage.*, errors.error_requests, errors.latest_error_at
 FROM usage CROSS JOIN errors
 `;
 
+export const idleProbeCoverageSql = `
+WITH target_accounts AS (
+  SELECT a.id::int AS account_id, a.name AS account_name, a.status AS account_status,
+    a.schedulable,
+    (a.status = 'active' AND COALESCE(a.schedulable, false) = true) AS coverage_required
+  FROM accounts a
+  WHERE a.deleted_at IS NULL
+    AND LOWER(TRIM(COALESCE(a.type, ''))) = 'apikey'
+    AND a.platform = 'openai'
+), probe_keys AS (
+  SELECT k.id AS api_key_id,
+    SUBSTRING(k.name FROM '^api2business-probe-([0-9]+)$')::int AS account_id
+  FROM api_keys k
+  JOIN users owner ON owner.id = k.user_id
+  WHERE owner.email = 'monitor-user@sub2api.platform-infra.local'
+    AND owner.deleted_at IS NULL
+    AND k.deleted_at IS NULL
+    AND k.name ~ '^api2business-probe-[0-9]+$'
+), recent_records AS (
+  SELECT p.account_id, COUNT(*)::int AS record_count, COUNT(*) FILTER (WHERE u.id IS NOT NULL)::int AS usage_count,
+    0::int AS error_count, MAX(u.created_at) AS latest_record_at
+  FROM usage_logs u
+  JOIN probe_keys p ON p.api_key_id = u.api_key_id
+  WHERE u.created_at >= NOW() - ($1::int * INTERVAL '1 minute')
+  GROUP BY p.account_id
+  UNION ALL
+  SELECT p.account_id, COUNT(*)::int AS record_count, 0::int AS usage_count,
+    COUNT(*) FILTER (WHERE o.id IS NOT NULL)::int AS error_count, MAX(o.created_at) AS latest_record_at
+  FROM ops_error_logs o
+  JOIN probe_keys p ON p.api_key_id = o.api_key_id
+  WHERE o.created_at >= NOW() - ($1::int * INTERVAL '1 minute')
+  GROUP BY p.account_id
+), aggregate AS (
+  SELECT account_id, SUM(record_count)::int AS record_count,
+    SUM(usage_count)::int AS usage_count, SUM(error_count)::int AS error_count,
+    MAX(latest_record_at) AS latest_record_at
+  FROM recent_records
+  GROUP BY account_id
+)
+SELECT t.account_id, t.account_name, t.account_status, t.schedulable,
+  t.coverage_required,
+  COALESCE(a.record_count, 0)::int AS record_count,
+  COALESCE(a.usage_count, 0)::int AS usage_count,
+  COALESCE(a.error_count, 0)::int AS error_count,
+  a.latest_record_at
+FROM target_accounts t
+LEFT JOIN aggregate a ON a.account_id = t.account_id
+ORDER BY (t.coverage_required AND a.latest_record_at IS NULL), a.latest_record_at, t.account_id
+`;
+
 export class IdleAccountProbeService {
   private running = false;
 
@@ -217,6 +267,53 @@ export class IdleAccountProbeService {
       firstSampleAt: row.first_sample_at ?? null,
       latestSampleAt: row.latest_sample_at ?? row.latest_error_at ?? null,
       source: "ordinary-usage-logs-probe-users",
+    };
+  }
+
+  async coverage(windowMinutes = 20, priority: Sub2ApiReadPriority = "manual"): Promise<Record<string, unknown>> {
+    if (!Number.isInteger(windowMinutes) || windowMinutes < 1 || windowMinutes > 1440) {
+      throw new Error("idle probe coverage window must be an integer from 1 to 1440 minutes");
+    }
+    const result = await this.reads.query<Record<string, unknown>>({
+      key: `accounts.idle-probe.coverage:${windowMinutes}`,
+      kind: "accounts.idle-probe.coverage",
+      sql: idleProbeCoverageSql,
+      parameters: [windowMinutes],
+      priority,
+      cacheMode: "bypass-cache",
+    });
+    const accounts = result.rows.map((row) => ({
+      accountId: Number(row.account_id),
+      accountName: String(row.account_name),
+      status: String(row.account_status ?? "unknown"),
+      schedulable: row.schedulable === true,
+      coverageRequired: row.coverage_required === true,
+      recordCount: Number(row.record_count ?? 0),
+      usageCount: Number(row.usage_count ?? 0),
+      errorCount: Number(row.error_count ?? 0),
+      latestRecordAt: row.latest_record_at ?? null,
+      covered: row.coverage_required !== true || Number(row.record_count ?? 0) > 0,
+    }));
+    const required = accounts.filter((account) => account.coverageRequired === true);
+    const exempt = accounts.filter((account) => account.status === "error");
+    const missing = required.filter((account) => account.covered !== true);
+    return {
+      ok: missing.length === 0,
+      mutation: false,
+      scope: "openai-apikey",
+      windowMinutes,
+      observedAt: new Date().toISOString(),
+      targetCount: required.length,
+      coveredCount: required.length - missing.length,
+      missingCount: missing.length,
+      exemptErrorCount: exempt.length,
+      accounts,
+      missingAccountIds: missing.map((account) => account.accountId),
+      source: "probe-key-attributed-usage-and-error-logs",
+      databaseQueries: 1,
+      queueDurationMs: result.queueDurationMs,
+      queryDurationMs: result.queryDurationMs,
+      valuesPrinted: false,
     };
   }
 

@@ -236,19 +236,30 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
     const failureRate = attempts > 0 ? Math.round(failureRequests / attempts * 1_000_000) / 1_000_000 : null;
     const ttftP95Ms = percentile(ttft, 0.95);
     const reliability = failureRate === null ? null : Math.round(60 * (1 - Math.min(Math.max(failureRate, 0), 0.2) / 0.2) * 100) / 100;
-    const latency = ttft.length < 5 || ttftP95Ms === null ? null : Math.round(25 * (1 - Math.min(Math.max(ttftP95Ms - 10_000, 0), 170_000) / 170_000) * 100) / 100;
+    const latencyObserved = ttft.length >= 5 && ttftP95Ms !== null;
+    const latency = !latencyObserved
+      ? 6.25
+      : Math.round(25 * (1 - Math.min(Math.max(ttftP95Ms - 10_000, 0), 170_000) / 170_000) * 100) / 100;
     const nativeAvailability = availabilityByAccount.get(account.id)?.is_available;
     const currentlyAvailable = typeof nativeAvailability === "boolean"
       ? nativeAvailability
       : account.status === "active" && account.schedulable !== false;
     const availability = currentlyAvailable ? 15 : account.status === "active" ? 8 : 0;
-    const availableWeight = (reliability === null ? 0 : 60) + (latency === null ? 0 : 25) + 15;
+    const availableWeight = (reliability === null ? 0 : 60) + 25 + 15;
     const score = attempts > 0 ? Math.round(((reliability ?? 0) + (latency ?? 0) + availability) / availableWeight * 1_000) / 10 : null;
     const comparable = attempts >= 10 && ttft.length >= 5;
     const accountGrade = grade(score);
     const failoverIds = failover.get(account.id) ?? new Set<string>();
     const failoverRecovered = [...failoverIds].filter((id) => (finalStatus.get(id) ?? 999) < 400).length;
     const failoverFailed = [...failoverIds].filter((id) => (finalStatus.get(id) ?? 0) >= 400).length;
+    const failoverOutcomeMissing = failoverIds.size - failoverRecovered - failoverFailed;
+    const recoveredFailoverRate = attempts > 0 ? Math.round(failoverRecovered / attempts * 1_000_000) / 1_000_000 : null;
+    const unrecoveredFailoverRate = attempts > 0
+      ? Math.round((failoverFailed + failoverOutcomeMissing) / attempts * 1_000_000) / 1_000_000
+      : null;
+    const effectiveFailoverRate = recoveredFailoverRate === null || unrecoveredFailoverRate === null
+      ? null
+      : Math.round((unrecoveredFailoverRate + 0.25 * recoveredFailoverRate) * 1_000_000) / 1_000_000;
     const models = new Map<string, number>();
     for (const usage of usages) models.set(usage.model || "unknown", (models.get(usage.model || "unknown") ?? 0) + 1);
     const amount = usages.reduce((sum, row) => sum + (numeric(row.actual_cost) ?? 0), 0);
@@ -300,7 +311,10 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
       failoverRequests: failoverIds.size,
       failoverRecovered,
       failoverFailed,
-      failoverOutcomeMissing: failoverIds.size - failoverRecovered - failoverFailed,
+      failoverOutcomeMissing,
+      recoveredFailoverRate,
+      unrecoveredFailoverRate,
+      effectiveFailoverRate,
       sameAccountRetryEvents: retries.get(account.id) ?? 0,
       tempUnschedulableEvents: temp.get(account.id) ?? 0,
       forwardFailedRequests: forward.get(account.id)?.size ?? 0,
@@ -308,6 +322,8 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
       scoreComponents: {
         reliability,
         latency,
+        latencyEvidence: latencyObserved ? "observed" : "prior",
+        latencyPriorScore: latencyObserved ? null : 25,
         availability,
         availableWeight,
         weights: { reliability: 60, latency: 25 },

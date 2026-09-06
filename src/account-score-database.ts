@@ -351,7 +351,17 @@ export function scoreRecentDatabaseRow(
   );
   const failoverAborted = numeric(row.failover_aborted) ?? 0;
   const failoverNotTriggered = Math.max(0, failureRequests - failoverRequests - failoverAborted);
+  const failoverOutcomeMissing = Math.max(0, failoverRequests - failoverRecovered - failoverFailed);
   const failoverRate = attributedRequests > 0 ? Math.round(failoverRequests / attributedRequests * 1_000_000) / 1_000_000 : null;
+  const recoveredFailoverRate = attributedRequests > 0
+    ? Math.round(failoverRecovered / attributedRequests * 1_000_000) / 1_000_000
+    : null;
+  const unrecoveredFailoverRate = attributedRequests > 0
+    ? Math.round((failoverFailed + failoverOutcomeMissing) / attributedRequests * 1_000_000) / 1_000_000
+    : null;
+  const effectiveFailoverRate = recoveredFailoverRate === null || unrecoveredFailoverRate === null
+    ? null
+    : Math.round((unrecoveredFailoverRate + 0.25 * recoveredFailoverRate) * 1_000_000) / 1_000_000;
   const firstTokenSamples = numeric(row.first_token_samples) ?? 0;
   const streamSuccessRequests = numeric(row.stream_success_requests) ?? 0;
   const ttftP50Ms = weightedPercentile(row.ttft_values, row.ttft_weights, 0.50) ?? percentile(row.ttft_p50_ms);
@@ -359,13 +369,15 @@ export function scoreRecentDatabaseRow(
   const ttftP99Ms = weightedPercentile(row.ttft_values, row.ttft_weights, 0.99) ?? percentile(row.ttft_p99_ms);
   const durationP95Ms = weightedPercentile(row.duration_values, row.duration_weights, 0.95) ?? percentile(row.duration_p95_ms);
   const reliability = effectiveFailureRate === null ? null : Math.round(policy.reliabilityWeight * (1 - Math.min(Math.max(effectiveFailureRate, 0), policy.failureZeroScoreRate) / policy.failureZeroScoreRate) * 100) / 100;
-  const failover = failoverRate === null ? null : Math.round(policy.failoverWeight * (1 - Math.min(Math.max(failoverRate, 0), policy.failoverZeroScoreRate) / policy.failoverZeroScoreRate) * 100) / 100;
-  const latency = firstTokenSamples < 5 || ttftP95Ms === null
-    ? null
-    : Math.round(policy.latencyWeight * (1 - Math.min(
+  const failover = effectiveFailoverRate === null ? null : Math.round(policy.failoverWeight * (1 - Math.min(Math.max(effectiveFailoverRate, 0), policy.failoverZeroScoreRate) / policy.failoverZeroScoreRate) * 100) / 100;
+  const latencyObserved = firstTokenSamples >= 5 && ttftP95Ms !== null;
+  const latencyPercent = !latencyObserved
+    ? policy.ttftPriorScore
+    : 100 * (1 - Math.min(
       Math.max(ttftP95Ms - policy.ttftFullScoreMs, 0),
       policy.ttftZeroScoreMs - policy.ttftFullScoreMs,
-    ) / (policy.ttftZeroScoreMs - policy.ttftFullScoreMs)) * 100) / 100;
+    ) / (policy.ttftZeroScoreMs - policy.ttftFullScoreMs));
+  const latency = Math.round(policy.latencyWeight * latencyPercent) / 100;
   // 当前状态只展示，不参与最近调用质量分。
   const availableWeight = (reliability === null ? 0 : policy.reliabilityWeight)
     + (failover === null ? 0 : policy.failoverWeight)
@@ -434,8 +446,11 @@ export function scoreRecentDatabaseRow(
     failoverFailed,
     failoverAborted,
     failoverNotTriggered,
-    failoverOutcomeMissing: Math.max(0, failoverRequests - failoverRecovered - failoverFailed),
+    failoverOutcomeMissing,
     failoverRate,
+    recoveredFailoverRate,
+    unrecoveredFailoverRate,
+    effectiveFailoverRate,
     streamSuccessRequests,
     firstTokenSamples,
     firstTokenCoverage: streamSuccessRequests > 0 ? Math.round(firstTokenSamples / streamSuccessRequests * 1_000_000) / 1_000_000 : null,
@@ -458,6 +473,9 @@ export function scoreRecentDatabaseRow(
       reliability,
       failover,
       latency,
+      latencyEvidence: latencyObserved ? "observed" : "prior",
+      latencyPriorScore: latencyObserved ? null : policy.ttftPriorScore,
+      effectiveFailoverRate,
       baseline: policy.baselineWeight,
       availableWeight,
       weights: {

@@ -60,7 +60,8 @@ WITH internal_probe_keys AS (
       o.error_message, o.upstream_error_message, o.upstream_error_detail,
       LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
         o.upstream_error_message, o.upstream_error_detail)) AS message_text
-    FROM ops_error_logs o JOIN target_accounts a ON a.id = o.account_id
+    FROM ops_error_logs o
+    LEFT JOIN target_accounts a ON a.id = o.account_id
     LEFT JOIN users requester ON requester.id = o.user_id
     WHERE (
       COALESCE(o.status_code, 0) >= 400
@@ -68,6 +69,7 @@ WITH internal_probe_keys AS (
       OR o.error_type = 'cyber_policy'
     )
       AND o.request_id IS NOT NULL
+      AND o.group_id = ANY(string_to_array($2, ',')::bigint[])
       AND o.created_at <= $3::timestamptz
       AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
       -- 上游失败但入站已成功的 failover 中间事件不是用户错误。
@@ -228,6 +230,12 @@ export interface PoolQualitySample {
   failoverRecovered: number;
   ttftP95Ms: number | null;
   firstTokenSamples: number;
+  errorAttribution: {
+    total: number;
+    attributed: number;
+    unattributed: number;
+    completenessRate: number | null;
+  };
   participation: PoolParticipation[];
 }
 
@@ -249,6 +257,8 @@ export async function collectPoolQualitySample(
   const rows = query.rows;
   const successes = rows.filter((row) => row.kind === "usage");
   const failures = rows.filter((row) => row.kind === "error" && row.scoreable === true);
+  const errors = rows.filter((row) => row.kind === "error");
+  const attributedErrors = errors.filter((row) => Number.isInteger(Number(row.account_id)) && Number(row.account_id) > 0);
   const failovers = rows.filter((row) => row.failover_triggered === true);
   const recovered = failovers.filter((row) => row.kind === "usage");
   const ttft = successes.map((row) => Number(row.first_token_ms)).filter((value) => Number.isFinite(value) && value >= 0);
@@ -291,6 +301,14 @@ export async function collectPoolQualitySample(
     failoverRecovered: Number(scored.failoverRecovered ?? 0),
     ttftP95Ms: scored.ttftP95Ms == null ? null : Number(scored.ttftP95Ms),
     firstTokenSamples: ttft.length,
+    errorAttribution: {
+      total: errors.length,
+      attributed: attributedErrors.length,
+      unattributed: errors.length - attributedErrors.length,
+      completenessRate: errors.length > 0
+        ? Math.round(attributedErrors.length / errors.length * 1_000_000) / 1_000_000
+        : null,
+    },
     participation: [...accounts.entries()].map(([accountId, account]) => {
       const manualMatch = account.accountName.match(/(\d+(?:\.\d+)?)$/u);
       return {

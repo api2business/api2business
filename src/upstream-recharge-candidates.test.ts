@@ -32,8 +32,8 @@ test("充值候选只读取一次 Sub2API，并返回低余额账号的 24 小�
       upstreamManagement: { rechargeCandidates: { lowBalanceCny: 10, lookbackHours: 24, recommendationLimit: 20, retiredSuppliers: [] } },
     },
     sub2api: {
-      scorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000 },
-      grokScorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000 },
+      scorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000, ttftPriorScore: 25 },
+      grokScorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000, ttftPriorScore: 25 },
       priorityPlan: { procurementAdvice: { billingErrorPatterns: ["insufficient balance"] } },
       grokPriorityPlan: { procurementAdvice: { billingErrorPatterns: ["balance depleted"] } },
     },
@@ -65,8 +65,8 @@ test("退场供应商保留审计结果但永不进入充值推荐", async () =>
       upstreamManagement: { rechargeCandidates: { lowBalanceCny: 10, lookbackHours: 24, recommendationLimit: 20, retiredSuppliers: ["xianapi.cloud"] } },
     },
     sub2api: {
-      scorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000 },
-      grokScorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000 },
+      scorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000, ttftPriorScore: 25 },
+      grokScorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000, ttftPriorScore: 25 },
       priorityPlan: { procurementAdvice: { billingErrorPatterns: ["insufficient balance"] } },
       grokPriorityPlan: { procurementAdvice: { billingErrorPatterns: ["balance depleted"] } },
     },

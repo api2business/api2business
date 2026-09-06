@@ -69,6 +69,9 @@ export class AdminHttpClient {
   idleProbeHistory(page: number): Promise<Record<string, unknown>> {
     return this.request(`/api/operations/idle-probe/history?page=${page}`);
   }
+  idleProbeCoverage(windowMinutes: number): Promise<Record<string, unknown>> {
+    return this.request(`/api/operations/idle-probe/coverage?windowMinutes=${windowMinutes}`);
+  }
   idleProbeRun(accountIds: number[], rounds: number): Promise<Record<string, unknown>> {
     return this.request("/api/operations/idle-probe", {
       method: "POST",

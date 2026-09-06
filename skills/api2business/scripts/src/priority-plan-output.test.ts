@@ -15,6 +15,7 @@ test("priority plan text includes review evidence and exact priorities", () => {
         failureRate: 0.012,
         failoverRate: 0.034,
         ttftP95Ms: 24117,
+        evidenceScore: 88,
         score: 86.6,
         costRateCnyPerApiUsd: 0.2,
         combinedScore: 69.28,
@@ -44,7 +45,7 @@ test("priority plan text includes review evidence and exact priorities", () => {
     },
   });
 
-  expect(lines.join("\n")).toContain("N  FAIL%  SWITCH%  TTFT_P95  QUALITY   COST  VALUE");
+  expect(lines.join("\n")).toContain("N  FAIL%  SWITCH%  TTFT_P95  EVID  QUALITY   COST  VALUE");
   expect(lines.join("\n")).toContain("1.2%");
   expect(lines.join("\n")).toContain("3.4%");
   expect(lines.join("\n")).toContain("24117ms");

@@ -40,10 +40,15 @@
     - 不支持端点、错误阶段或排除条件。
   - 关键词规则：
     - 保留既有切号模板关键词，模板同步不得因为本地校验而静默删词；
-    - `model_not_found` 和 `model not found` 不得写入模板，因为模型不存在不是账号故障。
+    - 普通 `model_not_found`、`model not found` 不得写入模板，因为客户请求了全池都不存在的模型时，切号不能恢复请求。
   - 模型错误：
     - `selected model is at capacity` 表示模型或容量临时异常，可以切号；
     - `404 model_not_found` 不进入模板，直接保留标准模型错误。
+    - 仅当 `400` 正文包含 `unknown provider for model gpt-5.6-terra` 或
+      `unknown provider for model gpt-5.6-sol` 时，才按当前上游不支持目标模型处理；这是账号级上游能力不匹配，可以短暂冷却当前 API-key 账号并切换候选。
+    - 不将通用 `unknown provider for model`、`model_not_found` 或 `model not found` 作为关键词，避免把其他模型的错误误判为可由切号恢复的问题。
+    - `400 No tool call found for function call output` 是用户明确选择的短暂切号例外：
+      只匹配这条完整、稳定的上游短语，按 3 分钟冷却当前 API-key 账号；不得扩展为泛化的工具调用或 `invalid_request_error` 规则。
     - `401` 的 API key 认证失效可以进入模板，并进入较长的临时冷却；
     - 400/429/502/503/504 的并发、限流和瞬态网关短语必须同时满足对应状态码，避免把普通文本错误当成账号故障。
   - 网关错误：
@@ -75,8 +80,33 @@
     - 最终错误仍由 Sub2API 运行面产生；
     - Api2Business 只负责模板声明、批量写入和回读校验。
 - 调度先按账号质量和成本形成排序，再生成有界优先级计划。
-- 调度质量拆为可靠性和延迟两个连续维度：`reliabilityWeight`、`latencyWeight`、成本、余额和探索共同线性加权；不使用 `qualityWeight`，不增加隐式硬门槛。
+- 最终调度分只使用严格线性加权：
+  - `S = wR*R + wL*L - wC*C + wE*E + wX*X + wB*B`；
+  - 各输入先归一化到 `0–100`，成本 `C` 是线性扣分；
+  - 禁止置信度乘总分、池分与账号分相乘、动态质量反馈和新增硬门槛。
+- `R` 与 `L` 分别由 `reliabilityWeight`、`latencyWeight` 调度：
+  - TTFT 样本不足时，`L` 使用 YAML `ttftPriorScore`，完整保留延迟权重与分母；输出 `latencyEvidence=prior`，不得因缺失 TTFT 虚高；
+  - 优先级计划对已观测的 `ttftP95Ms` 单独采用线性负向扣分：按对应评分策略配置的
+    `ttftFullScoreMs` 至 `ttftZeroScoreMs` 绝对边界计算，低于最低边界扣 `0` 分，
+    高于最高边界扣 `100` 分，中间值按比例扣分；不让单个异常慢账号改变整批基准；
+    缺少可信 TTFT 集合时回退全部可用 TTFT 样本；
+  - 该扣分输出为 `latencyPenalty`，并通过 `latencyWeight` 作用于综合排序；缺少
+    TTFT 时保留原有延迟 prior，不将缺失样本误判为低延迟；
+  - 切号分别输出 `recoveredFailoverRate`、`unrecoveredFailoverRate` 和 `effectiveFailoverRate`；有效率为 `未恢复 + 0.25 × 已恢复`，再线性计入切号分。
+- `E` 是独立证据分：请求样本量占 `50%`、首 Token 样本量占 `25%`、首 Token 覆盖率占 `25%`；只影响连续排序，不做可调度硬过滤。
 - 优先使用探测成本；探测成本缺失时再使用手工成本。
+- 成本维度采用扣分制：以本轮可调度账号的实际人民币成本范围做线性归一化，最低成本扣 `0` 分，最高成本扣 `100` 分，中间成本按比例扣分；`costWeight` 是扣分幅度，不使用负权重。
+- 成本范围的锚点优先取当前可调度、具有成本数据且满足 `requiredConfidence` 的账号；没有该证据集时才回退所有当前可调度账号，输出 `costNormalizationRange.evidenceSource` 与 `evidenceCount`。
+- 成本范围不再使用 P10/P90 截断，避免 `0.15` 与 `0.2` 等不同成本被同时压成 `costScore=0`；高成本账号仍可因质量和延迟保持可调度，但不会因成本维度获得奖励。
+- 成本采样口径：
+  - 供应商 API-USD 产出分母使用 Sub2API `usage_logs.total_cost`，即标准 API 成本；
+  - 不得使用 `actual_cost` 作为供应商产出分母，该字段是用户/API Key 实际扣费，包含下游计费倍率；
+  - `effective_rate_multiplier` 是认证 API Key 的有效计费倍率，不是人民币汇率；人民币金额必须另乘共享钱包的 `CNY/API-USD` 换算率；
+  - 钱包换算率缺少可信证据时必须保留 warning/未知状态，不得把用户扣费倍率或未经确认的倍率静默当作人民币换算率。
+- 池级质量的数据完整度：
+  - `scores pool-quality` 统计最近窗口内用户可见错误的账号归属总数、已归属数、未归属数和完整率；
+  - 未归属错误只说明运行面归因数据不完整，禁止推断或扣分到任何单一账号；
+  - 该指标不参与账号优先级计算，只用于核查错误归因与观测质量。
 - 充值候选分析：
   - `upstreams recharge-candidates --over-api` 同时列出当前欠费账号和最新人民币余额低于
     `operations.upstreamManagement.rechargeCandidates.lowBalanceCny` 的账号，默认阈值为 `¥10`；等于阈值不纳入低余额候选。

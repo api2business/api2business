@@ -79,6 +79,7 @@ interface Parsed {
   description: string | null;
   remainingUsd: number | null;
   rounds: number | null;
+  windowMinutes: number | null;
   page: number | null;
   search: string | null;
   apiKeyStdin: boolean;
@@ -120,7 +121,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -203,6 +204,7 @@ function parseArgs(args: string[]): Parsed {
     category: value(args, "--category"), description: value(args, "--description"),
     remainingUsd: nonNegativeDecimal("--remaining-usd"),
     rounds: integer("--rounds"),
+    windowMinutes: integer("--window-minutes"),
     page: integer("--page"), search: value(args, "--search"), apiKeyStdin: args.includes("--api-key-stdin"),
     templateOnly: args.includes("--template-only"),
     priorities: value(args, "--priorities"),
@@ -220,7 +222,7 @@ function help(): Record<string, unknown> {
     commands: [
       "config validate",
       "backend check",
-      "scores get|pool-quality|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
+      "scores get|pool-quality|pool-quality-refresh|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
@@ -254,6 +256,7 @@ function help(): Record<string, unknown> {
       "accounts oauth-runtime-sample --over-api",
       "accounts idle-probe plan [--accounts <id-or-range,...>] --over-api",
       "accounts idle-probe history [--page N] --over-api",
+      "accounts idle-probe coverage [--window-minutes N] --over-api",
       "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--confirm] --over-api",
       "accounts idle-probe run [--accounts <id-or-range,...>] [--rounds 1..10] [--confirm] --over-api",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
@@ -423,10 +426,11 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
   if (json) return emit(value, true);
   const accounts = Array.isArray(value.accounts) ? value.accounts.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
   console.log(`API2BUSINESS ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)} totalDurationMs=${String(value.totalDurationMs)}`);
-  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%  SWITCH%  TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
+  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%  SWITCH%  EFFECTIVE%  TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
   for (const row of accounts) {
     const failureRate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
     const failoverRate = typeof row.failoverRate === "number" ? `${(row.failoverRate * 100).toFixed(1)}%` : "-";
+    const effectiveFailoverRate = typeof row.effectiveFailoverRate === "number" ? `${(row.effectiveFailoverRate * 100).toFixed(1)}%` : "-";
     const ttft = typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-";
     const groups = Array.isArray(row.groupNames) ? row.groupNames.join(",") : "-";
     console.log([
@@ -436,6 +440,7 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
       String(row.attemptCount ?? row.selectedCalls ?? row.observedAttempts ?? 0).padStart(8),
       failureRate.padStart(6),
       failoverRate.padStart(7),
+      effectiveFailoverRate.padStart(10),
       ttft.padStart(9),
       String(row.priority ?? "-").padStart(8),
       (row.currentAvailable === true ? "available" : row.currentAvailable === false ? "unavailable" : "unknown").padEnd(11),
@@ -531,6 +536,7 @@ function appCommand(parsed: Parsed, config: ReturnType<typeof loadConfig>): AppC
   if (group === "backend" && action === "check") return { kind: "backend.check" };
   if (group === "scores" && action === "get") return { kind: "scores.get" };
   if (group === "scores" && action === "refresh") return { kind: "scores.refresh" };
+  if (group === "scores" && action === "pool-quality-refresh") return { kind: "pool.quality.sample" };
   if (group === "lottery" && action === "status") return { kind: "lottery.status" };
   if (group === "lottery" && action === "draw") return parsed.confirm ? { kind: "lottery.draw" } : { ok: true, mutation: false, action: "lottery-draw", hint: "add --confirm to execute" };
   if (group === "lottery" && action === "reset") {
@@ -569,10 +575,13 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
   ) {
     throw new Error("Sub2API production reads require the Native API transport");
   }
-  if (parsed.command.join(" ") === "scores refresh" || parsed.command.join(" ") === "workflow status") {
+  if (parsed.command.join(" ") === "scores refresh"
+    || parsed.command.join(" ") === "scores pool-quality-refresh"
+    || parsed.command.join(" ") === "workflow status") {
     const temporal = await TemporalGateway.connect(config, { taskQueue: target.temporalTaskQueue });
     try {
-      if (parsed.command[0] === "scores") return await temporal.submit({ kind: "scores.refresh" });
+      if (parsed.command.join(" ") === "scores refresh") return await temporal.submit({ kind: "scores.refresh" });
+      if (parsed.command.join(" ") === "scores pool-quality-refresh") return await temporal.submit({ kind: "pool.quality.sample" });
       if (!parsed.id) throw new Error("workflow status requires --id");
       return await temporal.status(parsed.id);
     } finally {
@@ -888,6 +897,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     if (verb === "plan") return await client.idleProbePlan(accountIds);
     if (verb === "history") return await client.idleProbeHistory(parsed.page ?? 1);
+    if (verb === "coverage") return await client.idleProbeCoverage(parsed.windowMinutes ?? 20);
     if (verb === "reconcile") {
       if (!parsed.confirm) return {
         ok: true,
@@ -1030,6 +1040,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "scores" && action === "get") return await client.scores();
   if (group === "scores" && action === "pool-quality") return await client.poolQuality();
+  if (group === "scores" && action === "pool-quality-refresh") return await client.workflowSubmit({ kind: "pool.quality.sample" });
   if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
   if (group === "scores" && action === "rank") {
     return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account, parsed.group);

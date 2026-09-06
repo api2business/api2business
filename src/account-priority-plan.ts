@@ -23,6 +23,32 @@ type QualityDimensions = {
   latencyEvidence: "observed" | "prior";
 };
 
+type EvidenceDimensions = {
+  score: number;
+  requestScore: number;
+  firstTokenScore: number;
+  coverageScore: number;
+};
+
+type LatencyNormalization = {
+  strategy: "linear-penalty";
+  evidenceSource: "required-confidence" | "eligible-fallback" | "none";
+  evidenceCount: number;
+  minimumTtftP95Ms: number | null;
+  maximumTtftP95Ms: number | null;
+};
+
+function latencyBounds(config: AppConfig, profile: "codex" | "grok"): {
+  minimumTtftP95Ms: number;
+  maximumTtftP95Ms: number;
+} {
+  const scorePolicy = profile === "grok" ? config.sub2api.grokScorePolicy : config.sub2api.scorePolicy;
+  return {
+    minimumTtftP95Ms: scorePolicy.ttftFullScoreMs,
+    maximumTtftP95Ms: scorePolicy.ttftZeroScoreMs,
+  };
+}
+
 function dimensionScore(
   row: ScoreRow,
   keys: string[],
@@ -39,12 +65,32 @@ function dimensionScore(
   if (observed.length === 0) return { score: prior, evidence: "prior" };
   const maximum = observed.reduce((sum, item) => sum + item.weight!, 0);
   const earned = observed.reduce((sum, item) => sum + item.value!, 0);
-  return { score: Math.max(0, Math.min(100, 100 * earned / maximum)), evidence: "observed" };
+  const evidence = keys.includes("latency") && components.latencyEvidence === "prior"
+    ? "prior"
+    : "observed";
+  return { score: Math.max(0, Math.min(100, 100 * earned / maximum)), evidence };
 }
 
-function qualityDimensions(row: ScoreRow, policy: PriorityPlanPolicy): QualityDimensions {
+function qualityDimensions(
+  row: ScoreRow,
+  policy: PriorityPlanPolicy,
+  latencyNormalization: LatencyNormalization,
+): QualityDimensions {
   const reliability = dimensionScore(row, ["reliability", "failover"], policy.explorationQualityPrior);
-  const latency = dimensionScore(row, ["latency"], policy.explorationQualityPrior);
+  const existingLatency = dimensionScore(row, ["latency"], policy.explorationQualityPrior);
+  const measuredTtftP95Ms = number(row.ttftP95Ms);
+  const latency = measuredTtftP95Ms !== null
+    && latencyNormalization.minimumTtftP95Ms !== null
+    && latencyNormalization.maximumTtftP95Ms !== null
+    ? {
+        score: 100 - linearLatencyPenalty(
+          measuredTtftP95Ms,
+          latencyNormalization.minimumTtftP95Ms,
+          latencyNormalization.maximumTtftP95Ms,
+        ),
+        evidence: "observed" as const,
+      }
+    : existingLatency;
   const qualityWeight = policy.reliabilityWeight + policy.latencyWeight;
   if (qualityWeight <= 0) throw new Error("sub2api.priorityPlan reliabilityWeight + latencyWeight must be positive");
   return {
@@ -53,6 +99,21 @@ function qualityDimensions(row: ScoreRow, policy: PriorityPlanPolicy): QualityDi
     qualityScore: (reliability.score * policy.reliabilityWeight + latency.score * policy.latencyWeight) / qualityWeight,
     reliabilityEvidence: reliability.evidence,
     latencyEvidence: latency.evidence,
+  };
+}
+
+function evidenceDimensions(row: ScoreRow, policy: PriorityPlanPolicy): EvidenceDimensions {
+  const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
+  const firstTokenSamples = Math.max(0, number(row.firstTokenSamples) ?? 0);
+  const coverage = Math.max(0, Math.min(1, number(row.firstTokenCoverage) ?? 0));
+  const requestScore = 100 * Math.min(1, attempts / policy.evidenceTargetAttempts);
+  const firstTokenScore = 100 * Math.min(1, firstTokenSamples / policy.evidenceTargetFirstTokenSamples);
+  const coverageScore = 100 * coverage;
+  return {
+    score: 0.5 * requestScore + 0.25 * firstTokenScore + 0.25 * coverageScore,
+    requestScore,
+    firstTokenScore,
+    coverageScore,
   };
 }
 
@@ -75,16 +136,16 @@ function costRate(row: ScoreRow): number | null {
   return number((row.usage as ScoreRow).costRateCnyPerApiUsd);
 }
 
-function percentile(sorted: number[], ratio: number): number {
-  if (sorted.length === 0) throw new Error("percentile requires evidence");
-  const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1));
-  return sorted[index]!;
+function linearCostPenalty(cost: number, minimumCost: number, maximumCost: number): number {
+  if (maximumCost === minimumCost) return 0;
+  return 100 * (Math.min(maximumCost, Math.max(minimumCost, cost)) - minimumCost)
+    / (maximumCost - minimumCost);
 }
 
-function normalizedCostScore(cost: number, minimumCost: number, maximumCost: number): number {
-  if (maximumCost === minimumCost) return 100;
-  return 100 * (maximumCost - Math.min(maximumCost, Math.max(minimumCost, cost)))
-    / (maximumCost - minimumCost);
+function linearLatencyPenalty(ttftP95Ms: number, minimumTtftP95Ms: number, maximumTtftP95Ms: number): number {
+  if (maximumTtftP95Ms === minimumTtftP95Ms) return 0;
+  return 100 * (Math.min(maximumTtftP95Ms, Math.max(minimumTtftP95Ms, ttftP95Ms)) - minimumTtftP95Ms)
+    / (maximumTtftP95Ms - minimumTtftP95Ms);
 }
 
 function buildStableRankPriorities(
@@ -187,9 +248,9 @@ function buildPriorityProfile(
     throw new Error("sub2api.priorityPlan.maximumPriority must be >= minimumPriority");
   }
   const totalWeight = policy.reliabilityWeight + policy.latencyWeight
-    + policy.costWeight + policy.explorationWeight + policy.balanceWeight;
+    + policy.costWeight + policy.evidenceWeight + policy.explorationWeight + policy.balanceWeight;
   if (totalWeight <= 0) {
-    throw new Error("sub2api.priorityPlan reliabilityWeight + latencyWeight + costWeight + explorationWeight + balanceWeight must be positive");
+    throw new Error("sub2api.priorityPlan linear weights must total to a positive value");
   }
   const rows = Array.isArray(ranking.accounts)
     ? ranking.accounts.filter((row): row is ScoreRow => typeof row === "object" && row !== null && !Array.isArray(row))
@@ -245,20 +306,42 @@ function buildPriorityProfile(
       && (number(row.score) !== null || hasExplorationEvidence)
       && costRate(row) !== null;
   });
-  const costs = eligible.map((row) => costRate(row)!);
-  const fallbackCosts = rows.flatMap((row) => {
-    const accountId = number(row.accountId);
-    const cost = costRate(row);
-    return profileRow(row)
-      && accountId !== null
-      && !fixedAccountIds.has(String(accountId))
-      && row.confidence === policy.requiredConfidence
-      && cost !== null
-      ? [cost]
-      : [];
-  });
-  const costEvidence = costs.length > 0 ? costs : fallbackCosts;
+  const trustedCosts = eligible
+    .filter((row) => row.confidence === policy.requiredConfidence)
+    .map((row) => costRate(row)!);
+  const fallbackCosts = eligible.map((row) => costRate(row)!);
+  const costEvidence = trustedCosts.length > 0 ? trustedCosts : fallbackCosts;
+  const costEvidenceSource = trustedCosts.length > 0 ? "required-confidence" : "eligible-fallback";
   if (costEvidence.length === 0) {
+    const tailChanges = rows.flatMap((row) => {
+      const accountId = number(row.accountId);
+      if (accountId === null || !profileRow(row) || fixedAccountIds.has(String(accountId))) return [];
+      const before = number(row.priority);
+      if (before === null) return [];
+      const desired = policy.maximumPriority;
+      if (before !== desired) priorities[String(accountId)] = desired;
+      return [{
+        profile,
+        accountId,
+        accountName: row.accountName,
+        score: number(row.score),
+        costRateCnyPerApiUsd: costRate(row),
+        confidence: row.confidence,
+        observedAttempts: row.observedAttempts,
+        failureRate: row.failureRate,
+        failoverRate: row.failoverRate,
+        ttftP95Ms: row.ttftP95Ms,
+        beforePriority: before,
+        calculatedPriority: desired,
+        normalizedPriority: desired,
+        configuredPriorityFloor: null,
+        priorityFloorApplied: false,
+        reservePolicy: null,
+        desiredPriority: desired,
+        priorityMode: "topk-tail",
+        change: before === desired ? "noop" : "update",
+      }];
+    });
     return {
       ok: true,
       action: "scores-priority-plan",
@@ -271,11 +354,18 @@ function buildPriorityProfile(
       observedAnchorScore: null,
       priorityReferenceScore: policy.referenceScore,
       costRange: null,
+      latencyNormalizationRange: {
+        strategy: "linear-penalty",
+        evidenceSource: "none",
+        evidenceCount: 0,
+        minimumTtftP95Ms: null,
+        maximumTtftP95Ms: null,
+      },
       eligibleCount: 0,
       fixedCount: fixedChanges.length,
       changedCount: Object.keys(priorities).length,
       priorities,
-      changes: fixedChanges,
+      changes: [...fixedChanges, ...tailChanges],
       procurementAdvice: profile === "codex"
         ? buildProcurementAdvice(rows.filter((row) => !isOAuthAccount(row)), config, { minimum: 0, maximum: 0 })
         : { enabled: false, statusAlerts: [], recommendations: [] },
@@ -283,9 +373,30 @@ function buildPriorityProfile(
   }
   const minimumCost = Math.min(...costEvidence);
   const maximumCost = Math.max(...costEvidence);
-  const sortedCosts = [...costEvidence].sort((left, right) => left - right);
-  const normalizationMinimumCost = percentile(sortedCosts, 0.1);
-  const normalizationMaximumCost = percentile(sortedCosts, 0.9);
+  const trustedLatencies = eligible
+    .filter((row) => row.confidence === policy.requiredConfidence)
+    .map((row) => number(row.ttftP95Ms))
+    .filter((value): value is number => value !== null && value >= 0);
+  const fallbackLatencies = eligible
+    .map((row) => number(row.ttftP95Ms))
+    .filter((value): value is number => value !== null && value >= 0);
+  const latencyEvidence = trustedLatencies.length > 0 ? trustedLatencies : fallbackLatencies;
+  const configuredLatencyBounds = latencyBounds(config, profile);
+  const latencyNormalization: LatencyNormalization = latencyEvidence.length === 0
+    ? {
+        strategy: "linear-penalty",
+        evidenceSource: "none",
+        evidenceCount: 0,
+        minimumTtftP95Ms: null,
+        maximumTtftP95Ms: null,
+      }
+    : {
+      strategy: "linear-penalty",
+      evidenceSource: trustedLatencies.length > 0 ? "required-confidence" : "eligible-fallback",
+      evidenceCount: latencyEvidence.length,
+      minimumTtftP95Ms: configuredLatencyBounds.minimumTtftP95Ms,
+      maximumTtftP95Ms: configuredLatencyBounds.maximumTtftP95Ms,
+    };
   const knownBalances = eligible.map((row) => number(row.accountBalanceCny)).filter((value): value is number => value !== null);
   const minimumBalance = knownBalances.length ? Math.min(...knownBalances) : null;
   const maximumBalance = knownBalances.length ? Math.max(...knownBalances) : null;
@@ -295,27 +406,20 @@ function buildPriorityProfile(
     return maximumBalance === minimumBalance ? 100 : 100 * (balance - minimumBalance) / (maximumBalance - minimumBalance);
   };
   const baseEconomicScore = (row: ScoreRow): number => {
-    const dimensions = qualityDimensions(row, policy);
+    const dimensions = qualityDimensions(row, policy, latencyNormalization);
+    const evidence = evidenceDimensions(row, policy);
     const cost = costRate(row)!;
-    const costScore = normalizedCostScore(cost, normalizationMinimumCost, normalizationMaximumCost);
+    const costPenalty = linearCostPenalty(cost, minimumCost, maximumCost);
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
     const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
     return (dimensions.reliabilityScore * policy.reliabilityWeight
       + dimensions.latencyScore * policy.latencyWeight
-      + costScore * policy.costWeight
+      + evidence.score * policy.evidenceWeight
       + explorationScore * policy.explorationWeight
-      + balanceScore(row) * policy.balanceWeight) / totalWeight;
+      + balanceScore(row) * policy.balanceWeight
+      - costPenalty * policy.costWeight) / totalWeight;
   };
-  const currentPoolQualityScore = number(ranking.poolQualityScore);
-  const dynamicQualityExtraScore = (row: ScoreRow): number => {
-    if (currentPoolQualityScore === null || policy.dynamicQualityFeedback.coefficient === 0) return 0;
-    const quality = qualityDimensions(row, policy).qualityScore;
-    return (policy.dynamicQualityFeedback.targetQualityScore - currentPoolQualityScore)
-      * policy.dynamicQualityFeedback.coefficient * quality / 100;
-  };
-  const economicScore = (row: ScoreRow): number => Math.max(0, Math.min(100,
-    baseEconomicScore(row) + dynamicQualityExtraScore(row),
-  ));
+  const economicScore = (row: ScoreRow): number => baseEconomicScore(row);
   const observedAnchorScore = eligible.length === 0
     ? null
     : eligible.reduce((best, row) => Math.max(best, economicScore(row)), -Infinity);
@@ -333,9 +437,20 @@ function buildPriorityProfile(
   const dynamicChanges = ranked.map(({ row, combinedScore }, index) => {
     const accountId = number(row.accountId);
     const score = number(row.score);
-    const dimensions = qualityDimensions(row, policy);
+    const dimensions = qualityDimensions(row, policy, latencyNormalization);
+    const evidence = evidenceDimensions(row, policy);
     const cost = costRate(row)!;
-    const costScore = normalizedCostScore(cost, normalizationMinimumCost, normalizationMaximumCost);
+    const costPenalty = linearCostPenalty(cost, minimumCost, maximumCost);
+    const latencyValue = number(row.ttftP95Ms);
+    const latencyPenalty = latencyValue !== null
+      && latencyNormalization.minimumTtftP95Ms !== null
+      && latencyNormalization.maximumTtftP95Ms !== null
+      ? linearLatencyPenalty(
+          latencyValue,
+          latencyNormalization.minimumTtftP95Ms,
+          latencyNormalization.maximumTtftP95Ms,
+        )
+      : null;
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
     const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
     const weightedBalanceScore = balanceScore(row);
@@ -378,18 +493,20 @@ function buildPriorityProfile(
       score,
       reliabilityScore: dimensions.reliabilityScore,
       latencyScore: dimensions.latencyScore,
+      latencyPenalty,
       qualityScore: dimensions.qualityScore,
       reliabilityEvidence: dimensions.reliabilityEvidence,
       latencyEvidence: dimensions.latencyEvidence,
+      evidenceScore: evidence.score,
+      evidenceRequestScore: evidence.requestScore,
+      evidenceFirstTokenScore: evidence.firstTokenScore,
+      evidenceCoverageScore: evidence.coverageScore,
       costRateCnyPerApiUsd: cost,
-      costScore,
+      costPenalty,
+      costScore: 100 - costPenalty,
       explorationScore,
       balanceScore: weightedBalanceScore,
       baseCombinedScore: baseEconomicScore(row),
-      dynamicQualityExtraScore: dynamicQualityExtraScore(row),
-      currentPoolQualityScore,
-      targetPoolQualityScore: policy.dynamicQualityFeedback.targetQualityScore,
-      qualityFeedbackCoefficient: policy.dynamicQualityFeedback.coefficient,
       accountBalanceCny: number(row.accountBalanceCny),
       costSource: number(row.detectedCostRateCnyPerApiUsd) !== null ? "detected" : "manual",
       combinedScore,
@@ -466,15 +583,16 @@ function buildPriorityProfile(
     ...rankingMeasurement(ranking),
     anchorScore: eligible.length === 0 ? null : priorityReferenceScore,
     observedAnchorScore,
-    currentPoolQualityScore,
     priorityReferenceScore,
     costRange: { minimumCostRateCnyPerApiUsd: minimumCost, maximumCostRateCnyPerApiUsd: maximumCost },
     costNormalizationRange: {
-      lowerPercentile: 0.1,
-      upperPercentile: 0.9,
-      minimumCostRateCnyPerApiUsd: normalizationMinimumCost,
-      maximumCostRateCnyPerApiUsd: normalizationMaximumCost,
+      strategy: "linear-penalty",
+      evidenceSource: costEvidenceSource,
+      evidenceCount: costEvidence.length,
+      minimumCostRateCnyPerApiUsd: minimumCost,
+      maximumCostRateCnyPerApiUsd: maximumCost,
     },
+    latencyNormalizationRange: latencyNormalization,
     eligibleCount: eligible.length,
     fixedCount: fixedChanges.length,
     changedCount: Object.keys(priorities).length,

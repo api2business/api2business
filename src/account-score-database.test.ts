@@ -11,6 +11,7 @@ const scorePolicy = {
   failoverZeroScoreRate: 0.2,
   ttftFullScoreMs: 5_000,
   ttftZeroScoreMs: 55_000,
+  ttftPriorScore: 25,
 };
 
 test("database aggregate uses bounded account indexes and current state is display-only", () => {
@@ -114,7 +115,7 @@ test("账务额度不足样本保留审计但不参与质量评分", () => {
   expect(row.observedAttempts).toBe(6);
   expect(row.failureRequests).toBe(2);
   expect(row.failoverRequests).toBe(0);
-  expect(row.score).toBe(30.8);
+  expect(row.score).toBe(28.8);
   expect(row.grade).toBe("E");
 });
 
@@ -153,7 +154,7 @@ test("database aggregate accepts a 2000-call analysis window", () => {
   }, 2000, scorePolicy)).not.toThrow();
 });
 
-test("sample count does not reduce score or grade", () => {
+test("missing TTFT uses the configured prior instead of removing latency from the denominator", () => {
   const successful = scoreRecentDatabaseRow({
     account_id: 41,
     account_name: "one-success 0.08",
@@ -179,7 +180,12 @@ test("sample count does not reduce score or grade", () => {
     selected_calls: 1,
   }, 1000, scorePolicy);
 
-  expect(successful).toMatchObject({ score: 100, grade: "A", confidence: "low", scoreComparable: false });
+  expect(successful).toMatchObject({ score: 70.8, grade: "C", confidence: "low", scoreComparable: false });
+  expect(successful.scoreComponents).toMatchObject({
+    latencyEvidence: "prior",
+    latencyPriorScore: 25,
+    latency: 8.75,
+  });
   expect(failed).toMatchObject({ grade: "E", confidence: "low", scoreComparable: false });
   expect(Number(failed.score)).toBeLessThan(60);
 });
@@ -228,8 +234,33 @@ test("database score always projects failover and recovered request counts", () 
   expect(recovered.failoverAborted).toBe(1);
   expect(recovered.failoverNotTriggered).toBe(0);
   expect(recovered.failoverOutcomeMissing).toBe(0);
+  expect(recovered.recoveredFailoverRate).toBe(0.02);
+  expect(recovered.unrecoveredFailoverRate).toBe(0.01);
+  expect(recovered.effectiveFailoverRate).toBe(0.015);
   expect(zero.failoverRequests).toBe(0);
   expect(zero.failoverRecovered).toBe(0);
+});
+
+test("recovered failovers receive less linear penalty than unrecovered failovers", () => {
+  const recovered = scoreRecentDatabaseRow({
+    account_id: 20, account_name: "recovered 0.1", status: "active", schedulable: true,
+    priority: 1, group_ids: [2], group_names: ["pool"], success_requests: 100,
+    attributed_requests: 100, failover_requests: 10, failover_recovered: 10, failover_failed: 0,
+    failure_requests: 0, stream_success_requests: 100, first_token_samples: 100,
+    ttft_p95_ms: 5000, selected_calls: 100,
+  }, 1000, scorePolicy);
+  const failed = scoreRecentDatabaseRow({
+    account_id: 21, account_name: "failed 0.1", status: "active", schedulable: true,
+    priority: 1, group_ids: [2], group_names: ["pool"], success_requests: 100,
+    attributed_requests: 100, failover_requests: 10, failover_recovered: 0, failover_failed: 10,
+    failure_requests: 0, stream_success_requests: 100, first_token_samples: 100,
+    ttft_p95_ms: 5000, selected_calls: 100,
+  }, 1000, scorePolicy);
+
+  expect(recovered.effectiveFailoverRate).toBe(0.025);
+  expect(failed.effectiveFailoverRate).toBe(0.1);
+  expect(Number((recovered.scoreComponents as Record<string, unknown>).failover))
+    .toBeGreaterThan(Number((failed.scoreComponents as Record<string, unknown>).failover));
 });
 
 test("TTFT weight curve keeps latency above 20 seconds below grade A", () => {

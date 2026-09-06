@@ -73,11 +73,12 @@ export function mergeAccountScores(rows: Row[]): Row[] {
     const streamSuccessRequests = sum(accountRows, "streamSuccessRequests");
     const ttftP95Ms = max(accountRows, "ttftP95Ms");
     const reliability = reliabilityPoints(failureRate);
-    const latency = firstTokenSamples >= 5 ? latencyPoints(ttftP95Ms) : null;
+    const latencyObserved = firstTokenSamples >= 5 && ttftP95Ms !== null;
+    const latency = latencyObserved ? latencyPoints(ttftP95Ms) : 6.25;
     const currentlyAvailable = accountRows.every((row) => row.currentlyAvailable === true);
     const status = String(representative.status ?? "");
     const availability = currentlyAvailable ? 15 : status === "active" ? 8 : 0;
-    const availableWeight = (reliability === null ? 0 : 60) + (latency === null ? 0 : 25) + 15;
+    const availableWeight = (reliability === null ? 0 : 60) + 25 + 15;
     const earned = (reliability ?? 0) + (latency ?? 0) + availability;
     const score = observedAttempts > 0 && availableWeight > 0 ? Math.round(earned / availableWeight * 1_000) / 10 : null;
     const comparable = observedAttempts >= 10 && firstTokenSamples >= 5;
@@ -131,6 +132,8 @@ export function mergeAccountScores(rows: Row[]): Row[] {
       scoreComponents: {
         reliability,
         latency,
+        latencyEvidence: latencyObserved ? "observed" : "prior",
+        latencyPriorScore: latencyObserved ? null : 25,
         availability,
         availableWeight,
         weights: { reliability: 60, latency: 25 },

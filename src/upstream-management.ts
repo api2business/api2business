@@ -869,7 +869,13 @@ export class UpstreamManagementService {
           COALESCE(a.credentials->>'api_key', '') AS api_key,
           a.status,
           COALESCE(a.schedulable, false) AS schedulable,
-          COALESCE(SUM(usage.actual_cost), 0)::numeric AS account_api_amount_usd_total
+          -- actual_cost is the user/API-key charge and includes the
+          -- downstream billing multiplier.  It is not the provider's
+          -- standard API-USD output used as the denominator for CNY/API-USD
+          -- procurement cost.  Keep this query on the canonical standard
+          -- amount so the quota sampler does not mix customer billing with
+          -- upstream cost.
+          COALESCE(SUM(usage.total_cost), 0)::numeric AS account_api_amount_usd_total
         FROM accounts a
         LEFT JOIN usage_logs usage ON usage.account_id = a.id
         WHERE a.deleted_at IS NULL

@@ -121,7 +121,12 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 上游、评分和优先级读取 `references/upstream-scheduling.md`。
 - 池级质量调查使用 `scores pool-quality --over-api`，账号分项使用
   `scores rank --calls <N> --over-api`；两者均为只读查询。
-- 优先级计划用 `reliabilityWeight` 与 `latencyWeight` 分别调度可靠性和首 token 延迟；两者与成本、探索、余额共同组成连续线性权重，禁止恢复已废弃的 `qualityWeight` 或借此新增硬门槛。
+- 优先级计划采用严格线性加权：可靠性、TTFT、证据、探索、余额加分，实际人民币成本扣分；不得使用置信度乘总分、池分与账号分相乘、动态质量反馈或新增硬门槛。
+- `scores rank` 对 TTFT 样本不足的账号输出固定 `ttftPriorScore` 与 `latencyEvidence=prior`；`scores priority-plan` 单独输出 `evidenceScore`、成本锚点来源及线性分项。
+- 切号质量同时输出原始、已恢复、未恢复和有效切号率；有效率按 `未恢复 + 0.25 × 已恢复` 计入账号评分。
+- `scores pool-quality` 输出错误归因完整度；未归属错误只作为池级数据质量事实，不得扣入任一账号。
+- 立即刷新池质量样本使用 `scores pool-quality-refresh --over-api`；命令立即返回 workflow ID。
+  随后用 `workflow status --id <workflow-id> --over-api` 回读，再查询 `scores pool-quality --over-api`。
 - 充值候选使用 `upstreams recharge-candidates --over-api`；同时分析当前欠费和最新额度低于 YAML `lowBalanceCny` 的账号，分别回看锚点前 `lookbackHours` 小时。
 - 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api`；同一规范化 `base_url` 是共享钱包，只记账一次并统一恢复该站点全部 API-key 账号。
 - 充值确认后 CLI 立即返回异步 workflow ID，并做一次非阻塞只读状态与账号快照核验；最终一致性使用 `upstreams recharge-status --id <workflow-id> --over-api`。
@@ -134,6 +139,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - `errors diagnose --request-id` 和 `errors get --request-id` 会返回限长脱敏的 `responseEvidence`，包含来源、长度和摘要；正文缺失时明确显示 `available=false`，不得据此臆测上游业务原因。
 - 切号模板只在确认为响应提交前未触发且运行态规则缺失时增强；
   已触发切号但候选耗尽不通过模板扩张处理，详见 `references/upstream-scheduling.md`。
+- `No tool call found for function call output` 仅以完整短语加入 HTTP 400 的 3 分钟短暂切号规则；
+  不得扩展为通用工具调用或 `invalid_request_error` 模板。
 - 模板同步使用 `upstreams template --confirm --over-api`，默认只处理 API-key 上游账号，完成后必须查询原 `workflow status` 回读 `verifiedCount`、`failedCount` 和 `misalignedCount`。
 - 新增上游时省略 `--rate`，由 YAML 提供创建占位费率；worker 创建成功后自动探测额度与有效倍率，并将有效倍率同步为最终费率。
   倍率写回使用 Sub2API 原生批量更新并做排队回读，超时只保留可见 warning，不重复创建账号。
@@ -189,6 +196,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 进度与日志：`upstreams benchmark-status --id <benchmark-run-id> --over-api`；
   - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api`；
   - 评测只复用持久化探活专用 API Key，不读取供应商原始 Key，也不轮换探活 Key。
+- 成本与评分口径：Sub2API `actual_cost` 仅表示用户/API Key 实际扣费；供应商成本采样的 API-USD 分母使用 `total_cost`，`effective_rate_multiplier` 不得直接当作人民币汇率，人民币余额必须经过共享钱包的 `CNY/API-USD` 换算。
 
 ## 验收
 

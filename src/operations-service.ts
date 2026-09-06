@@ -227,6 +227,10 @@ export class OperationsService {
     return await this.idleProbe.rollingUsage("manual");
   }
 
+  async idleProbeCoverage(windowMinutes = 20) {
+    return await this.idleProbe.coverage(windowMinutes, "manual");
+  }
+
   async idleProbeHistory(page = 1, pageSize = 10) {
     if (!Number.isInteger(page) || page < 1) throw new Error("idle probe history page must be a positive integer");
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new Error("idle probe history page size must be from 1 to 100");
@@ -509,6 +513,14 @@ export class OperationsService {
       failoverRecovered: Number(latest?.failover_recovered ?? 0),
       ttftP95Ms: latest?.ttft_p95_ms == null ? null : Number(latest.ttft_p95_ms),
       firstTokenSamples: Number(latest?.first_token_samples ?? 0),
+      errorAttribution: {
+        total: Number(latest?.error_attribution_total ?? 0),
+        attributed: Number(latest?.error_attributed ?? 0),
+        unattributed: Number(latest?.error_unattributed ?? 0),
+        completenessRate: Number(latest?.error_attribution_total ?? 0) > 0
+          ? Math.round(Number(latest?.error_attributed ?? 0) / Number(latest?.error_attribution_total ?? 0) * 1_000_000) / 1_000_000
+          : null,
+      },
       participation: Array.isArray(latest?.participation) ? latest.participation : [],
       history: poolQualityHistory(rows),
       valuesPrinted: false,
@@ -962,10 +974,7 @@ export class OperationsService {
         detectedCostRateCnyPerApiUsd: Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null,
       };
     });
-    const poolQualityRows = await this.store.getPoolQualitySamples(8) as Array<Record<string, unknown>>;
-    const latestPoolQuality = poolQualityRows.at(-1);
-    const poolQualityScore = latestPoolQuality?.score == null ? null : Number(latestPoolQuality.score);
-    const result = buildAccountPriorityPlan({ ...ranking, accounts, poolQualityScore }, this.config);
+    const result = buildAccountPriorityPlan({ ...ranking, accounts }, this.config);
     return { ...result, refreshedAt: new Date().toISOString() };
   }
 

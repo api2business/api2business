@@ -38,7 +38,7 @@ const persistentSnapshotApiPaths = [
   /^\/api\/bugteam\/cost-monitor$/u,
   /^\/api\/admin\/errors(?:\/|$)/u,
   /^\/api\/operations\/priority-(?:automation|history)$/u,
-  /^\/api\/operations\/idle-probe\/(?:history|summary)$/u,
+  /^\/api\/operations\/idle-probe\/(?:history|summary|coverage)$/u,
 ];
 
 export function isApiResponseCacheable(request: Request): boolean {
@@ -621,6 +621,11 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/summary") {
         return json({ ok: true, rolling24Hours: await operations.idleProbeRollingUsage() });
       }
+      if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/coverage") {
+        const windowMinutes = positiveInteger(url.searchParams.get("windowMinutes"), 20);
+        if (windowMinutes === null || windowMinutes > 1440) return json({ ok: false, error: "windowMinutes must be an integer from 1 to 1440" }, 400);
+        return json(await operations.idleProbeCoverage(windowMinutes));
+      }
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/history") {
         return json(await operations.idleProbeHistory(pageNumber(url), 10));
       }
@@ -945,12 +950,14 @@ export function createHandler(
       if (request.method === "POST" && url.pathname === "/api/admin/workflows") {
         const input = await body(request);
         const command = input.command as Record<string, unknown> | undefined;
-        if (command?.kind !== "scores.refresh" && command?.kind !== "oauth.runtime.sample") {
-          return json({ ok: false, error: "command.kind must be scores.refresh or oauth.runtime.sample" }, 400);
+        if (command?.kind !== "scores.refresh"
+          && command?.kind !== "oauth.runtime.sample"
+          && command?.kind !== "pool.quality.sample") {
+          return json({ ok: false, error: "command.kind must be scores.refresh, oauth.runtime.sample, or pool.quality.sample" }, 400);
         }
-        return json(await dispatcher.submit(command.kind === "scores.refresh"
-          ? { kind: "scores.refresh" }
-          : { kind: "oauth.runtime.sample" }));
+        if (command.kind === "scores.refresh") return json(await dispatcher.submit({ kind: "scores.refresh" }));
+        if (command.kind === "oauth.runtime.sample") return json(await dispatcher.submit({ kind: "oauth.runtime.sample" }));
+        return json(await dispatcher.submit({ kind: "pool.quality.sample" }));
       }
       if (request.method === "GET" && url.pathname.startsWith("/api/admin/workflows/")) {
         const workflowId = decodeURIComponent(url.pathname.slice("/api/admin/workflows/".length));

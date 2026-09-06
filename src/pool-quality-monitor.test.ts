@@ -26,6 +26,7 @@ test("pool quality uses one queued query and separates exact upstream accounts",
   expect(sample.observedAttempts).toBe(3);
   expect(sample.participation).toHaveLength(2);
   expect(sample.failureRequests).toBe(1);
+  expect(sample.errorAttribution).toEqual({ total: 1, attributed: 1, unattributed: 0, completenessRate: 1 });
   expect(sample.participation).toEqual([
     { accountId: 10, accountName: "https://api.example.com plus 0.05", baseUrl: "https://api.example.com/v1", attempts: 2, ratio: 0.666667, costRateCnyPerApiUsd: 0.05, costSource: "manual" },
     { accountId: 11, accountName: "https://api.example.com pro 0.08", baseUrl: "https://api.example.com", attempts: 1, ratio: 0.333333, costRateCnyPerApiUsd: 0.08, costSource: "manual" },
@@ -37,6 +38,8 @@ test("pool quality excludes every monitor-user key without changing account scor
   expect(poolQualitySql).not.toContain("k.name LIKE");
   expect(poolQualitySql).toContain("p.id = u.api_key_id");
   expect(poolQualitySql).toContain("p.id = o.api_key_id");
+  expect(poolQualitySql).toContain("LEFT JOIN target_accounts a ON a.id = o.account_id");
+  expect(poolQualitySql).toContain("o.group_id = ANY(string_to_array($2, ',')::bigint[])");
   expect(poolQualitySql).toContain("'%insufficient_balance%'");
   expect(poolQualitySql).toContain("'%balance is insufficient%'");
   expect(poolQualitySql).toContain("'%model_not_found%'");

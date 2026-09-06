@@ -151,7 +151,7 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   expect(config).not.toMatch(/errorCode: 404\n/u);
   expect(config).not.toContain("statusCode:");
   expect(config).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
-  expect(config).toContain("description: 上游明确返回指定模型故障、模型容量、临时过载、包装层故障或供应商上下文空间故障");
+  expect(config).toContain("description: 上游明确返回 gpt-5.6-terra 或 gpt-5.6-sol 的 Provider 不支持、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障");
 });
 
 test("usage target discovery uses one queued database read", async () => {
@@ -190,7 +190,8 @@ test("usage target discovery uses one queued database read", async () => {
 test("rolling upstream output excludes OAuth usage", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   expect(source).toMatch(/LOWER\(a\.type\)\s*=\s*'apikey'/u);
-  expect(source).toContain("SUM(usage.actual_cost)");
+  expect(source).toContain("SUM(usage.total_cost)");
+  expect(source).toContain("actual_cost is the user/API-key charge");
 });
 
 test("template application verifies persisted runtime fields through the queued reader", async () => {

@@ -28,7 +28,7 @@ export function renderPriorityPlanLines(value: Row): string[] {
   ];
   const changes = rows(value.changes).filter((row) => row.change === "update");
   if (changes.length > 0) {
-    lines.push("", "PROFILE  ACCOUNT_ID  BEFORE  AFTER     N  FAIL%  SWITCH%  TTFT_P95  QUALITY   COST  VALUE  ACCOUNT");
+    lines.push("", "PROFILE  ACCOUNT_ID  BEFORE  AFTER     N  FAIL%  SWITCH%  TTFT_P95  EVID  QUALITY   COST  VALUE  ACCOUNT");
     for (const row of changes) lines.push([
       String(row.profile ?? "-").padEnd(7),
       String(row.accountId ?? "-").padEnd(10),
@@ -38,6 +38,7 @@ export function renderPriorityPlanLines(value: Row): string[] {
       percent(row.failureRate).padStart(6),
       percent(row.failoverRate).padStart(7),
       milliseconds(row.ttftP95Ms).padStart(9),
+      decimal(row.evidenceScore).padStart(5),
       decimal(row.score).padStart(7),
       decimal(row.costRateCnyPerApiUsd, 3).padStart(6),
       decimal(row.combinedScore).padStart(5),

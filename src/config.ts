@@ -67,6 +67,7 @@ export interface ScorePolicy {
   failoverZeroScoreRate: number;
   ttftFullScoreMs: number;
   ttftZeroScoreMs: number;
+  ttftPriorScore: number;
 }
 
 export interface PriorityPlanPolicy {
@@ -77,14 +78,13 @@ export interface PriorityPlanPolicy {
   reliabilityWeight: number;
   latencyWeight: number;
   costWeight: number;
+  evidenceWeight: number;
+  evidenceTargetAttempts: number;
+  evidenceTargetFirstTokenSamples: number;
   explorationWeight: number;
   explorationTargetAttempts: number;
   explorationQualityPrior: number;
   balanceWeight: number;
-  dynamicQualityFeedback: {
-    targetQualityScore: number;
-    coefficient: number;
-  };
   referenceScore: number;
   pointsPerScore: number;
   minimumChange: number;
@@ -451,12 +451,12 @@ function readScorePolicy(raw: unknown, path: string): ScorePolicy {
     failoverZeroScoreRate: numberValue(policy, "failoverZeroScoreRate", path, 0.000001, 1),
     ttftFullScoreMs: integerValue(policy, "ttftFullScoreMs", path, 0),
     ttftZeroScoreMs: integerValue(policy, "ttftZeroScoreMs", path, 1),
+    ttftPriorScore: numberValue(policy, "ttftPriorScore", path, 0, 100),
   };
 }
 
 function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy {
   const policy = object(raw, path);
-  const dynamicQualityFeedback = object(policy.dynamicQualityFeedback, `${path}.dynamicQualityFeedback`);
   const fixedRaw = object(policy.fixedPriorities, `${path}.fixedPriorities`);
   const fixedPriorities = Object.fromEntries(Object.keys(fixedRaw).map((accountId) => {
     if (!/^[1-9][0-9]*$/u.test(accountId)) throw new Error(`${path}.fixedPriorities keys must be positive account IDs`);
@@ -492,14 +492,13 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
     reliabilityWeight: numberValue(policy, "reliabilityWeight", path, 0, 100),
     latencyWeight: numberValue(policy, "latencyWeight", path, 0, 100),
     costWeight: numberValue(policy, "costWeight", path, 0, 100),
+    evidenceWeight: numberValue(policy, "evidenceWeight", path, 0, 100),
+    evidenceTargetAttempts: integerValue(policy, "evidenceTargetAttempts", path, 1, 10000),
+    evidenceTargetFirstTokenSamples: integerValue(policy, "evidenceTargetFirstTokenSamples", path, 1, 10000),
     explorationWeight: numberValue(policy, "explorationWeight", path, 0, 100),
     explorationTargetAttempts: integerValue(policy, "explorationTargetAttempts", path, 1, 10000),
     explorationQualityPrior: numberValue(policy, "explorationQualityPrior", path, 0, 100),
     balanceWeight: numberValue(policy, "balanceWeight", path, 0, 100),
-    dynamicQualityFeedback: {
-      targetQualityScore: numberValue(dynamicQualityFeedback, "targetQualityScore", `${path}.dynamicQualityFeedback`, 0, 100),
-      coefficient: numberValue(dynamicQualityFeedback, "coefficient", `${path}.dynamicQualityFeedback`, 0, 10),
-    },
     referenceScore: numberValue(policy, "referenceScore", path, 0, 100),
     pointsPerScore: numberValue(policy, "pointsPerScore", path, 0.01, 1000),
     minimumChange: integerValue(policy, "minimumChange", path, 1, 1000),
