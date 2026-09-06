@@ -513,6 +513,8 @@ export class OperationsService {
       failoverRecovered: Number(latest?.failover_recovered ?? 0),
       ttftP95Ms: latest?.ttft_p95_ms == null ? null : Number(latest.ttft_p95_ms),
       firstTokenSamples: Number(latest?.first_token_samples ?? 0),
+      effectiveSampleWeight: Number(latest?.effective_sample_weight ?? latest?.observed_attempts ?? 0),
+      sampleWeighting: String(latest?.sample_weighting ?? "recent-call-decay-buckets"),
       errorAttribution: {
         total: Number(latest?.error_attribution_total ?? 0),
         attributed: Number(latest?.error_attributed ?? 0),

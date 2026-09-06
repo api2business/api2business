@@ -251,6 +251,15 @@ function numericArray(value: unknown): number[] {
   return value.map(Number).filter(Number.isFinite);
 }
 
+export function recentCallBucketWeight(
+  recentRank: number,
+  policy: AppConfig["sub2api"]["scoreSamplePolicy"],
+): number {
+  if (!Number.isInteger(recentRank) || recentRank < 1) throw new Error("recent rank must be a positive integer");
+  const bucket = Math.floor((recentRank - 1) / policy.decayBucketSize);
+  return Math.max(policy.minimumWeight, 1 - bucket * policy.decayStep);
+}
+
 export function weightedPercentile(values: unknown, weights: unknown, quantile: number): number | null {
   if (!Number.isFinite(quantile) || quantile < 0 || quantile > 1) throw new Error("quantile must be between 0 and 1");
   const samples = numericArray(values);

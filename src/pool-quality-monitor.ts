@@ -1,5 +1,5 @@
 import type { AppConfig } from "./config";
-import { scoreRecentDatabaseRow } from "./account-score-database";
+import { recentCallBucketWeight, scoreRecentDatabaseRow } from "./account-score-database";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { modelRoutingPatternsSql } from "./scoring-error-policy";
 type Row = Record<string, unknown>;
@@ -230,6 +230,8 @@ export interface PoolQualitySample {
   failoverRecovered: number;
   ttftP95Ms: number | null;
   firstTokenSamples: number;
+  effectiveSampleWeight: number;
+  sampleWeighting: "recent-call-decay-buckets";
   errorAttribution: {
     total: number;
     attributed: number;
@@ -254,59 +256,81 @@ export async function collectPoolQualitySample(
     sql: poolQualitySql,
     parameters: [recentCallLimit, groupIds.join(","), sampledAt],
   });
-  const rows = query.rows;
-  const successes = rows.filter((row) => row.kind === "usage");
-  const failures = rows.filter((row) => row.kind === "error" && row.scoreable === true);
-  const errors = rows.filter((row) => row.kind === "error");
+  const rows = query.rows as Row[];
+  const weightedRows: Row[] = rows.map((row, index): Row => ({
+    ...row,
+    sampleWeight: recentCallBucketWeight(index + 1, config.sub2api.scoreSamplePolicy),
+  }));
+  const weight = (row: Row): number => Number(row.sampleWeight ?? 0);
+  const weightedCount = (items: Row[]): number => items.reduce((total, row) => total + weight(row), 0);
+  const weightedDistinctCount = (items: Row[]): number => {
+    const seen = new Set<string>();
+    return items.reduce((total, row) => {
+      const requestId = String(row.request_id ?? "");
+      if (!requestId || seen.has(requestId)) return total;
+      seen.add(requestId);
+      return total + weight(row);
+    }, 0);
+  };
+  const successes = weightedRows.filter((row) => row.kind === "usage");
+  const failures = weightedRows.filter((row) => row.kind === "error" && row.scoreable === true);
+  const errors = weightedRows.filter((row) => row.kind === "error");
   const attributedErrors = errors.filter((row) => Number.isInteger(Number(row.account_id)) && Number(row.account_id) > 0);
-  const failovers = rows.filter((row) => row.failover_triggered === true);
+  const failovers = weightedRows.filter((row) => row.failover_triggered === true);
   const recovered = failovers.filter((row) => row.kind === "usage");
-  const ttft = successes.map((row) => Number(row.first_token_ms)).filter((value) => Number.isFinite(value) && value >= 0);
+  const ttftRows = successes.filter((row) => Number.isFinite(Number(row.first_token_ms)) && Number(row.first_token_ms) >= 0);
+  const ttft = ttftRows.map((row) => Number(row.first_token_ms));
+  const ttftWeights = ttftRows.map(weight);
+  const effectiveSampleWeight = weightedCount(weightedRows);
   const accounts = new Map<number, { accountName: string; baseUrl: string; attempts: number }>();
-  for (const row of rows) {
+  for (const row of weightedRows) {
     const accountId = Number(row.account_id);
     if (!Number.isInteger(accountId) || accountId < 1) continue;
     const current = accounts.get(accountId);
     accounts.set(accountId, {
       accountName: String(row.account_name ?? `#${accountId}`),
       baseUrl: String(row.base_url ?? ""),
-      attempts: (current?.attempts ?? 0) + 1,
+      attempts: (current?.attempts ?? 0) + weight(row),
     });
   }
   const scored = scoreRecentDatabaseRow({
     account_id: 0, account_name: "混池 + 自用池", platform: "openai", account_type: "apikey",
     status: "active", schedulable: true, priority: 0, group_ids: groupIds, group_names: ["混池", "自用"],
-    success_requests: successes.length, failure_requests: failures.length,
-    attributed_requests: new Set(rows.map((row) => row.request_id).filter(Boolean)).size,
-    failover_requests: new Set(failovers.map((row) => row.request_id).filter(Boolean)).size,
-    failover_recovered: new Set(recovered.map((row) => row.request_id).filter(Boolean)).size,
-    failover_failed: 0, failover_aborted: 0, burst_attempts: rows.length,
-    burst_failure_requests: failures.length, stream_success_requests: successes.filter((row) => row.stream === true).length,
-    first_token_samples: ttft.length, ttft_p50_ms: percentile(ttft, 0.5), ttft_p95_ms: percentile(ttft, 0.95),
+    success_requests: weightedCount(successes), failure_requests: weightedCount(failures),
+    attributed_requests: weightedDistinctCount(weightedRows.filter((row) => row.request_id)),
+    failover_requests: weightedDistinctCount(failovers),
+    failover_recovered: weightedDistinctCount(recovered),
+    failover_failed: 0, failover_aborted: 0, burst_attempts: effectiveSampleWeight,
+    burst_failure_requests: weightedCount(failures), stream_success_requests: weightedCount(successes.filter((row) => row.stream === true)),
+    first_token_samples: weightedCount(ttftRows), ttft_values: ttft, ttft_weights: ttftWeights,
+    ttft_p50_ms: percentile(ttft, 0.5), ttft_p95_ms: percentile(ttft, 0.95),
     ttft_p99_ms: percentile(ttft, 0.99), ttft_max_ms: ttft.length ? Math.max(...ttft) : null,
+    duration_values: successes.map((row) => Number(row.duration_ms)).filter(Number.isFinite),
+    duration_weights: successes.filter((row) => Number.isFinite(Number(row.duration_ms))).map(weight),
     duration_p95_ms: percentile(successes.map((row) => Number(row.duration_ms)).filter(Number.isFinite), 0.95),
-    customer_error_requests: failures.length, excluded_error_requests: rows.filter((row) => row.kind === "error" && row.scoreable !== true).length,
+    customer_error_requests: weightedCount(failures), excluded_error_requests: weightedCount(weightedRows.filter((row) => row.kind === "error" && row.scoreable !== true)),
     token_count: 0, api_amount_usd: 0,
   }, recentCallLimit, config.sub2api.poolScorePolicy);
-  const total = rows.length;
   return {
     sampledAt,
     score: scored.score == null ? null : Number(scored.score),
     grade: String(scored.grade ?? "insufficient"),
-    observedAttempts: Number(scored.observedAttempts ?? total),
-    successRequests: successes.length,
-    failureRequests: failures.length,
+    observedAttempts: Number(scored.observedAttempts ?? effectiveSampleWeight),
+    successRequests: weightedCount(successes),
+    failureRequests: weightedCount(failures),
     failureRate: scored.failureRate == null ? null : Number(scored.failureRate),
     failoverRequests: Number(scored.failoverRequests ?? 0),
     failoverRecovered: Number(scored.failoverRecovered ?? 0),
     ttftP95Ms: scored.ttftP95Ms == null ? null : Number(scored.ttftP95Ms),
-    firstTokenSamples: ttft.length,
+    firstTokenSamples: weightedCount(ttftRows),
+    effectiveSampleWeight,
+    sampleWeighting: "recent-call-decay-buckets",
     errorAttribution: {
-      total: errors.length,
-      attributed: attributedErrors.length,
-      unattributed: errors.length - attributedErrors.length,
+      total: weightedCount(errors),
+      attributed: weightedCount(attributedErrors),
+      unattributed: weightedCount(errors) - weightedCount(attributedErrors),
       completenessRate: errors.length > 0
-        ? Math.round(attributedErrors.length / errors.length * 1_000_000) / 1_000_000
+        ? Math.round(weightedCount(attributedErrors) / weightedCount(errors) * 1_000_000) / 1_000_000
         : null,
     },
     participation: [...accounts.entries()].map(([accountId, account]) => {
@@ -316,7 +340,7 @@ export async function collectPoolQualitySample(
         accountName: account.accountName,
         baseUrl: account.baseUrl,
         attempts: account.attempts,
-        ratio: total > 0 ? Math.round(account.attempts / total * 1_000_000) / 1_000_000 : 0,
+        ratio: effectiveSampleWeight > 0 ? Math.round(account.attempts / effectiveSampleWeight * 1_000_000) / 1_000_000 : 0,
         costRateCnyPerApiUsd: manualMatch ? Number(manualMatch[1]) : null,
         costSource: manualMatch ? "manual" : null,
       } satisfies PoolParticipation;

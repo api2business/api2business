@@ -33,6 +33,34 @@ test("pool quality uses one queued query and separates exact upstream accounts",
   ]);
 });
 
+test("pool quality applies the same recent-call decay buckets as account scoring", async () => {
+  const config = loadConfig("config/api2business.example.yaml");
+  config.sub2api.scoreSamplePolicy.decayBucketSize = 1;
+  config.sub2api.scoreSamplePolicy.decayStep = 0.5;
+  config.sub2api.scoreSamplePolicy.minimumWeight = 0.1;
+  const reads = {
+    async query() {
+      return {
+        rows: [
+          { id: 1, kind: "usage", request_id: "new", account_id: 10, account_name: "new", base_url: "https://new", stream: true, first_token_ms: 1000, duration_ms: 2000, scoreable: false, failover_triggered: false },
+          { id: 2, kind: "error", request_id: "old", account_id: 11, account_name: "old", base_url: "https://old", stream: false, first_token_ms: null, duration_ms: null, scoreable: true, client_status_code: 502, failover_triggered: false },
+        ],
+        cached: false, deduplicated: false, queueDurationMs: 1, queryDurationMs: 2,
+        totalDurationMs: 3, queryStartedAt: new Date().toISOString(), queryCompletedAt: new Date().toISOString(),
+      };
+    },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+  const sample = await collectPoolQualitySample(config, reads, "2026-08-03T00:00:00.000Z");
+  expect(sample.effectiveSampleWeight).toBe(1.5);
+  expect(sample.successRequests).toBe(1);
+  expect(sample.failureRequests).toBe(0.5);
+  expect(sample.observedAttempts).toBe(1.5);
+  expect(sample.sampleWeighting).toBe("recent-call-decay-buckets");
+  expect(sample.participation[0]).toMatchObject({ accountId: 10, attempts: 1, ratio: 0.666667 });
+  expect(sample.participation[1]).toMatchObject({ accountId: 11, attempts: 0.5, ratio: 0.333333 });
+});
+
 test("pool quality excludes every monitor-user key without changing account scoring", () => {
   expect(poolQualitySql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
   expect(poolQualitySql).not.toContain("k.name LIKE");

@@ -171,25 +171,49 @@ export class OperationsStore {
         sampled_at timestamptz PRIMARY KEY,
         score numeric,
         grade text NOT NULL,
-        observed_attempts integer NOT NULL,
-        success_requests integer NOT NULL,
-        failure_requests integer NOT NULL,
+        observed_attempts numeric NOT NULL,
+        success_requests numeric NOT NULL,
+        failure_requests numeric NOT NULL,
         failure_rate numeric,
-        failover_requests integer NOT NULL,
-        failover_recovered integer NOT NULL,
+        failover_requests numeric NOT NULL,
+        failover_recovered numeric NOT NULL,
         ttft_p95_ms integer,
-        first_token_samples integer NOT NULL,
-        error_attribution_total integer NOT NULL DEFAULT 0,
-        error_attributed integer NOT NULL DEFAULT 0,
-        error_unattributed integer NOT NULL DEFAULT 0,
+        first_token_samples numeric NOT NULL,
+        error_attribution_total numeric NOT NULL DEFAULT 0,
+        error_attributed numeric NOT NULL DEFAULT 0,
+        error_unattributed numeric NOT NULL DEFAULT 0,
+        effective_sample_weight numeric NOT NULL DEFAULT 0,
+        sample_weighting text NOT NULL DEFAULT 'recent-call-decay-buckets',
         participation jsonb NOT NULL
       );
+      ALTER TABLE api2business_pool_quality_samples
+        ALTER COLUMN observed_attempts TYPE numeric USING observed_attempts::numeric;
+      ALTER TABLE api2business_pool_quality_samples
+        ALTER COLUMN success_requests TYPE numeric USING success_requests::numeric;
+      ALTER TABLE api2business_pool_quality_samples
+        ALTER COLUMN failure_requests TYPE numeric USING failure_requests::numeric;
+      ALTER TABLE api2business_pool_quality_samples
+        ALTER COLUMN failover_requests TYPE numeric USING failover_requests::numeric;
+      ALTER TABLE api2business_pool_quality_samples
+        ALTER COLUMN failover_recovered TYPE numeric USING failover_recovered::numeric;
+      ALTER TABLE api2business_pool_quality_samples
+        ALTER COLUMN first_token_samples TYPE numeric USING first_token_samples::numeric;
       ALTER TABLE api2business_pool_quality_samples
         ADD COLUMN IF NOT EXISTS error_attribution_total integer NOT NULL DEFAULT 0;
       ALTER TABLE api2business_pool_quality_samples
         ADD COLUMN IF NOT EXISTS error_attributed integer NOT NULL DEFAULT 0;
       ALTER TABLE api2business_pool_quality_samples
         ADD COLUMN IF NOT EXISTS error_unattributed integer NOT NULL DEFAULT 0;
+      ALTER TABLE api2business_pool_quality_samples
+        ALTER COLUMN error_attribution_total TYPE numeric USING error_attribution_total::numeric;
+      ALTER TABLE api2business_pool_quality_samples
+        ALTER COLUMN error_attributed TYPE numeric USING error_attributed::numeric;
+      ALTER TABLE api2business_pool_quality_samples
+        ALTER COLUMN error_unattributed TYPE numeric USING error_unattributed::numeric;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS effective_sample_weight numeric NOT NULL DEFAULT 0;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS sample_weighting text NOT NULL DEFAULT 'recent-call-decay-buckets';
       CREATE INDEX IF NOT EXISTS api2business_pool_quality_samples_time_idx
         ON api2business_pool_quality_samples(sampled_at DESC);
       CREATE TABLE IF NOT EXISTS api2business_bugteam_cost_samples (
@@ -522,12 +546,13 @@ export class OperationsStore {
         sampled_at, score, grade, observed_attempts, success_requests, failure_requests,
         failure_rate, failover_requests, failover_recovered, ttft_p95_ms,
         first_token_samples, error_attribution_total, error_attributed, error_unattributed,
-        participation
+        effective_sample_weight, sample_weighting, participation
       ) VALUES (${sample.sampledAt}, ${sample.score}, ${sample.grade}, ${sample.observedAttempts},
         ${sample.successRequests}, ${sample.failureRequests}, ${sample.failureRate},
         ${sample.failoverRequests}, ${sample.failoverRecovered}, ${sample.ttftP95Ms},
         ${sample.firstTokenSamples}, ${sample.errorAttribution.total},
         ${sample.errorAttribution.attributed}, ${sample.errorAttribution.unattributed},
+        ${sample.effectiveSampleWeight}, ${sample.sampleWeighting},
         ${sample.participation}::jsonb)
       ON CONFLICT (sampled_at) DO NOTHING
     `;
@@ -538,7 +563,7 @@ export class OperationsStore {
       SELECT sampled_at, score, grade, observed_attempts, success_requests,
         failure_requests, failure_rate, failover_requests, failover_recovered,
         ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
-        error_unattributed, participation
+        error_unattributed, effective_sample_weight, sample_weighting, participation
       FROM api2business_pool_quality_samples
       WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
          OR sampled_at IN (
