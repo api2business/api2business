@@ -32,7 +32,13 @@ function rows(value: unknown): Row[] {
 }
 
 function classifyChain(chain: Row): Row {
-  const attempts = rows(chain.attempts).map((attempt) => {
+  const rawAttempts = rows(chain.attempts);
+  // 只采用系统事件，不把供应商正文中的同名短语当成网关判定。
+  const systemEvents = rawAttempts.map((attempt) => String(attempt.systemLogText ?? "")).join(" ");
+  const suppressedAfterOutput = systemEvents.includes("gateway.failover_suppressed_after_semantic_output");
+  const abortedClientDisconnected = chain.failoverAborted === true
+    || systemEvents.includes("failover_aborted_client_disconnected");
+  const attempts = rawAttempts.map((attempt) => {
     const projected = { ...attempt, responseEvidence: responseEvidence(attempt) };
     delete projected.errorMessage;
     delete projected.errorBody;
@@ -45,26 +51,30 @@ function classifyChain(chain: Row): Row {
     attempt.errorType === "failover_event"
     || String(attempt.signature ?? "").includes(":failover_event:"),
   );
-  const templateCandidates = attempts.filter((attempt) => attempt.errorType !== "failover_event");
-  const templateMatched = failoverAttempts.length > 0;
+  const failoverObserved = chain.failoverTriggered === true || failoverAttempts.length > 0;
   const statusMismatches = attempts.filter((attempt) =>
     attempt.recordedStatusCode != null
     && attempt.upstreamStatusCode != null
     && Number(attempt.recordedStatusCode) !== Number(attempt.upstreamStatusCode),
   );
-  const failoverExhausted = templateMatched && chain.recovered !== true && (
-    Number(chain.attemptCount ?? 0) > 1 || failoverAttempts.length > 0
-  );
-  const classification = templateMatched
-    ? (failoverExhausted ? "template_matched_failover_exhausted" : "template_matched")
-    : (statusMismatches.length > 0 ? "template_not_matched_status_code_mismatch" : "template_not_matched");
+  const successMatched = chain.recovered === true;
+  const classification = successMatched ? "success_record_matched"
+    : suppressedAfterOutput ? "failover_suppressed_after_output"
+      : abortedClientDisconnected ? "failover_aborted_client_disconnected"
+        : failoverObserved ? "failover_observed_recovery_unconfirmed"
+          : "failover_not_observed";
   return {
     attempts,
     diagnosis: {
-      templateMatched,
-      failoverExhausted,
+      templateMatched: null,
+      templateMatchEvidence: "not_available",
+      failoverExhausted: successMatched ? false : null,
+      failoverObserved,
+      suppressedAfterOutput,
+      abortedClientDisconnected,
+      recoveryEvidence: successMatched ? "exact_request_id_match" : "no_exact_request_id_match",
       classification,
-      templateAttemptCount: templateCandidates.length,
+      errorAttemptCount: attempts.length - failoverAttempts.length,
       failoverSwitchCount: failoverAttempts.length,
       statusMismatchCount: statusMismatches.length,
       statusMismatch: statusMismatches.length > 0,
@@ -72,12 +82,25 @@ function classifyChain(chain: Row): Row {
   };
 }
 
-function decorateDiagnosis(value: Row): Row {
+export function decorateDiagnosis(value: Row): Row {
   const chains = rows(value.chains).map((chain) => {
     const result = classifyChain(chain);
     return { ...chain, attempts: result.attempts, diagnosis: result.diagnosis };
   });
-  return { ...value, chains };
+  return {
+    ...value,
+    chains,
+    interpretation: {
+      sampleBasis: "recent-error-rows",
+      chainOrder: "unrecovered-failover-attempt-count-recency",
+      recoveryJoin: "exact-request-id",
+      limitations: [
+        "错误样本及排序后的展示链不代表全量请求的失败率或切号恢复率。",
+        "成功用量与错误的请求 ID 可能使用不同命名空间；未匹配不能证明没有恢复。",
+        "上下游状态码不同不证明模板漏配；模板命中与候选耗尽需要独立证据。",
+      ],
+    },
+  };
 }
 
 function accountPath(chain: Row): string {
@@ -110,6 +133,7 @@ export function emitErrorDiagnosis(value: Row, json: boolean): void {
     + ` failoverFailed=${String(summary.failoverFailedRequests ?? 0)}`
     + ` databaseQueries=${String(value.databaseQueries ?? 0)}`,
   );
+  console.log("诊断边界：错误样本不是全量成功率分母；模板命中、候选耗尽未知，状态码差异不作原因判定。");
   console.log("VISIBLE  REQUESTS  RECOVERED  ACCOUNTS  SIGNATURE");
   for (const row of rows(value.signatures)) {
     console.log([
@@ -139,7 +163,7 @@ export function emitErrorDiagnosis(value: Row, json: boolean): void {
   }
   if (chains.length === 0) return;
   console.log("\nCUSTOMER-VISIBLE / FAILOVER SAMPLES");
-  console.log("MODEL  VISIBLE  RECOVERED  FAILOVER  ATTEMPTS  STATUS  REQUEST_ID  ACCOUNT_CHAIN  FINAL_SIGNATURE");
+  console.log("MODEL  VISIBLE  RECOVERED  FAILOVER  ATTEMPTS  STATUS  REQUEST_ID  ACCOUNT_CHAIN  FINAL_SIGNATURE  CLASSIFICATION");
   for (const row of chains) {
     console.log([
       String(row.model ?? "unknown").padEnd(20),
@@ -151,6 +175,7 @@ export function emitErrorDiagnosis(value: Row, json: boolean): void {
       String(row.requestId ?? "-").padEnd(36),
       accountPath(row).padEnd(18),
       String(row.finalSignature ?? "-"),
+      String((row.diagnosis as Row | undefined)?.classification ?? "-"),
     ].join("  "));
   }
 }
@@ -166,7 +191,7 @@ export function emitErrorInspection(value: Row, json: boolean): void {
   const attempts = rows(detail?.attempts);
   console.log(
       `API2BUSINESS ERROR INSPECT request=${String(output.requestId ?? "-")}`
-      + ` template=${String((rows(diagnosis.chains)[0]?.diagnosis as Row | undefined)?.classification ?? "-")}`
+      + ` diagnosis=${String((rows(diagnosis.chains)[0]?.diagnosis as Row | undefined)?.classification ?? "-")}`
       + ` attempts=${attempts.length}`,
   );
   console.log("ACCOUNT  RECORDED  UPSTREAM  EVIDENCE");

@@ -122,7 +122,7 @@ const projectionColumnsSql = `
   COALESCE((
     SELECT STRING_AGG(l.message, ' ' ORDER BY l.created_at, l.id)
     FROM ops_system_logs l
-    WHERE l.request_id = request_id
+    WHERE l.request_id = enriched.request_id
   ), '') AS system_log_text,
   CASE
     WHEN COALESCE(is_business_limited, false) THEN 'quota'

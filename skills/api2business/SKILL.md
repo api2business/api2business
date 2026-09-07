@@ -7,6 +7,8 @@ description: >-
 
 # Api2Business
 
+- 本技能遵循 Skill(cli-spec)。
+
 ## 当前 Sub2API 架构
 
 - 唯一 Sub2API 运行面是 NC01 的 `sub2api-nc01-native`。
@@ -118,7 +120,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 对缺少采购成本记录的整池账号，先用 `--scope pool --plan-type <type> --unit-cost-cny <CNY>`
   显式声明本批结算单价；该模式只支持单一账号类型，并在计划与确认回读中固定成本。
 - 退役删除按 `operations.accountLifecycle.deleteBatchSize` 分批调用原生批量接口；单批失败会跳过并继续，终态只以排队回读为准，失败且有剩余账号时复用原计划恢复。
-- 上游、评分和优先级读取 `references/upstream-scheduling.md`。
+- 上游、评分、优先级、定时稳定性观察和截图报错归因读取 `references/upstream-scheduling.md`。
 - 池级质量调查使用 `scores pool-quality --over-api`，账号分项使用
   `scores rank --calls <N> --over-api`；两者均为只读查询。
 - 优先级计划采用严格线性加权：可靠性、TTFT、证据、探索、余额加分，实际人民币成本扣分；不得使用置信度乘总分、池分与账号分相乘、动态质量反馈或新增硬门槛。
@@ -133,7 +135,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 核验状态为 `pending`、`snapshot_mismatch` 或 `unavailable` 时，只表示作业未完成或读模型暂未追上，不代表充值失败；必须继续查询原 workflow。
 - 充值请求超时重试时必须复用相同的 `--idempotency-key`，禁止生成新 key 重复提交同一笔充值。
 - CLI 在提交传输异常时会回显本次幂等键和“结果未知”提示；只有复用该键重试，不能把传输异常当成未提交而生成新键。
-- 精确错误链使用 `errors diagnose --request-id <request-id> --over-api`；输出会区分模板未命中、模板命中后切号耗尽和已恢复。
+- 精确错误链使用 `errors diagnose --request-id <request-id> --over-api`。
+  - CLI 区分已观测切号、输出后抑制、客户端断开、成功记录关联和未观测切号。
+  - `templateMatched=null` 表示没有模板命中证据；不能用切号事件推断模板命中。
+  - 未关联成功记录时 `failoverExhausted=null`；不能据此推断候选耗尽。
+  - `interpretation` 披露错误采样、链排序及请求 ID 关联边界。
 - 按模型定位切号链使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api`；输出含模型 × 已尝试账号 × 请求链矩阵和样本顺序。它只报告 Sub2API 已记录的尝试，不推断未记录的候选排除原因。
 - 一次性排障优先使用 `errors inspect --request-id <request-id> --over-api`；CLI 会并行取得诊断链和请求详情，避免手工串联 `errors diagnose` 与 `errors get`。
 - `errors diagnose --request-id` 和 `errors get --request-id` 会返回限长脱敏的 `responseEvidence`，包含来源、长度和摘要；正文缺失时明确显示 `available=false`，不得据此臆测上游业务原因。
