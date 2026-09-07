@@ -9,7 +9,13 @@ import { attributedInternalUpstreamFailureSql, modelRoutingPatternsSql } from ".
 type Row = Record<string, unknown>;
 
 const recentAccountAggregateSql = `
-WITH target_accounts AS (
+WITH internal_probe_keys AS (
+  SELECT k.id
+  FROM api_keys k
+  LEFT JOIN users owner ON owner.id = k.user_id
+  WHERE owner.email = 'monitor-user@sub2api.platform-infra.local'
+    OR LOWER(COALESCE(k.name, '')) LIKE 'api2business-probe-%'
+), target_accounts AS (
   SELECT
     a.id AS account_id,
     a.name AS account_name,
@@ -140,6 +146,7 @@ account_stats AS (
           false AS scoreable
         FROM usage_logs u
         WHERE u.account_id = a.account_id
+          AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
           AND u.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
         ORDER BY u.created_at DESC
@@ -192,6 +199,8 @@ account_stats AS (
           END AS scoreable
         FROM ops_error_logs o
         WHERE o.account_id = a.account_id
+          AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = o.api_key_id)
+          AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
           AND o.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
           AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
@@ -600,6 +609,8 @@ export async function collectRecentCallScoresFromDatabase(
     collectedAt: new Date().toISOString(),
     deduplicated: query.deduplicated,
     cached: query.cached,
+    probeNoiseExcluded: true,
+    failoverIntermediateEventsExcluded: true,
     accounts,
   };
 }

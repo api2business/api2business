@@ -80,6 +80,7 @@ function qualityDimensions(
   const existingLatency = dimensionScore(row, ["latency"], policy.explorationQualityPrior);
   const measuredTtftP95Ms = number(row.ttftP95Ms);
   const latency = measuredTtftP95Ms !== null
+    && existingLatency.evidence === "observed"
     && latencyNormalization.minimumTtftP95Ms !== null
     && latencyNormalization.maximumTtftP95Ms !== null
     ? {
@@ -443,6 +444,7 @@ function buildPriorityProfile(
     const costPenalty = linearCostPenalty(cost, minimumCost, maximumCost);
     const latencyValue = number(row.ttftP95Ms);
     const latencyPenalty = latencyValue !== null
+      && dimensions.latencyEvidence === "observed"
       && latencyNormalization.minimumTtftP95Ms !== null
       && latencyNormalization.maximumTtftP95Ms !== null
       ? linearLatencyPenalty(
