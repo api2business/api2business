@@ -99,7 +99,10 @@
 - `E` 是独立证据分：请求样本量占 `50%`、首 Token 样本量占 `25%`、首 Token 覆盖率占 `25%`；只影响连续排序，不做可调度硬过滤。
 - 优先使用探测成本；探测成本缺失时再使用手工成本。
 - 成本维度采用扣分制：以本轮可调度账号的实际人民币成本范围做线性归一化，最低成本扣 `0` 分，最高成本扣 `100` 分，中间成本按比例扣分；`costWeight` 是扣分幅度，不使用负权重。
-- 成本范围的锚点优先取当前可调度、具有成本数据且满足 `requiredConfidence` 的账号；没有该证据集时才回退所有当前可调度账号，输出 `costNormalizationRange.evidenceSource` 与 `evidenceCount`。
+- 成本范围的锚点优先取当前可调度、具有成本数据且满足 `requiredConfidence` 的账号：
+  - 该证据集缺失或成本全部相同时，回退所有当前可调度候选的成本区间。
+  - 输出 `costNormalizationRange.evidenceSource`、`evidenceCount` 与 `fallbackReason`。
+  - 只有所有候选成本确实相同时，成本扣分才统一为零。
 - 成本范围不再使用 P10/P90 截断，避免 `0.15` 与 `0.2` 等不同成本被同时压成 `costScore=0`；高成本账号仍可因质量和延迟保持可调度，但不会因成本维度获得奖励。
 - 成本采样口径：
   - 供应商 API-USD 产出分母使用 Sub2API `usage_logs.total_cost`，即标准 API 成本；

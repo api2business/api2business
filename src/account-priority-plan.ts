@@ -311,8 +311,13 @@ function buildPriorityProfile(
     .filter((row) => row.confidence === policy.requiredConfidence)
     .map((row) => costRate(row)!);
   const fallbackCosts = eligible.map((row) => costRate(row)!);
-  const costEvidence = trustedCosts.length > 0 ? trustedCosts : fallbackCosts;
-  const costEvidenceSource = trustedCosts.length > 0 ? "required-confidence" : "eligible-fallback";
+  const trustedCostHasRange = trustedCosts.length > 1
+    && Math.min(...trustedCosts) < Math.max(...trustedCosts);
+  const costEvidence = trustedCostHasRange ? trustedCosts : fallbackCosts;
+  const costEvidenceSource = trustedCostHasRange ? "required-confidence" : "eligible-fallback";
+  const costEvidenceFallbackReason = trustedCostHasRange
+    ? null
+    : trustedCosts.length === 0 ? "no-trusted-costs" : "trusted-cost-range-degenerate";
   if (costEvidence.length === 0) {
     const tailChanges = rows.flatMap((row) => {
       const accountId = number(row.accountId);
@@ -590,6 +595,7 @@ function buildPriorityProfile(
     costNormalizationRange: {
       strategy: "linear-penalty",
       evidenceSource: costEvidenceSource,
+      fallbackReason: costEvidenceFallbackReason,
       evidenceCount: costEvidence.length,
       minimumCostRateCnyPerApiUsd: minimumCost,
       maximumCostRateCnyPerApiUsd: maximumCost,
