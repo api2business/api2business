@@ -37,7 +37,7 @@ const persistentSnapshotApiPaths = [
   /^\/api\/oauth\/runtime-summary$/u,
   /^\/api\/bugteam\/cost-monitor$/u,
   /^\/api\/admin\/errors(?:\/|$)/u,
-  /^\/api\/operations\/priority-(?:automation|history)$/u,
+  /^\/api\/operations\/priority-(?:automation|history|state)$/u,
   /^\/api\/operations\/idle-probe\/(?:history|summary|coverage)$/u,
 ];
 
