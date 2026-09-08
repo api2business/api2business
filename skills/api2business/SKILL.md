@@ -121,8 +121,17 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   显式声明本批结算单价；该模式只支持单一账号类型，并在计划与确认回读中固定成本。
 - 退役删除按 `operations.accountLifecycle.deleteBatchSize` 分批调用原生批量接口；单批失败会跳过并继续，终态只以排队回读为准，失败且有剩余账号时复用原计划恢复。
 - 上游、评分、优先级、定时稳定性观察和截图报错归因读取 `references/upstream-scheduling.md`。
+- 多轮号池优化先读取该参考的“评分、容量与冷却联动评估”：
+  - 分开核对滚动分、固定时间段业务记录、账号容量和会话绑定；
+  - 模板及排序变更必须独立回读运行态，不以工作流成功代替业务恢复。
 - 池级质量调查使用 `scores pool-quality --over-api`，账号分项使用
   `scores rank --calls <N> --over-api`；两者均为只读查询。
+- 单账号质量评分将绑定该账号的专用探活样本纳入评分：
+  - 用户请求不足时，用探活补充可靠性、切号和延迟证据；
+  - 探活失败属于该账号的有效质量信号，不得笼统视为评分污染。
+- 池级 `scores pool-quality` 仍排除内部 monitor 和 `api2business-probe-*` 探活：
+  - 池分只反映真实用户业务；
+  - 比较账号分与池分时必须同时报告样本范围。
 - 优先级计划采用严格线性加权：可靠性、TTFT、证据、探索、余额加分，实际人民币成本扣分；不得使用置信度乘总分、池分与账号分相乘、动态质量反馈或新增硬门槛。
 - `scores rank` 对 TTFT 样本不足的账号输出固定 `ttftPriorScore` 与 `latencyEvidence=prior`；`scores priority-plan` 单独输出 `evidenceScore`、成本锚点来源及线性分项。
 - 切号质量同时输出原始、已恢复、未恢复和有效切号率；有效率按 `未恢复 + 0.25 × 已恢复` 计入账号评分。
