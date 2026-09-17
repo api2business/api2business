@@ -465,6 +465,8 @@ operations:
         keywords:
           - upstream service temporarily unavailable
           - upstream response stream was interrupted
+          - upstream_unavailable
+          - upstream_error
           - 服务暂时不可用
           - origin web server returned an invalid or incomplete response
           - please try again later
@@ -480,6 +482,8 @@ operations:
           - overloaded
           - origin web server returned an invalid or incomplete response
           - our servers are currently overloaded
+          - we're currently experiencing high demand
+          - we are currently experiencing high demand
           - concurrency limit exceeded for account
           - concurrency limit exceeded
           - selected model is at capacity
@@ -553,6 +557,14 @@ operations:
           - our servers are currently overloaded
         durationMinutes: 3
         description: 上游明确返回服务容量不足
+    externalCutoff:
+      enabled: true
+      dryRun: true
+      durationSeconds: 60
+      rules:
+        - statusCodes: [499, 502, 503, 504, 522, 524]
+          keywords: [stream_read_error, stream disconnected before completion, upstream stream disconnected, upstream_unavailable, upstream service temporarily unavailable, unexpected eof]
+          description: 原生模板未切号的上游断流，外部补偿冷却 1 分钟
   upstreamBenchmark:
     enabled: true
     provider: https://apitest.work/
@@ -606,24 +618,12 @@ runtime:
     secrets/sub2api.env: /etc/api2business/secrets/sub2api.env
     secrets/api2business.env: /etc/api2business/secrets/api2business.env
     secrets/database.env: /etc/api2business/secrets/database.env
-  defaultCliTarget: local
-  overApiTarget: native-api
+  defaultCliTarget: l1
+  overApiTarget: l1
   cliTargets:
-    local:
-      mode: embedded
-      databasePath: .state/api2business.sqlite
-      scoreCachePath: .state/account-scores.json
-      monitorWorkDir: /integrations
-      temporalTaskQueue: api2business-native
-    production:
+    l1:
       mode: http
       baseUrl: https://api2business.example.com
-      adminToken:
-        sourceRef: secrets/api2business.env
-        sourceKey: API2BUSINESS_API_KEY
-    native-api:
-      mode: http
-      baseUrl: http://127.0.0.1:8080
       adminToken:
         sourceRef: secrets/api2business.env
         sourceKey: API2BUSINESS_API_KEY

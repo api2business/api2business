@@ -12,6 +12,7 @@ import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { isRecoverableDatabaseConnectionError } from "./database-connection";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { TemporalSubmissionError } from "./temporal-client";
+import { matchExternalCutoff } from "./external-cutoff-match";
 import {
   normalizeAccountIds,
   parseAccountEconomicsWindow,
@@ -300,6 +301,46 @@ export function createHandler(
       }
       if (request.method === "GET" && url.pathname === "/api/oauth/api-key-cutoff/history") {
         return json({ ok: true, events: upstreams.apiKeyCutoffHistory(), valuesPrinted: false });
+      }
+      if (request.method === "GET" && url.pathname === "/api/admin/external-cutoff/config") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const setting = config.operations.upstreamManagement.externalCutoff;
+        return json({ ok: true, enabled: setting.enabled, dryRun: setting.dryRun, durationSeconds: setting.durationSeconds, rules: setting.rules, valuesPrinted: false });
+      }
+      if (request.method === "GET" && url.pathname === "/api/admin/external-cutoff/matches") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const limit = positiveInteger(url.searchParams.get("limit"), config.monitor.errorAggregateLimit);
+        if (limit === null) return json({ ok: false, error: "limit must be a positive integer" }, 400);
+        const errors = await operations.errorList(limit);
+        const records = Array.isArray(errors.records) ? errors.records : [];
+        const matches = records.flatMap((record) => {
+          if (typeof record !== "object" || record === null) return [];
+          const row = record as Record<string, unknown>;
+          if (row.recovered === true || row.failoverObserved === true || row.customerVisible !== true || String(row.phase ?? "").toLowerCase() !== "upstream") return [];
+          const evidence = typeof row.responseEvidence === "object" && row.responseEvidence !== null
+            ? row.responseEvidence as Record<string, unknown> : {};
+          const result = matchExternalCutoff({
+            accountId: Number(row.accountId), requestId: row.requestId ? String(row.requestId) : null,
+            statusCode: Number(row.statusCode), phase: String(row.phase ?? ""),
+            text: String(evidence.summary ?? ""),
+          }, config.operations.upstreamManagement.externalCutoff.rules);
+          return result.matched ? [{ ...row, externalCutoffMatch: result }] : [];
+        });
+        return json({ ok: true, mode: "external-cutoff-match", sampledErrors: records.length, matchCount: matches.length, matches, valuesPrinted: false });
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/external-cutoff") {
+        const input = await body(request);
+        const accountId = Number(input.accountId);
+        if (!Number.isSafeInteger(accountId) || accountId < 1) return json({ ok: false, error: "accountId must be a positive integer" }, 400);
+        const mode = input.mode === "live" ? "live" : "dryrun";
+        const setting = config.operations.upstreamManagement.externalCutoff;
+        if (!setting.enabled) return json({ ok: false, error: "external cutoff is disabled" }, 409);
+        const statusCode = input.statusCode === undefined ? null : Number(input.statusCode);
+        const text = String(input.text ?? "").slice(0, 2000);
+        const match = matchExternalCutoff({ accountId, requestId: input.requestId ? String(input.requestId) : null, statusCode, phase: input.phase ? String(input.phase) : null, text }, setting.rules);
+        if (!match.matched) return json({ ok: true, matched: false, mode, valuesRedacted: true });
+        const submitted = await dispatcher.submit({ kind: "upstream.apikey.cutoff", phase: "start", operationId: crypto.randomUUID(), durationSeconds: setting.durationSeconds, accountIds: [accountId], trigger: "external-error", mode, requestId: input.requestId ? String(input.requestId) : undefined, matchedKeyword: match.keyword ?? undefined });
+        return json({ ...submitted, matched: true, mode, accountId, matchedKeyword: match.keyword, valuesRedacted: true }, 202);
       }
       if (request.method === "POST" && url.pathname === "/api/oauth/api-key-cutoff/restore") {
         return json(await dispatcher.signalRunningApiKeyCutoffsRestore(), 202);
@@ -807,6 +848,20 @@ export function createHandler(
             ? (url.searchParams.get("failoverRequestIds") ?? "")
               .split(",").filter((value) => /^[0-9a-f-]{36}$/iu.test(value))
             : null,
+        ));
+      }
+      if (request.method === "GET" && url.pathname === "/api/admin/errors/cooldowns") {
+        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        const limit = positiveInteger(url.searchParams.get("limit"), config.monitor.errorAggregateLimit);
+        const since = url.searchParams.get("since");
+        const until = url.searchParams.get("until");
+        if (limit === null || !since || !until) return json({ ok: false, error: "limit, since, and until are required" }, 400);
+        return json(await operations.cooldownDiagnosis(
+          limit,
+          since,
+          until,
+          url.searchParams.get("account"),
+          url.searchParams.get("model"),
         ));
       }
       if (request.method === "GET" && url.pathname === "/api/admin/errors") {

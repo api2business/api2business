@@ -75,7 +75,7 @@ export function mergeAccountScores(rows: Row[]): Row[] {
     const reliability = reliabilityPoints(failureRate);
     const latencyObserved = firstTokenSamples >= 5 && ttftP95Ms !== null;
     const latency = latencyObserved ? latencyPoints(ttftP95Ms) : 6.25;
-    const currentlyAvailable = accountRows.every((row) => row.currentlyAvailable === true);
+    const currentlyAvailable = accountRows.every((row) => (row.currentAvailable ?? row.currentlyAvailable) === true);
     const status = String(representative.status ?? "");
     const availability = currentlyAvailable ? 15 : status === "active" ? 8 : 0;
     const availableWeight = (reliability === null ? 0 : 60) + 25 + 15;
@@ -92,6 +92,7 @@ export function mergeAccountScores(rows: Row[]): Row[] {
       groupIds,
       groupNames,
       currentlyAvailable,
+      currentAvailable: currentlyAvailable,
       score,
       grade,
       assessment: assessment(grade),

@@ -1,5 +1,5 @@
 import { createServerContext } from "./bootstrap";
-import { loadConfig } from "./config";
+import { loadConfig, startConfigHotReload } from "./config";
 import { ApplicationDispatcher } from "./dispatcher";
 import { createHandler } from "./http";
 import { requiredOption } from "./runtime-args";
@@ -74,6 +74,9 @@ const server = Bun.serve({
   port: target.listenPort,
   fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, purchases, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation),
 });
+const stopConfigHotReload = startConfigHotReload(config, requiredOption("--config"), (next) => {
+  context.runtime.updateApiKeyFailoverRules(next.operations.upstreamManagement.failoverRules);
+});
 
 console.log(JSON.stringify({
   ok: true,
@@ -92,6 +95,7 @@ async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
   server.stop(true);
+  stopConfigHotReload();
   context.close();
   await operations.close();
   await reads.close();

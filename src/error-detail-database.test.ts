@@ -5,6 +5,7 @@ test("error detail queries are bounded and request scoped", () => {
   expect(errorListQuery).toContain("LIMIT $1");
   expect(errorListQuery).not.toContain("COALESCE(is_business_limited, false) = false");
   expect(errorListQuery).toContain("COALESCE(status_code, 0) >= 400");
+  expect(errorListQuery).toContain("COALESCE(upstream_status_code, 0) >= 400");
   expect(errorGetQuery).toContain("WHERE request_id = $1");
   expect(errorGetQuery).toContain("'badGateway'");
   expect(errorGetQuery).toContain("'gatewayTimeout'");
@@ -35,6 +36,15 @@ test("error detail projection masks identity and excludes bodies", () => {
   expect(row.recordedStatusCode).toBe(499);
   expect(row.upstreamStatusCode).toBe(503);
   expect(row).not.toHaveProperty("error_body");
+});
+
+test("upstream-only status is customer-visible", () => {
+  const row = projectErrorDetailRow({
+    id: 4,
+    recorded_status_code: null,
+    upstream_status_code: 503,
+  }, "Asia/Shanghai");
+  expect(row.customerVisible).toBeTrue();
 });
 
 test("error category follows Sub2API native phase and type mapping", () => {

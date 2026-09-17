@@ -7,6 +7,7 @@ import type {
 } from "./sub2api-client";
 import { Sub2ApiClient } from "./sub2api-client";
 import type { RuntimePolicyEventSource } from "./runtime-policy-events";
+import { stableUpstreamErrorPatterns } from "./scoring-error-policy";
 
 type Row = Record<string, unknown>;
 
@@ -135,7 +136,13 @@ function groupMatches(log: Sub2ApiSystemLog, groupId: number): boolean {
 }
 
 function customerErrorAttribution(row: Sub2ApiRequestError): { scoreable: boolean; reason: string } {
-  const message = String(row.message ?? row.error_message ?? "").toLowerCase();
+  const message = [
+    row.message,
+    row.error_message,
+    row.error_body,
+    row.upstream_error_message,
+    row.upstream_error_detail,
+  ].filter((value) => value !== undefined && value !== null).join(" ").toLowerCase();
   if (message.includes("context window") || message.includes("context_length_exceeded")) return { scoreable: false, reason: "context-window" };
   if (message.includes("input must be a list")) return { scoreable: false, reason: "invalid-client-input" };
   if (message.includes("not supported by any configured account") || message.includes("no available channel for model")) return { scoreable: false, reason: "model-route" };
@@ -144,7 +151,7 @@ function customerErrorAttribution(row: Sub2ApiRequestError): { scoreable: boolea
   if (row.account_id === null || row.account_id === undefined) return { scoreable: false, reason: "no-account-attribution" };
   const category = String(row.type ?? "").toLowerCase();
   if (phase === "upstream" || category.includes("upstream")) return { scoreable: true, reason: "explicit-upstream" };
-  const stable = ["upstream service temporarily unavailable", "upstream request failed", "bad gateway", "gateway timeout", "error code: 502", "error code: 503", "error code: 504", "error code: 524"];
+  const stable = stableUpstreamErrorPatterns;
   return stable.some((marker) => message.includes(marker))
     ? { scoreable: true, reason: "stable-upstream-message" }
     : { scoreable: false, reason: "unattributed-customer-error" };
@@ -277,6 +284,7 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
       status: account.status,
       schedulable: account.schedulable,
       currentlyAvailable,
+      currentAvailable: currentlyAvailable,
       priority: account.priority,
       priorityOrder: "lower-is-higher",
       score,

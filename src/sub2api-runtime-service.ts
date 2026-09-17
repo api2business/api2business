@@ -69,10 +69,16 @@ export function runtimeImportIdempotencyKey(operationKey: string, value: unknown
 }
 
 export class Sub2ApiRuntimeService {
+  private apiKeyFailoverRules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }>;
+
   constructor(
     private readonly client: Sub2ApiClient,
-    private readonly apiKeyFailoverRules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }> = [],
-  ) {}
+    apiKeyFailoverRules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }> = [],
+  ) { this.apiKeyFailoverRules = apiKeyFailoverRules; }
+
+  updateApiKeyFailoverRules(rules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }>): void {
+    this.apiKeyFailoverRules = rules;
+  }
 
   private apiKeyCredentials(value: unknown): Row {
     return {

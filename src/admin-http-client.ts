@@ -377,6 +377,15 @@ export class AdminHttpClient {
       60000,
     );
   }
+  externalCutoffMatches(limit: number): Promise<Record<string, unknown>> {
+    return this.request(`/api/admin/external-cutoff/matches?limit=${limit}`, {}, 60000);
+  }
+  cooldownDiagnosis(limit: number, since: string, until: string, account: string | null, model: string | null): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ limit: String(limit), since, until });
+    if (account) query.set("account", account);
+    if (model) query.set("model", model);
+    return this.request(`/api/admin/errors/cooldowns?${query}`, {}, 60000);
+  }
   userImpact(
     start: string,
     end: string,

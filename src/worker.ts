@@ -14,7 +14,7 @@ import { OperationsStore } from "./operations-store";
 import { OperationsService } from "./operations-service";
 import { AccountScoreService } from "./account-score-service";
 import { Sub2ApiClient } from "./sub2api-client";
-import { resolveDataPath } from "./config";
+import { resolveDataPath, startConfigHotReload } from "./config";
 import { AccountImportService, type ImportJob } from "./account-import-service";
 import { AccountLifecycleService, type LifecycleJob } from "./account-lifecycle-service";
 import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
@@ -31,11 +31,13 @@ if (!target) throw new Error(`runtime.serverTargets.${runtimeId} does not exist`
 
 const internalTarget = config.runtime.cliTargets[config.runtime.overApiTarget];
 if (!internalTarget || internalTarget.mode !== "http") {
-  throw new Error("worker requires runtime.overApiTarget to reference the Native API");
+    throw new Error("worker requires runtime.overApiTarget to reference the unique L1 API target");
 }
-const internal = new AdminHttpClient(config, runtimeId === "compose"
-  ? { ...internalTarget, baseUrl: "http://127.0.0.1:8080", adminToken: { envKey: target.adminTokenEnv } }
-  : internalTarget);
+const internal = new AdminHttpClient(config, {
+  ...internalTarget,
+  baseUrl: `http://${target.listenHost}:${target.listenPort}`,
+  adminToken: { envKey: target.adminTokenEnv },
+});
 const temporalAddressValue = process.env[config.temporal.addressEnv];
 const workflowEnabled = Boolean(temporalAddressValue);
 const connection = workflowEnabled
@@ -48,6 +50,9 @@ const password = process.env[target.sub2apiAdminPasswordEnv];
 if (!email || !password) throw new Error("worker requires Sub2API admin credentials");
 const sub2apiClient = new Sub2ApiClient(config, { email, password });
 const runtime = new Sub2ApiRuntimeService(sub2apiClient, config.operations.upstreamManagement.failoverRules);
+const stopConfigHotReload = startConfigHotReload(config, requiredOption("--config"), (next) => {
+  runtime.updateApiKeyFailoverRules(next.operations.upstreamManagement.failoverRules);
+});
 const probeIsolation = new ProbeIsolationService(config, sub2apiClient, runtime);
 const accountImports = new AccountImportService(config, remoteReads, null, {
   get: async (id): Promise<ImportJob | null> => {
@@ -501,6 +506,7 @@ const standaloneStop = new Promise<void>((resolve) => {
 async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
+  stopConfigHotReload();
   wakeIdleProbeWatchdog();
   wakeScoreWatchdog();
   state = "stopping";

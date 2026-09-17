@@ -18,11 +18,19 @@ description: >-
   不代表数据库 authority。
 - 禁止将旧 PK01 或 `NC01-DOCKER` 的数据库地址写入配置、Secret、CLI 参数或示例。
 
+## Api2Business L1 唯一运行面
+
+- `https://api2business.hwpod.com` 是 Api2Business 唯一 L1 实例、唯一业务入口和唯一验收入口。
+- CLI 的唯一 HTTP target 使用该公网地址；不得再配置或交付 `native-api`、`production`、`local` 等并列业务 target。
+- 本机监听地址、Docker Compose/native profile 和 worker 内部回环地址只是唯一 L1 实例的实现细节，不构成第二个实例。
+- `localhost`、`127.0.0.1` 和嵌入式 CLI 只能用于受控故障诊断或构建检查，不得用于业务结果、截图验收或邮件交付。
+- L1 的 API、Web、worker、Temporal、数据库和账本必须由同一 owning 配置和同一公网入口关联；发现数据不一致时先修复入口映射，禁止创建并列实例。
+
 ## 工作区
 
 - 新部署先克隆 `https://github.com/api2business/api2business.git`，再从克隆后的仓库加载本 skill。
 - 从当前 Api2Business 仓库根目录执行命令。
-- 使用 `config/api2business.yaml` 保存本地配置；该文件不得提交。
+- 使用 `config/api2business.yaml` 保存唯一 L1 的运行配置；该文件不得提交。
 - 使用 `skills/api2business/scripts/api2business-cli.ts` 执行业务和生命周期操作。
 
 ## 从零部署（Bootstrap）
@@ -92,7 +100,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml native stop --component all
 ```
 
-- `native` 是统一生命周期入口，实际运行方式由配置选择。
+- `native` 是唯一 L1 实例的生命周期入口，实际运行方式由配置选择；生命周期操作不得创建第二个业务实例。
 - API 应快速返回作业 ID，长流程由 worker 执行。
 - 数据库读取使用应用内排队读取通道，不从外部脚本直接连接业务数据库。
 

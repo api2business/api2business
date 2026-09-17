@@ -63,6 +63,15 @@ async function requestJson(url, options = {}, timeoutMs = 20000) {
   }
 }
 
+async function loadScoreData() {
+  const snapshot = await requestJson('/api/scores')
+  if (snapshot.snapshotOk !== false && Array.isArray(snapshot.accounts) && snapshot.accounts.length > 0) return snapshot
+  return await requestJson('/api/scores/rank', {
+    method: 'POST',
+    body: JSON.stringify({ recentCallLimit: 1000, accountSelector: null, groupSelector: null }),
+  }, 60000)
+}
+
 function shell() {
   const mount = $('[data-shell]')
   if (!mount) return
@@ -141,6 +150,40 @@ let poolQualityInFlight = null
 let poolErrorPage = 1
 const poolErrorPageSize = 20
 let poolErrorInFlight = null
+
+let externalCutoffRows = []
+let externalCutoffPage = 1
+const externalCutoffPageSize = 10
+
+function renderExternalCutoffLogs() {
+  const body = $('#external-cutoff-log-body')
+  if (!body) return
+  const rows = externalCutoffRows.slice().reverse()
+  const pageCount = Math.max(1, Math.ceil(rows.length / externalCutoffPageSize))
+  externalCutoffPage = Math.min(Math.max(1, externalCutoffPage), pageCount)
+  const pageRows = rows.slice((externalCutoffPage - 1) * externalCutoffPageSize, externalCutoffPage * externalCutoffPageSize)
+  const prev = $('#external-cutoff-prev'); const next = $('#external-cutoff-next'); const page = $('#external-cutoff-page')
+  if (page) page.textContent = `${externalCutoffPage} / ${pageCount}`
+  if (prev) prev.disabled = externalCutoffPage <= 1
+  if (next) next.disabled = externalCutoffPage >= pageCount
+  body.innerHTML = pageRows.length ? pageRows.map((row) => `<tr><td>${escapeHtml(time(row.occurredAt))}</td><td>${escapeHtml(row.accountIds?.length ? row.accountIds.map((id) => `#${id}`).join(', ') : '全量')}</td><td>${row.action === 'restore' ? '恢复' : '切断'}</td><td>${escapeHtml(row.mode ?? 'live')}</td><td>${number(row.beforeCount)}</td><td>${number(row.afterCount)}</td><td>${escapeHtml(row.action === 'restore' ? `外部断流 · ${row.restoreReason ?? '自动恢复'}` : `外部断流 · 计划 ${number(row.durationSeconds)} 秒`)}</td><td>${escapeHtml(row.action === 'restore' ? `成功 · 恢复 ${number(row.afterCount)} 个` : '成功')}</td></tr>`).join('') : '<tr><td colspan="8" class="empty">暂无外部切断记录</td></tr>'
+  body.dataset.loaded = 'true'
+}
+
+async function loadExternalCutoffHistory() {
+  const body = $('#external-cutoff-log-body')
+  try {
+    const data = await requestJson('/api/oauth/api-key-cutoff/history')
+    externalCutoffRows = (data.events ?? []).filter((row) => row.trigger === 'external-error')
+    renderExternalCutoffLogs()
+  } catch (error) {
+    if (body) {
+      body.innerHTML = `<tr><td colspan="8" class="empty">外部切断记录读取失败：${escapeHtml(error instanceof Error ? error.message : String(error))}</td></tr>`
+      body.dataset.loaded = 'error'
+    }
+    throw error
+  }
+}
 
 function scoreProfile(row) {
   return String(row.platform ?? '').toLowerCase() === 'grok' ? 'grok' : 'codex'
@@ -589,15 +632,15 @@ function renderPoolQuality(data) {
   $('#pool-quality-state').textContent = data.sampledAt
     ? `${time(data.sampledAt)} 采样 · 最近 ${number(data.recentCallLimit)} 次 · 混池 #2 + 自用 #3`
     : '尚无质量采样，等待下一轮五分钟任务'
-  $('#pool-quality-outcomes').textContent = `${number(data.successRequests)} / ${number(data.failureRequests)}`
+  $('#pool-quality-outcomes').textContent = `${number(data.rawSuccessRequests ?? data.successRequests)} / ${number(data.rawFailureRequests ?? data.failureRequests)}`
   $('#pool-quality-failure-rate').textContent = `失败率 ${data.failureRate == null ? '—' : percent(data.failureRate)}`
-  $('#pool-quality-failover').textContent = `${number(data.failoverRecovered)} / ${number(data.failoverRequests)}`
+  $('#pool-quality-failover').textContent = `${number(data.rawFailoverRecovered ?? data.failoverRecovered)} / ${number(data.rawFailoverRequests ?? data.failoverRequests)}`
   $('#pool-quality-ttft').textContent = data.ttftP95Ms == null ? '—' : `${number(data.ttftP95Ms)} ms`
-  $('#pool-quality-ttft-samples').textContent = `首 token 样本 ${number(data.firstTokenSamples)}`
+  $('#pool-quality-ttft-samples').textContent = `首 token 样本 ${number(data.rawFirstTokenSamples ?? data.firstTokenSamples)}`
   $('#pool-quality-chart').innerHTML = historyChartMarkup(data.history ?? [], {
     series: [
       { key: 'score', className: 'chart-pool-quality', label: '当前采样' },
-      { key: 'rollingScore', className: 'chart-pool-quality-rolling', label: '一小时滚动' },
+      { key: 'rollingScore', className: 'chart-pool-quality-rolling', label: '100 点滚动' },
     ],
     valueFormatter: (value) => number(value, 1), unit: '质量分 / 100', ariaLabel: '混池和自用池综合质量评分', yMin: 0, yMax: 100,
   })
@@ -606,15 +649,15 @@ function renderPoolQuality(data) {
   const ring = $('#pool-participation-ring')
   renderDonut({
     ring, detail: $('#pool-participation-detail'), items: participation,
-    center: number(data.participationAttempts ?? data.observedAttempts), centerLabel: '调用', emptyDetail: '暂无参与样本',
+    center: number(data.rawCallCount || data.participationAttempts || data.observedAttempts), centerLabel: '调用', emptyDetail: '暂无参与样本',
     itemLabel: (item) => displayAccountName(item.accountName ?? item.wallet, item.baseUrl) || `账号 #${item.accountId}`,
-    itemDetail: (item) => `${percent(item.ratio)} · ${number(item.attempts)} 次 · ${item.costRateCnyPerApiUsd == null ? '成本未知' : `¥${number(item.costRateCnyPerApiUsd, 4)}/刀 ${item.costSource === 'detected' ? '探测' : '手工'}`}`,
+    itemDetail: (item) => `${percent(item.ratio)} · ${number(item.rawAttempts ?? item.attempts)} 次 · ${item.costRateCnyPerApiUsd == null ? '成本未知' : `¥${number(item.costRateCnyPerApiUsd, 4)}/刀 ${item.costSource === 'detected' ? '探测' : '手工'}`}`,
   })
   $('#pool-participation-legend').innerHTML = participation.length ? participation.map((item, index) => {
     const label = displayAccountName(item.accountName ?? item.wallet, item.baseUrl) || `账号 #${item.accountId}`
     const cost = item.costRateCnyPerApiUsd == null ? '成本未知' : `¥${number(item.costRateCnyPerApiUsd, 4)}/刀`
     const source = item.costSource === 'detected' ? '探测' : item.costSource === 'manual' ? '手工' : ''
-    return `<li><i style="--participation-color:${poolParticipationColors[index % poolParticipationColors.length]}"></i><span title="${escapeHtml(label)}"><b>${escapeHtml(label)}</b><em>${escapeHtml(cost)}${source ? ` · ${source}` : ''}</em></span><strong>${percent(item.ratio)}</strong><small>${number(item.attempts)} 次</small></li>`
+    return `<li><i style="--participation-color:${poolParticipationColors[index % poolParticipationColors.length]}"></i><span title="${escapeHtml(label)}"><b>${escapeHtml(label)}</b><em>${escapeHtml(cost)}${source ? ` · ${source}` : ''}</em></span><strong>${percent(item.ratio)}</strong><small>${number(item.rawAttempts ?? item.attempts)} 次</small></li>`
   }).join('') : '<li class="empty">暂无参与样本</li>'
 }
 
@@ -695,6 +738,7 @@ async function loadPoolQualityErrors() {
 
 async function scoresPage() {
   resetScoreTableViewport()
+  void loadExternalCutoffHistory().catch(() => null)
   const select = $('#score-call-limit')
   const refreshInterval = $('#score-refresh-interval')
   refreshInterval.value = String(readScoreRefreshInterval())
@@ -718,6 +762,8 @@ async function scoresPage() {
   $('#refresh-pool-errors').addEventListener('click', () => void loadPoolQualityErrors())
   $('#pool-error-prev').addEventListener('click', () => { poolErrorPage = Math.max(1, poolErrorPage - 1); void loadPoolQualityErrors() })
   $('#pool-error-next').addEventListener('click', () => { poolErrorPage += 1; void loadPoolQualityErrors() })
+  $('#external-cutoff-prev').addEventListener('click', () => { externalCutoffPage = Math.max(1, externalCutoffPage - 1); renderExternalCutoffLogs() })
+  $('#external-cutoff-next').addEventListener('click', () => { externalCutoffPage += 1; renderExternalCutoffLogs() })
   const editDialog = $('#score-upstream-edit-dialog')
   const benchmarkDialog = $('#score-benchmark-dialog')
   const createDialog = $('#score-upstream-create-dialog')
@@ -1005,7 +1051,7 @@ async function scoresPage() {
     finally { button.disabled = false }
   })
   const [initial] = await Promise.all([
-    requestJson('/api/scores'),
+    loadScoreData(),
     loadUnifiedUpstreamAssets().catch((error) => {
       $('#score-updated-time').textContent = `资产读取失败：${error instanceof Error ? error.message : String(error)}`
     }),
@@ -1032,7 +1078,7 @@ async function scoresPage() {
   setInterval(async () => {
     if (!document.hidden) {
       const [scores] = await Promise.allSettled([
-        requestJson('/api/scores'),
+        loadScoreData(),
         loadUnifiedQuotaSummary(),
         loadPoolQuality(),
         loadPoolQualityErrors(),
@@ -1882,7 +1928,7 @@ let oauthCutoffHistoryTimer = null
 function readOauthCutoffLogs() { return oauthCutoffLogs }
 function saveOauthCutoffLogs(rows) { oauthCutoffLogs = rows.slice(-100) }
 function cutoffTriggerLabel(row) {
-  const source = row.trigger === 'bugteam-import' ? 'BugTeam 导入' : row.trigger === 'account-import' ? '账号导入' : '手动'
+  const source = row.trigger === 'bugteam-import' ? 'BugTeam 导入' : row.trigger === 'account-import' ? '账号导入' : row.trigger === 'external-error' ? '外部断流' : '手动'
   if (row.action === 'restore') return `${source} · ${row.restoreReason ?? '自动恢复'}`
   return `${source} · 计划 ${number(row.durationSeconds)} 秒`
 }
@@ -1891,7 +1937,7 @@ async function loadOauthCutoffHistory() {
   oauthCutoffHistoryLoading = true
   try {
     const data = await requestJson('/api/oauth/api-key-cutoff/history')
-    oauthCutoffLogs = (data.events ?? []).map((row) => ({
+    oauthCutoffLogs = (data.events ?? []).filter((row) => row.trigger !== 'external-error').map((row) => ({
       ...row,
       trigger: cutoffTriggerLabel(row),
       resultLabel: row.action === 'restore' ? `成功 · 恢复 ${number(row.afterCount)} 个` : '成功',
@@ -1900,6 +1946,21 @@ async function loadOauthCutoffHistory() {
   } finally {
     oauthCutoffHistoryLoading = false
   }
+}
+
+async function runExternalCutoff() {
+  const accountId = Number($('#external-cutoff-account')?.value)
+  const state = $('#external-cutoff-state')
+  const button = $('#external-cutoff-run')
+  if (!Number.isSafeInteger(accountId) || accountId < 1) { if (state) state.textContent = '请输入有效账号 ID'; return }
+  const mode = $('#external-cutoff-live')?.checked ? 'live' : 'dryrun'
+  button.disabled = true; button.classList.add('is-loading')
+  try {
+    const result = await requestJson('/api/admin/external-cutoff', { method: 'POST', body: JSON.stringify({ accountId, mode, statusCode: 502, phase: 'upstream', text: 'stream_read_error upstream stream disconnected' }) })
+    if (state) state.textContent = result.matched ? `${mode} 已提交，等待 1 分钟恢复` : '未命中外部断流规则'
+    await loadOauthCutoffHistory()
+  } catch (error) { if (state) state.textContent = error instanceof Error ? error.message : String(error) }
+  finally { button.disabled = false; button.classList.remove('is-loading') }
 }
 function startOauthCutoffHistoryRefresh() {
   if (oauthCutoffHistoryTimer !== null) clearInterval(oauthCutoffHistoryTimer)
@@ -1910,7 +1971,8 @@ function startOauthCutoffHistoryRefresh() {
 function renderOauthCutoffLogs() {
   const body = $('#oauth-cutoff-log-body'); if (!body) return
   const rows = readOauthCutoffLogs().slice().reverse()
-  body.innerHTML = rows.length ? rows.map((row) => `<tr data-result="${escapeHtml(row.result ?? 'pending')}"><td>${escapeHtml(time(row.occurredAt))}</td><td>${row.action === 'restore' ? '恢复' : '切断'}</td><td>${number(row.beforeCount)}</td><td>${number(row.afterCount)}</td><td>${escapeHtml(row.trigger ?? '—')}</td><td>${escapeHtml(row.resultLabel ?? '进行中')}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">暂无调度记录</td></tr>'
+  body.innerHTML = rows.length ? rows.map((row) => `<tr data-result="${escapeHtml(row.result ?? 'pending')}"><td>${escapeHtml(time(row.occurredAt))}</td><td>${row.action === 'restore' ? '恢复' : '切断'}</td><td>${number(row.beforeCount)}</td><td>${number(row.afterCount)}</td><td>${escapeHtml(row.trigger ?? '—')}</td><td>${escapeHtml(row.resultLabel ?? '进行中')}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">暂无 API Key 调度记录</td></tr>'
+  body.dataset.loaded = 'true'
 }
 
 async function cutoffOauthApiKeys() {
@@ -1995,7 +2057,11 @@ async function restoreOauthApiKeysNow() {
 }
 
 async function oauthCostPage() {
+  const cutoffControls = document.querySelector('.oauth-cutoff-controls')
+  if (cutoffControls && !$('#external-cutoff-run')) cutoffControls.insertAdjacentHTML('beforeend', '<label><span>外部断流测试账号</span><input id="external-cutoff-account" type="number" min="1" step="1" placeholder="账号 ID" /></label><label class="toggle-field"><input id="external-cutoff-live" type="checkbox" /><span>允许真实切断</span></label><button id="external-cutoff-run" class="query-command" type="button"><span class="query-spinner" aria-hidden="true"></span><span>执行断流匹配</span></button><small id="external-cutoff-state" class="oauth-cutoff-state" aria-live="polite">默认 dryrun，只记录切断和恢复</small>')
   renderOauthCutoffLogs()
+  renderExternalCutoffLogs()
+  $('#external-cutoff-run')?.addEventListener('click', () => void runExternalCutoff())
   document.querySelectorAll('[data-oauth-profile]').forEach((button) => {
     button.addEventListener('click', async () => {
       const selected = button.dataset.oauthProfile

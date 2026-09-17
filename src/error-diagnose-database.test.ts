@@ -18,6 +18,7 @@ test("error diagnosis uses one bounded query for signatures and failover chains"
   expect(errorDiagnoseQuery).toContain("g.name = $3::text");
   expect(errorDiagnoseQuery).toContain("request_group.id = o.group_id");
   expect(errorDiagnoseQuery).toContain("api2business-probe-%");
+  expect(errorDiagnoseQuery).toContain("COALESCE(o.upstream_status_code, 0) >= 400");
   expect(errorDiagnoseQuery).toContain("probe.id = o.api_key_id");
   expect(errorDiagnoseQuery).not.toContain("account_groups");
   expect(errorDiagnoseQuery).not.toContain("api_key_prefix");

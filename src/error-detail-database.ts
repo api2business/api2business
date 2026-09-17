@@ -44,6 +44,7 @@ JSONB_BUILD_OBJECT(
   'noAvailableChannel', LOWER(message_text) LIKE '%no available channel for model%',
   'upstreamRequestFailed', LOWER(message_text) LIKE '%upstream request failed%',
   'upstreamServiceUnavailable', LOWER(message_text) LIKE '%upstream service temporarily unavailable%',
+  'highDemand', LOWER(message_text) LIKE '%currently experiencing high demand%',
   'serviceTemporarilyUnavailable', LOWER(message_text) LIKE '%service temporarily unavailable%',
   'badGateway', LOWER(message_text) LIKE '%bad gateway%',
   'gatewayTimeout', LOWER(message_text) LIKE '%gateway timeout%',
@@ -76,7 +77,12 @@ WITH enriched AS (
     EXISTS (
       SELECT 1 FROM usage_logs success
       WHERE success.request_id = o.request_id
-    ) AS recovered
+    ) AS recovered,
+    EXISTS (
+      SELECT 1 FROM ops_system_logs failover
+      WHERE failover.request_id = o.request_id
+        AND LOWER(failover.message) LIKE '%upstream_failover_switching%'
+    ) AS failover_observed
   FROM ops_error_logs o
   LEFT JOIN accounts a ON a.id = o.account_id
   LEFT JOIN api_keys k ON k.id = o.api_key_id
@@ -141,6 +147,7 @@ const projectionColumnsSql = `
     ELSE 'other'
   END AS category,
   recovered,
+  failover_observed,
   created_at,
   ${stablePhraseSql} AS stable_phrases
 `;
@@ -149,7 +156,9 @@ const errorListSql = `
 ${baseProjectionSql}
 SELECT ${projectionColumnsSql}
 FROM enriched
-WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'cyber_policy')
+  WHERE (COALESCE(status_code, 0) >= 400
+    OR COALESCE(upstream_status_code, 0) >= 400
+    OR error_type = 'cyber_policy')
 ORDER BY created_at DESC, id DESC
 LIMIT $1
 `;
@@ -214,8 +223,10 @@ export function projectErrorDetailRow(row: Row, timezone: string): Row {
     businessLimited: row.is_business_limited === true,
     category: row.category ?? "other",
     recovered: row.recovered === true,
+    failoverObserved: row.failover_observed === true,
     customerVisible:
       (integer(row.recorded_status_code) ?? 0) >= 400 ||
+      (integer(row.upstream_status_code) ?? 0) >= 400 ||
       String(row.error_type ?? "").toLowerCase() === "cyber_policy",
     stablePhrases: row.stable_phrases ?? {},
     responseEvidence: projectResponseEvidence(row),
@@ -311,6 +322,7 @@ export async function collectErrorRequestFromDatabase(
     recovered: result.rows.some((row) => row.recovered === true),
     customerVisible: result.rows.some((row) =>
       (integer(row.recorded_status_code) ?? 0) >= 400 ||
+      (integer(row.upstream_status_code) ?? 0) >= 400 ||
       String(row.error_type ?? "").toLowerCase() === "cyber_policy"
     ),
     valuesPrinted: false,

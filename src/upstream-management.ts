@@ -677,6 +677,53 @@ export class UpstreamManagementService {
     return { ok: true, accountIds, disabledCount: accountIds.length, verifiedCount: verified.length, availableOAuthCount, valuesRedacted: true };
   }
 
+  async beginExternalCutoff(context: { operationId: string; durationSeconds: number; accountId: number; mode: "live" | "dryrun"; requestId?: string; matchedKeyword?: string }): Promise<Record<string, unknown>> {
+    const account = await this.accountQuery(context.accountId);
+    if (!account || account.platform.toLowerCase() !== "openai" || account.type.toLowerCase() !== "apikey") {
+      throw new UpstreamManagementError("外部断流切号只允许作用于 OpenAI API-key 账号", 400, { accountId: context.accountId });
+    }
+    if (context.mode === "live") {
+      if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
+      if (account.schedulable) await this.runtime.setSchedulable(context.accountId, false, this.config.operations.upstreamManagement.mutationTimeoutMs);
+    }
+    recordApiKeyCutoffEvent(this.apiKeyCutoffLedgerPath(), {
+      id: `${context.operationId}:cutoff`, operationId: context.operationId, occurredAt: new Date().toISOString(), action: "cutoff",
+      beforeCount: account.schedulable ? 1 : 0, afterCount: context.mode === "live" ? 0 : account.schedulable ? 1 : 0,
+      trigger: "external-error", durationSeconds: context.durationSeconds, mode: context.mode, accountIds: [context.accountId],
+      requestId: context.requestId, matchedKeyword: context.matchedKeyword, reason: "外部断流补偿冷却", result: "success",
+      beforeSchedulable: account.schedulable,
+    });
+    return { ok: true, accountIds: [context.accountId], disabledCount: context.mode === "live" && account.schedulable ? 1 : 0, mode: context.mode, valuesRedacted: true };
+  }
+
+  async restoreExternalCutoff(accountIds: number[], context: { operationId: string; durationSeconds: number; mode: "live" | "dryrun"; requestId?: string; matchedKeyword?: string; restoreReason?: string }): Promise<Record<string, unknown>> {
+    const accountId = accountIds[0];
+    if (!Number.isSafeInteger(accountId) || accountId < 1) throw new Error("外部断流恢复缺少有效账号");
+    let restoredCount = 0;
+    const cutoffEvent = readApiKeyCutoffEvents(this.apiKeyCutoffLedgerPath(), 500)
+      .find((event) => event.action === "cutoff"
+        && event.trigger === "external-error"
+        && event.operationId === context.operationId
+        && event.accountIds?.includes(accountId));
+    const ownedSchedulableState = cutoffEvent?.beforeSchedulable === true;
+    if (context.mode === "live") {
+      const account = await this.accountQuery(accountId);
+      if (ownedSchedulableState && account?.platform.toLowerCase() === "openai" && account.type.toLowerCase() === "apikey" && account.status === "active" && !account.schedulable) {
+        if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
+        await this.runtime.setSchedulable(accountId, true, this.config.operations.upstreamManagement.mutationTimeoutMs);
+        restoredCount = 1;
+      }
+    }
+    recordApiKeyCutoffEvent(this.apiKeyCutoffLedgerPath(), {
+      id: `${context.operationId}:restore`, operationId: context.operationId, occurredAt: new Date().toISOString(), action: "restore",
+      beforeCount: context.mode === "live" ? 0 : 1, afterCount: context.mode === "live" ? restoredCount : 1,
+      trigger: "external-error", durationSeconds: context.durationSeconds, mode: context.mode, accountIds: [accountId],
+      requestId: context.requestId, matchedKeyword: context.matchedKeyword, restoreReason: context.restoreReason, reason: "外部断流补偿冷却", result: "success",
+      beforeSchedulable: ownedSchedulableState,
+    });
+    return { ok: true, accountIds: [accountId], restoredCount, mode: context.mode, valuesRedacted: true };
+  }
+
   async restoreApiKeyCutoff(accountIds: number[], context: { operationId: string; durationSeconds: number; trigger?: ApiKeyCutoffTrigger; restoreReason?: string }): Promise<Record<string, unknown>> {
     if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
     const requested = [...new Set(accountIds)].filter(positiveInteger).sort((left, right) => left - right);

@@ -15,12 +15,12 @@ export function buildSupplierQualityAssets({
   burnWindowHours = null,
   goodScoreThreshold = 80,
 } = {}) {
-  const upstreamById = new Map(upstreamAccounts.map((row) => [Number(row.id), row]))
+  const upstreamById = new Map(upstreamAccounts.map((row) => [Number(row.id ?? row.accountId ?? row.account_id), row]))
   const scoresByWallet = new Map()
   for (const row of scoreRows) {
     const score = finite(row.score)
-    const upstream = upstreamById.get(Number(row.accountId))
-    const wallet = normalizeSupplierWallet(upstream?.baseUrl)
+    const upstream = upstreamById.get(Number(row.accountId ?? row.id ?? row.account_id))
+    const wallet = normalizeSupplierWallet(upstream?.baseUrl ?? upstream?.base_url ?? row.baseUrl ?? row.base_url)
     if (score === null || !wallet) continue
     const scores = scoresByWallet.get(wallet) ?? []
     scores.push(score)
@@ -30,9 +30,10 @@ export function buildSupplierQualityAssets({
   const items = walletDistribution.map((row) => {
     const wallet = normalizeSupplierWallet(row.wallet)
     const scores = scoresByWallet.get(wallet) ?? []
-    const score = scores.length > 0 ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null
+    // Asset quality is eligible when any account in the wallet clears the threshold.
+    const score = scores.length > 0 ? Math.max(...scores) : null
     const remainingCny = Math.max(0, finite(row.remainingCny) ?? 0)
-    const schedulable = row.schedulable === true
+    const schedulable = row.schedulable === true || row.schedulable === 1 || String(row.schedulable).toLowerCase() === 'true'
     const good = score !== null && score > goodScoreThreshold && schedulable
     const band = !schedulable || score === null
       ? 'risk'

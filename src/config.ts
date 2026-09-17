@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { DateTime } from "luxon";
 import { parse } from "yaml";
@@ -31,6 +31,16 @@ export interface UpstreamManagementConfig {
     retiredSuppliers: string[];
   };
   failoverRules: FailoverRule[];
+  externalCutoff: {
+    enabled: boolean;
+    dryRun: boolean;
+    durationSeconds: number;
+    rules: Array<{
+      statusCodes: number[];
+      keywords: string[];
+      description: string;
+    }>;
+  };
 }
 
 export interface SecretRef {
@@ -561,6 +571,19 @@ export function loadConfig(path: string): AppConfig {
     };
   });
   validateFailoverRules(upstreamFailoverRules);
+  const externalCutoff = object(upstreamManagement.externalCutoff, "operations.upstreamManagement.externalCutoff");
+  const externalCutoffRulesValue = externalCutoff.rules;
+  if (!Array.isArray(externalCutoffRulesValue) || externalCutoffRulesValue.length === 0) {
+    throw new Error("operations.upstreamManagement.externalCutoff.rules must be a non-empty array");
+  }
+  const externalCutoffRules = externalCutoffRulesValue.map((value, index) => {
+    const rule = object(value, `operations.upstreamManagement.externalCutoff.rules[${index}]`);
+    return {
+      statusCodes: integers(rule, "statusCodes", `operations.upstreamManagement.externalCutoff.rules[${index}]`, 100, 599),
+      keywords: strings(rule, "keywords", `operations.upstreamManagement.externalCutoff.rules[${index}]`),
+      description: stringValue(rule, "description", `operations.upstreamManagement.externalCutoff.rules[${index}]`),
+    };
+  });
   const upstreamGroupIds = integers(upstreamManagement, "groupIds", "operations.upstreamManagement", 1, Number.MAX_SAFE_INTEGER);
   const upstreamPrimaryGroupId = integerValue(upstreamManagement, "primaryGroupId", "operations.upstreamManagement", 1);
   if (!upstreamGroupIds.includes(upstreamPrimaryGroupId)) {
@@ -921,6 +944,12 @@ export function loadConfig(path: string): AppConfig {
           };
         })(),
         failoverRules: upstreamFailoverRules,
+        externalCutoff: {
+          enabled: booleanValue(externalCutoff, "enabled", "operations.upstreamManagement.externalCutoff"),
+          dryRun: booleanValue(externalCutoff, "dryRun", "operations.upstreamManagement.externalCutoff"),
+          durationSeconds: integerValue(externalCutoff, "durationSeconds", "operations.upstreamManagement.externalCutoff", 30, 3600),
+          rules: externalCutoffRules,
+        },
       },
       upstreamBenchmark: {
         enabled: booleanValue(upstreamBenchmark, "enabled", "operations.upstreamBenchmark"),
@@ -1032,6 +1061,36 @@ export function loadConfig(path: string): AppConfig {
     configPath,
     rootDirectory,
   };
+}
+
+export function startConfigHotReload(
+  config: AppConfig,
+  path: string,
+  onReload?: (next: AppConfig) => void,
+  intervalMs = 1000,
+): () => void {
+  const configPath = resolve(path);
+  let fingerprint = "";
+  let stopped = false;
+  const refresh = (): void => {
+    if (stopped) return;
+    try {
+      const stat = statSync(configPath);
+      const nextFingerprint = `${stat.mtimeMs}:${stat.size}`;
+      if (nextFingerprint === fingerprint) return;
+      const next = loadConfig(configPath);
+      // Only publish a fully validated config. Invalid edits keep the last good version.
+      Object.assign(config, next);
+      fingerprint = nextFingerprint;
+      onReload?.(next);
+      console.log(JSON.stringify({ ok: true, component: "config-hot-reload", configPath, reloadedAt: new Date().toISOString(), valuesPrinted: false }));
+    } catch (error) {
+      console.error(JSON.stringify({ ok: false, component: "config-hot-reload", configPath, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }));
+    }
+  };
+  refresh();
+  const timer = setInterval(refresh, intervalMs);
+  return () => { stopped = true; clearInterval(timer); };
 }
 
 export function resolveDataPath(config: AppConfig, value: string): string {

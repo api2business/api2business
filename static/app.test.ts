@@ -281,11 +281,21 @@ test("operations tables request fixed server-side pages of ten records", async (
 
 test("OAuth API Key cutoff history refreshes independently from cost accounting", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const scores = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+  const oauth = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();
 
   expect(app).toContain("function startOauthCutoffHistoryRefresh() {");
   expect(app).toContain("void loadOauthCutoffHistory().catch(() => null)");
   expect(app).toContain("}, 5000)");
   expect(app).toContain("await loadOauthCost()\n  startOauthCutoffHistoryRefresh()");
+  expect(scores).toContain('id="external-cutoff-log-body"');
+  expect(scores).toContain('id="external-cutoff-prev"');
+  expect(scores).toContain('id="external-cutoff-next"');
+  expect(oauth).not.toContain('id="external-cutoff-log-body"');
+  expect(app).toContain("function loadExternalCutoffHistory() {");
+  expect(app).toContain("row.trigger === 'external-error'");
+  expect(app).toContain("row.trigger !== 'external-error'");
+  expect(app).toContain("const externalCutoffPageSize = 10");
 });
 
 test("OAuth cost table separates live status buckets and does not infer archived status", async () => {
@@ -422,6 +432,7 @@ test("priority history renders one combined pool label with per-pool counts", as
   expect(app).toContain("row.profile_changed_counts ?? {}");
   expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
   expect(app).toContain("key: 'rollingScore'");
+  expect(app).toContain("label: '100 点滚动'");
   expect(html).toContain('id="score-create-upstream"');
   expect(html).toContain('id="score-upstream-create-dialog"');
 });
@@ -524,9 +535,14 @@ test("pool quality is sampled separately above the account table with participat
   expect(html.indexOf('class="pool-quality-band"')).toBeLessThan(html.indexOf('class="table-section"'));
   expect(html.indexOf('class="pool-quality-head"')).toBeLessThan(html.indexOf('class="quota-monitor unified-quota-monitor"'));
   expect(html).toContain('id="pool-quality-chart"');
+  expect(html).toContain('最近 100 个采样点');
+  expect(html).toContain('每点统计 1000 次调用');
   expect(html).toContain('id="pool-participation-ring"');
   expect(source).toContain("requestJson('/api/upstreams/pool-quality')");
-  expect(source).toContain('data.participationAttempts ?? data.observedAttempts');
+  expect(source).toContain('data.rawCallCount || data.participationAttempts || data.observedAttempts');
+  expect(source).toContain('data.rawSuccessRequests ?? data.successRequests');
+  expect(source).toContain('data.rawFailureRequests ?? data.failureRequests');
+  expect(source).toContain('item.rawAttempts ?? item.attempts');
   expect(source).toContain("item.accountName ?? item.wallet");
   expect(source).toContain("item.costSource === 'detected'");
   expect(source).toContain("最近 ${number(data.recentCallLimit)} 次");

@@ -4,7 +4,11 @@ import type {
   Sub2ApiReadPriority,
 } from "./sub2api-read-executor";
 import { isOAuthAccount } from "./account-score-eligibility";
-import { attributedInternalUpstreamFailureSql, modelRoutingPatternsSql } from "./scoring-error-policy";
+import {
+  attributedInternalUpstreamFailureSql,
+  modelRoutingPatternsSql,
+  stableUpstreamErrorPatternsSql,
+} from "./scoring-error-policy";
 
 type Row = Record<string, unknown>;
 
@@ -178,16 +182,8 @@ account_stats AS (
             WHEN ${attributedInternalUpstreamFailureSql("o")} THEN true
             WHEN LOWER(COALESCE(o.error_phase, '')) IN ('internal', 'client', 'business') THEN false
             WHEN o.error_phase = 'upstream' OR LOWER(COALESCE(o.error_type, '')) LIKE '%upstream%' THEN true
-            WHEN LOWER(COALESCE(o.error_message, '')) LIKE ANY (ARRAY[
-              '%upstream service temporarily unavailable%',
-              '%upstream request failed%',
-              '%bad gateway%',
-              '%gateway timeout%',
-              '%error code: 502%',
-              '%error code: 503%',
-              '%error code: 504%',
-              '%error code: 524%'
-            ]) THEN true
+            WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
+              o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${stableUpstreamErrorPatternsSql}) THEN true
             ELSE false
           END AS scoreable
         FROM ops_error_logs o
@@ -425,6 +421,7 @@ export function scoreRecentDatabaseRow(
     groupIds: Array.isArray(row.group_ids) ? row.group_ids.map(Number) : [],
     groupNames: Array.isArray(row.group_names) ? row.group_names.map(String) : [],
     currentAvailable,
+    currentlyAvailable: currentAvailable,
     availabilityReason: availabilityReason(row, currentAvailable, billingErrorPatterns, now),
     currentStatus: row.status,
     currentError: row.error_message ?? null,

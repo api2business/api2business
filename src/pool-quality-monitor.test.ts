@@ -23,13 +23,19 @@ test("pool quality uses one queued query and separates exact upstream accounts",
   } as unknown as Sub2ApiReadClient;
   const sample = await collectPoolQualitySample(loadConfig("config/api2business.example.yaml"), reads, "2026-08-03T00:00:00.000Z");
   expect(queries).toBe(1);
+  expect(sample.rawCallCount).toBe(3);
+  expect(sample.rawSuccessRequests).toBe(2);
+  expect(sample.rawFailureRequests).toBe(1);
+  expect(sample.rawFailoverRequests).toBe(1);
+  expect(sample.rawFailoverRecovered).toBe(0);
+  expect(sample.rawFirstTokenSamples).toBe(2);
   expect(sample.observedAttempts).toBe(3);
   expect(sample.participation).toHaveLength(2);
   expect(sample.failureRequests).toBe(1);
   expect(sample.errorAttribution).toEqual({ total: 1, attributed: 1, unattributed: 0, completenessRate: 1 });
   expect(sample.participation).toEqual([
-    { accountId: 10, accountName: "https://api.example.com plus 0.05", baseUrl: "https://api.example.com/v1", attempts: 2, ratio: 0.666667, costRateCnyPerApiUsd: 0.05, costSource: "manual" },
-    { accountId: 11, accountName: "https://api.example.com pro 0.08", baseUrl: "https://api.example.com", attempts: 1, ratio: 0.333333, costRateCnyPerApiUsd: 0.08, costSource: "manual" },
+    { accountId: 10, accountName: "https://api.example.com plus 0.05", baseUrl: "https://api.example.com/v1", attempts: 2, rawAttempts: 2, ratio: 0.666667, costRateCnyPerApiUsd: 0.05, costSource: "manual" },
+    { accountId: 11, accountName: "https://api.example.com pro 0.08", baseUrl: "https://api.example.com", attempts: 1, rawAttempts: 1, ratio: 0.333333, costRateCnyPerApiUsd: 0.08, costSource: "manual" },
   ]);
 });
 
@@ -52,13 +58,16 @@ test("pool quality applies the same recent-call decay buckets as account scoring
     status() { throw new Error("not used"); },
   } as unknown as Sub2ApiReadClient;
   const sample = await collectPoolQualitySample(config, reads, "2026-08-03T00:00:00.000Z");
+  expect(sample.rawCallCount).toBe(2);
+  expect(sample.rawSuccessRequests).toBe(1);
+  expect(sample.rawFailureRequests).toBe(1);
   expect(sample.effectiveSampleWeight).toBe(1.5);
   expect(sample.successRequests).toBe(1);
   expect(sample.failureRequests).toBe(0.5);
   expect(sample.observedAttempts).toBe(1.5);
   expect(sample.sampleWeighting).toBe("recent-call-decay-buckets");
-  expect(sample.participation[0]).toMatchObject({ accountId: 10, attempts: 1, ratio: 0.666667 });
-  expect(sample.participation[1]).toMatchObject({ accountId: 11, attempts: 0.5, ratio: 0.333333 });
+  expect(sample.participation[0]).toMatchObject({ accountId: 10, attempts: 1, rawAttempts: 1, ratio: 0.666667 });
+  expect(sample.participation[1]).toMatchObject({ accountId: 11, attempts: 0.5, rawAttempts: 1, ratio: 0.333333 });
 });
 
 test("pool quality excludes every monitor-user key without changing account scoring", () => {
@@ -123,4 +132,14 @@ test("pool quality history preserves bounded chart fields", () => {
   expect(poolQualityHistory([{ sampled_at: "2026-08-03T00:00:00Z", score: "88.5", failure_rate: "0.02", ttft_p95_ms: 2500 }])).toEqual([
     { sampledAt: "2026-08-03T00:00:00.000Z", score: 88.5, failureRate: 0.02, ttftP95Ms: 2500, rollingScore: 88.5 },
   ]);
+});
+
+test("pool quality rolling score uses the latest 100 sample points", () => {
+  const rows = Array.from({ length: 101 }, (_, index) => ({
+    sampled_at: new Date(Date.UTC(2026, 7, 3, 0, index)).toISOString(),
+    score: index === 0 ? 0 : 100,
+    failure_rate: "0",
+    ttft_p95_ms: 2500,
+  }));
+  expect(poolQualityHistory(rows).at(-1)?.rollingScore).toBe(100);
 });

@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>OAuth 实时成本 | Api2Business</title>
   <link rel="stylesheet" href="/styles.css?v=oauth-mobile-layout-v1" />
-  <script src="/app.js?v=oauth-mobile-layout-v1" type="module"></script>
+  <script src="/app.js?v=external-cutoff-pagination-v2" type="module"></script>
 </head>
 <body data-page="oauth-cost">
   <div data-shell></div>
@@ -34,7 +34,7 @@
         </div>
       </section>
       <div class="table-wrap"><table class="data-table oauth-cost-table"><thead><tr><th>核算范围</th><th>账号类型</th><th>账号数</th><th>有产出</th><th>状态分布</th><th>采购成本</th><th>平均单价</th><th>当前产出 / 实时预期 / 初始预期</th><th>成本计算</th><th>请求</th><th>Token</th></tr></thead><tbody id="oauth-cost-body"><tr><td colspan="11" class="empty">正在读取当前号池 OAuth 成本</td></tr></tbody></table></div>
-      <section class="oauth-cutoff-log-section" aria-labelledby="oauth-cutoff-log-title"><div class="table-toolbar"><div><h2 id="oauth-cutoff-log-title">API Key 调度记录</h2><p class="section-state">切断与恢复分别记录</p></div></div><div class="table-wrap"><table class="data-table oauth-cutoff-log-table"><thead><tr><th>时间</th><th>动作</th><th>操作前可调度</th><th>操作后可调度</th><th>触发方式</th><th>结果</th></tr></thead><tbody id="oauth-cutoff-log-body"><tr><td colspan="6" class="empty">暂无调度记录</td></tr></tbody></table></div></section>
+      <section class="oauth-cutoff-log-section" aria-labelledby="oauth-cutoff-log-title"><div class="table-toolbar"><div><h2 id="oauth-cutoff-log-title">API Key 调度记录</h2><p class="section-state">仅展示 API Key 的切断与恢复</p></div></div><div class="table-wrap"><table class="data-table oauth-cutoff-log-table"><thead><tr><th>时间</th><th>动作</th><th>操作前可调度</th><th>操作后可调度</th><th>触发方式</th><th>结果</th></tr></thead><tbody id="oauth-cutoff-log-body"><tr><td colspan="6" class="empty">暂无 API Key 调度记录</td></tr></tbody></table></div></section>
     </section>
     <section class="table-section oauth-archived-section">
       <div class="table-toolbar"><div><h2>已归档 OAuth 成本</h2><p id="oauth-archived-state" class="section-state">等待查询已归档账号</p></div><nav class="table-pagination" aria-label="已归档 OAuth 成本分页"><button id="oauth-archived-prev" class="query-command" type="button">上一页</button><span id="oauth-archived-page" class="section-state" aria-live="polite">1 / 1</span><button id="oauth-archived-next" class="query-command" type="button">下一页</button></nav></div>

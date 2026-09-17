@@ -205,3 +205,40 @@ export function emitErrorInspection(value: Row, json: boolean): void {
     ].join("  "));
   }
 }
+
+export function emitCooldownDiagnosis(value: Row, json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(value, null, 2));
+    return;
+  }
+  const summary = typeof value.summary === "object" && value.summary !== null ? value.summary as Row : {};
+  console.log(
+    `API2BUSINESS COOLDOWN DIAGNOSIS events=${String(summary.cooldownEvents ?? 0)}`
+    + ` accounts=${String(summary.affectedAccounts ?? 0)}`
+    + ` linkedUpstream=${String(summary.linkedUpstreamEvents ?? 0)}`
+    + ` temporal=${String(summary.temporalLinkedEvents ?? 0)}`
+    + ` suspectClient=${String(summary.suspectClientEvents ?? 0)}`
+    + ` failover=${String(summary.followedByFailoverEvents ?? 0)}`
+    + ` activeNow=${String(summary.currentlyActiveEvents ?? 0)}`,
+  );
+  console.log("suspectClient 是候选项：同一 request_id 仅关联 4xx，没有上游 5xx；无 request_id 的事件需要日志交叉核对。 ");
+  console.log("TIME  ACCOUNT  MODEL  STATUS  RULE  KEYWORD  REQUEST_ID  LINKED  FAILOVER  ACTIVE  EVIDENCE");
+  const events = Array.isArray(value.events) ? value.events : [];
+  for (const raw of events) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const row = raw as Row;
+    console.log([
+      String(row.triggeredAt ?? "-").replace("T", " ").slice(0, 19).padEnd(19),
+      String(row.accountId ?? "-").padStart(7),
+      String(row.model ?? "-").padEnd(18),
+      String(row.statusCode ?? "-").padStart(6),
+      String(row.ruleIndex ?? "-").padStart(4),
+      String(row.matchedKeyword ?? "-").slice(0, 28).padEnd(28),
+      String(row.requestId ?? "-").padEnd(36),
+      String(row.linkedErrorCount ?? 0).padStart(6),
+      (row.followedByFailover === true ? "yes" : "no").padStart(8),
+      (row.currentlyActive === true ? "yes" : "no").padStart(6),
+      String(row.evidenceClass ?? "-"),
+    ].join("  "));
+  }
+}

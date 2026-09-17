@@ -1,7 +1,7 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-export type ApiKeyCutoffTrigger = "manual" | "account-import" | "bugteam-import" | "public-recovery";
+export type ApiKeyCutoffTrigger = "manual" | "account-import" | "bugteam-import" | "public-recovery" | "external-error";
 
 export interface ApiKeyCutoffEvent {
   id: string;
@@ -14,6 +14,12 @@ export interface ApiKeyCutoffEvent {
   durationSeconds: number;
   restoreReason?: string;
   result: "success";
+  mode?: "live" | "dryrun";
+  accountIds?: number[];
+  requestId?: string;
+  matchedKeyword?: string;
+  reason?: string;
+  beforeSchedulable?: boolean;
 }
 
 export function readApiKeyCutoffEvents(path: string, limit = 100): ApiKeyCutoffEvent[] {

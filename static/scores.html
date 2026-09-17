@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>上游资产与实时成本 | Api2Business</title>
   <link rel="stylesheet" href="/styles.css?v=score-freshness-v1" />
-  <script src="/app.js?v=score-freshness-v1" type="module"></script>
+  <script src="/app.js?v=external-cutoff-pagination-v2" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -48,8 +48,12 @@
         <figure><figcaption><span>实时成本</span><small>最近 8 小时</small></figcaption><svg id="quota-cost-chart" viewBox="0 0 1000 150" role="img" aria-label="上游最近八小时实时成本"></svg></figure>
       </div>
     </section>
+    <section class="table-section external-cutoff-log-section" aria-labelledby="external-cutoff-log-title">
+      <div class="table-toolbar record-table-toolbar"><div><h2 id="external-cutoff-log-title">外部切断记录</h2><p class="section-state">断流匹配产生的切断与恢复，不计入 API Key 调度记录</p></div><nav class="table-pagination" aria-label="外部切断记录分页"><button id="external-cutoff-prev" class="query-command" type="button" disabled>上一页</button><span id="external-cutoff-page" class="section-state" aria-live="polite">1 / 1</span><button id="external-cutoff-next" class="query-command" type="button" disabled>下一页</button></nav></div>
+      <div class="table-wrap"><table class="data-table external-cutoff-log-table"><thead><tr><th>时间</th><th>账号</th><th>动作</th><th>模式</th><th>操作前可调度</th><th>操作后可调度</th><th>触发方式</th><th>结果</th></tr></thead><tbody id="external-cutoff-log-body"><tr><td colspan="8" class="empty">正在读取外部切断记录</td></tr></tbody></table></div>
+    </section>
     <section class="pool-quality-band" aria-label="综合质量趋势与上游参与比例">
-      <figure class="pool-quality-trend"><figcaption><span>综合评分趋势</span><small>最近 8 小时 · 5 分钟采样</small></figcaption><svg id="pool-quality-chart" viewBox="0 0 1000 150" role="img" aria-label="混池和自用池最近八小时综合质量评分"></svg></figure>
+      <figure class="pool-quality-trend"><figcaption><span>综合评分趋势</span><small>最近 100 个采样点 · 每点统计 1000 次调用</small></figcaption><svg id="pool-quality-chart" viewBox="0 0 1000 150" role="img" aria-label="混池和自用池最近一百个采样点综合质量评分"></svg></figure>
       <figure class="pool-participation"><figcaption><span>上游参与比例</span><small>最近 1000 次调用</small></figcaption><div class="pool-participation-body"><div class="donut-stack"><div id="pool-participation-ring" class="pool-participation-ring" role="img" aria-label="各上游参与比例"><strong>—</strong><small>调用</small></div><p id="pool-participation-detail" class="donut-hover-detail">悬停查看账号详情</p></div><ol id="pool-participation-legend" class="pool-participation-legend"><li class="empty">暂无参与样本</li></ol></div></figure>
     </section>
     <section class="table-section">

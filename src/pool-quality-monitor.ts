@@ -1,7 +1,11 @@
 import type { AppConfig } from "./config";
 import { recentCallBucketWeight, scoreRecentDatabaseRow } from "./account-score-database";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
-import { attributedInternalUpstreamFailureSql, modelRoutingPatternsSql } from "./scoring-error-policy";
+import {
+  attributedInternalUpstreamFailureSql,
+  modelRoutingPatternsSql,
+  stableUpstreamErrorPatternsSql,
+} from "./scoring-error-policy";
 type Row = Record<string, unknown>;
 
 export interface PoolParticipation {
@@ -9,6 +13,7 @@ export interface PoolParticipation {
   accountName: string;
   baseUrl: string;
   attempts: number;
+  rawAttempts: number;
   ratio: number;
   costRateCnyPerApiUsd: number | null;
   costSource: "detected" | "manual" | null;
@@ -96,11 +101,7 @@ WITH internal_probe_keys AS (
         WHEN ${attributedInternalUpstreamFailureSql("source")} THEN true
         WHEN LOWER(COALESCE(source.error_phase, '')) IN ('internal', 'client', 'business') THEN false
         WHEN source.error_phase = 'upstream' OR LOWER(COALESCE(source.error_type, '')) LIKE '%upstream%' THEN true
-        WHEN LOWER(COALESCE(source.error_message, '')) LIKE ANY (ARRAY[
-          '%upstream service temporarily unavailable%', '%upstream request failed%',
-          '%bad gateway%', '%gateway timeout%', '%error code: 502%', '%error code: 503%',
-          '%error code: 504%', '%error code: 524%'
-        ]) THEN true
+        WHEN source.message_text LIKE ANY (${stableUpstreamErrorPatternsSql}) THEN true
         ELSE false
       END AS scoreable,
       CASE
@@ -147,7 +148,7 @@ export const poolQualitySql = `${poolQualityEventsSql}
 SELECT e.*,
   EXISTS (
     SELECT 1 FROM ops_system_logs s
-    WHERE s.account_id=e.account_id AND s.request_id=e.request_id
+    WHERE s.request_id=e.request_id
       AND s.message LIKE '%upstream_failover_switching'
   ) AS failover_triggered
 FROM recent_events e ORDER BY e.created_at DESC, e.id DESC
@@ -159,7 +160,7 @@ export const poolQualityErrorsSql = `${poolQualityEventsSql}, filtered_errors AS
   SELECT e.*,
     EXISTS (
       SELECT 1 FROM ops_system_logs s
-      WHERE s.account_id=e.account_id AND s.request_id=e.request_id
+      WHERE s.request_id=e.request_id
         AND s.message LIKE '%upstream_failover_switching'
     ) AS failover_triggered
   FROM recent_events e
@@ -222,6 +223,12 @@ function percentile(values: number[], ratio: number): number | null {
 
 export interface PoolQualitySample {
   sampledAt: string;
+  rawCallCount: number;
+  rawSuccessRequests: number;
+  rawFailureRequests: number;
+  rawFailoverRequests: number;
+  rawFailoverRecovered: number;
+  rawFirstTokenSamples: number;
   score: number | null;
   grade: string;
   observedAttempts: number;
@@ -284,7 +291,7 @@ export async function collectPoolQualitySample(
   const ttft = ttftRows.map((row) => Number(row.first_token_ms));
   const ttftWeights = ttftRows.map(weight);
   const effectiveSampleWeight = weightedCount(weightedRows);
-  const accounts = new Map<number, { accountName: string; baseUrl: string; attempts: number }>();
+  const accounts = new Map<number, { accountName: string; baseUrl: string; attempts: number; rawAttempts: number }>();
   for (const row of weightedRows) {
     const accountId = Number(row.account_id);
     if (!Number.isInteger(accountId) || accountId < 1) continue;
@@ -293,6 +300,7 @@ export async function collectPoolQualitySample(
       accountName: String(row.account_name ?? `#${accountId}`),
       baseUrl: String(row.base_url ?? ""),
       attempts: (current?.attempts ?? 0) + weight(row),
+      rawAttempts: (current?.rawAttempts ?? 0) + 1,
     });
   }
   const scored = scoreRecentDatabaseRow({
@@ -315,12 +323,19 @@ export async function collectPoolQualitySample(
   }, recentCallLimit, config.sub2api.poolScorePolicy);
   return {
     sampledAt,
+    rawCallCount: rows.length,
+    rawSuccessRequests: successes.length,
+    rawFailureRequests: failures.length,
+    rawFailoverRequests: failovers.length,
+    rawFailoverRecovered: recovered.length,
+    rawFirstTokenSamples: ttftRows.length,
     score: scored.score == null ? null : Number(scored.score),
     grade: String(scored.grade ?? "insufficient"),
     observedAttempts: Number(scored.observedAttempts ?? effectiveSampleWeight),
     successRequests: weightedCount(successes),
     failureRequests: weightedCount(failures),
-    failureRate: scored.failureRate == null ? null : Number(scored.failureRate),
+    // The dashboard count is raw-call based; weighted failureRate remains inside scored.
+    failureRate: rows.length > 0 ? failures.length / rows.length : null,
     failoverRequests: Number(scored.failoverRequests ?? 0),
     failoverRecovered: Number(scored.failoverRecovered ?? 0),
     ttftP95Ms: scored.ttftP95Ms == null ? null : Number(scored.ttftP95Ms),
@@ -342,6 +357,7 @@ export async function collectPoolQualitySample(
         accountName: account.accountName,
         baseUrl: account.baseUrl,
         attempts: account.attempts,
+        rawAttempts: account.rawAttempts,
         ratio: effectiveSampleWeight > 0 ? Math.round(account.attempts / effectiveSampleWeight * 1_000_000) / 1_000_000 : 0,
         costRateCnyPerApiUsd: manualMatch ? Number(manualMatch[1]) : null,
         costSource: manualMatch ? "manual" : null,
@@ -406,7 +422,7 @@ export async function collectPoolQualityErrors(
   };
 }
 
-export function poolQualityHistory(rows: Row[]) {
+export function poolQualityHistory(rows: Row[], rollingWindowPoints = 100) {
   const points = rows.map((row) => ({
     sampledAt: new Date(String(row.sampled_at)).toISOString(),
     score: row.score == null ? null : Number(row.score),
@@ -414,8 +430,8 @@ export function poolQualityHistory(rows: Row[]) {
     ttftP95Ms: row.ttft_p95_ms == null ? null : Number(row.ttft_p95_ms),
   }));
   return points.map((point, index) => {
-    const cutoff = Date.parse(point.sampledAt) - 60 * 60 * 1000;
-    const window = points.slice(0, index + 1).filter((candidate) => Date.parse(candidate.sampledAt) >= cutoff && candidate.score != null && Number.isFinite(candidate.score));
+    const window = points.slice(Math.max(0, index + 1 - rollingWindowPoints), index + 1)
+      .filter((candidate) => candidate.score != null && Number.isFinite(candidate.score));
     const rollingScore = window.length ? window.reduce((total, candidate) => total + Number(candidate.score), 0) / window.length : null;
     return { ...point, rollingScore: rollingScore == null ? null : Math.round(rollingScore * 10) / 10 };
   });

@@ -67,7 +67,11 @@ selected_errors AS (
     AND NOT EXISTS (
       SELECT 1 FROM internal_probe_keys probe WHERE probe.id = o.api_key_id
     )
-    AND (COALESCE(o.status_code, 0) >= 400 OR o.error_type = 'cyber_policy')
+    AND (
+      COALESCE(o.status_code, 0) >= 400
+      OR COALESCE(o.upstream_status_code, 0) >= 400
+      OR o.error_type = 'cyber_policy'
+    )
     AND ($6::text IS NULL OR o.request_id::text = ANY(string_to_array($6::text, ',')))
     AND ($7::text IS NULL OR LOWER(COALESCE(o.requested_model, o.model, 'unknown')) = LOWER($7::text))
   ORDER BY o.created_at DESC, o.id DESC
@@ -108,6 +112,7 @@ classified AS (
       WHEN message_text LIKE '%model_not_found%'
         OR message_text LIKE '%model not found%' THEN 'model_not_found'
       WHEN message_text LIKE '%overloaded%' THEN 'upstream_overloaded'
+      WHEN message_text LIKE '%currently experiencing high demand%' THEN 'server_overloaded'
       WHEN message_text LIKE '%error code: 524%' THEN 'error_code_524'
       WHEN message_text LIKE '%error code: 504%' THEN 'error_code_504'
       WHEN message_text LIKE '%error code: 502%' THEN 'error_code_502'
@@ -139,6 +144,7 @@ classified AS (
         WHEN message_text LIKE '%model_not_found%'
           OR message_text LIKE '%model not found%' THEN 'model_not_found'
         WHEN message_text LIKE '%overloaded%' THEN 'upstream_overloaded'
+        WHEN message_text LIKE '%currently experiencing high demand%' THEN 'server_overloaded'
         WHEN message_text LIKE '%error code: 524%' THEN 'error_code_524'
         WHEN message_text LIKE '%error code: 504%' THEN 'error_code_504'
         WHEN message_text LIKE '%error code: 502%' THEN 'error_code_502'

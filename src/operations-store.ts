@@ -169,6 +169,12 @@ export class OperationsStore {
         ON api2business_oauth_runtime_samples(profile, sampled_at DESC);
       CREATE TABLE IF NOT EXISTS api2business_pool_quality_samples (
         sampled_at timestamptz PRIMARY KEY,
+        raw_call_count integer NOT NULL DEFAULT 0,
+        raw_success_requests integer NOT NULL DEFAULT 0,
+        raw_failure_requests integer NOT NULL DEFAULT 0,
+        raw_failover_requests integer NOT NULL DEFAULT 0,
+        raw_failover_recovered integer NOT NULL DEFAULT 0,
+        raw_first_token_samples integer NOT NULL DEFAULT 0,
         score numeric,
         grade text NOT NULL,
         observed_attempts numeric NOT NULL,
@@ -212,6 +218,18 @@ export class OperationsStore {
         ALTER COLUMN error_unattributed TYPE numeric USING error_unattributed::numeric;
       ALTER TABLE api2business_pool_quality_samples
         ADD COLUMN IF NOT EXISTS effective_sample_weight numeric NOT NULL DEFAULT 0;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS raw_call_count integer NOT NULL DEFAULT 0;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS raw_success_requests integer NOT NULL DEFAULT 0;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS raw_failure_requests integer NOT NULL DEFAULT 0;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS raw_failover_requests integer NOT NULL DEFAULT 0;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS raw_failover_recovered integer NOT NULL DEFAULT 0;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS raw_first_token_samples integer NOT NULL DEFAULT 0;
       ALTER TABLE api2business_pool_quality_samples
         ADD COLUMN IF NOT EXISTS sample_weighting text NOT NULL DEFAULT 'recent-call-decay-buckets';
       CREATE INDEX IF NOT EXISTS api2business_pool_quality_samples_time_idx
@@ -543,11 +561,15 @@ export class OperationsStore {
   async addPoolQualitySample(sample: import("./pool-quality-monitor").PoolQualitySample) {
     await this.sql`
       INSERT INTO api2business_pool_quality_samples (
-        sampled_at, score, grade, observed_attempts, success_requests, failure_requests,
+        sampled_at, raw_call_count, raw_success_requests, raw_failure_requests,
+        raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
+        score, grade, observed_attempts, success_requests, failure_requests,
         failure_rate, failover_requests, failover_recovered, ttft_p95_ms,
         first_token_samples, error_attribution_total, error_attributed, error_unattributed,
         effective_sample_weight, sample_weighting, participation
-      ) VALUES (${sample.sampledAt}, ${sample.score}, ${sample.grade}, ${sample.observedAttempts},
+      ) VALUES (${sample.sampledAt}, ${sample.rawCallCount}, ${sample.rawSuccessRequests},
+        ${sample.rawFailureRequests}, ${sample.rawFailoverRequests}, ${sample.rawFailoverRecovered},
+        ${sample.rawFirstTokenSamples}, ${sample.score}, ${sample.grade}, ${sample.observedAttempts},
         ${sample.successRequests}, ${sample.failureRequests}, ${sample.failureRate},
         ${sample.failoverRequests}, ${sample.failoverRecovered}, ${sample.ttftP95Ms},
         ${sample.firstTokenSamples}, ${sample.errorAttribution.total},
@@ -560,7 +582,9 @@ export class OperationsStore {
 
   async getPoolQualitySamples(hours: number) {
     return await this.sql`
-      SELECT sampled_at, score, grade, observed_attempts, success_requests,
+      SELECT sampled_at, raw_call_count, raw_success_requests, raw_failure_requests,
+        raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
+        score, grade, observed_attempts, success_requests,
         failure_requests, failure_rate, failover_requests, failover_recovered,
         ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
         error_unattributed, effective_sample_weight, sample_weighting, participation
@@ -570,6 +594,29 @@ export class OperationsStore {
            SELECT sampled_at FROM api2business_pool_quality_samples
            ORDER BY sampled_at DESC LIMIT 13
          )
+      ORDER BY sampled_at
+    `;
+  }
+
+  async getPoolQualitySamplesByLimit(limit: number) {
+    return await this.sql`
+      SELECT sampled_at, raw_call_count, raw_success_requests, raw_failure_requests,
+        raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
+        score, grade, observed_attempts, success_requests,
+        failure_requests, failure_rate, failover_requests, failover_recovered,
+        ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
+        error_unattributed, effective_sample_weight, sample_weighting, participation
+      FROM (
+        SELECT sampled_at, raw_call_count, raw_success_requests, raw_failure_requests,
+          raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
+          score, grade, observed_attempts, success_requests,
+          failure_requests, failure_rate, failover_requests, failover_recovered,
+          ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
+          error_unattributed, effective_sample_weight, sample_weighting, participation
+        FROM api2business_pool_quality_samples
+        ORDER BY sampled_at DESC
+        LIMIT ${limit}
+      ) recent
       ORDER BY sampled_at
     `;
   }

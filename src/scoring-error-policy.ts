@@ -13,11 +13,26 @@ const modelRoutingPatterns = [
   "%no available channel for model%",
 ];
 
+export const stableUpstreamErrorPatterns = [
+  "upstream service temporarily unavailable",
+  "upstream request failed",
+  "bad gateway",
+  "gateway timeout",
+  "error code: 502",
+  "error code: 503",
+  "error code: 504",
+  "error code: 524",
+  "we're currently experiencing high demand",
+  "we are currently experiencing high demand",
+];
+
 function sqlLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
 export const modelRoutingPatternsSql = `ARRAY[${modelRoutingPatterns.map(sqlLiteral).join(", ")}]`;
+
+export const stableUpstreamErrorPatternsSql = `ARRAY[${stableUpstreamErrorPatterns.map((pattern) => sqlLiteral(`%${pattern}%`)).join(", ")}]`;
 
 // 流已提交后的上游 5xx 可能被网关记录为 internal；只采用明确的上游状态证据。
 // 调用方仍先排除客户输入、模型路由和账务错误。

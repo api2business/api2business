@@ -6,7 +6,7 @@ test("normalizes supplier wallets consistently with quota accounting", () => {
   expect(normalizeSupplierWallet("https://a.test/")).toBe("https://a.test");
 });
 
-test("weights supplier quality by balance and keeps the good threshold strict", () => {
+test("uses any qualifying account in a wallet for good asset eligibility", () => {
   const result = buildSupplierQualityAssets({
     walletDistribution: [
       { wallet: "https://a.test", remainingCny: 60, remainingUsd: 60, schedulable: true },
@@ -31,7 +31,7 @@ test("weights supplier quality by balance and keeps the good threshold strict", 
   expect(result.goodBalanceCny).toBe(60);
   expect(result.goodBalanceRatio).toBe(0.6);
   expect(result.estimatedGoodAvailableHours).toBe(6);
-  expect(result.items.find((row) => row.wallet === "https://a.test")).toMatchObject({ score: 85, good: true, ratio: 0.6 });
+  expect(result.items.find((row) => row.wallet === "https://a.test")).toMatchObject({ score: 90, good: true, ratio: 0.6 });
   expect(result.items.find((row) => row.wallet === "https://b.test")).toMatchObject({ score: 80, good: false, ratio: 0.3 });
   expect(result.unknownScoreWallets).toBe(1);
   expect(result.qualityBands).toEqual([

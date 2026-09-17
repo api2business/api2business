@@ -79,6 +79,8 @@ func OperationWorkflow(ctx workflow.Context, input OperationWorkflowInput) (any,
 func ApiKeyCutoffWorkflow(ctx workflow.Context, input OperationWorkflowInput) (any, error) {
 	ctx = workflow.WithActivityOptions(ctx, activityOptions(input.ActivityStartToCloseTimeout, input.MaximumAttempts))
 	command := input.Operation.Command
+	trigger, _ := command["trigger"].(string)
+	externalError := trigger == "external-error"
 	cutoffOperationID, _ := command["operationId"].(string)
 	if cutoffOperationID == "" {
 		cutoffOperationID = input.Operation.OperationID
@@ -108,7 +110,7 @@ func ApiKeyCutoffWorkflow(ctx workflow.Context, input OperationWorkflowInput) (a
 	}
 	var guardResult map[string]any
 	restoreReason := "到期自动恢复"
-	for workflow.Now(ctx).Before(deadline) && !restoreNow {
+	for workflow.Now(ctx).Before(deadline) && !restoreNow && !externalError {
 		guardRequest := OperationRequest{OperationID: input.Operation.OperationID + ":guard", Command: map[string]any{
 			"kind": "upstream.apikey.cutoff", "phase": "guard", "operationId": cutoffOperationID, "durationSeconds": durationSeconds,
 			"trigger": command["trigger"],
@@ -134,6 +136,16 @@ func ApiKeyCutoffWorkflow(ctx workflow.Context, input OperationWorkflowInput) (a
 		selector.AddFuture(timer, func(workflow.Future) {})
 		selector.Select(ctx)
 	}
+	if externalError && !restoreNow {
+		timer := workflow.NewTimer(ctx, deadline.Sub(workflow.Now(ctx)))
+		selector := workflow.NewSelector(ctx)
+		selector.AddReceive(signalChannel, func(channel workflow.ReceiveChannel, more bool) {
+			channel.Receive(ctx, &signalPayload)
+			restoreNow = true
+		})
+		selector.AddFuture(timer, func(workflow.Future) {})
+		selector.Select(ctx)
+	}
 	if restoreNow {
 		restoreReason = "立即恢复"
 	}
@@ -147,6 +159,11 @@ func ApiKeyCutoffWorkflow(ctx workflow.Context, input OperationWorkflowInput) (a
 		"accountIds":      accountIDs,
 		"trigger":         command["trigger"],
 		"restoreReason":   restoreReason,
+	}
+	if externalError {
+		restoreCommand["mode"] = command["mode"]
+		restoreCommand["requestId"] = command["requestId"]
+		restoreCommand["matchedKeyword"] = command["matchedKeyword"]
 	}
 	restoreRequest := OperationRequest{OperationID: input.Operation.OperationID + ":restore", Command: restoreCommand}
 	var restoreResult map[string]any

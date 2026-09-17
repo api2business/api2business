@@ -11,6 +11,7 @@ import { TemporalGateway } from "../../../../src/temporal-client";
 import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
 import { emitErrorDiagnosis, emitErrorInspection } from "./error-diagnose-output";
+import { emitCooldownDiagnosis } from "./error-diagnose-output";
 import { emitPriorityPlan } from "./priority-plan-output";
 import { emitAccountEconomics, emitAccountImportEconomics } from "./account-economics-output";
 import { emitOAuthEconomics } from "./oauth-economics-output";
@@ -46,6 +47,8 @@ interface Parsed {
   group: string | null;
   start: string | null;
   end: string | null;
+  since: string | null;
+  until: string | null;
   affectedOnly: boolean;
   intervalSeconds: number | null;
   enabled: boolean | null;
@@ -121,7 +124,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -175,6 +178,8 @@ function parseArgs(args: string[]): Parsed {
     group: value(args, "--group"),
     start: value(args, "--start"),
     end: value(args, "--end"),
+    since: value(args, "--since"),
+    until: value(args, "--until"),
     day: value(args, "--day"),
     period: value(args, "--period"),
     costCny: decimal("--cost-cny"),
@@ -226,8 +231,10 @@ function help(): Record<string, unknown> {
       "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
+      "errors cooldowns [--since <ISO>] [--until <ISO>] [--limit N] [--account <id-or-name>] [--model <exact-id>]",
       "errors inspect --request-id <request-id>",
       "errors list [--limit N]",
+      "errors external-cutoff-match [--limit N]",
       "errors get --request-id <request-id>",
       "users impact --start <ISO> --end <ISO> [--affected-only]",
       "users balance-liability [--over-api]",
@@ -1071,6 +1078,11 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       parsed.requestId ? [parsed.requestId] : null,
     );
   }
+  if (group === "errors" && action === "cooldowns") {
+    const until = parsed.until ?? parsed.end ?? new Date().toISOString();
+    const since = parsed.since ?? parsed.start ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    return await client.cooldownDiagnosis(parsed.limit ?? 1000, since, until, parsed.account, parsed.model);
+  }
   if (group === "errors" && action === "inspect") {
     if (!parsed.requestId) throw new Error("errors inspect requires --request-id");
     const [diagnosis, detail] = await Promise.all([
@@ -1089,6 +1101,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   }
   if (group === "errors" && action === "list") {
     return await client.errorList(parsed.limit ?? config.monitor.errorAggregateLimit);
+  }
+  if (group === "errors" && action === "external-cutoff-match") {
+    return await client.externalCutoffMatches(parsed.limit ?? config.monitor.errorAggregateLimit);
   }
   if (group === "errors" && action === "get") {
     if (!parsed.requestId) throw new Error("errors get requires --request-id");
@@ -1160,10 +1175,7 @@ async function runWebScreenshot(
     config.monitor.cli.executable,
     config.monitor.cli.entrypoint,
     "web-probe",
-    "product-smoke",
-    "--product", "api2business",
-    "--target", "NC01",
-    "--profile", profile,
+    "api2business-screenshot",
     "--json",
   ], {
     cwd: config.monitor.cli.workDir,
@@ -1290,6 +1302,7 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "scores pool-quality") emitPoolQuality(output, parsed.json);
     else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
     else if (parsed.command.join(" ") === "errors diagnose") emitErrorDiagnosis(output, parsed.json);
+    else if (parsed.command.join(" ") === "errors cooldowns") emitCooldownDiagnosis(output, parsed.json);
     else if (parsed.command.join(" ") === "errors inspect") emitErrorInspection(output, parsed.json);
     else if (parsed.command.join(" ") === "users impact") emitUserImpact(output, parsed.json);
     else if (parsed.command.join(" ") === "accounts economics") emitAccountEconomics(output, parsed.json);

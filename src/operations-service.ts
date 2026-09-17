@@ -74,6 +74,7 @@ import type { ProbeIsolationService } from "./probe-isolation";
 import { UpstreamBenchmarkService } from "./upstream-benchmark";
 import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
 import { collectRechargeCandidates } from "./upstream-recharge-candidates";
+import { collectCooldownDiagnosisFromDatabase } from "./cooldown-diagnose-database";
 
 export { normalizeUpstreamWallet, upstreamBalanceRateByWallet } from "./upstream-valuation";
 
@@ -492,15 +493,19 @@ export class OperationsService {
   }
 
   async poolQualitySummary() {
-    const rows = await this.store.getPoolQualitySamples(8) as Array<Record<string, unknown>>;
+    const rollingWindowPoints = 100;
+    const rows = await this.store.getPoolQualitySamplesByLimit(rollingWindowPoints * 2 - 1) as Array<Record<string, unknown>>;
+    const history = poolQualityHistory(rows, rollingWindowPoints).slice(-rollingWindowPoints);
     const latest = rows.at(-1) ?? null;
     return {
       ok: true,
       recentCallLimit: 1000,
+      rawCallCount: Number(latest?.raw_call_count ?? 0) || Number(latest?.observed_attempts ?? 0),
       groupIds: this.config.sub2api.priorityPlan.eligibleGroupIds,
       sampledAt: latest ? new Date(String(latest.sampled_at)).toISOString() : null,
       score: latest?.score == null ? null : Number(latest.score),
-      rollingScore: poolQualityHistory(rows).at(-1)?.rollingScore ?? null,
+      rollingScore: history.at(-1)?.rollingScore ?? null,
+      rollingWindowPoints,
       grade: latest?.grade ?? "insufficient",
       observedAttempts: Number(latest?.observed_attempts ?? 0),
       participationAttempts: Array.isArray(latest?.participation)
@@ -508,11 +513,18 @@ export class OperationsService {
         : 0,
       successRequests: Number(latest?.success_requests ?? 0),
       failureRequests: Number(latest?.failure_requests ?? 0),
-      failureRate: latest?.failure_rate == null ? null : Number(latest.failure_rate),
+      rawSuccessRequests: Number(latest?.raw_success_requests ?? 0) || Number(latest?.success_requests ?? 0),
+      rawFailureRequests: Number(latest?.raw_failure_requests ?? 0) || Number(latest?.failure_requests ?? 0),
+      failureRate: Number(latest?.raw_success_requests ?? 0) + Number(latest?.raw_failure_requests ?? 0) > 0
+        ? Number(latest?.raw_failure_requests ?? 0) / (Number(latest?.raw_success_requests ?? 0) + Number(latest?.raw_failure_requests ?? 0))
+        : latest?.failure_rate == null ? null : Number(latest.failure_rate),
       failoverRequests: Number(latest?.failover_requests ?? 0),
       failoverRecovered: Number(latest?.failover_recovered ?? 0),
+      rawFailoverRequests: Number(latest?.raw_failover_requests ?? 0) || Number(latest?.failover_requests ?? 0),
+      rawFailoverRecovered: Number(latest?.raw_failover_recovered ?? 0) || Number(latest?.failover_recovered ?? 0),
       ttftP95Ms: latest?.ttft_p95_ms == null ? null : Number(latest.ttft_p95_ms),
       firstTokenSamples: Number(latest?.first_token_samples ?? 0),
+      rawFirstTokenSamples: Number(latest?.raw_first_token_samples ?? 0) || Number(latest?.first_token_samples ?? 0),
       effectiveSampleWeight: Number(latest?.effective_sample_weight ?? latest?.observed_attempts ?? 0),
       sampleWeighting: String(latest?.sample_weighting ?? "recent-call-decay-buckets"),
       errorAttribution: {
@@ -524,7 +536,7 @@ export class OperationsService {
           : null,
       },
       participation: Array.isArray(latest?.participation) ? latest.participation : [],
-      history: poolQualityHistory(rows),
+      history,
       valuesPrinted: false,
     };
   }
@@ -1741,6 +1753,25 @@ export class OperationsService {
       this.config,
       this.reads,
       requestId,
+      "manual",
+    );
+  }
+
+  async cooldownDiagnosis(
+    limit: number,
+    since: string,
+    until: string,
+    accountSelector: string | null,
+    modelSelector: string | null,
+  ) {
+    return await collectCooldownDiagnosisFromDatabase(
+      this.config,
+      this.reads,
+      limit,
+      since,
+      until,
+      accountSelector,
+      modelSelector,
       "manual",
     );
   }

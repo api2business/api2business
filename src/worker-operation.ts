@@ -36,6 +36,26 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
     if (command.kind === "pool.quality.sample") return await services.operations.samplePoolQuality();
     if (command.kind === "bugteam.cost.sample") return await services.operations.sampleBugTeamCost();
     if (command.kind === "upstream.apikey.cutoff") {
+      if (command.trigger === "external-error" && command.phase === "disable") {
+        return await services.upstreams.beginExternalCutoff({
+          operationId: command.operationId,
+          durationSeconds: command.durationSeconds,
+          accountId: command.accountIds?.[0] ?? 0,
+          mode: command.mode ?? "dryrun",
+          requestId: command.requestId,
+          matchedKeyword: command.matchedKeyword,
+        });
+      }
+      if (command.trigger === "external-error" && command.phase === "restore") {
+        return await services.upstreams.restoreExternalCutoff(command.accountIds ?? [], {
+          operationId: command.operationId,
+          durationSeconds: command.durationSeconds,
+          mode: command.mode ?? "dryrun",
+          requestId: command.requestId,
+          matchedKeyword: command.matchedKeyword,
+          restoreReason: command.restoreReason,
+        });
+      }
       if (command.phase === "disable") return await services.upstreams.beginApiKeyCutoff(command);
       if (command.phase === "guard") return await services.upstreams.guardApiKeyCutoff();
       if (command.phase === "restore") return await services.upstreams.restoreApiKeyCutoff(command.accountIds ?? [], command);
