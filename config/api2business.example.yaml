@@ -141,7 +141,7 @@ sub2api:
     failureBurstCallLimit: 100
     failoverZeroScoreRate: 0.2
     ttftFullScoreMs: 5000
-    ttftZeroScoreMs: 55000
+    ttftZeroScoreMs: 90000
     ttftPriorScore: 25
   grokScorePolicy:
     reliabilityWeight: 50
