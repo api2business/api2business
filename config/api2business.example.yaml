@@ -428,6 +428,7 @@ operations:
         description: 上游明确返回余额或账单不足
       - errorCode: 403
         keywords:
+          - insufficient_balance
           - insufficient account balance
           - insufficient balance
           - payment required
