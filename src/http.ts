@@ -660,7 +660,7 @@ export function createHandler(
         return json(await operations.idleProbePlan(accountIds));
       }
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/summary") {
-        return json({ ok: true, rolling24Hours: await operations.idleProbeRollingUsage() });
+        return json({ ok: true, ...await operations.idleProbeSummary() });
       }
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/coverage") {
         const windowMinutes = positiveInteger(url.searchParams.get("windowMinutes"), 20);

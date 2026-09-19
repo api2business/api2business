@@ -104,7 +104,13 @@ function numericIds(value: unknown): number[] {
 }
 
 export const idleProbeRollingUsageSql = `
-WITH probe_keys AS (
+WITH monitor_account AS (
+  SELECT owner.balance
+  FROM users owner
+  WHERE owner.email = 'monitor-user@sub2api.platform-infra.local'
+    AND owner.deleted_at IS NULL
+  LIMIT 1
+), probe_keys AS (
   SELECT k.id
   FROM api_keys k
   JOIN users owner ON owner.id = k.user_id
@@ -128,8 +134,12 @@ WITH probe_keys AS (
   JOIN probe_keys p ON p.id = o.api_key_id
   WHERE o.created_at >= NOW() - INTERVAL '24 hours'
 )
-SELECT usage.*, errors.error_requests, errors.latest_error_at
-FROM usage CROSS JOIN errors
+SELECT usage.*, errors.error_requests, errors.latest_error_at,
+  monitor_account.balance AS monitor_balance_usd,
+  NOW() AS monitor_balance_queried_at
+FROM usage
+CROSS JOIN errors
+LEFT JOIN monitor_account ON true
 `;
 
 export const idleProbeCoverageSql = `
@@ -246,6 +256,11 @@ export class IdleAccountProbeService {
   }
 
   async rollingUsage(priority: Sub2ApiReadPriority = "manual"): Promise<Record<string, unknown>> {
+    const summary = await this.summary(priority);
+    return summary.rolling24Hours as Record<string, unknown>;
+  }
+
+  async summary(priority: Sub2ApiReadPriority = "manual"): Promise<Record<string, unknown>> {
     const result = await this.reads.query<Record<string, unknown>>({
       key: "accounts.idle-probe.rolling-24-hours",
       kind: "accounts.idle-probe.rolling-24-hours",
@@ -257,16 +272,26 @@ export class IdleAccountProbeService {
     const row = result.rows[0] ?? {};
     const successRequests = Number(row.success_requests ?? 0);
     const errorRequests = Number(row.error_requests ?? 0);
+    const rawBalance = row.monitor_balance_usd;
+    const balanceUsd = rawBalance === null || rawBalance === undefined ? null : Number(rawBalance);
+    const normalizedBalance = balanceUsd !== null && Number.isFinite(balanceUsd) ? balanceUsd : null;
     return {
-      windowHours: 24,
-      successRequests,
-      errorRequests,
-      requestAttempts: successRequests + errorRequests,
-      sampledAccounts: Number(row.sampled_accounts ?? 0),
-      consumedApiAmountUsd: Number(row.consumed_api_amount_usd ?? 0),
-      firstSampleAt: row.first_sample_at ?? null,
-      latestSampleAt: row.latest_sample_at ?? row.latest_error_at ?? null,
-      source: "ordinary-usage-logs-probe-users",
+      rolling24Hours: {
+        windowHours: 24,
+        successRequests,
+        errorRequests,
+        requestAttempts: successRequests + errorRequests,
+        sampledAccounts: Number(row.sampled_accounts ?? 0),
+        consumedApiAmountUsd: Number(row.consumed_api_amount_usd ?? 0),
+        firstSampleAt: row.first_sample_at ?? null,
+        latestSampleAt: row.latest_sample_at ?? row.latest_error_at ?? null,
+        source: "ordinary-usage-logs-probe-users",
+      },
+      monitorAccount: {
+        balanceUsd: normalizedBalance,
+        status: normalizedBalance === null ? "unknown" : normalizedBalance > 0 ? "available" : "depleted",
+        queriedAt: row.monitor_balance_queried_at ?? null,
+      },
     };
   }
 

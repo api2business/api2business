@@ -346,7 +346,19 @@ function compareScoreRows(left, right) {
 async function loadIdleProbeRollingUsage() {
   const data = await requestJson('/api/operations/idle-probe/summary')
   const rolling = data.rolling24Hours ?? {}
-  $('#idle-probe-rolling').textContent = `探活 24h：${number(rolling.requestAttempts)} 次 · ${usdText(rolling.consumedApiAmountUsd, 4)} · ${number(rolling.sampledAccounts)} 个账号${rolling.latestSampleAt ? ` · 最近 ${time(rolling.latestSampleAt)}` : ''}`
+  const monitorAccount = data.monitorAccount ?? {}
+  const rawBalance = monitorAccount.balanceUsd
+  const balance = rawBalance === null || rawBalance === undefined ? null : Number(rawBalance)
+  const hasBalance = balance !== null && Number.isFinite(balance)
+  const balanceLabel = hasBalance ? `$${balance.toFixed(2)}` : '—'
+  const balanceStatus = monitorAccount.status === 'available' && hasBalance
+    ? '可用'
+    : monitorAccount.status === 'depleted' && hasBalance
+      ? '已耗尽'
+      : '暂不可用'
+  const balanceNode = $('#idle-probe-rolling')
+  balanceNode.dataset.balanceStatus = balanceStatus
+  balanceNode.textContent = `探活 24h：${number(rolling.requestAttempts)} 次 · ${usdText(rolling.consumedApiAmountUsd, 4)} · ${number(rolling.sampledAccounts)} 个账号${rolling.latestSampleAt ? ` · 最近 ${time(rolling.latestSampleAt)}` : ''} · 余额 ${balanceLabel}（${balanceStatus}）${monitorAccount.queriedAt ? ` · 查询 ${time(monitorAccount.queriedAt)}` : ''}`
   return rolling
 }
 

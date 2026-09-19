@@ -393,6 +393,19 @@ test("score toolbar refresh uses the queue-backed manual ranking path", async ()
   expect(handler).not.toContain("/api/scores/refresh");
 });
 
+test("score page renders sanitized probe balance and status", async () => {
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+
+  expect(app).toContain("data.monitorAccount ?? {}");
+  expect(app).toContain("rawBalance === null || rawBalance === undefined ? null : Number(rawBalance)");
+  expect(app).toContain("balance.toFixed(2)");
+  expect(app).toContain("余额 ${balanceLabel}（${balanceStatus}）");
+  expect(app).toContain("balanceNode.dataset.balanceStatus = balanceStatus");
+  expect(app).toContain("monitorAccount.queriedAt");
+  expect(app).not.toContain("monitorAccount.email");
+  expect(app).not.toContain("monitorAccount.apiKey");
+});
+
 test("score dashboard refreshes independent cached regions without serial blocking", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   expect(app).toContain("if (upstreamAssetsInFlight !== null) return await upstreamAssetsInFlight");

@@ -228,6 +228,10 @@ export class OperationsService {
     return await this.idleProbe.rollingUsage("manual");
   }
 
+  async idleProbeSummary() {
+    return await this.idleProbe.summary("manual");
+  }
+
   async idleProbeCoverage(windowMinutes = 20) {
     return await this.idleProbe.coverage(windowMinutes, "manual");
   }

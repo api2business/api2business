@@ -135,6 +135,48 @@ test("idle probe usage follows monitor-user owned API keys", () => {
   expect(idleProbeRollingUsageSql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
   expect(idleProbeRollingUsageSql).toContain("JOIN probe_keys p ON p.id = u.api_key_id");
   expect(idleProbeRollingUsageSql).toContain("JOIN probe_keys p ON p.id = o.api_key_id");
+  expect(idleProbeRollingUsageSql).toContain("monitor_account.balance AS monitor_balance_usd");
+  expect(idleProbeRollingUsageSql).toContain("NOW() AS monitor_balance_queried_at");
+});
+
+test("idle probe summary exposes only normalized monitor balance state", async () => {
+  const service = new IdleAccountProbeService(config, reads([{
+    success_requests: 8,
+    error_requests: 2,
+    sampled_accounts: 3,
+    consumed_api_amount_usd: "0.125",
+    first_sample_at: "2026-09-19T09:00:00.000Z",
+    latest_sample_at: "2026-09-19T10:00:00.000Z",
+    monitor_balance_usd: "1.75",
+    monitor_balance_queried_at: "2026-09-19T10:00:01.000Z",
+  }]), null);
+
+  expect(await service.summary()).toEqual({
+    rolling24Hours: {
+      windowHours: 24,
+      successRequests: 8,
+      errorRequests: 2,
+      requestAttempts: 10,
+      sampledAccounts: 3,
+      consumedApiAmountUsd: 0.125,
+      firstSampleAt: "2026-09-19T09:00:00.000Z",
+      latestSampleAt: "2026-09-19T10:00:00.000Z",
+      source: "ordinary-usage-logs-probe-users",
+    },
+    monitorAccount: {
+      balanceUsd: 1.75,
+      status: "available",
+      queriedAt: "2026-09-19T10:00:01.000Z",
+    },
+  });
+});
+
+test("idle probe summary marks zero balance depleted and invalid balance unknown", async () => {
+  const depleted = new IdleAccountProbeService(config, reads([{ monitor_balance_usd: "0" }]), null);
+  expect((await depleted.summary()).monitorAccount).toMatchObject({ balanceUsd: 0, status: "depleted" });
+
+  const unknown = new IdleAccountProbeService(config, reads([{ monitor_balance_usd: "not-a-number" }]), null);
+  expect((await unknown.summary()).monitorAccount).toMatchObject({ balanceUsd: null, status: "unknown" });
 });
 
 test("automatic idle probe planning uses one queued database query", async () => {
