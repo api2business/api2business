@@ -132,8 +132,10 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 多轮号池优化先读取该参考的“评分、容量与冷却联动评估”：
   - 分开核对滚动分、固定时间段业务记录、账号容量和会话绑定；
   - 模板及排序变更必须独立回读运行态，不以工作流成功代替业务恢复。
-- 池级质量调查使用 `scores pool-quality --over-api`，账号分项使用
-  `scores rank --calls <N> --over-api`；两者均为只读查询。
+- 池级质量调查使用 `scores pool-quality --over-api`，该查询只读。
+- 账号评分只有一条计算路径。
+- `scores get` 只读取账号评分快照，不重新计算。
+- `scores rank --calls <N> --over-api` 先按这 N 次刷新同一份快照，再读取刚写入的快照。
 - 单账号质量评分将绑定该账号的专用探活样本纳入评分：
   - 用户请求不足时，用探活补充可靠性、切号和延迟证据；
   - 探活失败属于该账号的有效质量信号，不得笼统视为评分污染。
@@ -200,11 +202,17 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `--group` 按错误记录的实际请求分组筛选；
   - 默认排除内部 monitor 用户和 `api2business-probe-*` 探活流量；
   - 返回 `groupFilterBasis=request-group` 与 `probeNoiseExcluded=true` 供调用方核对口径。
-- 页面数据快照统一写入 host PostgreSQL：
+- 页面普通读取只返回已有缓存，刷新先写缓存再读回：
+  - 普通 GET 只读 `api2business_api_cache`，不重新计算；
+  - 显式刷新请求携带 `x-api2business-refresh: 1`，先重算并写入该缓存，再读出刚写入的响应；
+  - 排队 SQL 的普通读取只返回未过期缓存；
+  - 显式刷新或缓存不存在时先查询并写入读取缓存，再返回这份缓存；
+  - 不把查询结果直接返回给调用方；
+  - 读取不先返回旧缓存，再在后台刷新；
+  - 快照型 API 不叠加第二份通用 HTTP 响应缓存；
   - API 与 Worker 按稳定快照键共享成功载荷；
-  - 快照型 API 不再叠加通用 HTTP 响应缓存；
-  - 成功后原子替换，失败保留上一份成功快照；
-  - 账号评分默认每 5 分钟刷新，并在进程重启后优先回显持久化快照。
+  - 快照成功后原子替换，失败保留上一份成功快照；
+  - 账号评分快照另由 worker 每 5 分钟刷新，进程重启后仍读取持久化快照。
 - Sub2API 业务查询统一通过 Api2Business 排队 broker 读取 NC01 本地专用库；
   CLI、Web、worker 和人工脚本不得直连旧 PK01 数据库。
 - 账号级代理默认策略：OAuth 导入、Plus/Team 账号和 API-key 上游默认直连，不绑定

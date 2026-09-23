@@ -389,7 +389,7 @@ test("score toolbar refresh uses the queue-backed manual ranking path", async ()
   const end = app.indexOf("const [initial] = await Promise.all([", start);
   const handler = app.slice(start, end);
 
-  expect(handler).toContain("await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadPoolQualityErrors(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])");
+  expect(handler).toContain("await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(true), loadUnifiedQuotaSummary(), loadPoolQuality(), loadPoolQualityErrors(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])");
   expect(handler).not.toContain("/api/scores/refresh");
 });
 
@@ -415,16 +415,21 @@ test("score dashboard refreshes independent cached regions without serial blocki
   expect(app).toContain("loadUnifiedQuotaSummary(),\n        loadPoolQuality(),");
 });
 
-test("score page refreshes once on open and keeps periodic refresh disabled by default", async () => {
+test("score page reads the cache on open and keeps periodic refresh disabled by default", async () => {
   const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
+  const loadStart = app.indexOf("async function loadScoreData");
+  const loadEnd = app.indexOf("function shell", loadStart);
+  const load = app.slice(loadStart, loadEnd);
 
   expect(html).toContain('<option value="0" selected>关闭</option>');
   expect(html).toContain('id="score-refresh-countdown"');
-  expect(app).toContain("void refreshPriorityState().catch(() => undefined).finally(scheduleScoreRefresh)");
+  expect(load).toContain("return await requestJson('/api/scores')");
+  expect(load).not.toContain("/api/scores/rank");
+  expect(app).not.toContain("void refreshPriorityState()");
+  expect(app).toContain("scheduleScoreRefresh()");
   expect(app).toContain("const scoreRefreshIntervals = new Set([0, 300, 900, 1800])");
   expect(app).toContain("if (scoreRefreshInFlight !== null) return await scoreRefreshInFlight");
-  expect(app).toContain("scheduleScoreRefresh()");
   expect(app).toContain("requestJson('/api/operations/priority-history', { cache: 'no-store' })");
   expect(app).toContain("$('#history-page-state').textContent = '正在刷新记录…'");
   expect(app).toContain("loadPoolQuality(),\n      loadPriorityHistory(),");

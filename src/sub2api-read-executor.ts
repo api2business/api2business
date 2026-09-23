@@ -163,9 +163,17 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
       ));
     }
     const cacheMode = input.cacheMode ?? "prefer-cache";
-    const cached = cacheMode === "prefer-cache" ? this.cached<Row>(input.key) : null;
-    if (cached) return Promise.resolve(cached);
-
+    if (cacheMode === "prefer-cache") {
+      const stored = this.readStored<Row>(input.key);
+      if (stored) {
+        this.metrics.cacheHits += 1;
+        return Promise.resolve({
+          ...stored,
+          cached: true,
+          deduplicated: false,
+        });
+      }
+    }
     const existing = this.inFlight.get(input.key);
     if (existing) {
       this.metrics.deduplicatedQueries += 1;
@@ -249,25 +257,18 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
     await this.database.close();
   }
 
-  private cached<Row extends Record<string, unknown>>(
+  private readStored<Row extends Record<string, unknown>>(
     key: string,
   ): Sub2ApiReadResult<Row> | null {
     const entry = this.cache.get(key);
     if (!entry) return null;
-    if (entry.expiresAt <= Date.now()) {
+    if (Date.now() >= entry.expiresAt) {
       this.cache.delete(key);
       return null;
     }
-    this.cache.delete(key);
-    this.cache.set(key, entry);
-    this.metrics.cacheHits += 1;
     return {
       ...entry.result,
-      rows: entry.result.rows as Row[],
-      queueDurationMs: 0,
-      totalDurationMs: 0,
-      deduplicated: false,
-      cached: true,
+      rows: [...entry.result.rows] as Row[],
     };
   }
 
@@ -275,10 +276,11 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
     key: string,
     result: Sub2ApiReadResult<Record<string, unknown>>,
   ): void {
-    if (this.options.cacheTtlMs <= 0) return;
     this.cache.delete(key);
     this.cache.set(key, {
-      expiresAt: Date.now() + this.options.cacheTtlMs,
+      expiresAt: this.options.cacheTtlMs > 0
+        ? Date.now() + this.options.cacheTtlMs
+        : Number.POSITIVE_INFINITY,
       result: { ...result, rows: [...result.rows] },
     });
     while (this.cache.size > this.options.cacheMaxEntries) {
@@ -395,7 +397,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
       this.metrics.lastCompletedAt = queryCompletedAt;
       this.metrics.lastError = null;
       this.remember(task.request.key, result);
-      task.resolve(result);
+      task.resolve(this.readStored(task.request.key) ?? result);
     } catch (error) {
       const message = databaseErrorMessage(error);
       const timedOut = (error instanceof Error && error.name === "sub2api_read_query_timeout")

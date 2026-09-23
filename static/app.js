@@ -47,10 +47,20 @@ function time(value) {
 }
 
 async function requestJson(url, options = {}, timeoutMs = 20000) {
+  const refresh = options.refresh === true
+  const { refresh: _refresh, ...fetchOptions } = options
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal, headers: { 'content-type': 'application/json', ...(options.headers ?? {}) } })
+    const response = await fetch(url, {
+      ...fetchOptions,
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        ...(refresh ? { 'x-api2business-refresh': '1' } : {}),
+        ...(fetchOptions.headers ?? {}),
+      },
+    })
     const data = await response.json().catch(() => null)
     if (response.status === 401 && page !== 'login') {
       location.assign('/login')
@@ -64,12 +74,7 @@ async function requestJson(url, options = {}, timeoutMs = 20000) {
 }
 
 async function loadScoreData() {
-  const snapshot = await requestJson('/api/scores')
-  if (snapshot.snapshotOk !== false && Array.isArray(snapshot.accounts) && snapshot.accounts.length > 0) return snapshot
-  return await requestJson('/api/scores/rank', {
-    method: 'POST',
-    body: JSON.stringify({ recentCallLimit: 1000, accountSelector: null, groupSelector: null }),
-  }, 60000)
+  return await requestJson('/api/scores')
 }
 
 function shell() {
@@ -263,7 +268,7 @@ function scheduleScoreRefresh() {
     renderScoreRefreshCountdown()
     await Promise.allSettled([
       refreshPriorityState(),
-      loadUnifiedUpstreamAssets(),
+      loadUnifiedUpstreamAssets(true),
       loadUnifiedQuotaSummary(),
       loadPoolQuality(),
       loadPriorityHistory(),
@@ -459,20 +464,21 @@ function renderScores(data) {
   return true
 }
 
-async function loadUnifiedUpstreamAssets() {
+async function loadUnifiedUpstreamAssets(refresh = false) {
   if (upstreamAssetsInFlight !== null) return await upstreamAssetsInFlight
+  const cache = refresh ? { refresh: true } : {}
   upstreamAssetsInFlight = (async () => {
     const [first, options, benchmarks] = await Promise.all([
-      requestJson('/api/upstreams?page=1'),
-      requestJson('/api/upstreams/options'),
-      requestJson('/api/upstreams/benchmarks'),
+      requestJson('/api/upstreams?page=1', cache),
+      requestJson('/api/upstreams/options', cache),
+      requestJson('/api/upstreams/benchmarks', cache),
     ])
     upstreamValuationPolicy = options.valuation ?? upstreamValuationPolicy
     scoreBenchmarkOptions = options.benchmark ?? scoreBenchmarkOptions
     scoreBenchmarksById = new Map((benchmarks.results ?? []).map((row) => [Number(row.accountId), row]))
     const pageCount = Math.max(1, Number(first.totalPages ?? 1))
     const rest = pageCount > 1
-      ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => requestJson(`/api/upstreams?page=${index + 2}`)))
+      ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => requestJson(`/api/upstreams?page=${index + 2}`, cache)))
       : []
     const accounts = [first, ...rest].flatMap((pageData) => pageData.accounts ?? [])
     scoreUpstreamsById = new Map(accounts.map((row) => [Number(row.id), row]))
@@ -870,7 +876,7 @@ async function scoresPage() {
       $('#score-upstream-create-state').dataset.state = 'success'
       $('#score-upstream-create-api-key').value = ''
       createOperationId = null
-      await loadUnifiedUpstreamAssets()
+      await loadUnifiedUpstreamAssets(true)
       setTimeout(() => { if (createDialog.open) createDialog.close() }, 350)
     } catch (error) {
       $('#score-upstream-create-state').textContent = error instanceof Error ? error.message : String(error)
@@ -1005,7 +1011,7 @@ async function scoresPage() {
       }
       $('#score-upstream-edit-state').textContent = '调整完成。'
       $('#score-upstream-edit-state').dataset.state = 'success'
-      await loadUnifiedUpstreamAssets()
+      await loadUnifiedUpstreamAssets(true)
       setTimeout(() => { if (editDialog.open) editDialog.close() }, 350)
     } catch (error) {
       $('#score-upstream-edit-state').textContent = error instanceof Error ? error.message : String(error)
@@ -1045,7 +1051,7 @@ async function scoresPage() {
   })
   $('#query-scores').addEventListener('click', () => void Promise.allSettled([
     refreshPriorityState(),
-    loadUnifiedUpstreamAssets(),
+    loadUnifiedUpstreamAssets(true),
     loadUnifiedQuotaSummary(),
     loadPoolQuality(),
     loadPoolQualityErrors(),
@@ -1057,7 +1063,7 @@ async function scoresPage() {
     const button = $('#refresh-scores')
     button.disabled = true
     try {
-      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(), loadUnifiedQuotaSummary(), loadPoolQuality(), loadPoolQualityErrors(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])
+      await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(true), loadUnifiedQuotaSummary(), loadPoolQuality(), loadPoolQualityErrors(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])
     }
     catch (error) { $('#score-updated-time').textContent = error instanceof Error ? error.message : String(error) }
     finally { button.disabled = false }
@@ -1086,7 +1092,7 @@ async function scoresPage() {
   renderScores(initial)
   setInterval(renderScoreFreshness, 1000)
   await setupPriorityPanel(options)
-  void refreshPriorityState().catch(() => undefined).finally(scheduleScoreRefresh)
+  scheduleScoreRefresh()
   setInterval(async () => {
     if (!document.hidden) {
       const [scores] = await Promise.allSettled([
@@ -1146,18 +1152,18 @@ function scheduleRankingRefresh() {
   renderRankingRefreshCountdown()
   rankingRefreshCountdownTimer = setInterval(renderRankingRefreshCountdown, 1000)
   rankingRefreshTimer = setTimeout(async () => {
-    await loadRanking(true).catch(() => null)
+    await loadRanking(true, true).catch(() => null)
     scheduleRankingRefresh()
   }, interval * 1000)
 }
 
-async function loadRanking(automatic = false) {
+async function loadRanking(automatic = false, refresh = false) {
   if (rankingLoading) return
   rankingLoading = true
   const button = $('#ranking-refresh')
   button.disabled = true; button.classList.add('is-loading'); button.setAttribute('aria-busy', 'true')
-  $('#ranking-state').textContent = automatic ? '自动刷新中，正在排队读取…' : '正在排队读取用户用量…'
-  try { renderRanking(await requestJson('/api/ranking', {}, 60000)) }
+  $('#ranking-state').textContent = automatic ? '自动刷新中，正在排队读取…' : refresh ? '正在刷新用户用量…' : '正在读取用户用量缓存…'
+  try { renderRanking(await requestJson('/api/ranking', { refresh }, 60000)) }
   catch (error) { $('#ranking-state').textContent = `刷新失败：${error instanceof Error ? error.message : String(error)}`; throw error }
   finally { rankingLoading = false; button.disabled = false; button.classList.remove('is-loading'); button.removeAttribute('aria-busy') }
 }
@@ -1172,7 +1178,7 @@ async function rankingPage() {
     try { localStorage.setItem(rankingRefreshStorageKey, select.value) } catch { /* 不影响当前刷新。 */ }
     scheduleRankingRefresh()
   })
-  $('#ranking-refresh').addEventListener('click', async () => { await loadRanking(); scheduleRankingRefresh() })
+  $('#ranking-refresh').addEventListener('click', async () => { await loadRanking(false, true); scheduleRankingRefresh() })
   await loadRanking()
   scheduleRankingRefresh()
 }
@@ -1205,7 +1211,7 @@ async function lotteryPage() {
       $('#winner-prize').textContent = number(data.record.prizeAmountUsd, 0)
       $('#winner-meta').textContent = `${data.record.eligibleCount} 人等概率 · ${creditLabel(data.record.creditStatus)}`
       $('#winner-dialog').showModal()
-      state = await requestJson('/api/lottery')
+      state = await requestJson('/api/lottery', { refresh: true })
       renderLottery(state)
     } catch (error) {
       $('#draw-status').textContent = error instanceof Error ? error.message : String(error)
@@ -1557,7 +1563,7 @@ function renderOperations(ledger, audits) {
     await requestJson(`/api/operations/cash/${encodeURIComponent(button.dataset.id)}/void`, {
       method: 'POST', body: JSON.stringify({ reason: reason.trim() }),
     })
-    await loadOperations()
+    await loadOperations({ refresh: true })
   }))
   $('#audit-body').innerHTML = audits.records?.length ? audits.records.map((row) => `<tr>
     <td>${time(row.created_at)}</td><td>${escapeHtml(row.action)}</td><td>${escapeHtml(row.status)}</td>
@@ -1585,14 +1591,14 @@ function writeOperationsSnapshot(ledger, audits) {
   }
 }
 
-async function loadOperations({ showCached = false } = {}) {
+async function loadOperations({ showCached = false, refresh = false } = {}) {
   if (showCached && cashPage === 1 && auditPage === 1) {
     const cached = readOperationsSnapshot()
     if (cached) renderOperations(cached.ledger, cached.audits)
   }
   const [ledger, audits] = await Promise.all([
-    requestJson(`/api/operations/ledger?page=${cashPage}`),
-    requestJson(`/api/operations/audits?page=${auditPage}`),
+    requestJson(`/api/operations/ledger?page=${cashPage}`, { refresh }),
+    requestJson(`/api/operations/audits?page=${auditPage}`, { refresh }),
   ])
   renderOperations(ledger, audits)
   writeOperationsSnapshot(ledger, audits)
@@ -1854,12 +1860,12 @@ function scheduleOauthCostRefresh() {
   oauthRefreshTimer = setTimeout(async () => {
     oauthRefreshDueAt = null
     renderOauthRefreshCountdown()
-    await loadOauthCost({ automatic: true }).catch(() => null)
+    await loadOauthCost({ automatic: true, refresh: true }).catch(() => null)
     scheduleOauthCostRefresh()
   }, interval * 1000)
 }
 
-async function loadOauthCost({ automatic = false } = {}) {
+async function loadOauthCost({ automatic = false, refresh = false } = {}) {
   if (oauthCostLoading) return
   oauthCostLoading = true
   const button = $('#oauth-cost-refresh')
@@ -1874,7 +1880,7 @@ async function loadOauthCost({ automatic = false } = {}) {
       .catch((error) => {
         $('#oauth-runtime-state').textContent = `采样读取失败：${error instanceof Error ? error.message : String(error)}`
       })
-    const data = await requestJson(`/api/operations/oauth-cost?profile=${oauthProfile}&page=${oauthPage}&archivedPage=${oauthArchivedPage}`, {}, 60000)
+    const data = await requestJson(`/api/operations/oauth-cost?profile=${oauthProfile}&page=${oauthPage}&archivedPage=${oauthArchivedPage}`, { refresh }, 60000)
     renderOauthCost(data)
     await Promise.all([runtimeRequest, cutoffHistoryRequest])
   } catch (error) {
@@ -1891,10 +1897,10 @@ async function loadOauthCost({ automatic = false } = {}) {
 
 async function operationsPage() {
   $('#cash-date').value = operatingDay()
-  $('#cash-prev').addEventListener('click', async () => { cashPage -= 1; await loadOperations() })
-  $('#cash-next').addEventListener('click', async () => { cashPage += 1; await loadOperations() })
-  $('#audit-prev').addEventListener('click', async () => { auditPage -= 1; await loadOperations() })
-  $('#audit-next').addEventListener('click', async () => { auditPage += 1; await loadOperations() })
+  $('#cash-prev').addEventListener('click', async () => { cashPage -= 1; await loadOperations({ refresh: true }) })
+  $('#cash-next').addEventListener('click', async () => { cashPage += 1; await loadOperations({ refresh: true }) })
+  $('#audit-prev').addEventListener('click', async () => { auditPage -= 1; await loadOperations({ refresh: true }) })
+  $('#audit-next').addEventListener('click', async () => { auditPage += 1; await loadOperations({ refresh: true }) })
   $('#cash-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     await requestJson('/api/operations/cash', { method: 'POST', body: JSON.stringify({
@@ -1904,14 +1910,14 @@ async function operationsPage() {
     }) })
     event.currentTarget.reset()
     $('#cash-date').value = operatingDay()
-    await loadOperations()
+    await loadOperations({ refresh: true })
   })
   $('#procurement-form').addEventListener('submit', async (event) => {
     event.preventDefault()
     procurementBudget = Number($('#procurement-budget').value)
     procurementPage = 1
     await loadProcurement()
-    await loadOperations()
+    await loadOperations({ refresh: true })
   })
   $('#procurement-prev').addEventListener('click', async () => { procurementPage -= 1; await loadProcurement() })
   $('#procurement-next').addEventListener('click', async () => { procurementPage += 1; await loadProcurement() })
@@ -2014,7 +2020,7 @@ async function cutoffOauthApiKeys() {
     renderOauthApiKeyCutoffCountdown()
     button.classList.remove('is-loading')
     if (buttonLabel) buttonLabel.textContent = 'API Key 已切断'
-    void loadOauthCost().catch(() => null)
+    void loadOauthCost({ refresh: true }).catch(() => null)
     if (oauthCutoffCountdownTimer !== null) clearInterval(oauthCutoffCountdownTimer)
     oauthCutoffCountdownTimer = setInterval(renderOauthApiKeyCutoffCountdown, 1000)
     for (;;) {
@@ -2026,7 +2032,7 @@ async function cutoffOauthApiKeys() {
         oauthCutoffDueAt = null
         clearInterval(oauthCutoffCountdownTimer)
         oauthCutoffCountdownTimer = null
-        await loadOauthCost()
+        await loadOauthCost({ refresh: true })
         await loadOauthCutoffHistory()
         break
       }
@@ -2040,7 +2046,7 @@ async function cutoffOauthApiKeys() {
     const failedLabel = error instanceof Error ? error.message : String(error)
     const failed = readOauthCutoffLogs().map((item) => item.result === 'pending' ? { ...item, result: 'failed', resultLabel: failedLabel } : item)
     saveOauthCutoffLogs(failed); renderOauthCutoffLogs()
-    await loadOauthCost().catch(() => null)
+    await loadOauthCost({ refresh: true }).catch(() => null)
   } finally {
     oauthCutoffRunning = false
     $('#oauth-api-key-restore').disabled = false
@@ -2089,7 +2095,7 @@ async function oauthCostPage() {
         candidate.classList.toggle('is-active', active)
         candidate.setAttribute('aria-selected', String(active))
       })
-      await loadOauthCost()
+      await loadOauthCost({ refresh: true })
     })
   })
   const refreshInterval = $('#oauth-cost-refresh-interval')
@@ -2100,12 +2106,12 @@ async function oauthCostPage() {
     scheduleOauthCostRefresh()
   })
   $('#oauth-cost-form').addEventListener('submit', async (event) => {
-    event.preventDefault(); oauthPage = 1; oauthArchivedPage = 1; await loadOauthCost()
+    event.preventDefault(); oauthPage = 1; oauthArchivedPage = 1; await loadOauthCost({ refresh: true })
   })
-  $('#oauth-prev').addEventListener('click', async () => { oauthPage -= 1; await loadOauthCost() })
-  $('#oauth-next').addEventListener('click', async () => { oauthPage += 1; await loadOauthCost() })
-  $('#oauth-archived-prev').addEventListener('click', async () => { oauthArchivedPage -= 1; await loadOauthCost() })
-  $('#oauth-archived-next').addEventListener('click', async () => { oauthArchivedPage += 1; await loadOauthCost() })
+  $('#oauth-prev').addEventListener('click', async () => { oauthPage -= 1; await loadOauthCost({ refresh: true }) })
+  $('#oauth-next').addEventListener('click', async () => { oauthPage += 1; await loadOauthCost({ refresh: true }) })
+  $('#oauth-archived-prev').addEventListener('click', async () => { oauthArchivedPage -= 1; await loadOauthCost({ refresh: true }) })
+  $('#oauth-archived-next').addEventListener('click', async () => { oauthArchivedPage += 1; await loadOauthCost({ refresh: true }) })
   $('#oauth-api-key-cutoff').addEventListener('click', () => void cutoffOauthApiKeys())
   $('#oauth-api-key-restore').addEventListener('click', () => void restoreOauthApiKeysNow())
   $('#oauth-runtime-sample').addEventListener('click', async () => {
@@ -2114,7 +2120,7 @@ async function oauthCostPage() {
       const submitted = await requestJson('/api/oauth/runtime-sample', { method: 'POST' })
       for (;;) {
         const status = await requestJson(`/api/oauth/runtime-sample/${encodeURIComponent(submitted.workflowId)}`)
-        if (status.terminal) { if (status.state !== 'completed') throw new Error(status.error ?? '采样失败'); await loadOauthCost(); break }
+        if (status.terminal) { if (status.state !== 'completed') throw new Error(status.error ?? '采样失败'); await loadOauthCost({ refresh: true }); break }
         await new Promise((resolve) => setTimeout(resolve, 1000))
       }
     } catch (error) { $('#oauth-cost-state').textContent = error instanceof Error ? error.message : String(error) }

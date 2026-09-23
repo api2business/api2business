@@ -1223,15 +1223,15 @@ function aggregateSmoke(): Record<string, unknown> {
     successRequests, failureRequests, observedAttempts: successRequests + failureRequests, streamSuccessRequests: successRequests,
     firstTokenSamples: successRequests, ttftP95Ms, usage: { requestCount: successRequests, tokenCount: successRequests * 1000, apiAmountUsd },
   });
-  const rows = mergeAccountScores([account(3, "自用", 100, 0, 10_591, 1), account(2, "混合池", 50, 1, 13_206, 0.5)]);
+  const scored = { ...account(3, "自用", 100, 0, 10_591, 1), score: 72.3, scoreComponents: { weights: { reliability: 48, failover: 10, latency: 37 } } };
+  const rows = mergeAccountScores([scored, account(2, "混合池", 50, 1, 13_206, 0.5)]);
   const row = rows[0] ?? {};
   const checks = {
     uniqueAccount: rows.length === 1,
     groupsMerged: Array.isArray(row.groupNames) && row.groupNames.length === 2,
-    attemptsMerged: row.observedAttempts === 151,
-    usageMerged: record(row.usage)?.requestCount === 150 && record(row.usage)?.apiAmountUsd === 1.5,
-    decimalScore: typeof row.score === "number" && !Number.isInteger(row.score),
-    conservativeTtft: row.ttftP95Ms === 13_206,
+    scorePreserved: row.score === 72.3,
+    policyWeightsPreserved: record(row.scoreComponents)?.weights !== undefined
+      && record(record(row.scoreComponents)?.weights)?.reliability === 48,
   };
   return { ok: Object.values(checks).every(Boolean), action: "account-score-aggregate-smoke", checks, mutation: false };
 }

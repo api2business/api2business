@@ -5,7 +5,7 @@ import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { isOAuthAccount } from "./account-score-eligibility";
 import type { AppConfig } from "./config";
 import type { Sub2ApiClient } from "./sub2api-client";
-import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
 
 interface ScoreSnapshot {
   cacheVersion: string;
@@ -15,6 +15,7 @@ interface ScoreSnapshot {
   refreshStartedAt: string | null;
   nextRefreshAt: string | null;
   window: string;
+  recentCallLimit: number;
   groups: Array<Record<string, unknown>>;
   accounts: Array<Record<string, unknown>>;
   error: string | null;
@@ -55,34 +56,29 @@ export class AccountScoreService {
     this.snapshot = this.readCache();
   }
 
+  async readLatest(): Promise<ScoreSnapshot> {
+    return await this.state();
+  }
+
   async rank(recentCallLimit: number, accountSelector: string | null = null, groupSelector: string | null = null): Promise<Record<string, unknown>> {
     if (!this.config.monitor.recentCallOptions.includes(recentCallLimit)) {
       throw new Error(`recentCallLimit must be one of: ${this.config.monitor.recentCallOptions.join(", ")}`);
     }
-    if (!this.reads) throw new Error("scores.rank requires the Native API read executor");
-    const result = await collectRecentCallScoresFromDatabase(
-      this.config,
-      recentCallLimit,
-      this.reads,
-      accountSelector,
-      groupSelector,
-      "manual",
-    );
-    const accounts = this.poolAccounts(result.accounts);
-    const groupNames = [...new Set(accounts.flatMap((row) =>
-      Array.isArray(row.groupNames) ? row.groupNames.map(String) : [],
-    ))];
+    await this.refresh(recentCallLimit, "manual");
+    const snapshot = await this.state();
+    const accounts = this.selectAccounts(snapshot.accounts, accountSelector, groupSelector);
     return {
-      ...result,
+      ...snapshot,
+      ok: snapshot.refreshedAt !== null,
       accounts,
       accountCount: accounts.length,
+      accountSelector,
+      groupSelector,
+      recentCallLimit: snapshot.recentCallLimit,
       scoringScope: "non-oauth-accounts",
-      status: "ready",
-      refreshedAt: new Date().toISOString(),
-      nextRefreshAt: null,
-      window: `最近 ${recentCallLimit} 次`,
-      groups: groupNames.map((name) => ({ name })),
       availableCallOptions: this.config.monitor.recentCallOptions,
+      databaseQueries: record(snapshot.collection)?.databaseQueries ?? null,
+      queryDurationMs: record(snapshot.collection)?.queryDurationMs ?? null,
     };
   }
 
@@ -107,17 +103,24 @@ export class AccountScoreService {
     return { ...this.snapshot, status };
   }
 
-  async refresh(): Promise<ScoreSnapshot> {
-    if (this.inFlight) return await this.inFlight;
-    this.inFlight = this.performRefresh();
+  async refresh(
+    recentCallLimit = this.config.monitor.recentCallLimit,
+    priority: Sub2ApiReadPriority = "automatic",
+  ): Promise<ScoreSnapshot> {
+    if (this.inFlight) {
+      await this.inFlight;
+      return await this.state();
+    }
+    this.inFlight = this.performRefresh(recentCallLimit, priority);
     try {
-      return await this.inFlight;
+      await this.inFlight;
     } finally {
       this.inFlight = null;
     }
+    return await this.state();
   }
 
-  private async performRefresh(): Promise<ScoreSnapshot> {
+  private async performRefresh(recentCallLimit: number, priority: Sub2ApiReadPriority): Promise<ScoreSnapshot> {
     const startedAt = new Date();
     this.snapshot = { ...this.snapshot, status: "refreshing", refreshStartedAt: startedAt.toISOString(), error: null };
     if (this.snapshotStore) await this.snapshotStore.beginSnapshotRefresh(scoreSnapshotKey, scoreCacheVersion, startedAt.toISOString());
@@ -125,11 +128,11 @@ export class AccountScoreService {
       if (!this.reads) throw new Error("scores.refresh requires the Native API read executor");
       const collected = await collectRecentCallScoresFromDatabase(
         this.config,
-        this.config.monitor.recentCallLimit,
+        recentCallLimit,
         this.reads,
         null,
         null,
-        "automatic",
+        priority,
       );
       const refreshedAt = new Date();
       const accounts = this.poolAccounts(mergeAccountScores(collected.accounts));
@@ -143,13 +146,14 @@ export class AccountScoreService {
         refreshedAt: refreshedAt.toISOString(),
         refreshStartedAt: startedAt.toISOString(),
         nextRefreshAt: new Date(refreshedAt.getTime() + this.config.monitor.refreshIntervalMinutes * 60_000).toISOString(),
-        window: `最近 ${this.config.monitor.recentCallLimit} 次`,
+        window: `最近 ${recentCallLimit} 次`,
+        recentCallLimit,
         groups: groupNames.map((name) => ({ name })),
         accounts,
         error: null,
         source: "postgresql-recent-account-calls",
         collection: {
-          recentCallLimit: this.config.monitor.recentCallLimit,
+          recentCallLimit,
           databaseQueries: collected.databaseQueries,
           queryDurationMs: collected.queryDurationMs,
         },
@@ -183,6 +187,7 @@ export class AccountScoreService {
       const cached = payload as unknown as ScoreSnapshot;
       this.snapshot = {
         ...cached,
+        recentCallLimit: typeof cached.recentCallLimit === "number" ? cached.recentCallLimit : this.config.monitor.recentCallLimit,
         status: row?.refresh_started_at ? "refreshing" : row?.last_error ? "stale" : cached.status,
         accounts: this.poolAccounts(mergeAccountScores(records(cached.accounts))),
         refreshStartedAt: row?.refresh_started_at ? String(row.refresh_started_at) : null,
@@ -198,6 +203,29 @@ export class AccountScoreService {
         error: row.last_error ? String(row.last_error) : null,
       };
     }
+  }
+
+  private selectAccounts(
+    accounts: Array<Record<string, unknown>>,
+    accountSelector: string | null,
+    groupSelector: string | null,
+  ): Array<Record<string, unknown>> {
+    const selected = accounts.filter((row) => {
+      const accountMatch = accountSelector === null
+        || String(row.accountId) === accountSelector
+        || String(row.accountName) === accountSelector;
+      const groupIds = Array.isArray(row.groupIds) ? row.groupIds.map(String) : [];
+      const groupNames = Array.isArray(row.groupNames) ? row.groupNames.map(String) : [];
+      const groupMatch = groupSelector === null || groupIds.includes(groupSelector) || groupNames.includes(groupSelector);
+      return accountMatch && groupMatch;
+    });
+    if (accountSelector !== null && selected.length !== 1) {
+      throw new Error(`account selector did not resolve exactly once: ${accountSelector}`);
+    }
+    if (groupSelector !== null && selected.length === 0) {
+      throw new Error(`group selector resolved no scoreable accounts: ${groupSelector}`);
+    }
+    return selected;
   }
 
   private poolAccounts(accounts: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
@@ -216,7 +244,11 @@ export class AccountScoreService {
       try {
         const cached = record(JSON.parse(readFileSync(this.cachePath, "utf8"))) as ScoreSnapshot | null;
         if (cached && cached.cacheVersion === scoreCacheVersion) {
-          return { ...cached, accounts: this.poolAccounts(mergeAccountScores(records(cached.accounts))) };
+          return {
+            ...cached,
+            recentCallLimit: typeof cached.recentCallLimit === "number" ? cached.recentCallLimit : this.config.monitor.recentCallLimit,
+            accounts: this.poolAccounts(mergeAccountScores(records(cached.accounts))),
+          };
         }
       } catch {
         // Invalid cache is replaced by the next successful refresh.
@@ -230,6 +262,7 @@ export class AccountScoreService {
       refreshStartedAt: null,
       nextRefreshAt: null,
       window: `最近 ${this.config.monitor.recentCallLimit} 次`,
+      recentCallLimit: this.config.monitor.recentCallLimit,
       groups: [],
       accounts: [],
       error: null,

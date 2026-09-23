@@ -50,6 +50,84 @@ export function isApiResponseCacheable(request: Request): boolean {
     && !persistentSnapshotApiPaths.some((pattern) => pattern.test(pathname));
 }
 
+type ApiCacheRefreshResult =
+  | { ok: true }
+  | { ok: false; status: number; headers: Record<string, string>; body: string };
+
+type ApiCacheRow = {
+  status: unknown;
+  headers: unknown;
+  body: unknown;
+  cached_at: unknown;
+};
+
+export function apiCacheRefreshRequested(request: Request): boolean {
+  return request.headers.get("x-api2business-refresh") === "1";
+}
+
+function responseFromApiCache(cached: ApiCacheRow, cacheState: "hit" | "refreshed"): Response {
+  const headers = typeof cached.headers === "string"
+    ? JSON.parse(cached.headers) as Record<string, string>
+    : cached.headers as Record<string, string>;
+  return new Response(String(cached.body), {
+    status: Number(cached.status),
+    headers: {
+      ...headers,
+      "cache-control": "no-store",
+      "x-api2business-cache": cacheState,
+      "x-api2business-cached-at": String(cached.cached_at),
+    },
+  });
+}
+
+export async function readApiCache(
+  key: string,
+  read: (cacheKey: string) => Promise<ApiCacheRow | null>,
+): Promise<Response> {
+  const cached = await read(key);
+  if (!cached) {
+    return json({ ok: false, error: "缓存尚未刷新" }, 200, { "x-api2business-cache": "miss" });
+  }
+  return responseFromApiCache(cached, "hit");
+}
+
+export async function refreshThenReadApiCache(
+  key: string,
+  inflight: Map<string, Promise<ApiCacheRefreshResult>>,
+  refresh: () => Promise<Response>,
+  read: (cacheKey: string) => Promise<{ status: unknown; headers: unknown; body: unknown; cached_at: unknown } | null>,
+  write: (cacheKey: string, status: number, headers: Record<string, string>, body: string) => Promise<void>,
+): Promise<Response> {
+  let job = inflight.get(key);
+  if (!job) {
+    job = (async () => {
+      const response = await refresh();
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, name) => {
+        if (name !== "cache-control" && name !== "content-length") headers[name] = value;
+      });
+      const body = await response.text();
+      if (!response.ok) return { ok: false as const, status: response.status, headers, body };
+      await write(key, response.status, headers, body);
+      return { ok: true as const };
+    })();
+    inflight.set(key, job);
+    void job.finally(() => {
+      if (inflight.get(key) === job) inflight.delete(key);
+    });
+  }
+  const result = await job;
+  if (!result.ok) {
+    return new Response(result.body, {
+      status: result.status,
+      headers: { ...result.headers, "cache-control": "no-store" },
+    });
+  }
+  const cached = await read(key);
+  if (!cached) return json({ ok: false, error: "服务暂时不可用，请稍后重试" }, 503);
+  return responseFromApiCache(cached, "refreshed");
+}
+
 function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
   return Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
 }
@@ -134,7 +212,7 @@ export function createHandler(
   executeWorkerOperation?: (operation: OperationRequest) => Promise<unknown>,
 ): (request: Request) => Promise<Response> {
   const cacheKey = (request: Request) => createHash("sha256").update(`${request.method} ${new URL(request.url).pathname}${new URL(request.url).search}`).digest("hex");
-  const cacheRefreshes = new Set<string>();
+  const cacheRefreshes = new Map<string, Promise<ApiCacheRefreshResult>>();
   const handle = async (request: Request) => {
     const url = new URL(request.url);
     const session = sessionAuthorized(request, config, auth);
@@ -1039,43 +1117,26 @@ export function createHandler(
       || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
     if (!authorized) return await handle(request);
     const key = cacheKey(request);
-    let cached = null;
     try {
-      cached = await operations.getApiCache(key);
+      if (!apiCacheRefreshRequested(request)) {
+        return await readApiCache(key, (cacheKey) => operations.getApiCache(cacheKey));
+      }
+      return await refreshThenReadApiCache(
+        key,
+        cacheRefreshes,
+        () => handle(request),
+        (cacheKey) => operations.getApiCache(cacheKey),
+        (cacheKey, status, headers, body) => operations.setApiCache(cacheKey, status, headers, body),
+      );
     } catch (error) {
       console.error(JSON.stringify({
         ok: false,
         component: "http-cache",
-        action: "lookup",
+        action: "refresh",
         path: new URL(request.url).pathname,
         error: error instanceof Error ? error.message : String(error),
-        fallback: "business-handler",
       }));
+      return json({ ok: false, error: "服务暂时不可用，请稍后重试" }, 503);
     }
-    if (cached) {
-      if (!cacheRefreshes.has(key)) {
-        cacheRefreshes.add(key);
-        void handle(request).then(async (response) => {
-          if (response.ok) await response.clone().text().then(async (body) => {
-            const headers: Record<string, string> = {};
-            response.headers.forEach((value, name) => { if (name !== "cache-control" && name !== "content-length") headers[name] = value; });
-            await operations.setApiCache(key, response.status, headers, body);
-          });
-        }).catch(() => undefined).finally(() => cacheRefreshes.delete(key));
-      }
-      const headers = typeof cached.headers === "string" ? JSON.parse(cached.headers) : cached.headers;
-      return new Response(String(cached.body), {
-        status: Number(cached.status),
-        headers: { ...(headers as Record<string, string>), "cache-control": "no-store", "x-api2business-cache": "hit", "x-api2business-cached-at": String(cached.cached_at) },
-      });
-    }
-    const response = await handle(request);
-    if (response.ok) {
-      const body = await response.clone().text();
-      const headers: Record<string, string> = {};
-      response.headers.forEach((value, name) => { if (name !== "cache-control" && name !== "content-length") headers[name] = value; });
-      void operations.setApiCache(key, response.status, headers, body).catch(() => undefined);
-    }
-    return response;
   };
 }

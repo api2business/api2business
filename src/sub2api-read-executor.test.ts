@@ -241,8 +241,12 @@ test("bounds a transaction that hangs before PostgreSQL statement timeout can st
   await executor.close();
 });
 
-test("uses the bounded successful-result cache without a second database query", async () => {
-  const database = new FakeDatabase(async () => [{ value: 1 }]);
+test("reads return the stored cache and refresh replaces that cache", async () => {
+  let generation = 0;
+  const database = new FakeDatabase(async () => {
+    generation += 1;
+    return [{ value: generation }];
+  });
   const executor = new SingleConnectionSub2ApiReadExecutor(
     "postgres://fixture",
     options({ cacheTtlMs: 1000 }),
@@ -255,11 +259,19 @@ test("uses the bounded successful-result cache without a second database query",
 
   const first = await executor.query(cachedRequest);
   const second = await executor.query(cachedRequest);
+  const refreshed = await executor.query({ ...cachedRequest, cacheMode: "bypass-cache" });
+  const afterRefresh = await executor.query(cachedRequest);
 
   expect(first.cached).toBeFalse();
+  expect(first.rows).toEqual([{ value: 1 }]);
   expect(second.cached).toBeTrue();
-  expect(database.queryCount).toBe(1);
-  expect(executor.status().cacheHits).toBe(1);
+  expect(second.rows).toEqual([{ value: 1 }]);
+  expect(refreshed.cached).toBeFalse();
+  expect(refreshed.rows).toEqual([{ value: 2 }]);
+  expect(afterRefresh.cached).toBeTrue();
+  expect(afterRefresh.rows).toEqual([{ value: 2 }]);
+  expect(database.queryCount).toBe(2);
+  expect(executor.status().cacheHits).toBe(2);
   await executor.close();
 });
 

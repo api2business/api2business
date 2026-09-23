@@ -561,7 +561,7 @@ export async function collectRecentCallScoresFromDatabase(
       config.sub2api.scoreSamplePolicy.minimumWeight,
     ],
     priority,
-    cacheMode: priority === "automatic" ? "prefer-cache" : "bypass-cache",
+    cacheMode: "bypass-cache",
     // PK01 的评分热数据常驻缓存；降低本事务随机页成本，避免规划器为每个
     // 账号反复扫描全局 created_at 索引，优先使用 account_id 复合索引。
     setupStatements: ["SET LOCAL random_page_cost = 1"],

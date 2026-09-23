@@ -19,3 +19,43 @@ test("aggregated availability uses the canonical field and keeps both display al
 
   expect(row).toMatchObject({ currentAvailable: false, currentlyAvailable: false });
 });
+
+test("group merge keeps the policy score instead of replacing it", () => {
+  const [row] = mergeAccountScores([
+    {
+      accountId: 478,
+      accountName: "https://rapidapi.cc pro",
+      platform: "openai",
+      accountType: "apikey",
+      groupId: 2,
+      groupName: "自用",
+      status: "active",
+      currentAvailable: true,
+      currentlyAvailable: true,
+      score: 72.3,
+      grade: "C",
+      scoreComponents: { weights: { reliability: 48, failover: 10, latency: 37 } },
+    },
+    {
+      accountId: 478,
+      accountName: "https://rapidapi.cc pro",
+      platform: "openai",
+      accountType: "apikey",
+      groupId: 3,
+      groupName: "混合池",
+      status: "active",
+      currentAvailable: true,
+      currentlyAvailable: true,
+      score: 81.3,
+      grade: "B",
+      scoreComponents: { weights: { reliability: 60, latency: 25 } },
+    },
+  ]);
+
+  expect(row).toMatchObject({
+    score: 72.3,
+    grade: "C",
+    groupNames: ["自用", "混合池"],
+    scoreComponents: { weights: { reliability: 48, failover: 10, latency: 37 } },
+  });
+});
