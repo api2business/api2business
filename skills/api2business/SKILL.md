@@ -210,6 +210,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 不把查询结果直接返回给调用方；
   - 读取不先返回旧缓存，再在后台刷新；
   - 快照型 API 不叠加第二份通用 HTTP 响应缓存；
+  - 评分表账号余额读取 `usage-cache` 快照，按评分账号 ID 查询，不依赖上游列表 HTTP 缓存是否命中；
   - API 与 Worker 按稳定快照键共享成功载荷；
   - 快照成功后原子替换，失败保留上一份成功快照；
   - 账号评分快照另由 worker 每 5 分钟刷新，进程重启后仍读取持久化快照。

@@ -243,6 +243,7 @@ export function createHandler(
       }
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/styles.css") return await staticFile("styles.css", "text/css; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/app.js") return await staticFile("app.js", "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/ledger-pages.js") return await staticFile("ledger-pages.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/api2business-icon.svg") {
         return await staticFile("api2business-icon.svg", "image/svg+xml");
       }

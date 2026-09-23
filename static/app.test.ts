@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
 
+async function frontendSource() {
+  const [app, ledger] = await Promise.all([
+    Bun.file(new URL("./app.js", import.meta.url)).text(),
+    Bun.file(new URL("./ledger-pages.js", import.meta.url)).text(),
+  ]);
+  return `${app}\n${ledger}`;
+}
+
 test("account import supports Team manual selection and three price-inferred types", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
   const cli = await Bun.file(new URL("../skills/api2business/scripts/src/cli.ts", import.meta.url)).text();
   expect(html).toContain('id="import-plan-type"');
@@ -50,7 +58,7 @@ test("account import supports Team manual selection and three price-inferred typ
 });
 
 test("ZIP import previews merged JSON and recognized account count before submit", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./account-import.html", import.meta.url)).text();
   expect(html).toContain("合并后的 JSON");
   expect(app).toContain("requestJson('/api/account-import/preview'");
@@ -63,7 +71,7 @@ test("ZIP import previews merged JSON and recognized account count before submit
 });
 
 test("upstream management exposes queued quota and usage queries", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./upstreams.html", import.meta.url)).text();
   expect(html).not.toContain('id="upstream-usage-refresh"');
   expect(html).toContain('id="upstream-edit-usage"');
@@ -92,7 +100,7 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(html).toContain('最近 8 小时');
   expect(html).toContain('<th>账号余额（人民币）</th>');
   expect(html).toContain('<th>成本（元/刀）</th>');
-  expect(app).toContain('options.valuation ?? upstreamValuationPolicy');
+  expect(app).toContain('applyUpstreamValuationPolicy(options.valuation)');
   expect(app).toContain('未取得账号级 USD 余额');
   expect(app).toContain('upstreamMultiplierPresentation');
   expect(app).toContain('Sub2API 实时有效');
@@ -111,7 +119,7 @@ test("upstream management exposes queued quota and usage queries", async () => {
 });
 
 test("score refresh controls expose stable loading animation state", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
   const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
   expect(html).toContain('id="query-scores" class="query-command"');
@@ -123,7 +131,7 @@ test("score refresh controls expose stable loading animation state", async () =>
 });
 
 test("automation submit preserves the user's current form values", async () => {
-  const source = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const source = await frontendSource();
   const start = source.indexOf("$('#automation-form').addEventListener");
   const end = source.indexOf("$('#generate-plan').addEventListener", start);
   const handler = source.slice(start, end);
@@ -135,7 +143,7 @@ test("automation submit preserves the user's current form values", async () => {
 });
 
 test("score and manual priority planning share one sample selector and one table", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
   expect(html).toContain('id="score-call-limit"');
@@ -151,7 +159,7 @@ test("score and manual priority planning share one sample selector and one table
 });
 
 test("score rendering applies the monotonic freshness guard", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const http = await Bun.file(new URL("../src/http.ts", import.meta.url)).text();
 
   expect(app).toContain("if (!shouldApplyScorePayload(scoreRefreshedAt, data)) return false");
@@ -159,7 +167,7 @@ test("score rendering applies the monotonic freshness guard", async () => {
 });
 
 test("score table aligns failures with the displayed rate before failover and recovery", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
   expect(html).toContain("<th>失败 / 切号 / 恢复</th>");
@@ -168,7 +176,7 @@ test("score table aligns failures with the displayed rate before failover and re
 });
 
 test("manual plan confirmation allows paced batches to finish before the browser timeout", async () => {
-  const source = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const source = await frontendSource();
   const start = source.indexOf("$('#confirm-plan').addEventListener");
   const end = source.indexOf("await Promise.all([", start);
   const handler = source.slice(start, end);
@@ -177,7 +185,7 @@ test("manual plan confirmation allows paced batches to finish before the browser
 });
 
 test("priority adjustment history is paginated instead of growing without bound", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
   expect(app).toContain("const priorityHistoryPageSize = 10");
@@ -188,7 +196,7 @@ test("priority adjustment history is paginated instead of growing without bound"
 });
 
 test("shared navigation remains stable and horizontally scrollable", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
   const http = await Bun.file(new URL("../src/http.ts", import.meta.url)).text();
 
@@ -204,7 +212,7 @@ test("shared navigation remains stable and horizontally scrollable", async () =>
 });
 
 test("operations tables request fixed server-side pages of ten records", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./operations.html", import.meta.url)).text();
   const oauthHtml = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();
   const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
@@ -280,7 +288,7 @@ test("operations tables request fixed server-side pages of ten records", async (
 });
 
 test("OAuth API Key cutoff history refreshes independently from cost accounting", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const scores = await Bun.file(new URL("./scores.html", import.meta.url)).text();
   const oauth = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();
 
@@ -299,7 +307,7 @@ test("OAuth API Key cutoff history refreshes independently from cost accounting"
 });
 
 test("OAuth cost table separates live status buckets and does not infer archived status", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();
 
   expect(html).toContain("<th>状态分布</th>");
@@ -315,12 +323,12 @@ test("OAuth cost table separates live status buckets and does not infer archived
 });
 
 test("score table displays total sampled attempts when quality attempts are excluded", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   expect(app).toContain("row.attemptCount ?? row.selectedCalls ?? row.observedAttempts");
 });
 
 test("OAuth runtime monitoring reuses the upstream history chart component", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const chart = await Bun.file(new URL("./history-chart.js", import.meta.url)).text();
   const html = await Bun.file(new URL("./oauth-cost.html", import.meta.url)).text();
   expect(app).toContain("from './history-chart.js'");
@@ -359,7 +367,7 @@ test("OAuth runtime monitoring reuses the upstream history chart component", asy
 });
 
 test("score table separates Codex and Grok accounts with profile tabs", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
   expect(html).toContain('data-score-profile="codex"');
@@ -370,7 +378,7 @@ test("score table separates Codex and Grok accounts with profile tabs", async ()
 });
 
 test("score table renders a bounded ten-row page with local navigation", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
   expect(app).toContain("const scorePageSize = 10");
@@ -384,17 +392,17 @@ test("score table renders a bounded ten-row page with local navigation", async (
 });
 
 test("score toolbar refresh uses the queue-backed manual ranking path", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const start = app.indexOf("$('#refresh-scores').addEventListener");
   const end = app.indexOf("const [initial] = await Promise.all([", start);
   const handler = app.slice(start, end);
 
-  expect(handler).toContain("await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(true), loadUnifiedQuotaSummary(), loadPoolQuality(), loadPoolQualityErrors(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])");
+  expect(handler).toContain("await Promise.allSettled([refreshPriorityState(), loadUnifiedUpstreamAssets(true), readUsageCache(scoreRows.map((row) => row.accountId)), loadUnifiedQuotaSummary(), loadPoolQuality(), loadPoolQualityErrors(), loadIdleProbeRollingUsage(), loadPriorityHistory(), loadIdleProbeHistory()])");
   expect(handler).not.toContain("/api/scores/refresh");
 });
 
 test("score page renders sanitized probe balance and status", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
 
   expect(app).toContain("data.monitorAccount ?? {}");
   expect(app).toContain("rawBalance === null || rawBalance === undefined ? null : Number(rawBalance)");
@@ -407,7 +415,7 @@ test("score page renders sanitized probe balance and status", async () => {
 });
 
 test("score dashboard refreshes independent cached regions without serial blocking", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   expect(app).toContain("if (upstreamAssetsInFlight !== null) return await upstreamAssetsInFlight");
   expect(app).toContain("if (quotaSummaryInFlight !== null) return await quotaSummaryInFlight");
   expect(app).toContain("if (poolQualityInFlight !== null) return await poolQualityInFlight");
@@ -416,7 +424,7 @@ test("score dashboard refreshes independent cached regions without serial blocki
 });
 
 test("score page reads the cache on open and keeps periodic refresh disabled by default", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
   const loadStart = app.indexOf("async function loadScoreData");
   const loadEnd = app.indexOf("function shell", loadStart);
@@ -436,14 +444,14 @@ test("score page reads the cache on open and keeps periodic refresh disabled by 
 });
 
 test("zero-change priority history is labelled as converged", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
 
   expect(app).toContain("Number(row.changed_count) === 0");
   expect(app).toContain("已收敛");
 });
 
 test("priority history renders one combined pool label with per-pool counts", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
   expect(app).toContain("profiles.map(label).join(' + ')");
@@ -456,7 +464,7 @@ test("priority history renders one combined pool label with per-pool counts", as
 });
 
 test("upstream intelligence benchmark is manual and reuses the persisted probe identity", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
   expect(html).toContain('id="score-benchmark-dialog"');
   expect(html).toContain('id="score-benchmark-submit"');
@@ -476,7 +484,7 @@ test("upstream intelligence benchmark is manual and reuses the persisted probe i
 });
 
 test("scores and upstream assets share one sortable operations table", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
   const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
 
@@ -498,6 +506,8 @@ test("scores and upstream assets share one sortable operations table", async () 
   expect(css).toContain('.unified-upstream-table th:first-child');
   expect(app).toContain("let scoreSort = { key: 'score', direction: 'desc' }");
   expect(app).toContain("loadUnifiedUpstreamAssets()");
+  expect(app).toContain("readUsageCache((data.accounts ?? []).map((row) => row.accountId))");
+  expect(app).toContain("usageResult?.baseUrl");
   expect(app).toContain("scoreUpstreamsById.get(Number(row.accountId))");
   expect(app).toContain("header.addEventListener('click'");
   expect(app).toContain("requestJson('/api/upstreams/quota-summary')");
@@ -507,7 +517,7 @@ test("scores and upstream assets share one sortable operations table", async () 
 });
 
 test("upstream create and update expose timestamped workflow logs", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./upstreams.html", import.meta.url)).text();
 
   expect(html).toContain('id="upstream-create-logs"');
@@ -522,7 +532,7 @@ test("upstream create and update expose timestamped workflow logs", async () => 
 });
 
 test("upstream dialogs use one scroll container and close without native form validation", async () => {
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   const html = await Bun.file(new URL("./upstreams.html", import.meta.url)).text();
   const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
   expect(html).toContain('data-dialog-close type="button"');
@@ -535,7 +545,7 @@ test("upstream dialogs use one scroll container and close without native form va
 test("unified upstream adjustments stay in the current page dialog", async () => {
   const [html, source] = await Promise.all([
     Bun.file(new URL("./scores.html", import.meta.url)).text(),
-    Bun.file(new URL("./app.js", import.meta.url)).text(),
+    frontendSource(),
   ]);
   expect(html).toContain('id="score-upstream-edit-dialog"');
   expect(source).toContain('data-score-upstream-edit=');
@@ -548,7 +558,7 @@ test("unified upstream adjustments stay in the current page dialog", async () =>
 test("pool quality is sampled separately above the account table with participation share", async () => {
   const [html, source] = await Promise.all([
     Bun.file(new URL("./scores.html", import.meta.url)).text(),
-    Bun.file(new URL("./app.js", import.meta.url)).text(),
+    frontendSource(),
   ]);
   expect(html.indexOf('class="pool-quality-band"')).toBeLessThan(html.indexOf('class="table-section"'));
   expect(html.indexOf('class="pool-quality-head"')).toBeLessThan(html.indexOf('class="quota-monitor unified-quota-monitor"'));
@@ -567,7 +577,7 @@ test("pool quality is sampled separately above the account table with participat
 });
 
 test("hides manual rate suffixes from upstream names in user-facing views", async () => {
-  const source = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const source = await frontendSource();
   const start = source.indexOf("function displayAccountName(value, baseUrl = '')");
   const end = source.indexOf("\nfunction scoreAccountDisplayName", start);
   const displayAccountName = new Function(`${source.slice(start, end)}; return displayAccountName`)();
@@ -583,7 +593,7 @@ test("hides manual rate suffixes from upstream names in user-facing views", asyn
 
 test("pool errors expose requester identity", async () => {
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
-  const source = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const source = await frontendSource();
   expect(html).toContain("<th>用户</th>");
   expect(source).toContain("row.userEmail ?? '未知用户'");
   expect(source).toContain("row.userId == null");
@@ -592,7 +602,7 @@ test("pool errors expose requester identity", async () => {
 
 test("user usage shows balance and recharge with a default 30 second refresh", async () => {
   const html = await Bun.file(new URL("./ranking.html", import.meta.url)).text();
-  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  const app = await frontendSource();
   expect(html).toContain('id="ranking-balance"');
   expect(html).toContain('id="ranking-recharge"');
   expect(html).toContain('<th>用户邮箱</th>');
