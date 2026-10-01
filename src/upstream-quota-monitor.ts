@@ -160,7 +160,9 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
     burnCoverageWallets: 0, insufficientBurnWallets: 0, warning: "尚无额度采样",
     walletDistribution: [],
   };
-  const latestRows = samples.filter((row) => Date.parse(row.sampledAt) === latestAt);
+  const latestRows = [...new Map(samples
+    .filter((row) => Date.parse(row.sampledAt) === latestAt)
+    .map((row) => [row.walletKey, row])).values()];
   const known = latestRows.filter((row) => row.remainingCny !== null);
   const total = known.reduce((sum, row) => sum + Math.max(0, row.remainingCny!), 0);
   const schedulable = known.filter((row) => row.schedulable)
