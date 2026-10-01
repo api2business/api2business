@@ -925,9 +925,9 @@ export class UpstreamManagementService {
               AND probe_user.deleted_at IS NULL AND probe_key.deleted_at IS NULL
           )
         WHERE a.deleted_at IS NULL AND LOWER(a.type) = 'apikey'
-          AND (${ids.length ? '$1::bigint[] IS NULL OR a.id = ANY($1::bigint[])' : 'TRUE'})
+          AND (${ids.length ? 'a.id = ANY(string_to_array($1, \',\')::bigint[])' : 'TRUE'})
         GROUP BY a.id, g.name ORDER BY a.id, g.name`,
-      parameters: ids.length ? [ids] : [],
+      parameters: ids.length ? [ids.join(",")] : [],
     });
     return { ok: true, windowHours: 24, rows: query.rows.map((row) => ({ accountId: Number(row.account_id), groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), requestCount: Number(row.request_count || 0) })), databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs };
   }
