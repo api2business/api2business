@@ -482,7 +482,9 @@ export class OperationsService {
       const point: Record<HistoryKey, number> & { sampledAt: string } = { sampledAt, codexMix: 0, noDegrade: 0, claude: 0, grok: 0 };
       for (const row of samples.filter((item) => item.sampledAt === sampledAt && item.remainingCny !== null)) {
         const walletAccounts = accountsByWallet.get(row.walletKey) ?? [];
-        const groups = new Set<HistoryKey>(walletAccounts.flatMap((meta) => [...quotaMemberships({ groupNames: meta.names, platform: meta.platform, baseUrl: meta.walletKey })].map((group) => group === "no-degrade" ? "noDegrade" : group as HistoryKey)));
+        const groups = new Set<HistoryKey>(walletAccounts.flatMap((meta) => [...quotaMemberships({ groupNames: meta.names, platform: meta.platform, baseUrl: meta.walletKey })].map((group) => ({
+          "codex-mix": "codexMix", "no-degrade": "noDegrade", claude: "claude", grok: "grok",
+        }[group] as HistoryKey))));
         if (!groups.size) groups.add("codexMix");
         for (const key of groups) point[key] = Number(point[key]) + Math.max(0, row.remainingCny ?? 0);
       }
