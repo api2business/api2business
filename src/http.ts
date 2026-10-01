@@ -323,6 +323,11 @@ export function createHandler(
           lastSuccessfulAt: rows.map((row) => row.last_success_at),
         });
       }
+      if (request.method === "GET" && url.pathname === "/api/upstreams/quota-monitor-usage") {
+        const selector = url.searchParams.get("accountIds");
+        const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
+        return json(await upstreams.quotaMonitorUsage(accountIds));
+      }
       if (request.method === "GET" && url.pathname === "/api/upstreams/quota-summary") {
         return json(await operations.upstreamQuotaSummary());
       }

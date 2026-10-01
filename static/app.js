@@ -1275,13 +1275,21 @@ async function quotaMonitorPage() {
   do { const data = await requestJson(`/api/upstreams?page=${page}`); accounts.push(...(data.accounts ?? [])); totalPages = Number(data.totalPages ?? 1); page += 1 } while (page <= totalPages && page < 20)
   const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
   const cached = ids.length ? await requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`) : { results: [] }
+  const usage24h = ids.length ? await requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`) : { rows: [] }
   const cachedById = new Map((cached.results ?? []).map((result) => [Number(result?.accountId ?? result?.account_id), result]))
+  const usageById = new Map()
+  for (const item of usage24h.rows ?? []) {
+    const id = Number(item.accountId); const current = usageById.get(id) ?? []
+    current.push(item); usageById.set(id, current)
+  }
   const scoreById = new Map((score.accounts ?? []).map((row) => [Number(row.accountId), row]))
   quotaMonitorRows = accounts.map((account) => {
     const id = Number(account.id); const result = cachedById.get(id) ?? {}; const scoreRow = scoreById.get(id) ?? {}
     const group = quotaGroup({ ...account, ...scoreRow }); const consumed = quotaUsageAmount(result) || Number(scoreRow.usage?.apiAmountUsd ?? 0) || 0
-    const consumption = { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 }; consumption[group] = consumed
-    return { accountId: id, name: account.name ?? scoreRow.accountName ?? `账号 #${id}`, platform: account.platform ?? '—', groups: quotaGroupNames(account), group, remaining: quotaRemaining(result), consumed24h: consumed, consumption }
+    const consumption = { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 }
+    for (const item of usageById.get(id) ?? []) { const itemGroup = quotaGroup({ ...account, ...scoreRow, groupNames: [item.groupName] }); consumption[itemGroup] += Number(item.apiAmountUsd) || 0 }
+    const consumed24h = Object.values(consumption).reduce((sum, value) => sum + value, 0)
+    return { accountId: id, name: account.name ?? scoreRow.accountName ?? `账号 #${id}`, platform: account.platform ?? '—', groups: quotaGroupNames(account), group, remaining: quotaRemaining(result), consumed24h, consumption }
   })
   renderQuotaMonitor()
   document.querySelectorAll('[data-quota-sort]').forEach((header) => header.addEventListener('click', () => { const key = header.dataset.quotaSort; if (quotaMonitorSort.key === key) quotaMonitorSort.direction = quotaMonitorSort.direction === 'asc' ? 'desc' : 'asc'; else { quotaMonitorSort = { key, direction: 'desc' } }; renderQuotaMonitor() }))

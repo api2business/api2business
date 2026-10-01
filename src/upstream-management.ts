@@ -901,6 +901,37 @@ export class UpstreamManagementService {
     };
   }
 
+  async quotaMonitorUsage(accountIds: number[]): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds.filter((id) => Number.isSafeInteger(id) && id > 0))];
+    const query = await this.reads.query<Row>({
+      key: `upstreams.quota-monitor-usage:${ids.join(",") || "all"}`,
+      kind: "upstreams.quota-monitor-usage",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: `
+        SELECT a.id AS account_id, COALESCE(g.name, '') AS group_name,
+          COALESCE(SUM(u.actual_cost), 0)::numeric AS api_amount_usd,
+          COUNT(u.id)::int AS request_count
+        FROM accounts a
+        LEFT JOIN account_groups ag ON ag.account_id = a.id
+        LEFT JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
+        LEFT JOIN usage_logs u ON u.account_id = a.id
+          AND u.created_at >= now() - INTERVAL '24 hours'
+          AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
+          AND NOT EXISTS (
+            SELECT 1 FROM api_keys probe_key JOIN users probe_user ON probe_user.id = probe_key.user_id
+            WHERE probe_key.id = u.api_key_id
+              AND probe_user.email = 'monitor-user@sub2api.platform-infra.local'
+              AND probe_user.deleted_at IS NULL AND probe_key.deleted_at IS NULL
+          )
+        WHERE a.deleted_at IS NULL AND LOWER(a.type) = 'apikey'
+          AND (${ids.length ? '$1::bigint[] IS NULL OR a.id = ANY($1::bigint[])' : 'TRUE'})
+        GROUP BY a.id, g.name ORDER BY a.id, g.name`,
+      parameters: ids.length ? [ids] : [],
+    });
+    return { ok: true, windowHours: 24, rows: query.rows.map((row) => ({ accountId: Number(row.account_id), groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), requestCount: Number(row.request_count || 0) })), databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs };
+  }
+
   async usage(accountIds: number[]): Promise<Record<string, unknown>> {
     const settings = this.config.operations.upstreamManagement;
     const query = await this.reads.query<Row>({
