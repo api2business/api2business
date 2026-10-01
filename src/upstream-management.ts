@@ -319,7 +319,7 @@ function findAccountIdIn(value: unknown, allowPlainId: boolean): number | null {
 function rowToAccount(row: Row, totals: Map<number, number>, entries: UpstreamRechargeCostEntry[]): UpstreamAccount {
   const id = positiveInteger(row.id) ?? 0;
   const baseUrl = String(row.base_url ?? "");
-  const parsed = parseUpstreamName(String(row.name ?? ""), baseUrl);
+  const parsed = parseUpstreamName(String(row.name ?? ""), baseUrl) ?? parseUpstreamNameTail(String(row.name ?? ""));
   const accountEntries = entries.filter((entry) => entry.accountId === id);
   return {
     id,

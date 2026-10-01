@@ -18,6 +18,11 @@ test("upstream names preserve historical six-decimal rates", () => {
   });
 });
 
+test("account rows recover the rate suffix when a wallet proxy changes base URL", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  expect(source).toContain('parseUpstreamName(String(row.name ?? ""), baseUrl) ?? parseUpstreamNameTail');
+});
+
 test("upstream inputs reject unsafe URLs, suffixes, and rates", () => {
   expect(() => normalizeBaseUrl("http://api.example.com")).toThrow("HTTPS URL");
   expect(() => normalizeBaseUrl("https://user:pass@api.example.com")).toThrow("HTTPS URL");
