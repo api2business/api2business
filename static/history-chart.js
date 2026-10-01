@@ -15,7 +15,7 @@ export function finiteChartValue(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null, missingKey = null }) {
+export function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null, missingKey = null, plotLeft: requestedPlotLeft = 64 }) {
   const chartWidth = 1000
   if (points.length < 2) return `<text x="${chartWidth / 2}" y="78" text-anchor="middle" class="chart-empty">至少需要两个采样点</text>`
   const chartPoints = points
@@ -25,13 +25,13 @@ export function historyChartMarkup(points, { series, valueFormatter, unit = '', 
   if (values.length < 2) return `<text x="${chartWidth / 2}" y="78" text-anchor="middle" class="chart-empty">当前指标暂无有效曲线</text>`
   const rawMin = Math.min(...values), rawMax = Math.max(...values)
   const configuredMin = Number(yMin), configuredMax = Number(yMax)
-  const lowerBound = yMin !== null && Number.isFinite(configuredMin) && rawMin <= configuredMin ? configuredMin : null
-  const upperBound = yMax !== null && Number.isFinite(configuredMax) && rawMax >= configuredMax ? configuredMax : null
+  const lowerBound = yMin !== null && Number.isFinite(configuredMin) ? configuredMin : null
+  const upperBound = yMax !== null && Number.isFinite(configuredMax) ? configuredMax : null
   const padding = Math.max((rawMax - rawMin) * 0.08, Math.abs(rawMax) * 0.02, 0.001)
   const min = lowerBound ?? Math.max(0, rawMin - padding)
   const max = upperBound ?? rawMax + padding
   const span = Math.max(max - min, 0.001)
-  const plotLeft = 64, plotRight = chartWidth - 14, plotTop = 18, plotBottom = 126
+  const plotLeft = Math.max(40, Number(requestedPlotLeft) || 64), plotRight = chartWidth - 14, plotTop = 18, plotBottom = 126
   const x = (index) => plotLeft + index * (plotRight - plotLeft) / Math.max(1, chartPoints.length - 1)
   const y = (value) => plotBottom - (Math.min(max, Math.max(min, value)) - min) / span * (plotBottom - plotTop)
   const formatValue = typeof valueFormatter === 'function' ? valueFormatter : (value) => number(value, 2)

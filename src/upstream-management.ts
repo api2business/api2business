@@ -21,6 +21,7 @@ import {
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
+import { upstreamCostBasisSql } from "./upstream-cost-sql";
 
 type Row = Record<string, unknown>;
 
@@ -912,7 +913,7 @@ export class UpstreamManagementService {
         SELECT a.id AS account_id, a.status, COALESCE(a.schedulable, false) AS schedulable,
           a.temp_unschedulable_until, a.rate_limit_reset_at, a.overload_until,
           a.expires_at, a.auto_pause_on_expired, COALESCE(g.name, '') AS group_name,
-          COALESCE(SUM(u.total_cost), 0)::numeric AS api_amount_usd,
+          COALESCE(SUM(${upstreamCostBasisSql("u")}), 0)::numeric AS api_amount_usd,
           COUNT(u.id)::int AS request_count
         FROM accounts a
         LEFT JOIN usage_logs u ON u.account_id = a.id
@@ -954,7 +955,7 @@ export class UpstreamManagementService {
           -- procurement cost.  Keep this query on the canonical standard
           -- amount so the quota sampler does not mix customer billing with
           -- upstream cost.
-          COALESCE(SUM(usage.total_cost), 0)::numeric AS account_api_amount_usd_total
+          COALESCE(SUM(${upstreamCostBasisSql("usage")}), 0)::numeric AS account_api_amount_usd_total
         FROM accounts a
         LEFT JOIN usage_logs usage ON usage.account_id = a.id
         WHERE a.deleted_at IS NULL

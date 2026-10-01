@@ -2,6 +2,11 @@ import { expect, test } from "bun:test";
 import { loadConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { findAccountId, formatRate, formatUpstreamName, normalizeBaseUrl, parseUpstreamName, UpstreamManagementService, validateCapacity, validateGroupIds, validatePriority, validateRate, validateSuffix } from "./upstream-management";
+import { upstreamCostBasisSql } from "./upstream-cost-sql";
+
+test("quota cost basis follows native account pricing with multiplier fallback", () => {
+  expect(upstreamCostBasisSql("usage")).toBe("COALESCE(usage.account_stats_cost, usage.total_cost * COALESCE(usage.account_rate_multiplier, 1))");
+});
 
 test("upstream names preserve historical six-decimal rates", () => {
   expect(normalizeBaseUrl("https://api.example.com/")).toBe("https://api.example.com");
@@ -190,7 +195,8 @@ test("usage target discovery uses one queued database read", async () => {
 test("rolling upstream output excludes OAuth usage", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   expect(source).toMatch(/LOWER\(a\.type\)\s*=\s*'apikey'/u);
-  expect(source).toContain("SUM(usage.total_cost)");
+  expect(source).toContain('upstreamCostBasisSql("usage")');
+  expect(source).not.toContain("SUM(usage.total_cost)");
   expect(source).toContain("actual_cost is the user/API-key charge");
 });
 

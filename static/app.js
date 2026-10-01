@@ -1282,6 +1282,8 @@ function renderQuotaGroupHistory(points) {
     valueFormatter: (value) => `¥${number(value, 2)}`,
     unit: '人民币余额',
     ariaLabel: '四个额度分组人民币余额趋势',
+    yMin: 0,
+    plotLeft: 48,
   })
   bindHistoryChartTooltip(chart)
 }

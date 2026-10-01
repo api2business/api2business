@@ -536,6 +536,8 @@ test("quota monitor places the shared four-group balance history between cards a
   expect(app).toContain("key: 'noDegrade'");
   expect(app).toContain("key: 'claude'");
   expect(app).toContain("key: 'grok'");
+  expect(app).toContain('yMin: 0');
+  expect(app).toContain('plotLeft: 48');
   expect(app).toContain("from './quota-grouping.js'");
 });
 
