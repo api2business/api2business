@@ -461,6 +461,9 @@ export function createHandler(
           typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
         ), 202);
       }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/quota-monitor/sample") {
+        return json(await dispatcher.submit({ kind: "upstream.quota.sample" }), 202);
+      }
       if (request.method === "POST" && url.pathname === "/api/upstreams/template") {
         const input = await body(request);
         let accountIds: number[] = [];

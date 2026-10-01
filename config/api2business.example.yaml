@@ -353,7 +353,7 @@ operations:
     usageConcurrency: 8
     usageTimeoutMs: 15000
     usageDays: 30
-    quotaSampleIntervalSeconds: 300
+    quotaSampleIntervalSeconds: 600
     quotaSampleTimeoutSeconds: 240
     rechargeCandidates:
       lowBalanceCny: 10

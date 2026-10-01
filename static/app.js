@@ -1288,14 +1288,27 @@ function renderQuotaMonitor() {
   document.querySelectorAll('[data-quota-filter]').forEach((button) => button.classList.toggle('is-active', button.dataset.quotaFilter === quotaMonitorFilter))
 }
 
-async function refreshQuotaCache(accountIds) {
-  if (!accountIds.length) return
-  const operationId = `quota-monitor-refresh-${Date.now()}`
-  const submitted = await requestJson('/api/upstreams/usage', { method: 'POST', redirectOnUnauthorized: false, headers: { 'Idempotency-Key': operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000)
-  if (submitted.workflowId) await waitUpstreamJob(submitted.workflowId, () => {}, 300000)
+function renderQuotaGroupHistory(points) {
+  const chart = $('#quota-group-history-chart')
+  if (!chart) return
+  chart.innerHTML = historyChartMarkup(Array.isArray(points) ? points : [], {
+    series: [
+      { key: 'codexMix', className: 'chart-quota-codex', label: 'Codex 混池' },
+      { key: 'noDegrade', className: 'chart-quota-no-degrade', label: '不降智' },
+      { key: 'claude', className: 'chart-quota-claude', label: 'Claude' },
+      { key: 'grok', className: 'chart-quota-grok', label: 'Grok' },
+    ],
+    valueFormatter: (value) => `¥${number(value, 2)}`,
+    unit: '人民币余额',
+    ariaLabel: '四个额度分组人民币余额趋势',
+  })
+  bindHistoryChartTooltip(chart)
 }
 
-async function quotaMonitorPage(refresh = false) {
+let quotaMonitorLoading = false
+let quotaMonitorAutoTimer = null
+
+async function quotaMonitorPage() {
   const filterBar = $('#quota-monitor-filters')
   if (filterBar && filterBar.dataset.bound !== '1') {
     filterBar.dataset.bound = '1'
@@ -1312,11 +1325,37 @@ async function quotaMonitorPage(refresh = false) {
     document.querySelectorAll('[data-quota-sort]').forEach((header) => header.addEventListener('click', () => { const key = header.dataset.quotaSort; if (quotaMonitorSort.key === key) quotaMonitorSort.direction = quotaMonitorSort.direction === 'asc' ? 'desc' : 'asc'; else { quotaMonitorSort = { key, direction: 'desc' } }; renderQuotaMonitor() }))
     $('#quota-monitor-prev')?.addEventListener('click', () => { quotaMonitorPageNumber = Math.max(1, quotaMonitorPageNumber - 1); renderQuotaMonitor() })
     $('#quota-monitor-next')?.addEventListener('click', () => { quotaMonitorPageNumber += 1; renderQuotaMonitor() })
-    $('#quota-monitor-refresh')?.addEventListener('click', async () => { const button = $('#quota-monitor-refresh'); button.disabled = true; try { await quotaMonitorPage(true) } catch (error) { const message = error instanceof Error ? error.message : String(error); if ($('#quota-monitor-state')) $('#quota-monitor-state').textContent = `刷新失败：${message}` } finally { button.disabled = false; button.classList.remove('is-loading'); button.removeAttribute('aria-busy') } })
+    const setQuotaBusy = (busy, mode = '') => {
+      quotaMonitorLoading = busy
+      const refreshButton = $('#quota-monitor-refresh'); const sampleButton = $('#quota-monitor-sample')
+      if (refreshButton) { refreshButton.disabled = busy; refreshButton.classList.toggle('is-loading', busy && mode === 'refresh'); refreshButton.setAttribute('aria-busy', busy && mode === 'refresh' ? 'true' : 'false') }
+      if (sampleButton) { sampleButton.disabled = busy; sampleButton.classList.toggle('is-loading', busy && mode === 'sample'); sampleButton.setAttribute('aria-busy', busy && mode === 'sample' ? 'true' : 'false') }
+    }
+    const runQuotaRefresh = async () => {
+      if (quotaMonitorLoading) return
+      setQuotaBusy(true, 'refresh')
+      try { if ($('#quota-monitor-state')) $('#quota-monitor-state').textContent = '正在读取最新额度缓存，旧数据保持可见…'; await quotaMonitorPage() }
+      catch (error) { if ($('#quota-monitor-state')) $('#quota-monitor-state').textContent = `刷新失败：${error instanceof Error ? error.message : String(error)}` }
+      finally { setQuotaBusy(false) }
+    }
+    const runQuotaSample = async () => {
+      if (quotaMonitorLoading) return
+      setQuotaBusy(true, 'sample')
+      try {
+        if ($('#quota-monitor-state')) $('#quota-monitor-state').textContent = '正在手动采样，完成后写入曲线并读取最新缓存…'
+        const submitted = await requestJson('/api/upstreams/quota-monitor/sample', { method: 'POST', redirectOnUnauthorized: false }, 30000)
+        if (submitted.workflowId) await waitUpstreamJob(submitted.workflowId, () => {}, 300000)
+        await quotaMonitorPage()
+      } catch (error) { if ($('#quota-monitor-state')) $('#quota-monitor-state').textContent = `采样失败：${error instanceof Error ? error.message : String(error)}` }
+      finally { setQuotaBusy(false) }
+    }
+    $('#quota-monitor-refresh')?.addEventListener('click', runQuotaRefresh)
+    $('#quota-monitor-sample')?.addEventListener('click', runQuotaSample)
+    const interval = $('#quota-monitor-refresh-interval')
+    const scheduleAutoRefresh = () => { if (quotaMonitorAutoTimer) clearTimeout(quotaMonitorAutoTimer); const seconds = Math.max(10, Number(interval?.value ?? 30)); quotaMonitorAutoTimer = setTimeout(async () => { await runQuotaRefresh(); scheduleAutoRefresh() }, seconds * 1000) }
+    interval?.addEventListener('change', scheduleAutoRefresh); scheduleAutoRefresh()
   }
-  const refreshButton = $('#quota-monitor-refresh')
-  if (refresh) { refreshButton?.classList.add('is-loading'); refreshButton?.setAttribute('aria-busy', 'true') }
-  const state = $('#quota-monitor-state'); if (state) state.textContent = refresh ? '正在刷新额度缓存，完成后读取同一缓存…' : '正在读取已有额度缓存…'
+  const state = $('#quota-monitor-state'); if (state && !quotaMonitorLoading) state.textContent = '正在读取已有额度缓存…'
   const firstPage = await requestJson('/api/upstreams?page=1')
   const accounts = [...(firstPage.accounts ?? [])]
   const totalPages = Number(firstPage.totalPages ?? 1)
@@ -1325,16 +1364,16 @@ async function quotaMonitorPage(refresh = false) {
     for (const data of pages) accounts.push(...(data.accounts ?? []))
   }
   const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
-  if (refresh) await refreshQuotaCache(ids)
   const [cached, usage24h, summary] = await Promise.all([
     ids.length ? requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ results: [] }),
-    requestJson('/api/upstreams/quota-monitor-usage', { refresh, redirectOnUnauthorized: false }),
+    requestJson('/api/upstreams/quota-monitor-usage', { redirectOnUnauthorized: false }),
     requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
   ])
   const sourceTotal = Number(summary.totalRemainingCny)
   quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? sourceTotal : null
   const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny)]))
   const usageById = new Map()
+  renderQuotaGroupHistory(summary.groupHistory)
   for (const item of usage24h.rows ?? []) {
     const id = Number(item.accountId); const current = usageById.get(id) ?? []
     current.push(item); usageById.set(id, current)

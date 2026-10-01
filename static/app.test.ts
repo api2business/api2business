@@ -516,6 +516,28 @@ test("scores and upstream assets share one sortable operations table", async () 
   expect(app).toContain("if (target && value !== null) target.textContent = value");
 });
 
+test("quota monitor places the shared four-group balance history between cards and wallet table", async () => {
+  const app = await frontendSource();
+  const html = await Bun.file(new URL("./quota-monitor.html", import.meta.url)).text();
+  const cards = html.indexOf('id="quota-group-cards"');
+  const chart = html.indexOf('id="quota-group-history-chart"');
+  const table = html.indexOf('class="table-section"');
+  expect(cards).toBeGreaterThan(0);
+  expect(chart).toBeGreaterThan(cards);
+  expect(table).toBeGreaterThan(chart);
+  expect(html).toContain("每 10 分钟一个采样点，共用时间轴");
+  expect(html).toContain('id="quota-monitor-sample"');
+  expect(html).toContain('id="quota-monitor-refresh-interval"');
+  expect(app).toContain("renderQuotaGroupHistory(summary.groupHistory)");
+  expect(app).toContain("/api/upstreams/quota-monitor/sample");
+  expect(app).toContain("runQuotaRefresh");
+  expect(app).toContain("runQuotaSample");
+  expect(app).toContain("key: 'codexMix'");
+  expect(app).toContain("key: 'noDegrade'");
+  expect(app).toContain("key: 'claude'");
+  expect(app).toContain("key: 'grok'");
+});
+
 test("upstream create and update expose timestamped workflow logs", async () => {
   const app = await frontendSource();
   const html = await Bun.file(new URL("./upstreams.html", import.meta.url)).text();

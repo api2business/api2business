@@ -447,12 +447,42 @@ export class OperationsService {
           && item.costRateCnyPerApiUsd > 0)
         : [],
     }));
+    const accountIds = [...new Set(samples.map((row) => row.accountId).filter((id) => Number.isSafeInteger(id) && id > 0))];
+    const groupRows = accountIds.length === 0 ? { rows: [] as Record<string, unknown>[] } : await this.reads.query<Record<string, unknown>>({
+      key: `upstream-quota-history-groups:${accountIds.join(",")}`,
+      kind: "upstream-quota-history-groups",
+      priority: "manual",
+      cacheMode: "bypass-cache",
+      sql: `SELECT ag.account_id, COALESCE(string_agg(g.name, '||| ' ORDER BY g.name), '') AS group_names
+        FROM account_groups ag JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
+        WHERE ag.account_id = ANY(string_to_array($1, ',')::bigint[])
+        GROUP BY ag.account_id`,
+      parameters: [accountIds.join(",")],
+    });
+    const namesByAccount = new Map(groupRows.rows.map((row) => [Number(row.account_id), String(row.group_names ?? "").split("||| ").filter(Boolean)]));
+    type HistoryKey = "codexMix" | "noDegrade" | "claude" | "grok";
+    const classify = (names: string[]): HistoryKey => {
+      const text = names.join(" ").toLowerCase();
+      if (/claude|anthropic/u.test(text)) return "claude";
+      if (/grok|x\.ai/u.test(text)) return "grok";
+      if (/不降智|no-degrade|quality/u.test(text)) return "noDegrade";
+      return "codexMix";
+    };
+    const groupedHistory = [...new Set(samples.map((row) => row.sampledAt))].sort((left, right) => Date.parse(left) - Date.parse(right)).map((sampledAt) => {
+      const point: Record<HistoryKey, number> & { sampledAt: string } = { sampledAt, codexMix: 0, noDegrade: 0, claude: 0, grok: 0 };
+      for (const row of samples.filter((item) => item.sampledAt === sampledAt && item.remainingCny !== null)) {
+        const key = classify(namesByAccount.get(row.accountId) ?? []);
+        point[key] = Number(point[key]) + Math.max(0, row.remainingCny ?? 0);
+      }
+      return point;
+    });
     return {
       ok: true,
       windowHours: calculationWindowHours,
       displayHours,
       ...summarizeQuotaSamples(samples, calculationWindowHours),
       history: quotaHistory(samples, calculationWindowHours, displayHours),
+      groupHistory: groupedHistory.filter((point) => Date.parse(point.sampledAt) >= Date.now() - displayHours * 3_600_000),
       valuesPrinted: false,
     };
   }
