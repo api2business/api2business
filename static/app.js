@@ -1,4 +1,5 @@
 import { scoreFreshnessLabel, shouldApplyScorePayload } from './score-display-freshness.js'
+import { quotaAccountAvailable, quotaAvailabilityTotals } from './quota-availability.js'
 import { sampleTimeDisplay } from './sample-time.js'
 import { buildSupplierQualityAssets } from './upstream-quality-assets.js'
 import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js'
@@ -1229,7 +1230,11 @@ function quotaGroup(row) {
 function quotaMemberships(row) {
   const names = quotaGroupNames(row)
   const memberships = new Set()
-  for (const name of names) memberships.add(quotaGroup({ groupNames: [name] }))
+  for (const name of names) {
+    if (/api2business-probe|自用/i.test(name)) continue
+    if (!/混池|gpt|codex|claude|grok|不降智|anthropic/i.test(name)) continue
+    memberships.add(quotaGroup({ groupNames: [name] }))
+  }
   if (!memberships.size) memberships.add(quotaGroup(row))
   return memberships
 }
@@ -1257,11 +1262,9 @@ function quotaRemaining(result) {
 function quotaDisplay(value) { return value === null ? '—' : `¥${number(value, 2)}` }
 
 function quotaPieMarkup(group, rows) {
-  const total = rows.reduce((sum, row) => sum + Math.max(0, row.remaining ?? 0), 0)
-  const used = rows.reduce((sum, row) => sum + Math.max(0, row.consumed24h), 0)
-  const ratio = total > 0 ? Math.max(0, Math.min(1, total / (total + used))) : 0
+  const { total, available, unavailable, ratio } = quotaAvailabilityTotals(rows, group)
   const labels = { 'codex-mix': 'Codex 混池', 'no-degrade': '不降智分组', claude: 'Claude', grok: 'Grok' }
-  return `<article class="quota-group-card"><div class="quota-group-card-head"><div><p class="eyebrow">${labels[group]}</p><h3>${quotaDisplay(total)}</h3></div><span>${number(rows.length)} 个上游钱包</span></div><div class="quota-pie" style="--quota-pie:${ratio * 360}deg"><strong>${number(ratio * 100, 0)}%</strong><small>剩余</small></div><dl><div><dt>剩余额度</dt><dd>${quotaDisplay(total)}</dd></div><div><dt>24h 消耗</dt><dd>${quotaDisplay(used)}</dd></div></dl></article>`
+  return `<article class="quota-group-card"><div class="quota-group-card-head"><div><p class="eyebrow">${labels[group]}</p><h3>${quotaDisplay(total)}</h3></div><span>${number(rows.length)} 个上游钱包</span></div><div class="quota-pie" style="--quota-pie:${ratio * 360}deg"><strong>${number(ratio * 100, 0)}%</strong><small>可用额度占比</small></div><dl><div><dt>可用额度</dt><dd>${quotaDisplay(available)}</dd></div><div><dt>不可用额度</dt><dd>${quotaDisplay(unavailable)}</dd></div></dl></article>`
 }
 
 function renderQuotaMonitor() {
@@ -1290,6 +1293,7 @@ async function refreshQuotaCache(accountIds) {
   const operationId = `quota-monitor-refresh-${Date.now()}`
   const submitted = await requestJson('/api/upstreams/usage', { method: 'POST', redirectOnUnauthorized: false, headers: { 'Idempotency-Key': operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000)
   if (submitted.workflowId) await waitWorkflow(submitted.workflowId, 300000, false)
+  await requestJson('/api/upstreams/quota-account-states', { refresh: true, redirectOnUnauthorized: false })
 }
 
 async function quotaMonitorPage(refresh = false) {
@@ -1316,16 +1320,16 @@ async function quotaMonitorPage(refresh = false) {
   }
   const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
   if (refresh) await refreshQuotaCache(ids)
-  const [cached, usage24h, summary] = await Promise.all([
+  const [cached, usage24h, summary, accountStates] = await Promise.all([
     ids.length ? requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ results: [] }),
     ids.length ? requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ rows: [] }),
     requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
+    requestJson('/api/upstreams/quota-account-states', { redirectOnUnauthorized: false }).catch(() => ({ accounts: [] })),
   ])
+  const stateById = new Map((accountStates.accounts ?? []).map((row) => [Number(row.accountId), row]))
   const sourceTotal = Number(summary.totalRemainingCny)
-  const reconciledTotal = 875.22
-  quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? reconciledTotal : null
-  const scale = Number.isFinite(sourceTotal) && sourceTotal > 0 ? reconciledTotal / sourceTotal : 1
-  const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny) * scale]))
+  quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? sourceTotal : null
+  const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny)]))
   const usageById = new Map()
   for (const item of usage24h.rows ?? []) {
     const id = Number(item.accountId); const current = usageById.get(id) ?? []
@@ -1350,7 +1354,9 @@ async function quotaMonitorPage(refresh = false) {
     const consumed24h = walletRow.consumedUsd * rate
     const consumption = { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 }
     consumption[group] = consumed24h
-    return { accountId: Number(representative.id) || index + 1, name: walletRow.wallet, wallet: walletRow.wallet, accountCount: walletRow.accounts.length, platform: representative.platform ?? '—', groups: [...new Set(walletRow.accounts.flatMap((account) => quotaGroupNames(account)))], group, remaining: remainingByWallet.get(walletRow.wallet) ?? null, consumed24h, consumption }
+    const availableGroups = [...new Set(walletRow.accounts.filter((account) => quotaAccountAvailable(stateById.get(Number(account.id))))
+      .flatMap((account) => [...quotaMemberships(account)]))]
+    return { accountId: Number(representative.id) || index + 1, name: walletRow.wallet, wallet: walletRow.wallet, accountCount: walletRow.accounts.length, platform: representative.platform ?? '—', groups: [...new Set(walletRow.accounts.flatMap((account) => quotaGroupNames(account)))], group, availableGroups, remaining: remainingByWallet.get(walletRow.wallet) ?? null, consumed24h, consumption }
   })
   renderQuotaMonitor()
   document.querySelectorAll('[data-quota-sort]').forEach((header) => header.addEventListener('click', () => { const key = header.dataset.quotaSort; if (quotaMonitorSort.key === key) quotaMonitorSort.direction = quotaMonitorSort.direction === 'asc' ? 'desc' : 'asc'; else { quotaMonitorSort = { key, direction: 'desc' } }; renderQuotaMonitor() }))
