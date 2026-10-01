@@ -914,22 +914,8 @@ export class UpstreamManagementService {
           a.temp_unschedulable_until, a.rate_limit_reset_at, a.overload_until,
           a.expires_at, a.auto_pause_on_expired, COALESCE(g.name, '') AS group_name,
           COALESCE(SUM(${upstreamCostBasisSql("u")}), 0)::numeric AS api_amount_usd,
-          COALESCE(SUM(u.actual_cost), 0)::numeric AS actual_cost_usd,
-          COALESCE(SUM(COALESCE(u.account_stats_cost, u.total_cost) * COALESCE(u.account_rate_multiplier, 1)), 0)::numeric AS account_cost_usd,
-          COALESCE(SUM(u.actual_cost * COALESCE(u.rate_multiplier, 1)), 0)::numeric AS actual_x_sale_usd,
           COALESCE(SUM(u.actual_cost / NULLIF(u.rate_multiplier, 0)), 0)::numeric AS actual_div_sale_usd,
-          COALESCE(SUM(u.actual_cost * COALESCE(u.account_rate_multiplier, 1)), 0)::numeric AS actual_x_account_rate_usd,
-          COALESCE(SUM(u.total_cost), 0)::numeric AS total_cost_usd,
           COUNT(*) FILTER (WHERE u.actual_cost > 0 AND (u.rate_multiplier IS NULL OR u.rate_multiplier <= 0))::int AS sale_rate_missing_count,
-          (SELECT jsonb_agg(jsonb_build_object('model', model_name, 'requests', requests, 'total_cost', total_cost, 'actual_cost', actual_cost, 'sale_derated', sale_derated) ORDER BY model_name)
-             FROM (SELECT COALESCE(NULLIF(u2.requested_model, ''), NULLIF(u2.model, ''), NULLIF(u2.upstream_model, ''), 'unknown') AS model_name,
-                          COUNT(*)::int AS requests, SUM(u2.total_cost)::numeric AS total_cost,
-                          SUM(u2.actual_cost)::numeric AS actual_cost,
-                          SUM(u2.actual_cost / NULLIF(u2.rate_multiplier, 0))::numeric AS sale_derated
-                     FROM usage_logs u2
-                    WHERE u2.account_id = a.id AND u2.created_at >= now() - INTERVAL '24 hours'
-                      AND LOWER(CONCAT_WS(' ', u2.requested_model, u2.model, u2.upstream_model)) NOT LIKE '%luna%'
-                    GROUP BY 1) model_stats) AS model_breakdown,
           COUNT(u.id)::int AS request_count
         FROM accounts a
         LEFT JOIN usage_logs u ON u.account_id = a.id
@@ -941,7 +927,7 @@ export class UpstreamManagementService {
         GROUP BY a.id, g.name ORDER BY a.id, g.name`,
       parameters: ids.length ? [ids.join(",")] : [],
     });
-    const rows = query.rows.map((row) => ({ accountId: Number(row.account_id), status: String(row.status ?? ''), schedulable: row.schedulable === true, tempUnschedulableUntil: row.temp_unschedulable_until == null ? null : String(row.temp_unschedulable_until), rateLimitResetAt: row.rate_limit_reset_at == null ? null : String(row.rate_limit_reset_at), overloadUntil: row.overload_until == null ? null : String(row.overload_until), expiresAt: row.expires_at == null ? null : String(row.expires_at), autoPauseOnExpired: row.auto_pause_on_expired === true, groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), actualCostUsd: Number(row.actual_cost_usd || 0), accountCostUsd: Number(row.account_cost_usd || 0), actualXSaleUsd: Number(row.actual_x_sale_usd || 0), actualDivSaleUsd: Number(row.actual_div_sale_usd || 0), actualXAccountRateUsd: Number(row.actual_x_account_rate_usd || 0), totalCostUsd: Number(row.total_cost_usd || 0), saleRateMissingCount: Number(row.sale_rate_missing_count || 0), modelBreakdown: row.model_breakdown ?? [], requestCount: Number(row.request_count || 0) }));
+    const rows = query.rows.map((row) => ({ accountId: Number(row.account_id), status: String(row.status ?? ''), schedulable: row.schedulable === true, tempUnschedulableUntil: row.temp_unschedulable_until == null ? null : String(row.temp_unschedulable_until), rateLimitResetAt: row.rate_limit_reset_at == null ? null : String(row.rate_limit_reset_at), overloadUntil: row.overload_until == null ? null : String(row.overload_until), expiresAt: row.expires_at == null ? null : String(row.expires_at), autoPauseOnExpired: row.auto_pause_on_expired === true, groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), actualDivSaleUsd: Number(row.actual_div_sale_usd || 0), saleRateMissingCount: Number(row.sale_rate_missing_count || 0), requestCount: Number(row.request_count || 0) }));
     // Sub2API actual_cost 可能已包含下游售卖倍率；用实时有效倍率折回供应商实际成本。
     // 一个账号可能按组聚合成多行，只把账号级实际成本落到一个业务组，避免重复计入。
     const byAccount = new Map<number, typeof rows>();
