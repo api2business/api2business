@@ -1224,6 +1224,11 @@ function quotaGroup(row) {
   return 'codex-mix'
 }
 
+function quotaWallet(value) {
+  const normalized = String(value ?? '').replace(/\/v1\/?$/u, '').replace(/\/$/u, '')
+  return normalized === 'https://direct.rapidapi.cc' ? 'https://rapidapi.cc' : normalized
+}
+
 function quotaUsageAmount(result) {
   const usage = result?.usage ?? {}
   for (const key of ['actualCostUsd', 'apiAmountUsd', 'totalCostUsd', 'costUsd']) {
@@ -1297,7 +1302,7 @@ async function quotaMonitorPage(refresh = false) {
   }
   const wallets = new Map()
   for (const account of accounts) {
-    const wallet = String(account.baseUrl ?? '').replace(/\/v1\/?$/u, '').replace(/\/$/u, '')
+    const wallet = quotaWallet(account.baseUrl)
     if (!wallet) continue
     const current = wallets.get(wallet) ?? { wallet, accounts: [], groupRows: [], consumedUsd: 0 }
     current.accounts.push(account)

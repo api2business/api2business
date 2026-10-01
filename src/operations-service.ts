@@ -426,7 +426,7 @@ export class OperationsService {
     const calculationWindowHours = 1;
     const rows = await this.store.getUpstreamQuotaSamples(displayHours + calculationWindowHours) as Array<Record<string, unknown>>;
     const samples = rows.map((row) => ({
-      sampledAt: new Date(String(row.sampled_at)).toISOString(), walletKey: String(row.wallet_key), accountId: Number(row.account_id),
+      sampledAt: new Date(String(row.sampled_at)).toISOString(), walletKey: normalizeUpstreamWallet(row.wallet_key), accountId: Number(row.account_id),
       schedulable: row.schedulable === true, status: String(row.status), provider: String(row.provider),
       probeOk: row.probe_ok === true, remainingUsd: row.remaining_usd == null ? null : Number(row.remaining_usd),
       cnyPerUsd: Number(row.cny_per_usd), remainingCny: row.remaining_cny == null ? null : Number(row.remaining_cny),

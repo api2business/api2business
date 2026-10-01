@@ -15,7 +15,8 @@ function object(value: unknown): Record<string, unknown> {
 
 export function normalizeUpstreamWallet(value: unknown): string {
   const url = String(value ?? "").trim().split(/\s+/u)[0] ?? "";
-  return url.replace(/\/v1\/?$/u, "").replace(/\/$/u, "");
+  const normalized = url.replace(/\/v1\/?$/u, "").replace(/\/$/u, "");
+  return normalized.replace(/^https:\/\/direct\.rapidapi\.cc$/u, "https://rapidapi.cc");
 }
 
 export function upstreamBalanceRateByWallet(
