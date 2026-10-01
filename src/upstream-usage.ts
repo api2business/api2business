@@ -72,6 +72,18 @@ function firstNumber(source: Row | null, keys: string[]): number | null {
   return null;
 }
 
+function sumDailyUsage(root: Row | null): Row | null {
+  const daily = row(root?.daily_usage);
+  const items = Array.isArray(daily?.items) ? daily.items.map((item) => row(item)).filter((item): item is Row => item !== null) : [];
+  if (items.length === 0) return null;
+  const sum = (keys: string[]) => items.reduce((total, item) => total + (firstNumber(item, keys) ?? 0), 0);
+  return {
+    input_tokens: sum(["input_tokens", "inputTokens"]), output_tokens: sum(["output_tokens", "outputTokens"]),
+    total_tokens: sum(["total_tokens", "totalTokens"]), cost: sum(["cost"]),
+    actual_cost: sum(["actual_cost", "actualCost"]), request_count: sum(["requests", "request_count", "total_requests"]),
+  };
+}
+
 function safeError(value: unknown): string {
   return String(value instanceof Error ? value.message : value)
     .replace(/sk-[A-Za-z0-9_=+/.-]+/gu, "[REDACTED]")
@@ -152,7 +164,10 @@ function parseSub2Api(target: UpstreamUsageTarget, payload: unknown, startedAt: 
   if (!root || (!row(root.usage) && !row(root.quota) && typeof root.mode !== "string")) return null;
   const quota = row(root.quota);
   const usageRoot = row(root.usage);
-  const usage = row(usageRoot?.total) ?? usageRoot ?? root;
+  // 额度监控请求 1 天窗口时必须读取供应商返回的 today 汇总；total 是账号累计值，
+  // 不能把累计实际扣除冒充 24 小时成本。较旧上游没有 today 时保持空值，交由上层显示无数据。
+  const usage = (days <= 1 ? row(usageRoot?.today) : null) ?? (days > 1 ? sumDailyUsage(root) : null)
+    ?? (days <= 1 ? null : row(usageRoot?.total)) ?? usageRoot ?? root;
   const subscription = row(root.subscription);
   const inputTokens = firstNumber(usage, ["input_tokens", "inputTokens"]);
   const outputTokens = firstNumber(usage, ["output_tokens", "outputTokens"]);

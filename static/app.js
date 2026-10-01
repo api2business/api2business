@@ -2,7 +2,7 @@ import { scoreFreshnessLabel, shouldApplyScorePayload } from './score-display-fr
 import { quotaAccountAvailable, quotaAvailabilityTotals } from './quota-availability.js'
 import { sampleTimeDisplay } from './sample-time.js'
 import { buildSupplierQualityAssets } from './upstream-quality-assets.js'
-import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=quota-monitor-v15'
+import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=quota-monitor-v16'
 import { quotaGroup, quotaMemberships } from './quota-grouping.js'
 
 const page = document.body.dataset.page
@@ -1349,7 +1349,7 @@ async function quotaMonitorPage() {
   const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
   const [cached, usage24h, summary] = await Promise.all([
     ids.length ? requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ results: [] }),
-    requestJson('/api/upstreams/quota-monitor-usage', { redirectOnUnauthorized: false }),
+    requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }),
     requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
   ])
   const sourceTotal = Number(summary.totalRemainingCny)
@@ -1375,7 +1375,9 @@ async function quotaMonitorPage() {
     current.groupRows.push(account)
     // 按请求实际所属组统计，账号挂多个组不会重复记账；每个账号先换算人民币再合并钱包。
     for (const usage of usageById.get(Number(account.id)) ?? []) {
-      const amountCny = (Number(usage.apiAmountUsd) || 0) * (walletRateByWallet.get(wallet) ?? 1)
+      const amountUsd = Number(usage.apiAmountUsd)
+      if (!Number.isFinite(amountUsd)) continue
+      const amountCny = amountUsd * (walletRateByWallet.get(wallet) ?? 1)
       current.consumed24h += amountCny
       current.consumption[usage.groupName ? quotaGroup(usage) : quotaGroup(account)] += amountCny
     }

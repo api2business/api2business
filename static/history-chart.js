@@ -32,14 +32,15 @@ export function historyChartMarkup(points, { series, valueFormatter, unit = '', 
   const max = upperBound ?? rawMax + padding
   const span = Math.max(max - min, 0.001)
   const requestedLeft = Number(requestedPlotLeft), requestedRight = Number(requestedPlotRight)
-  const plotLeft = Math.max(0, Number.isFinite(requestedLeft) ? requestedLeft : 64), plotRight = Math.min(chartWidth - 2, Math.max(plotLeft + 100, Number.isFinite(requestedRight) ? requestedRight : 986)), plotTop = 18, plotBottom = 126
+  const plotLeft = Math.max(0, Number.isFinite(requestedLeft) ? requestedLeft : 64), plotRight = Math.min(chartWidth - 2, Math.max(plotLeft + 100, Number.isFinite(requestedRight) ? requestedRight : 986)), plotTop = 18, plotBottom = 158
   const x = (index) => plotLeft + index * (plotRight - plotLeft) / Math.max(1, chartPoints.length - 1)
   const y = (value) => plotBottom - (Math.min(max, Math.max(min, value)) - min) / span * (plotBottom - plotTop)
   const formatValue = typeof valueFormatter === 'function' ? valueFormatter : (value) => number(value, 2)
   const ticks = [max, (max + min) / 2, min]
   const grid = ticks.map((value) => {
     const row = y(value)
-    return `<text x="${Math.max(4, plotLeft - 4)}" y="${row + 3}" text-anchor="end" class="chart-axis chart-axis-y">${escapeHtml(formatValue(value))}</text><line x1="${plotLeft}" y1="${row}" x2="${plotRight}" y2="${row}" class="chart-grid"/>`
+    const axisInside = plotLeft < 36
+    return `<text x="${axisInside ? 8 : Math.max(4, plotLeft - 4)}" y="${row + 3}" text-anchor="${axisInside ? 'start' : 'end'}" class="chart-axis chart-axis-y">${escapeHtml(formatValue(value))}</text><line x1="${plotLeft}" y1="${row}" x2="${plotRight}" y2="${row}" class="chart-grid"/>`
   }).join('')
   const lines = series.map(({ key, className, label }) => {
     const valuesByPoint = chartPoints.map((point, index) => {
@@ -88,7 +89,7 @@ export function historyChartMarkup(points, { series, valueFormatter, unit = '', 
     return `<g class="chart-hover-column" data-tooltip="${escapeHtml(`${label(at)}\n${details}`)}"><line x1="${x(index)}" y1="${plotTop}" x2="${x(index)}" y2="${plotBottom}"/><rect x="${left}" y="${plotTop}" width="${Math.max(8, right - left)}" height="${plotBottom - plotTop}"/></g>`
   }).join('')
   const capLabels = `${upperBound === null ? '' : `<text x="${plotRight}" y="${plotTop + 10}" text-anchor="end" class="chart-cap-label">展示上限 ${escapeHtml(formatValue(upperBound))}</text>`}${lowerBound === null ? '' : `<text x="${plotRight}" y="${plotBottom - 5}" text-anchor="end" class="chart-cap-label">展示下限 ${escapeHtml(formatValue(lowerBound))}</text>`}`
-  return `<title>${escapeHtml(ariaLabel)}</title>${grid}${lines}${hoverTargets}${capLabels}<text x="${plotLeft}" y="147" class="chart-axis">${label(first)}</text><text x="${plotRight}" y="147" text-anchor="end" class="chart-axis">${label(last)}</text><foreignObject x="${plotLeft}" y="1" width="${plotRight - plotLeft}" height="16"><div xmlns="http://www.w3.org/1999/xhtml" class="history-chart-meta"><span>${escapeHtml(unit)}</span><span class="history-chart-legend">${legend}</span></div></foreignObject>`
+  return `<title>${escapeHtml(ariaLabel)}</title>${grid}${lines}${hoverTargets}${capLabels}<text x="${plotLeft}" y="176" class="chart-axis">${label(first)}</text><text x="${plotRight}" y="176" text-anchor="end" class="chart-axis">${label(last)}</text><foreignObject x="${plotLeft}" y="1" width="${plotRight - plotLeft}" height="16"><div xmlns="http://www.w3.org/1999/xhtml" class="history-chart-meta"><span>${escapeHtml(unit)}</span><span class="history-chart-legend">${legend}</span></div></foreignObject>`
 }
 
 export function bindHistoryChartTooltip(svg) {

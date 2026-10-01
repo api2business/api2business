@@ -902,7 +902,7 @@ export class UpstreamManagementService {
     };
   }
 
-  async quotaMonitorUsage(accountIds: number[]): Promise<Record<string, unknown>> {
+  async quotaMonitorUsage(accountIds: number[], providerActualByAccount = new Map<number, number | null>()): Promise<Record<string, unknown>> {
     const ids = [...new Set(accountIds.filter((id) => Number.isSafeInteger(id) && id > 0))];
     const query = await this.reads.query<Row>({
       key: `upstreams.quota-monitor-usage:${ids.join(",") || "all"}`,
@@ -925,7 +925,18 @@ export class UpstreamManagementService {
         GROUP BY a.id, g.name ORDER BY a.id, g.name`,
       parameters: ids.length ? [ids.join(",")] : [],
     });
-    return { ok: true, windowHours: 24, rows: query.rows.map((row) => ({ accountId: Number(row.account_id), status: String(row.status ?? ''), schedulable: row.schedulable === true, tempUnschedulableUntil: row.temp_unschedulable_until == null ? null : String(row.temp_unschedulable_until), rateLimitResetAt: row.rate_limit_reset_at == null ? null : String(row.rate_limit_reset_at), overloadUntil: row.overload_until == null ? null : String(row.overload_until), expiresAt: row.expires_at == null ? null : String(row.expires_at), autoPauseOnExpired: row.auto_pause_on_expired === true, groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), requestCount: Number(row.request_count || 0) })), databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs };
+    const rows = query.rows.map((row) => ({ accountId: Number(row.account_id), status: String(row.status ?? ''), schedulable: row.schedulable === true, tempUnschedulableUntil: row.temp_unschedulable_until == null ? null : String(row.temp_unschedulable_until), rateLimitResetAt: row.rate_limit_reset_at == null ? null : String(row.rate_limit_reset_at), overloadUntil: row.overload_until == null ? null : String(row.overload_until), expiresAt: row.expires_at == null ? null : String(row.expires_at), autoPauseOnExpired: row.auto_pause_on_expired === true, groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), requestCount: Number(row.request_count || 0) }));
+    // 上游返回的 actualCostUsd 是真实供应商成本；一个账号可能按组聚合成多行，
+    // 只能把账号级实际成本落到一个业务组，避免把同一笔成本重复计入多个组。
+    const byAccount = new Map<number, typeof rows>();
+    for (const row of rows) byAccount.set(row.accountId, [...(byAccount.get(row.accountId) ?? []), row]);
+    for (const [accountId, accountRows] of byAccount) {
+      const actual = providerActualByAccount.get(accountId);
+      if (actual === undefined) continue;
+      const target = accountRows.find((row) => row.groupName && !row.groupName.startsWith('api2business-probe-') && row.groupName !== '自用') ?? accountRows[0];
+      for (const row of accountRows) row.apiAmountUsd = row === target ? actual : null;
+    }
+    return { ok: true, windowHours: 24, rows, databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs };
   }
 
   async usage(accountIds: number[]): Promise<Record<string, unknown>> {

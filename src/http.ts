@@ -326,7 +326,18 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/upstreams/quota-monitor-usage") {
         const selector = url.searchParams.get("accountIds");
         const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
-        return json(await upstreams.quotaMonitorUsage(accountIds));
+        const cachedRows = await operations.getUpstreamUsageCache(accountIds) as Array<Record<string, unknown>>;
+        const providerActualByAccount = new Map<number, number | null>(accountIds.map((accountId) => [accountId, null]));
+        for (const row of cachedRows) {
+          const accountId = Number(row.account_id);
+          if (Number.isSafeInteger(accountId) && accountId > 0 && !providerActualByAccount.has(accountId)) providerActualByAccount.set(accountId, null);
+          const result = (row.last_success_result ?? row.result) as Record<string, unknown> | null;
+          const usage = result && typeof result.usage === "object" && result.usage !== null ? result.usage as Record<string, unknown> : {};
+          const actual = Number(usage.actualCostUsd ?? usage.actual_cost_usd ?? usage.actual_cost);
+          const amount = Number.isFinite(actual) && actual >= 0 ? actual : null;
+          if (Number.isSafeInteger(accountId) && accountId > 0 && amount !== null) providerActualByAccount.set(accountId, amount);
+        }
+        return json(await upstreams.quotaMonitorUsage(accountIds, providerActualByAccount));
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/quota-summary") {
         return json(await operations.upstreamQuotaSummary());
