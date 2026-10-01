@@ -2,7 +2,7 @@ import { scoreFreshnessLabel, shouldApplyScorePayload } from './score-display-fr
 import { quotaAccountAvailable, quotaAvailabilityTotals } from './quota-availability.js'
 import { sampleTimeDisplay } from './sample-time.js'
 import { buildSupplierQualityAssets } from './upstream-quality-assets.js'
-import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=quota-monitor-v12'
+import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=quota-monitor-v14'
 import { quotaGroup, quotaMemberships } from './quota-grouping.js'
 
 const page = document.body.dataset.page
@@ -1283,7 +1283,7 @@ function renderQuotaGroupHistory(points) {
     unit: '人民币余额',
     ariaLabel: '四个额度分组人民币余额趋势',
     yMin: 0,
-    plotLeft: 12,
+    plotLeft: 0,
   })
   bindHistoryChartTooltip(chart)
 }
