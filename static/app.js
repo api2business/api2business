@@ -1212,7 +1212,7 @@ let quotaMonitorSort = { key: 'remaining', direction: 'desc' }
 const quotaMonitorPageSize = 12
 
 function quotaGroupNames(row) {
-  const names = Array.isArray(row.groupNames) ? row.groupNames : [row.groupName]
+  const names = Array.isArray(row.groupNames) ? row.groupNames : Array.isArray(row.groups) ? row.groups : [row.groupName]
   return names.filter(Boolean).map((value) => String(value))
 }
 
