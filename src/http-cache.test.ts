@@ -9,6 +9,7 @@ test("persistent snapshot APIs bypass the generic response cache", () => {
     "/api/upstreams/pool-quality/errors?page=1",
     "/api/upstreams/quota-summary",
     "/api/upstreams/usage-cache?accountIds=1,2",
+    "/api/upstreams/quota-monitor-usage?accountIds=1,2",
     "/api/upstreams/recharge-candidates",
     "/api/oauth/runtime-summary",
     "/api/admin/errors/diagnose?limit=1000",
