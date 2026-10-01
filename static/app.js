@@ -1207,6 +1207,7 @@ async function rankingPage() {
 
 let quotaMonitorRows = []
 let quotaMonitorTotalRemaining = null
+let quotaMonitorFilter = 'all'
 let quotaMonitorPageNumber = 1
 let quotaMonitorSort = { key: 'remaining', direction: 'desc' }
 const quotaMonitorPageSize = 12
@@ -1266,7 +1267,8 @@ function renderQuotaMonitor() {
   const groups = ['codex-mix', 'no-degrade', 'claude', 'grok']
   const grouped = Object.fromEntries(groups.map((group) => [group, quotaMonitorRows.filter((row) => quotaMemberships(row).has(group))]))
   const cards = $('#quota-group-cards'); if (cards) cards.innerHTML = groups.map((group) => quotaPieMarkup(group, grouped[group])).join('')
-  const sorted = quotaMonitorRows.slice().sort((a, b) => {
+  const filteredRows = quotaMonitorFilter === 'all' ? quotaMonitorRows : quotaMonitorRows.filter((row) => quotaMemberships(row).has(quotaMonitorFilter))
+  const sorted = filteredRows.slice().sort((a, b) => {
     const read = (row) => quotaMonitorSort.key.startsWith('consumption.') ? row.consumption[quotaMonitorSort.key.slice('consumption.'.length)] : row[quotaMonitorSort.key]
     const av = read(a); const bv = read(b)
     const result = typeof av === 'string' ? String(av).localeCompare(String(bv)) : (Number(av ?? -Infinity) - Number(bv ?? -Infinity))
@@ -1279,6 +1281,7 @@ function renderQuotaMonitor() {
   const pageLabel = $('#quota-monitor-page'); if (pageLabel) pageLabel.textContent = `${quotaMonitorPageNumber} / ${totalPages} · ${number(sorted.length)} 条`
   $('#quota-monitor-prev')?.toggleAttribute('disabled', quotaMonitorPageNumber <= 1); $('#quota-monitor-next')?.toggleAttribute('disabled', quotaMonitorPageNumber >= totalPages)
   document.querySelectorAll('[data-quota-sort]').forEach((header) => { header.setAttribute('aria-sort', header.dataset.quotaSort === quotaMonitorSort.key ? (quotaMonitorSort.direction === 'asc' ? 'ascending' : 'descending') : 'none') })
+  document.querySelectorAll('[data-quota-filter]').forEach((button) => button.classList.toggle('is-active', button.dataset.quotaFilter === quotaMonitorFilter))
 }
 
 async function refreshQuotaCache(accountIds) {
@@ -1331,6 +1334,7 @@ async function quotaMonitorPage(refresh = false) {
   })
   renderQuotaMonitor()
   document.querySelectorAll('[data-quota-sort]').forEach((header) => header.addEventListener('click', () => { const key = header.dataset.quotaSort; if (quotaMonitorSort.key === key) quotaMonitorSort.direction = quotaMonitorSort.direction === 'asc' ? 'desc' : 'asc'; else { quotaMonitorSort = { key, direction: 'desc' } }; renderQuotaMonitor() }))
+  document.querySelectorAll('[data-quota-filter]').forEach((button) => button.addEventListener('click', () => { quotaMonitorFilter = button.dataset.quotaFilter ?? 'all'; quotaMonitorPageNumber = 1; renderQuotaMonitor() }))
   $('#quota-monitor-prev')?.addEventListener('click', () => { quotaMonitorPageNumber = Math.max(1, quotaMonitorPageNumber - 1); renderQuotaMonitor() })
   $('#quota-monitor-next')?.addEventListener('click', () => { quotaMonitorPageNumber += 1; renderQuotaMonitor() })
   $('#quota-monitor-refresh')?.addEventListener('click', async () => { const button = $('#quota-monitor-refresh'); button.disabled = true; try { await quotaMonitorPage(true) } finally { button.disabled = false } })
