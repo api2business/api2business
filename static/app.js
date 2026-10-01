@@ -1295,8 +1295,9 @@ async function quotaMonitorPage(refresh = false) {
     const id = Number(account.id); const result = cachedById.get(id) ?? {}; const scoreRow = scoreById.get(id) ?? {}
     const group = quotaGroup({ ...account, ...scoreRow }); const consumed = quotaUsageAmount(result) || Number(scoreRow.usage?.apiAmountUsd ?? 0) || 0
     const consumption = { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 }
-    for (const item of usageById.get(id) ?? []) { const itemGroup = quotaGroup({ ...account, ...scoreRow, groupNames: [item.groupName] }); consumption[itemGroup] += Number(item.apiAmountUsd) || 0 }
-    const consumed24h = Object.values(consumption).reduce((sum, value) => sum + value, 0)
+    // 一个账号常同时绑定业务组和私有探活组；SQL 会为每个绑定组返回同一账号汇总，故只取一次。
+    const consumed24h = Number(usageById.get(id)?.[0]?.apiAmountUsd) || 0
+    consumption[group] = consumed24h
     return { accountId: id, name: account.name ?? scoreRow.accountName ?? `账号 #${id}`, platform: account.platform ?? '—', groups: quotaGroupNames(account), group, remaining: quotaRemaining(result), consumed24h, consumption }
   })
   renderQuotaMonitor()
