@@ -221,7 +221,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 进度与日志：`upstreams benchmark-status --id <benchmark-run-id> --over-api`；
   - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api`；
   - 评测只复用持久化探活专用 API Key，不读取供应商原始 Key，也不轮换探活 Key。
-- 成本与评分口径：Sub2API `actual_cost` 仅表示用户/API Key 实际扣费；供应商成本采样的 API-USD 分母使用 `total_cost`，`effective_rate_multiplier` 不得直接当作人民币汇率，人民币余额必须经过共享钱包的 `CNY/API-USD` 换算。
+- 评分与产出分母继续使用 `total_cost`。
+- 额度监控的供应商实际支出按逐条销售倍率折回后乘实时有效倍率，唯一公式和缺失处理见
+  [额度监控](references/quota-monitoring.md)。
 - 额度监控的状态、可用比例、钱包合并、刷新轮询和截图验收口径见 [额度监控](references/quota-monitoring.md)，不得在页面或其他文档另建第二套口径。
 
 ## 验收
