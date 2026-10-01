@@ -9,12 +9,12 @@
 
 - 钱包余额来自现有上游资产汇总的 `walletDistribution` 与 `totalRemainingCny`，单位统一为人民币。
 - 同一规范化 `base_url` 的多个 API Key 合并成一个钱包行；规范化规则必须与充值和上游资产汇总共用，不能在页面另造钱包身份。
-- 24 小时真实供应商成本只读取同一额度缓存结果中的 `usage.actualCostUsd`。
-  上游没有该字段时留空且不计入合计，不能用其他成本字段填充。
-  Sub2API `usage_logs` 的 `actual_cost`、`account_stats_cost` 和账号费率属于下游账务，
-  可能包含 Claude 等售卖倍率，不得作为真实上游成本。
-- 读取到的美元成本再按钱包资产汇总中的 `remainingCny / remainingUsd` 换算为人民币，
-  不能误用账号售卖倍率；缓存没有实际成本时保持空值。
+- 24 小时真实供应商成本统一从同一条排队数据库查询读取 `usage_logs.actual_cost`，
+  时间窗为 `created_at >= now() - interval '24 hours'`；失败或缺失记录不补假值。
+  该字段可能包含下游售卖倍率，必须乘以同一额度缓存中实时读取的有效倍率，
+  由共享 `providerActualCostUsd` 函数折回供应商实际支出；没有有效倍率时留空。
+- 结果再按钱包资产汇总中的 `remainingCny / remainingUsd` 换算为人民币，
+  不读取 `account_stats_cost` 或标准 `total_cost` 作为实际支出，也不把缺失值回退成其他成本字段。
 - 一个账号挂多个分组时，按实际分组汇总且不能因分组连接重复计算；一个钱包的总消耗等于其账号消耗之和。
 - 现场对账金额只能作为该时刻的核对证据，不能硬编码、缩放或写入通用规则。
 

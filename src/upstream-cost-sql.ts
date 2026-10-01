@@ -3,3 +3,11 @@
 export function upstreamCostBasisSql(alias: string): string {
   return `COALESCE(${alias}.total_cost, 0)`;
 }
+
+/** 将 Sub2API 已含下游倍率的 actual_cost 折回供应商实际支出。 */
+export function providerActualCostUsd(actualCostUsd: number, effectiveRate: number | null | undefined): number | null {
+  return Number.isFinite(actualCostUsd) && actualCostUsd >= 0
+    && effectiveRate !== null && effectiveRate !== undefined
+    && Number.isFinite(effectiveRate) && effectiveRate > 0
+    ? actualCostUsd * effectiveRate : null;
+}

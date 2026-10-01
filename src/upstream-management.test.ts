@@ -2,10 +2,15 @@ import { expect, test } from "bun:test";
 import { loadConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { findAccountId, formatRate, formatUpstreamName, normalizeBaseUrl, parseUpstreamName, UpstreamManagementService, validateCapacity, validateGroupIds, validatePriority, validateRate, validateSuffix } from "./upstream-management";
-import { upstreamCostBasisSql } from "./upstream-cost-sql";
+import { providerActualCostUsd, upstreamCostBasisSql } from "./upstream-cost-sql";
 
 test("quota cost basis follows native supplier standard cost", () => {
   expect(upstreamCostBasisSql("usage")).toBe("COALESCE(usage.total_cost, 0)");
+});
+
+test("provider actual cost removes downstream selling multiplier only with live rate evidence", () => {
+  expect(providerActualCostUsd(214.4581706, 0.08)).toBeCloseTo(17.156653648, 9);
+  expect(providerActualCostUsd(214.4581706, null)).toBeNull();
 });
 
 test("upstream names preserve historical six-decimal rates", () => {
