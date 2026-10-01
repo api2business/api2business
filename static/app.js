@@ -1332,10 +1332,8 @@ async function quotaMonitorPage(refresh = false) {
     requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
   ])
   const sourceTotal = Number(summary.totalRemainingCny)
-  const reconciledTotal = 875.22
-  quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? reconciledTotal : null
-  const scale = Number.isFinite(sourceTotal) && sourceTotal > 0 ? reconciledTotal / sourceTotal : 1
-  const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny) * scale]))
+  quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? sourceTotal : null
+  const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny)]))
   const usageById = new Map()
   for (const item of usage24h.rows ?? []) {
     const id = Number(item.accountId); const current = usageById.get(id) ?? []
