@@ -48,7 +48,8 @@ export function time(value) {
 
 export async function requestJson(url, options = {}, timeoutMs = 20000) {
   const refresh = options.refresh === true
-  const { refresh: _refresh, ...fetchOptions } = options
+  const redirectOnUnauthorized = options.redirectOnUnauthorized !== false
+  const { refresh: _refresh, redirectOnUnauthorized: _redirectOnUnauthorized, ...fetchOptions } = options
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -62,7 +63,7 @@ export async function requestJson(url, options = {}, timeoutMs = 20000) {
       },
     })
     const data = await response.json().catch(() => null)
-    if (response.status === 401 && page !== 'login') {
+    if (response.status === 401 && page !== 'login' && redirectOnUnauthorized) {
       location.assign('/login')
       throw new Error('登录状态已失效')
     }
@@ -1287,20 +1288,39 @@ function renderQuotaMonitor() {
 async function refreshQuotaCache(accountIds) {
   if (!accountIds.length) return
   const operationId = `quota-monitor-refresh-${Date.now()}`
-  const submitted = await requestJson('/api/upstreams/usage', { method: 'POST', headers: { 'Idempotency-Key': operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000)
-  if (submitted.workflowId) await waitWorkflow(submitted.workflowId, 300000)
+  const submitted = await requestJson('/api/upstreams/usage', { method: 'POST', redirectOnUnauthorized: false, headers: { 'Idempotency-Key': operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000)
+  if (submitted.workflowId) await waitWorkflow(submitted.workflowId, 300000, false)
 }
 
 async function quotaMonitorPage(refresh = false) {
+  const filterBar = $('#quota-monitor-filters')
+  if (filterBar && filterBar.dataset.bound !== '1') {
+    filterBar.dataset.bound = '1'
+    filterBar.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-quota-filter]')
+      if (!button) return
+      quotaMonitorFilter = button.dataset.quotaFilter ?? 'all'
+      quotaMonitorPageNumber = 1
+      renderQuotaMonitor()
+    })
+  }
+  const refreshButton = $('#quota-monitor-refresh')
+  if (refresh) { refreshButton?.classList.add('is-loading'); refreshButton?.setAttribute('aria-busy', 'true') }
   const state = $('#quota-monitor-state'); if (state) state.textContent = refresh ? '正在刷新额度缓存，完成后读取同一缓存…' : '正在读取已有额度缓存…'
-  const accounts = []
-  let page = 1; let totalPages = 1
-  do { const data = await requestJson(`/api/upstreams?page=${page}`); accounts.push(...(data.accounts ?? [])); totalPages = Number(data.totalPages ?? 1); page += 1 } while (page <= totalPages && page < 20)
+  const firstPage = await requestJson('/api/upstreams?page=1')
+  const accounts = [...(firstPage.accounts ?? [])]
+  const totalPages = Number(firstPage.totalPages ?? 1)
+  if (totalPages > 1) {
+    const pages = await Promise.all(Array.from({ length: Math.min(totalPages, 20) - 1 }, (_, index) => requestJson(`/api/upstreams?page=${index + 2}`)))
+    for (const data of pages) accounts.push(...(data.accounts ?? []))
+  }
   const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
   if (refresh) await refreshQuotaCache(ids)
-  const cached = ids.length ? await requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`) : { results: [] }
-  const usage24h = ids.length ? await requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`) : { rows: [] }
-  const summary = await requestJson('/api/upstreams/quota-summary')
+  const [cached, usage24h, summary] = await Promise.all([
+    ids.length ? requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ results: [] }),
+    ids.length ? requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ rows: [] }),
+    requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
+  ])
   const sourceTotal = Number(summary.totalRemainingCny)
   const reconciledTotal = 875.22
   quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? reconciledTotal : null
@@ -1337,7 +1357,7 @@ async function quotaMonitorPage(refresh = false) {
   document.querySelectorAll('[data-quota-filter]').forEach((button) => button.addEventListener('click', () => { quotaMonitorFilter = button.dataset.quotaFilter ?? 'all'; quotaMonitorPageNumber = 1; renderQuotaMonitor() }))
   $('#quota-monitor-prev')?.addEventListener('click', () => { quotaMonitorPageNumber = Math.max(1, quotaMonitorPageNumber - 1); renderQuotaMonitor() })
   $('#quota-monitor-next')?.addEventListener('click', () => { quotaMonitorPageNumber += 1; renderQuotaMonitor() })
-  $('#quota-monitor-refresh')?.addEventListener('click', async () => { const button = $('#quota-monitor-refresh'); button.disabled = true; try { await quotaMonitorPage(true) } finally { button.disabled = false } })
+  $('#quota-monitor-refresh')?.addEventListener('click', async () => { const button = $('#quota-monitor-refresh'); button.disabled = true; try { await quotaMonitorPage(true) } catch (error) { const message = error instanceof Error ? error.message : String(error); if ($('#quota-monitor-state')) $('#quota-monitor-state').textContent = `刷新失败：${message}` } finally { button.disabled = false; button.classList.remove('is-loading'); button.removeAttribute('aria-busy') } })
 }
 
 function creditLabel(status) {
@@ -1927,10 +1947,10 @@ export async function waitUpstreamJob(workflowId, onStatus = () => {}, timeoutMs
   }
 }
 
-async function waitWorkflow(workflowId, timeoutMs = 600000) {
+async function waitWorkflow(workflowId, timeoutMs = 600000, redirectOnUnauthorized = true) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    const status = await requestJson(`/api/admin/workflows/${encodeURIComponent(workflowId)}`, {}, 20000)
+    const status = await requestJson(`/api/admin/workflows/${encodeURIComponent(workflowId)}`, { redirectOnUnauthorized }, 20000)
     if (status.terminal) {
       if (status.state !== 'completed') throw new Error(status.error ?? `作业${status.state ?? '失败'}`)
       if (!status.result?.ok) throw new Error(status.result?.error ?? '作业未成功完成')
