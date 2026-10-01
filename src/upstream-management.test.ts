@@ -9,8 +9,14 @@ test("quota cost basis follows native supplier standard cost", () => {
 });
 
 test("provider actual cost removes downstream selling multiplier only with live rate evidence", () => {
-  expect(providerActualCostUsd(214.4581706, 0.08)).toBeCloseTo(17.156653648, 9);
+  expect(providerActualCostUsd(14.861467, 1.2)).toBeCloseTo(17.8337604, 9);
   expect(providerActualCostUsd(214.4581706, null)).toBeNull();
+});
+
+test("quota query derates each billed row before applying the live upstream rate", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  expect(source).toContain("SUM(u.actual_cost / NULLIF(u.rate_multiplier, 0))");
+  expect(source).toContain("saleRateMissingCount");
 });
 
 test("upstream names preserve historical six-decimal rates", () => {

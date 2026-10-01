@@ -11,8 +11,9 @@
 - 同一规范化 `base_url` 的多个 API Key 合并成一个钱包行；规范化规则必须与充值和上游资产汇总共用，不能在页面另造钱包身份。
 - 24 小时真实供应商成本统一从同一条排队数据库查询读取 `usage_logs.actual_cost`，
   时间窗为 `created_at >= now() - interval '24 hours'`；失败或缺失记录不补假值。
-  该字段可能包含下游售卖倍率，必须乘以同一额度缓存中实时读取的有效倍率，
-  由共享 `providerActualCostUsd` 函数折回供应商实际支出；没有有效倍率时留空。
+  该字段可能包含逐条下游售卖倍率；先按每条记录的
+  `actual_cost / rate_multiplier` 折回，再乘同一额度缓存中实时读取的有效倍率，
+  由共享 `providerActualCostUsd` 函数完成；任一实际记录缺售卖倍率或实时倍率时留空。
 - 结果再按钱包资产汇总中的 `remainingCny / remainingUsd` 换算为人民币，
   不读取 `account_stats_cost` 或标准 `total_cost` 作为实际支出，也不把缺失值回退成其他成本字段。
 - 一个账号挂多个分组时，按实际分组汇总且不能因分组连接重复计算；一个钱包的总消耗等于其账号消耗之和。
