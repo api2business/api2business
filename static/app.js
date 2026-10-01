@@ -1292,7 +1292,7 @@ async function refreshQuotaCache(accountIds) {
   if (!accountIds.length) return
   const operationId = `quota-monitor-refresh-${Date.now()}`
   const submitted = await requestJson('/api/upstreams/usage', { method: 'POST', redirectOnUnauthorized: false, headers: { 'Idempotency-Key': operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000)
-  if (submitted.workflowId) await waitWorkflow(submitted.workflowId, 300000, false)
+  if (submitted.workflowId) await waitUpstreamJob(submitted.workflowId, () => {}, 300000)
 }
 
 async function quotaMonitorPage(refresh = false) {
@@ -1306,6 +1306,13 @@ async function quotaMonitorPage(refresh = false) {
       quotaMonitorPageNumber = 1
       renderQuotaMonitor()
     })
+  }
+  if (!$('#quota-monitor-refresh')?.dataset.bound) {
+    $('#quota-monitor-refresh').dataset.bound = '1'
+    document.querySelectorAll('[data-quota-sort]').forEach((header) => header.addEventListener('click', () => { const key = header.dataset.quotaSort; if (quotaMonitorSort.key === key) quotaMonitorSort.direction = quotaMonitorSort.direction === 'asc' ? 'desc' : 'asc'; else { quotaMonitorSort = { key, direction: 'desc' } }; renderQuotaMonitor() }))
+    $('#quota-monitor-prev')?.addEventListener('click', () => { quotaMonitorPageNumber = Math.max(1, quotaMonitorPageNumber - 1); renderQuotaMonitor() })
+    $('#quota-monitor-next')?.addEventListener('click', () => { quotaMonitorPageNumber += 1; renderQuotaMonitor() })
+    $('#quota-monitor-refresh')?.addEventListener('click', async () => { const button = $('#quota-monitor-refresh'); button.disabled = true; try { await quotaMonitorPage(true) } catch (error) { const message = error instanceof Error ? error.message : String(error); if ($('#quota-monitor-state')) $('#quota-monitor-state').textContent = `刷新失败：${message}` } finally { button.disabled = false; button.classList.remove('is-loading'); button.removeAttribute('aria-busy') } })
   }
   const refreshButton = $('#quota-monitor-refresh')
   if (refresh) { refreshButton?.classList.add('is-loading'); refreshButton?.setAttribute('aria-busy', 'true') }
@@ -1321,7 +1328,7 @@ async function quotaMonitorPage(refresh = false) {
   if (refresh) await refreshQuotaCache(ids)
   const [cached, usage24h, summary] = await Promise.all([
     ids.length ? requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ results: [] }),
-    ids.length ? requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`, { refresh, redirectOnUnauthorized: false }) : Promise.resolve({ rows: [] }),
+    requestJson('/api/upstreams/quota-monitor-usage', { refresh, redirectOnUnauthorized: false }),
     requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
   ])
   const sourceTotal = Number(summary.totalRemainingCny)
@@ -1337,31 +1344,26 @@ async function quotaMonitorPage(refresh = false) {
   for (const account of accounts) {
     const wallet = quotaWallet(account.baseUrl)
     if (!wallet) continue
-    const current = wallets.get(wallet) ?? { wallet, accounts: [], groupRows: [], consumedUsd: 0 }
+    const current = wallets.get(wallet) ?? { wallet, accounts: [], groupRows: [], consumed24h: 0, consumption: { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 } }
     current.accounts.push(account)
     current.groupRows.push(account)
-    // 同一个账号可能挂多个业务组，接口按组返回重复汇总；这里只取第一行。
-    const firstUsage = usageById.get(Number(account.id))?.[0]
-    current.consumedUsd += Number(firstUsage?.apiAmountUsd) || 0
+    // 按请求实际所属组统计，账号挂多个组不会重复记账；每个账号先换算人民币再合并钱包。
+    for (const usage of usageById.get(Number(account.id)) ?? []) {
+      const amountCny = (Number(usage.apiAmountUsd) || 0) * (Number(account.rateCnyPerApiUsd) > 0 ? Number(account.rateCnyPerApiUsd) : 1)
+      current.consumed24h += amountCny
+      current.consumption[usage.groupName ? quotaGroup(usage) : quotaGroup(account)] += amountCny
+    }
     wallets.set(wallet, current)
   }
   quotaMonitorRows = [...wallets.values()].map((walletRow, index) => {
     const representative = walletRow.accounts[0] ?? {}
     const group = quotaGroup({ ...representative, groupNames: walletRow.accounts.flatMap((account) => quotaGroupNames(account)) })
-    const rate = walletRow.accounts.map((account) => Number(account.rateCnyPerApiUsd)).find((value) => Number.isFinite(value) && value > 0) ?? 1
-    const consumed24h = walletRow.consumedUsd * rate
-    const consumption = { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 }
-    consumption[group] = consumed24h
     const availableGroups = [...new Set(walletRow.accounts.filter((account) => quotaAccountAvailable(stateById.get(Number(account.id))))
       .flatMap((account) => [...quotaMemberships(account)]))]
-    return { accountId: Number(representative.id) || index + 1, name: walletRow.wallet, wallet: walletRow.wallet, accountCount: walletRow.accounts.length, platform: representative.platform ?? '—', groups: [...new Set(walletRow.accounts.flatMap((account) => quotaGroupNames(account)))], group, availableGroups, remaining: remainingByWallet.get(walletRow.wallet) ?? null, consumed24h, consumption }
+    const remaining = remainingByWallet.get(walletRow.wallet) ?? null
+    return { accountId: Number(representative.id) || index + 1, name: walletRow.wallet, wallet: walletRow.wallet, accountCount: walletRow.accounts.length, platform: representative.platform ?? '—', groups: [...new Set(walletRow.accounts.flatMap((account) => quotaGroupNames(account)))], group, availableGroups, remaining, consumed24h: walletRow.consumed24h, consumption: walletRow.consumption }
   })
   renderQuotaMonitor()
-  document.querySelectorAll('[data-quota-sort]').forEach((header) => header.addEventListener('click', () => { const key = header.dataset.quotaSort; if (quotaMonitorSort.key === key) quotaMonitorSort.direction = quotaMonitorSort.direction === 'asc' ? 'desc' : 'asc'; else { quotaMonitorSort = { key, direction: 'desc' } }; renderQuotaMonitor() }))
-  document.querySelectorAll('[data-quota-filter]').forEach((button) => button.addEventListener('click', () => { quotaMonitorFilter = button.dataset.quotaFilter ?? 'all'; quotaMonitorPageNumber = 1; renderQuotaMonitor() }))
-  $('#quota-monitor-prev')?.addEventListener('click', () => { quotaMonitorPageNumber = Math.max(1, quotaMonitorPageNumber - 1); renderQuotaMonitor() })
-  $('#quota-monitor-next')?.addEventListener('click', () => { quotaMonitorPageNumber += 1; renderQuotaMonitor() })
-  $('#quota-monitor-refresh')?.addEventListener('click', async () => { const button = $('#quota-monitor-refresh'); button.disabled = true; try { await quotaMonitorPage(true) } catch (error) { const message = error instanceof Error ? error.message : String(error); if ($('#quota-monitor-state')) $('#quota-monitor-state').textContent = `刷新失败：${message}` } finally { button.disabled = false; button.classList.remove('is-loading'); button.removeAttribute('aria-busy') } })
 }
 
 function creditLabel(status) {
@@ -1935,7 +1937,7 @@ export async function waitUpstreamJob(workflowId, onStatus = () => {}, timeoutMs
   const deadline = Date.now() + timeoutMs
   let previousState = ''
   for (;;) {
-    const status = await requestJson(`/api/upstreams/jobs/${encodeURIComponent(workflowId)}`, {}, 20000)
+    const status = await requestJson(`/api/upstreams/jobs/${encodeURIComponent(workflowId)}`, { redirectOnUnauthorized: false }, 20000)
     const state = String(status.state ?? 'unknown')
     if (state !== previousState) {
       previousState = state

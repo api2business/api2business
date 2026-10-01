@@ -912,11 +912,9 @@ export class UpstreamManagementService {
         SELECT a.id AS account_id, a.status, COALESCE(a.schedulable, false) AS schedulable,
           a.temp_unschedulable_until, a.rate_limit_reset_at, a.overload_until,
           a.expires_at, a.auto_pause_on_expired, COALESCE(g.name, '') AS group_name,
-          COALESCE(SUM(u.actual_cost), 0)::numeric AS api_amount_usd,
+          COALESCE(SUM(u.total_cost), 0)::numeric AS api_amount_usd,
           COUNT(u.id)::int AS request_count
         FROM accounts a
-        LEFT JOIN account_groups ag ON ag.account_id = a.id
-        LEFT JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
         LEFT JOIN usage_logs u ON u.account_id = a.id
           AND u.created_at >= now() - INTERVAL '24 hours'
           AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
@@ -926,6 +924,7 @@ export class UpstreamManagementService {
               AND probe_user.email = 'monitor-user@sub2api.platform-infra.local'
               AND probe_user.deleted_at IS NULL AND probe_key.deleted_at IS NULL
           )
+        LEFT JOIN groups g ON g.id = u.group_id
         WHERE a.deleted_at IS NULL AND LOWER(a.type) = 'apikey'
           AND (${ids.length ? 'a.id = ANY(string_to_array($1, \',\')::bigint[])' : 'TRUE'})
         GROUP BY a.id, g.name ORDER BY a.id, g.name`,
