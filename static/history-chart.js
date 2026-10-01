@@ -31,7 +31,8 @@ export function historyChartMarkup(points, { series, valueFormatter, unit = '', 
   const min = lowerBound ?? Math.max(0, rawMin - padding)
   const max = upperBound ?? rawMax + padding
   const span = Math.max(max - min, 0.001)
-  const plotLeft = Math.max(0, Number(requestedPlotLeft) || 64), plotRight = Math.min(chartWidth - 2, Math.max(plotLeft + 100, Number(requestedPlotRight) || 986)), plotTop = 18, plotBottom = 126
+  const requestedLeft = Number(requestedPlotLeft), requestedRight = Number(requestedPlotRight)
+  const plotLeft = Math.max(0, Number.isFinite(requestedLeft) ? requestedLeft : 64), plotRight = Math.min(chartWidth - 2, Math.max(plotLeft + 100, Number.isFinite(requestedRight) ? requestedRight : 986)), plotTop = 18, plotBottom = 126
   const x = (index) => plotLeft + index * (plotRight - plotLeft) / Math.max(1, chartPoints.length - 1)
   const y = (value) => plotBottom - (Math.min(max, Math.max(min, value)) - min) / span * (plotBottom - plotTop)
   const formatValue = typeof valueFormatter === 'function' ? valueFormatter : (value) => number(value, 2)
