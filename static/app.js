@@ -1224,6 +1224,14 @@ function quotaGroup(row) {
   return 'codex-mix'
 }
 
+function quotaMemberships(row) {
+  const names = quotaGroupNames(row)
+  const memberships = new Set()
+  for (const name of names) memberships.add(quotaGroup({ groupNames: [name] }))
+  if (!memberships.size) memberships.add(quotaGroup(row))
+  return memberships
+}
+
 function quotaWallet(value) {
   const normalized = String(value ?? '').replace(/\/v1\/?$/u, '').replace(/\/$/u, '')
   return normalized === 'https://direct.rapidapi.cc' ? 'https://rapidapi.cc' : normalized
@@ -1256,7 +1264,7 @@ function quotaPieMarkup(group, rows) {
 
 function renderQuotaMonitor() {
   const groups = ['codex-mix', 'no-degrade', 'claude', 'grok']
-  const grouped = Object.fromEntries(groups.map((group) => [group, quotaMonitorRows.filter((row) => row.group === group)]))
+  const grouped = Object.fromEntries(groups.map((group) => [group, quotaMonitorRows.filter((row) => quotaMemberships(row).has(group))]))
   const cards = $('#quota-group-cards'); if (cards) cards.innerHTML = groups.map((group) => quotaPieMarkup(group, grouped[group])).join('')
   const sorted = quotaMonitorRows.slice().sort((a, b) => {
     const read = (row) => quotaMonitorSort.key.startsWith('consumption.') ? row.consumption[quotaMonitorSort.key.slice('consumption.'.length)] : row[quotaMonitorSort.key]
