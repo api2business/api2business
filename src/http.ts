@@ -34,7 +34,7 @@ const staticRoot = resolve(import.meta.dir, "../static");
 
 const persistentSnapshotApiPaths = [
   /^\/api\/upstreams\/pool-quality(?:\/|$)/u,
-  /^\/api\/upstreams\/(?:quota-summary|usage-cache|quota-monitor-usage|quota-account-states|recharge-candidates)$/u,
+  /^\/api\/upstreams\/(?:quota-summary|usage-cache|quota-monitor-usage|recharge-candidates)$/u,
   /^\/api\/oauth\/runtime-summary$/u,
   /^\/api\/bugteam\/cost-monitor$/u,
   /^\/api\/admin\/errors(?:\/|$)/u,
