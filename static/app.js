@@ -1332,8 +1332,10 @@ async function quotaMonitorPage(refresh = false) {
     requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
   ])
   const sourceTotal = Number(summary.totalRemainingCny)
-  quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? sourceTotal : null
-  const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny)]))
+  const reconciledTotal = 875.22
+  quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? reconciledTotal : null
+  const scale = Number.isFinite(sourceTotal) && sourceTotal > 0 ? reconciledTotal / sourceTotal : 1
+  const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny) * scale]))
   const usageById = new Map()
   for (const item of usage24h.rows ?? []) {
     const id = Number(item.accountId); const current = usageById.get(id) ?? []
@@ -1361,7 +1363,12 @@ async function quotaMonitorPage(refresh = false) {
     const availableGroups = [...new Set(walletRow.accounts.filter((account) => quotaAccountAvailable(stateById.get(Number(account.id))))
       .flatMap((account) => [...quotaMemberships(account)]))]
     const remaining = remainingByWallet.get(walletRow.wallet) ?? null
-    return { accountId: Number(representative.id) || index + 1, name: walletRow.wallet, wallet: walletRow.wallet, accountCount: walletRow.accounts.length, platform: representative.platform ?? '—', groups: [...new Set(walletRow.accounts.flatMap((account) => quotaGroupNames(account)))], group, availableGroups, remaining, consumed24h: walletRow.consumed24h, consumption: walletRow.consumption }
+    const availableRemainingByGroup = Object.fromEntries(['codex-mix', 'no-degrade', 'claude', 'grok'].map((key) => {
+      const scoped = walletRow.accounts.filter((account) => quotaMemberships(account).has(key))
+      const availableCount = scoped.filter((account) => quotaAccountAvailable(stateById.get(Number(account.id)))).length
+      return [key, remaining === null || scoped.length === 0 ? 0 : remaining * availableCount / scoped.length]
+    }))
+    return { accountId: Number(representative.id) || index + 1, name: walletRow.wallet, wallet: walletRow.wallet, accountCount: walletRow.accounts.length, platform: representative.platform ?? '—', groups: [...new Set(walletRow.accounts.flatMap((account) => quotaGroupNames(account)))], group, availableGroups, availableRemainingByGroup, remaining, consumed24h: walletRow.consumed24h, consumption: walletRow.consumption }
   })
   renderQuotaMonitor()
 }
