@@ -266,7 +266,7 @@ export function createHandler(
         return await staticFile("bugteam-cost.js", "text/javascript; charset=utf-8");
       }
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
-      const page = ({ "/scores": "scores.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
+      const page = ({ "/scores": "scores.html", "/quota-monitor": "quota-monitor.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
