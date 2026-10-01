@@ -9,9 +9,9 @@
 
 - 钱包余额来自现有上游资产汇总的 `walletDistribution` 与 `totalRemainingCny`，单位统一为人民币。
 - 同一规范化 `base_url` 的多个 API Key 合并成一个钱包行；规范化规则必须与充值和上游资产汇总共用，不能在页面另造钱包身份。
-- 24 小时供应商消耗复用 `upstreamCostBasisSql`：优先使用 Sub2API
-  `usage_logs.account_stats_cost`，缺省按 `total_cost × account_rate_multiplier`；再按每个账号自己的
-  `CNY/API-USD` 换算率转为人民币。`actual_cost` 是用户/API Key 扣费，不能作为供应商成本分母。
+- 24 小时供应商消耗复用 `upstreamCostBasisSql`，使用 Sub2API `usage_logs.total_cost`；
+  `account_stats_cost` 和 `actual_cost` 可能包含 Claude 等售卖倍率，不能作为供应商成本分母。
+  结果再按钱包资产汇总中的 `remainingCny / remainingUsd` 换算为人民币，不能误用账号售卖倍率。
 - 一个账号挂多个分组时，按实际分组汇总且不能因分组连接重复计算；一个钱包的总消耗等于其账号消耗之和。
 - 现场对账金额只能作为该时刻的核对证据，不能硬编码、缩放或写入通用规则。
 

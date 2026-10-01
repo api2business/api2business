@@ -1355,6 +1355,10 @@ async function quotaMonitorPage() {
   const sourceTotal = Number(summary.totalRemainingCny)
   quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? sourceTotal : null
   const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny)]))
+  const walletRateByWallet = new Map((summary.walletDistribution ?? []).map((row) => {
+    const usd = Number(row.remainingUsd), cny = Number(row.remainingCny)
+    return [String(row.wallet), Number.isFinite(usd) && usd > 0 && Number.isFinite(cny) && cny > 0 ? cny / usd : 1]
+  }))
   const usageById = new Map()
   renderQuotaGroupHistory(summary.groupHistory)
   for (const item of usage24h.rows ?? []) {
@@ -1371,7 +1375,7 @@ async function quotaMonitorPage() {
     current.groupRows.push(account)
     // 按请求实际所属组统计，账号挂多个组不会重复记账；每个账号先换算人民币再合并钱包。
     for (const usage of usageById.get(Number(account.id)) ?? []) {
-      const amountCny = (Number(usage.apiAmountUsd) || 0) * (Number(account.rateCnyPerApiUsd) > 0 ? Number(account.rateCnyPerApiUsd) : 1)
+      const amountCny = (Number(usage.apiAmountUsd) || 0) * (walletRateByWallet.get(wallet) ?? 1)
       current.consumed24h += amountCny
       current.consumption[usage.groupName ? quotaGroup(usage) : quotaGroup(account)] += amountCny
     }

@@ -21,7 +21,7 @@ import {
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
-import { excludeInternalProbeSql, upstreamCostBasisSql } from "./upstream-cost-sql";
+import { upstreamCostBasisSql } from "./upstream-cost-sql";
 
 type Row = Record<string, unknown>;
 
@@ -919,7 +919,6 @@ export class UpstreamManagementService {
         LEFT JOIN usage_logs u ON u.account_id = a.id
           AND u.created_at >= now() - INTERVAL '24 hours'
           AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
-          AND ${excludeInternalProbeSql("u")}
         LEFT JOIN groups g ON g.id = u.group_id
         WHERE a.deleted_at IS NULL AND LOWER(a.type) = 'apikey'
           AND (${ids.length ? 'a.id = ANY(string_to_array($1, \',\')::bigint[])' : 'TRUE'})
@@ -953,7 +952,6 @@ export class UpstreamManagementService {
           COALESCE(SUM(${upstreamCostBasisSql("usage")}), 0)::numeric AS account_api_amount_usd_total
         FROM accounts a
         LEFT JOIN usage_logs usage ON usage.account_id = a.id
-          AND ${excludeInternalProbeSql("usage")}
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
           AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
