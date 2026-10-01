@@ -18,3 +18,5 @@
   - 切号事件不能证明自定义模板命中；未观测切号不能证明模板漏配。
   - 未关联成功记录不能证明候选耗尽；未知原因保持未知。
   - 错误详情的系统日志必须按当前请求关联，不混入其他请求的日志。
+- 切号短语是否写入模板，以及流式 `response.failed` 是否读取模板，只见
+  `skills/api2business/references/upstream-scheduling.md`。

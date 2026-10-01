@@ -93,7 +93,23 @@ export class TemporalGateway {
 
   async status(workflowId: string): Promise<Record<string, unknown>> {
     const handle = this.client.workflow.getHandle(workflowId);
-    const description = await handle.describe();
+    let description;
+    try {
+      description = await handle.describe();
+    } catch (error) {
+      if (error instanceof Error && error.name === "WorkflowNotFoundError") {
+        return {
+          ok: false,
+          workflowId,
+          runId: null,
+          state: "not_found",
+          terminal: true,
+          recoverable: false,
+          error: "Temporal workflow 已不在保留期内，无法读取原始结果",
+        };
+      }
+      throw error;
+    }
     const state = description.status.name.toLocaleLowerCase("en-US");
     const terminal = ["completed", "failed", "cancelled", "terminated", "timed_out"].includes(state);
     let result: unknown = null;

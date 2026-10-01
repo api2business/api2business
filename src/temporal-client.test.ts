@@ -19,3 +19,11 @@ test("projects a nested Temporal submission error without losing its cause", () 
     "Temporal 作业提交失败：namespace application is unavailable",
   );
 });
+
+test("marks an expired workflow lookup as an explicit terminal state", async () => {
+  const source = await Bun.file(new URL("./temporal-client.ts", import.meta.url)).text();
+  const status = source.slice(source.indexOf("  async status(workflowId: string)"));
+  expect(status).toContain('error.name === "WorkflowNotFoundError"');
+  expect(status).toContain('state: "not_found"');
+  expect(status).toContain("Temporal workflow 已不在保留期内");
+});

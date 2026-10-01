@@ -148,29 +148,22 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - `scores pool-quality` 输出错误归因完整度；未归属错误只作为池级数据质量事实，不得扣入任一账号。
 - 立即刷新池质量样本使用 `scores pool-quality-refresh --over-api`；命令立即返回 workflow ID。
   随后用 `workflow status --id <workflow-id> --over-api` 回读，再查询 `scores pool-quality --over-api`。
-- 充值候选使用 `upstreams recharge-candidates --over-api`；同时分析当前欠费和最新额度低于 YAML `lowBalanceCny` 的账号，分别回看锚点前 `lookbackHours` 小时。
+- 充值候选使用 `upstreams recharge-candidates --over-api`。
+- 欠费、低余额和查询超时的判定见 `references/upstream-scheduling.md`。
 - 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api`；同一规范化 `base_url` 是共享钱包，只记账一次并统一恢复该站点全部 API-key 账号。
 - 充值确认后 CLI 立即返回异步 workflow ID，并做一次非阻塞只读状态与账号快照核验；最终一致性使用 `upstreams recharge-status --id <workflow-id> --over-api`。
 - 核验状态为 `pending`、`snapshot_mismatch` 或 `unavailable` 时，只表示作业未完成或读模型暂未追上，不代表充值失败；必须继续查询原 workflow。
 - 充值请求超时重试时必须复用相同的 `--idempotency-key`，禁止生成新 key 重复提交同一笔充值。
 - CLI 在提交传输异常时会回显本次幂等键和“结果未知”提示；只有复用该键重试，不能把传输异常当成未提交而生成新键。
 - 精确错误链使用 `errors diagnose --request-id <request-id> --over-api`。
-  - CLI 区分已观测切号、输出后抑制、客户端断开、成功记录关联和未观测切号。
-  - `templateMatched=null` 表示没有模板命中证据；不能用切号事件推断模板命中。
-  - 未关联成功记录时 `failoverExhausted=null`；不能据此推断候选耗尽。
-  - `interpretation` 披露错误采样、链排序及请求 ID 关联边界。
-- 按模型定位切号链使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api`；输出含模型 × 已尝试账号 × 请求链矩阵和样本顺序。它只报告 Sub2API 已记录的尝试，不推断未记录的候选排除原因。
-- 一次性排障优先使用 `errors inspect --request-id <request-id> --over-api`；CLI 会并行取得诊断链和请求详情，避免手工串联 `errors diagnose` 与 `errors get`。
-- `errors diagnose --request-id` 和 `errors get --request-id` 会返回限长脱敏的 `responseEvidence`，包含来源、长度和摘要；正文缺失时明确显示 `available=false`，不得据此臆测上游业务原因。
-- 切号模板只在确认为响应提交前未触发且运行态规则缺失时增强；
-  已触发切号但候选耗尽不通过模板扩张处理，详见 `references/upstream-scheduling.md`。
-- `No tool call found for function call output` 仅以完整短语加入 HTTP 400 的 3 分钟短暂切号规则；
-  不得扩展为通用工具调用或 `invalid_request_error` 模板。
-- 模板同步使用 `upstreams template --confirm --over-api`，默认只处理 API-key 上游账号，完成后必须查询原 `workflow status` 回读 `verifiedCount`、`failedCount` 和 `misalignedCount`。
-- 新增上游时省略 `--rate`，由 YAML 提供创建占位费率；worker 创建成功后自动探测额度与有效倍率，并将有效倍率同步为最终费率。
-  倍率写回使用 Sub2API 原生批量更新并做排队回读，超时只保留可见 warning，不重复创建账号。
-- 已有上游分组调整使用 `upstreams update --id <account-id> --groups <id,id,...> --confirm --over-api`，
-  通过原生批量更新替换业务分组并在原异步作业终态回读。
+- 按模型定位使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api`。
+- 单请求排障使用 `errors inspect --request-id <request-id> --over-api`。
+- 切号是否命中、候选是否耗尽、正文是否缺失，只以 `references/upstream-scheduling.md` 为准。
+- 切号模板的匹配、近义短语、热加载、分组口语、同步范围和新增上游收口，只以该参考为准。
+- 新增上游省略 `--rate`；占位费率与最终费率回读也只以该参考为准。
+- 已有上游改分组使用 `upstreams update --id <account-id> --groups <id,id,...> --confirm --over-api`。
+  - `--groups` 整表替换全部分组，并重写切号模板。
+  - 私有探活分组必须列入；隔离后的收回顺序只见 `references/upstream-scheduling.md`。
 - 多个同钱包 API Key 只对实际充值动作记一笔充值；创建、模板和探活隔离作业按账号 ID 幂等回读。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
 - 手工收入明细使用 `cash ledger --period YYYY-MM --over-api`，汇总使用 `profit daily`。
@@ -229,6 +222,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api`；
   - 评测只复用持久化探活专用 API Key，不读取供应商原始 Key，也不轮换探活 Key。
 - 成本与评分口径：Sub2API `actual_cost` 仅表示用户/API Key 实际扣费；供应商成本采样的 API-USD 分母使用 `total_cost`，`effective_rate_multiplier` 不得直接当作人民币汇率，人民币余额必须经过共享钱包的 `CNY/API-USD` 换算。
+- 额度监控的状态、可用比例、钱包合并、刷新轮询和截图验收口径见 [额度监控](references/quota-monitoring.md)，不得在页面或其他文档另建第二套口径。
 
 ## 验收
 
