@@ -21,7 +21,7 @@ import {
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
-import { upstreamCostBasisSql } from "./upstream-cost-sql";
+import { excludeInternalProbeSql, upstreamCostBasisSql } from "./upstream-cost-sql";
 
 type Row = Record<string, unknown>;
 
@@ -919,12 +919,7 @@ export class UpstreamManagementService {
         LEFT JOIN usage_logs u ON u.account_id = a.id
           AND u.created_at >= now() - INTERVAL '24 hours'
           AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
-          AND NOT EXISTS (
-            SELECT 1 FROM api_keys probe_key JOIN users probe_user ON probe_user.id = probe_key.user_id
-            WHERE probe_key.id = u.api_key_id
-              AND probe_user.email = 'monitor-user@sub2api.platform-infra.local'
-              AND probe_user.deleted_at IS NULL AND probe_key.deleted_at IS NULL
-          )
+          AND ${excludeInternalProbeSql("u")}
         LEFT JOIN groups g ON g.id = u.group_id
         WHERE a.deleted_at IS NULL AND LOWER(a.type) = 'apikey'
           AND (${ids.length ? 'a.id = ANY(string_to_array($1, \',\')::bigint[])' : 'TRUE'})
@@ -958,6 +953,7 @@ export class UpstreamManagementService {
           COALESCE(SUM(${upstreamCostBasisSql("usage")}), 0)::numeric AS account_api_amount_usd_total
         FROM accounts a
         LEFT JOIN usage_logs usage ON usage.account_id = a.id
+          AND ${excludeInternalProbeSql("usage")}
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
           AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL

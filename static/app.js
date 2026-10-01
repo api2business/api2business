@@ -1283,7 +1283,7 @@ function renderQuotaGroupHistory(points) {
     unit: '人民币余额',
     ariaLabel: '四个额度分组人民币余额趋势',
     yMin: 0,
-    plotLeft: 48,
+    plotLeft: 12,
   })
   bindHistoryChartTooltip(chart)
 }

@@ -15,7 +15,7 @@ export function finiteChartValue(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null, missingKey = null, plotLeft: requestedPlotLeft = 64 }) {
+export function historyChartMarkup(points, { series, valueFormatter, unit = '', ariaLabel = '历史趋势', yMin = null, yMax = null, missingKey = null, plotLeft: requestedPlotLeft = 64, plotRight: requestedPlotRight = 986 }) {
   const chartWidth = 1000
   if (points.length < 2) return `<text x="${chartWidth / 2}" y="78" text-anchor="middle" class="chart-empty">至少需要两个采样点</text>`
   const chartPoints = points
@@ -31,14 +31,14 @@ export function historyChartMarkup(points, { series, valueFormatter, unit = '', 
   const min = lowerBound ?? Math.max(0, rawMin - padding)
   const max = upperBound ?? rawMax + padding
   const span = Math.max(max - min, 0.001)
-  const plotLeft = Math.max(40, Number(requestedPlotLeft) || 64), plotRight = chartWidth - 14, plotTop = 18, plotBottom = 126
+  const plotLeft = Math.max(8, Number(requestedPlotLeft) || 64), plotRight = Math.min(chartWidth - 2, Math.max(plotLeft + 100, Number(requestedPlotRight) || 986)), plotTop = 18, plotBottom = 126
   const x = (index) => plotLeft + index * (plotRight - plotLeft) / Math.max(1, chartPoints.length - 1)
   const y = (value) => plotBottom - (Math.min(max, Math.max(min, value)) - min) / span * (plotBottom - plotTop)
   const formatValue = typeof valueFormatter === 'function' ? valueFormatter : (value) => number(value, 2)
   const ticks = [max, (max + min) / 2, min]
   const grid = ticks.map((value) => {
     const row = y(value)
-    return `<text x="56" y="${row + 3}" text-anchor="end" class="chart-axis chart-axis-y">${escapeHtml(formatValue(value))}</text><line x1="${plotLeft}" y1="${row}" x2="${plotRight}" y2="${row}" class="chart-grid"/>`
+    return `<text x="${Math.max(4, plotLeft - 4)}" y="${row + 3}" text-anchor="end" class="chart-axis chart-axis-y">${escapeHtml(formatValue(value))}</text><line x1="${plotLeft}" y1="${row}" x2="${plotRight}" y2="${row}" class="chart-grid"/>`
   }).join('')
   const lines = series.map(({ key, className, label }) => {
     const valuesByPoint = chartPoints.map((point, index) => {
