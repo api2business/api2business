@@ -525,7 +525,7 @@ test("quota monitor places the shared four-group balance history between cards a
   expect(cards).toBeGreaterThan(0);
   expect(chart).toBeGreaterThan(cards);
   expect(table).toBeGreaterThan(chart);
-  expect(html).toContain("每 10 分钟一个采样点，共用时间轴");
+  expect(html).not.toContain("每 10 分钟一个采样点，共用时间轴");
   expect(html).toContain('id="quota-monitor-sample"');
   expect(html).toContain('id="quota-monitor-refresh-interval"');
   expect(app).toContain("renderQuotaGroupHistory(summary.groupHistory)");

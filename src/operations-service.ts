@@ -447,32 +447,59 @@ export class OperationsService {
           && item.costRateCnyPerApiUsd > 0)
         : [],
     }));
-    const accountIds = [...new Set(samples.map((row) => row.accountId).filter((id) => Number.isSafeInteger(id) && id > 0))];
-    const groupRows = accountIds.length === 0 ? { rows: [] as Record<string, unknown>[] } : await this.reads.query<Record<string, unknown>>({
-      key: `upstream-quota-history-groups:${accountIds.join(",")}`,
+    const walletKeys = [...new Set(samples.map((row) => row.walletKey).filter(Boolean))];
+    const groupRows = walletKeys.length === 0 ? { rows: [] as Record<string, unknown>[] } : await this.reads.query<Record<string, unknown>>({
+      key: `upstream-quota-history-groups:${walletKeys.join(",")}`,
       kind: "upstream-quota-history-groups",
       priority: "manual",
       cacheMode: "bypass-cache",
-      sql: `SELECT ag.account_id, COALESCE(string_agg(g.name, '||| ' ORDER BY g.name), '') AS group_names
-        FROM account_groups ag JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
-        WHERE ag.account_id = ANY(string_to_array($1, ',')::bigint[])
-        GROUP BY ag.account_id`,
-      parameters: [accountIds.join(",")],
+      sql: `WITH account_wallets AS (
+          SELECT a.id AS account_id, a.platform,
+            regexp_replace(RTRIM(COALESCE(a.credentials->>'base_url', ''), '/'), '/v1$', '') AS wallet_key
+          FROM accounts a WHERE a.deleted_at IS NULL
+        )
+        SELECT aw.account_id, aw.wallet_key, aw.platform,
+          COALESCE(string_agg(g.name, '||| ' ORDER BY g.name), '') AS group_names
+        FROM account_wallets aw
+        LEFT JOIN account_groups ag ON ag.account_id = aw.account_id
+        LEFT JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
+        WHERE replace(aw.wallet_key, 'https://direct.rapidapi.cc', 'https://rapidapi.cc') = ANY(string_to_array($1, ',')::text[])
+        GROUP BY aw.account_id, aw.wallet_key, aw.platform`,
+      parameters: [walletKeys.join(",")],
     });
-    const namesByAccount = new Map(groupRows.rows.map((row) => [Number(row.account_id), String(row.group_names ?? "").split("||| ").filter(Boolean)]));
+    type AccountMeta = { walletKey: string; platform: string; names: string[] };
+    const accountsByWallet = new Map<string, AccountMeta[]>();
+    for (const row of groupRows.rows) {
+      const wallet = normalizeUpstreamWallet(row.wallet_key);
+      const entries = accountsByWallet.get(wallet) ?? [];
+      entries.push({ walletKey: wallet, platform: String(row.platform ?? ""), names: String(row.group_names ?? "").split("||| ").filter(Boolean) });
+      accountsByWallet.set(wallet, entries);
+    }
     type HistoryKey = "codexMix" | "noDegrade" | "claude" | "grok";
-    const classify = (names: string[]): HistoryKey => {
-      const text = names.join(" ").toLowerCase();
+    const classify = (names: string[], platform = "", wallet = ""): HistoryKey => {
+      const text = [...names, platform, wallet].join(" ").toLowerCase();
       if (/claude|anthropic/u.test(text)) return "claude";
       if (/grok|x\.ai/u.test(text)) return "grok";
       if (/不降智|no-degrade|quality/u.test(text)) return "noDegrade";
       return "codexMix";
     };
+    const memberships = (meta: AccountMeta): Set<HistoryKey> => {
+      const groups = new Set<HistoryKey>();
+      for (const name of meta.names) {
+        if (/api2business-probe|自用/u.test(name)) continue;
+        if (!/混池|gpt|codex|claude|grok|不降智|anthropic/u.test(name)) continue;
+        groups.add(classify([name]));
+      }
+      if (!groups.size) groups.add(classify(meta.names, meta.platform, meta.walletKey));
+      return groups;
+    };
     const groupedHistory = [...new Set(samples.map((row) => row.sampledAt))].sort((left, right) => Date.parse(left) - Date.parse(right)).map((sampledAt) => {
       const point: Record<HistoryKey, number> & { sampledAt: string } = { sampledAt, codexMix: 0, noDegrade: 0, claude: 0, grok: 0 };
       for (const row of samples.filter((item) => item.sampledAt === sampledAt && item.remainingCny !== null)) {
-        const key = classify(namesByAccount.get(row.accountId) ?? []);
-        point[key] = Number(point[key]) + Math.max(0, row.remainingCny ?? 0);
+        const walletAccounts = accountsByWallet.get(row.walletKey) ?? [];
+        const groups = new Set<HistoryKey>(walletAccounts.flatMap((meta) => [...memberships(meta)]));
+        if (!groups.size) groups.add("codexMix");
+        for (const key of groups) point[key] = Number(point[key]) + Math.max(0, row.remainingCny ?? 0);
       }
       return point;
     });
