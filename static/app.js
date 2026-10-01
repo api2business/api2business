@@ -3,6 +3,7 @@ import { quotaAccountAvailable, quotaAvailabilityTotals } from './quota-availabi
 import { sampleTimeDisplay } from './sample-time.js'
 import { buildSupplierQualityAssets } from './upstream-quality-assets.js'
 import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js'
+import { quotaGroup, quotaMemberships } from './quota-grouping.js'
 
 const page = document.body.dataset.page
 export const $ = (selector) => document.querySelector(selector)
@@ -1217,26 +1218,6 @@ const quotaMonitorPageSize = 12
 function quotaGroupNames(row) {
   const names = Array.isArray(row.groupNames) ? row.groupNames : Array.isArray(row.groups) ? row.groups : [row.groupName]
   return names.filter(Boolean).map((value) => String(value))
-}
-
-function quotaGroup(row) {
-  const text = [...quotaGroupNames(row), row.platform, row.baseUrl].filter(Boolean).join(' ').toLowerCase()
-  if (text.includes('claude') || text.includes('anthropic')) return 'claude'
-  if (text.includes('grok') || text.includes('x.ai')) return 'grok'
-  if (text.includes('不降智') || text.includes('no-degrade') || text.includes('quality')) return 'no-degrade'
-  return 'codex-mix'
-}
-
-function quotaMemberships(row) {
-  const names = quotaGroupNames(row)
-  const memberships = new Set()
-  for (const name of names) {
-    if (/api2business-probe|自用/i.test(name)) continue
-    if (!/混池|gpt|codex|claude|grok|不降智|anthropic/i.test(name)) continue
-    memberships.add(quotaGroup({ groupNames: [name] }))
-  }
-  if (!memberships.size) memberships.add(quotaGroup(row))
-  return memberships
 }
 
 function quotaWallet(value) {

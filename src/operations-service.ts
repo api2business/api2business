@@ -75,6 +75,8 @@ import { UpstreamBenchmarkService } from "./upstream-benchmark";
 import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
 import { collectRechargeCandidates } from "./upstream-recharge-candidates";
 import { collectCooldownDiagnosisFromDatabase } from "./cooldown-diagnose-database";
+// @ts-expect-error Shared browser/server module is JavaScript by design.
+import { quotaMemberships } from "../static/quota-grouping.js";
 
 export { normalizeUpstreamWallet, upstreamBalanceRateByWallet } from "./upstream-valuation";
 
@@ -476,28 +478,11 @@ export class OperationsService {
       accountsByWallet.set(wallet, entries);
     }
     type HistoryKey = "codexMix" | "noDegrade" | "claude" | "grok";
-    const classify = (names: string[], platform = "", wallet = ""): HistoryKey => {
-      const text = [...names, platform, wallet].join(" ").toLowerCase();
-      if (/claude|anthropic/u.test(text)) return "claude";
-      if (/grok|x\.ai/u.test(text)) return "grok";
-      if (/不降智|no-degrade|quality/u.test(text)) return "noDegrade";
-      return "codexMix";
-    };
-    const memberships = (meta: AccountMeta): Set<HistoryKey> => {
-      const groups = new Set<HistoryKey>();
-      for (const name of meta.names) {
-        if (/api2business-probe|自用/u.test(name)) continue;
-        if (!/混池|gpt|codex|claude|grok|不降智|anthropic/u.test(name)) continue;
-        groups.add(classify([name]));
-      }
-      if (!groups.size) groups.add(classify(meta.names, meta.platform, meta.walletKey));
-      return groups;
-    };
     const groupedHistory = [...new Set(samples.map((row) => row.sampledAt))].sort((left, right) => Date.parse(left) - Date.parse(right)).map((sampledAt) => {
       const point: Record<HistoryKey, number> & { sampledAt: string } = { sampledAt, codexMix: 0, noDegrade: 0, claude: 0, grok: 0 };
       for (const row of samples.filter((item) => item.sampledAt === sampledAt && item.remainingCny !== null)) {
         const walletAccounts = accountsByWallet.get(row.walletKey) ?? [];
-        const groups = new Set<HistoryKey>(walletAccounts.flatMap((meta) => [...memberships(meta)]));
+        const groups = new Set<HistoryKey>(walletAccounts.flatMap((meta) => [...quotaMemberships({ groupNames: meta.names, platform: meta.platform, baseUrl: meta.walletKey })].map((group) => group === "no-degrade" ? "noDegrade" : group as HistoryKey)));
         if (!groups.size) groups.add("codexMix");
         for (const key of groups) point[key] = Number(point[key]) + Math.max(0, row.remainingCny ?? 0);
       }
