@@ -1267,13 +1267,21 @@ function renderQuotaMonitor() {
   document.querySelectorAll('[data-quota-sort]').forEach((header) => { header.setAttribute('aria-sort', header.dataset.quotaSort === quotaMonitorSort.key ? (quotaMonitorSort.direction === 'asc' ? 'ascending' : 'descending') : 'none') })
 }
 
-async function quotaMonitorPage() {
-  const state = $('#quota-monitor-state'); if (state) state.textContent = '正在读取已有额度缓存…'
+async function refreshQuotaCache(accountIds) {
+  if (!accountIds.length) return
+  const operationId = `quota-monitor-refresh-${Date.now()}`
+  const submitted = await requestJson('/api/upstreams/usage', { method: 'POST', headers: { 'Idempotency-Key': operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000)
+  if (submitted.workflowId) await waitWorkflow(submitted.workflowId, 300000)
+}
+
+async function quotaMonitorPage(refresh = false) {
+  const state = $('#quota-monitor-state'); if (state) state.textContent = refresh ? '正在刷新额度缓存，完成后读取同一缓存…' : '正在读取已有额度缓存…'
   const score = await requestJson('/api/scores')
   const accounts = []
   let page = 1; let totalPages = 1
   do { const data = await requestJson(`/api/upstreams?page=${page}`); accounts.push(...(data.accounts ?? [])); totalPages = Number(data.totalPages ?? 1); page += 1 } while (page <= totalPages && page < 20)
   const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
+  if (refresh) await refreshQuotaCache(ids)
   const cached = ids.length ? await requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`) : { results: [] }
   const usage24h = ids.length ? await requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`) : { rows: [] }
   const cachedById = new Map((cached.results ?? []).map((result) => [Number(result?.accountId ?? result?.account_id), result]))
@@ -1295,7 +1303,7 @@ async function quotaMonitorPage() {
   document.querySelectorAll('[data-quota-sort]').forEach((header) => header.addEventListener('click', () => { const key = header.dataset.quotaSort; if (quotaMonitorSort.key === key) quotaMonitorSort.direction = quotaMonitorSort.direction === 'asc' ? 'desc' : 'asc'; else { quotaMonitorSort = { key, direction: 'desc' } }; renderQuotaMonitor() }))
   $('#quota-monitor-prev')?.addEventListener('click', () => { quotaMonitorPageNumber = Math.max(1, quotaMonitorPageNumber - 1); renderQuotaMonitor() })
   $('#quota-monitor-next')?.addEventListener('click', () => { quotaMonitorPageNumber += 1; renderQuotaMonitor() })
-  $('#quota-monitor-refresh')?.addEventListener('click', async () => { const button = $('#quota-monitor-refresh'); button.disabled = true; try { await quotaMonitorPage() } finally { button.disabled = false } })
+  $('#quota-monitor-refresh')?.addEventListener('click', async () => { const button = $('#quota-monitor-refresh'); button.disabled = true; try { await quotaMonitorPage(true) } finally { button.disabled = false } })
 }
 
 function creditLabel(status) {
