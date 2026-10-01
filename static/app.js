@@ -1293,7 +1293,6 @@ async function refreshQuotaCache(accountIds) {
   const operationId = `quota-monitor-refresh-${Date.now()}`
   const submitted = await requestJson('/api/upstreams/usage', { method: 'POST', redirectOnUnauthorized: false, headers: { 'Idempotency-Key': operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000)
   if (submitted.workflowId) await waitWorkflow(submitted.workflowId, 300000, false)
-  await requestJson('/api/upstreams/quota-account-states', { refresh: true, redirectOnUnauthorized: false })
 }
 
 async function quotaMonitorPage(refresh = false) {
@@ -1320,13 +1319,11 @@ async function quotaMonitorPage(refresh = false) {
   }
   const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
   if (refresh) await refreshQuotaCache(ids)
-  const [cached, usage24h, summary, accountStates] = await Promise.all([
+  const [cached, usage24h, summary] = await Promise.all([
     ids.length ? requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ results: [] }),
-    ids.length ? requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ rows: [] }),
+    ids.length ? requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`, { refresh, redirectOnUnauthorized: false }) : Promise.resolve({ rows: [] }),
     requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
-    requestJson('/api/upstreams/quota-account-states', { redirectOnUnauthorized: false }).catch(() => ({ accounts: [] })),
   ])
-  const stateById = new Map((accountStates.accounts ?? []).map((row) => [Number(row.accountId), row]))
   const sourceTotal = Number(summary.totalRemainingCny)
   quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? sourceTotal : null
   const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny)]))
@@ -1335,6 +1332,7 @@ async function quotaMonitorPage(refresh = false) {
     const id = Number(item.accountId); const current = usageById.get(id) ?? []
     current.push(item); usageById.set(id, current)
   }
+  const stateById = new Map((usage24h.rows ?? []).map((row) => [Number(row.accountId), row]))
   const wallets = new Map()
   for (const account of accounts) {
     const wallet = quotaWallet(account.baseUrl)

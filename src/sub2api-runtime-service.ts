@@ -80,25 +80,6 @@ export class Sub2ApiRuntimeService {
     this.apiKeyFailoverRules = rules;
   }
 
-  async quotaAccountStates(): Promise<Record<string, unknown>> {
-    const accounts: Row[] = [];
-    for (let page = 1; ; page += 1) {
-      const data = await this.client.request<{ items: Row[]; pages?: number; total?: number }>(`/admin/accounts?page=${page}&page_size=100&type=apikey`);
-      for (const row of data.items ?? []) {
-        if (row.type !== "apikey") continue;
-        accounts.push({
-          accountId: Number(row.id), status: row.status, schedulable: row.schedulable,
-          tempUnschedulableUntil: row.temp_unschedulable_until ?? null,
-          rateLimitResetAt: row.rate_limit_reset_at ?? null,
-          overloadUntil: row.overload_until ?? null,
-          expiresAt: row.expires_at ?? null, autoPauseOnExpired: row.auto_pause_on_expired,
-        });
-      }
-      if ((data.items?.length ?? 0) < 100 || page * 100 >= Number(data.total ?? Infinity)) break;
-    }
-    return { ok: true, source: "sub2api-native-admin-api", sampledAt: new Date().toISOString(), accounts };
-  }
-
   private apiKeyCredentials(value: unknown): Row {
     return {
       ...(record(value) ?? {}),

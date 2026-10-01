@@ -34,7 +34,7 @@ const staticRoot = resolve(import.meta.dir, "../static");
 
 const persistentSnapshotApiPaths = [
   /^\/api\/upstreams\/pool-quality(?:\/|$)/u,
-  /^\/api\/upstreams\/(?:quota-summary|usage-cache|quota-monitor-usage|recharge-candidates)$/u,
+  /^\/api\/upstreams\/(?:quota-summary|usage-cache|recharge-candidates)$/u,
   /^\/api\/oauth\/runtime-summary$/u,
   /^\/api\/bugteam\/cost-monitor$/u,
   /^\/api\/admin\/errors(?:\/|$)/u,
@@ -327,9 +327,6 @@ export function createHandler(
         const selector = url.searchParams.get("accountIds");
         const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
         return json(await upstreams.quotaMonitorUsage(accountIds));
-      }
-      if (request.method === "GET" && url.pathname === "/api/upstreams/quota-account-states") {
-        return json(await runtime.quotaAccountStates());
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/quota-summary") {
         return json(await operations.upstreamQuotaSummary());

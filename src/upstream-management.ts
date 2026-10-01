@@ -909,7 +909,9 @@ export class UpstreamManagementService {
       priority: "manual",
       cacheMode: "bypass-cache",
       sql: `
-        SELECT a.id AS account_id, COALESCE(g.name, '') AS group_name,
+        SELECT a.id AS account_id, a.status, COALESCE(a.schedulable, false) AS schedulable,
+          a.temp_unschedulable_until, a.rate_limit_reset_at, a.overload_until,
+          a.expires_at, a.auto_pause_on_expired, COALESCE(g.name, '') AS group_name,
           COALESCE(SUM(u.actual_cost), 0)::numeric AS api_amount_usd,
           COUNT(u.id)::int AS request_count
         FROM accounts a
@@ -929,7 +931,7 @@ export class UpstreamManagementService {
         GROUP BY a.id, g.name ORDER BY a.id, g.name`,
       parameters: ids.length ? [ids.join(",")] : [],
     });
-    return { ok: true, windowHours: 24, rows: query.rows.map((row) => ({ accountId: Number(row.account_id), groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), requestCount: Number(row.request_count || 0) })), databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs };
+    return { ok: true, windowHours: 24, rows: query.rows.map((row) => ({ accountId: Number(row.account_id), status: String(row.status ?? ''), schedulable: row.schedulable === true, tempUnschedulableUntil: row.temp_unschedulable_until == null ? null : String(row.temp_unschedulable_until), rateLimitResetAt: row.rate_limit_reset_at == null ? null : String(row.rate_limit_reset_at), overloadUntil: row.overload_until == null ? null : String(row.overload_until), expiresAt: row.expires_at == null ? null : String(row.expires_at), autoPauseOnExpired: row.auto_pause_on_expired === true, groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), requestCount: Number(row.request_count || 0) })), databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs };
   }
 
   async usage(accountIds: number[]): Promise<Record<string, unknown>> {
