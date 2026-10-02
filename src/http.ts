@@ -482,6 +482,16 @@ export function createHandler(
           typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
         ), 202);
       }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/models-sync") {
+        const input = await body(request);
+        try {
+          const accountIds = normalizeAccountIds(input.accountIds);
+          if (accountIds.length === 0) return json({ ok: false, error: "accountIds 不能为空" }, 400);
+          return json(await upstreams.syncModels(accountIds));
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
       if (request.method === "POST" && url.pathname === "/api/upstreams/quota-monitor/sample") {
         return json(await dispatcher.submit({ kind: "upstream.quota.sample" }), 202);
       }
@@ -528,6 +538,8 @@ export function createHandler(
           priority: input.priority,
           capacity: input.capacity,
           groupIds: input.groupIds,
+          platform: typeof input.platform === "string" ? input.platform as "openai" | "grok" | "anthropic" : undefined,
+          poolMode: typeof input.poolMode === "boolean" ? input.poolMode : undefined,
           operationId: typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
           description: typeof input.description === "string" ? input.description : undefined,
         }), 202);

@@ -59,6 +59,7 @@ export interface UpstreamAccount {
   suffix: string | null;
   rateCnyPerApiUsd: number | null;
   keyPrefix: string | null;
+  poolMode: boolean;
   platform: string;
   type: string;
   status: string;
@@ -84,6 +85,8 @@ export interface UpstreamCreateInput {
   priority: number;
   capacity: number;
   groupIds: number[];
+  platform: "openai" | "grok" | "anthropic";
+  poolMode: boolean;
   operationId: string;
   description?: string;
 }
@@ -115,6 +118,7 @@ const accountSelect = `
       WHEN COALESCE(a.credentials->>'api_key', '') = '' THEN ''
       ELSE LEFT(a.credentials->>'api_key', 8) || '...'
     END AS key_prefix,
+    COALESCE((a.credentials->>'pool_mode')::boolean, false) AS pool_mode,
     COUNT(*) FILTER (WHERE a.status = 'active' AND COALESCE(a.schedulable, false)) OVER()::int AS available_count,
     COALESCE(array_agg(DISTINCT ag.group_id) FILTER (WHERE ag.group_id IS NOT NULL), '{}') AS group_ids,
     COALESCE(array_agg(DISTINCT g.name) FILTER (WHERE g.name IS NOT NULL), '{}') AS group_names,
@@ -328,6 +332,7 @@ function rowToAccount(row: Row, totals: Map<number, number>, entries: UpstreamRe
     suffix: parsed?.suffix ?? null,
     rateCnyPerApiUsd: parsed?.rateCnyPerApiUsd ?? null,
     keyPrefix: row.key_prefix ? String(row.key_prefix) : null,
+    poolMode: row.pool_mode === true,
     platform: String(row.platform ?? ""),
     type: String(row.type ?? ""),
     status: String(row.status ?? ""),
@@ -489,6 +494,8 @@ export class UpstreamManagementService {
     groupIds?: unknown;
     operationId?: string | null;
     description?: string;
+    platform?: unknown;
+    poolMode?: unknown;
   }): UpstreamCreateInput {
     const settings = this.config.operations.upstreamManagement;
     const baseUrl = normalizeBaseUrl(input.baseUrl);
@@ -513,6 +520,12 @@ export class UpstreamManagementService {
       ? settings.capacity : validateCapacity(input.capacity);
     const groupIds = input.groupIds === undefined || input.groupIds === null
       ? [...settings.groupIds] : validateGroupIds(input.groupIds);
+    const platform = String(input.platform ?? "").trim().toLowerCase();
+    if (platform !== "openai" && platform !== "grok" && platform !== "anthropic") {
+      throw new Error("platform 必须明确填写 openai、grok 或 anthropic");
+    }
+    const poolMode = input.poolMode === undefined || input.poolMode === null || input.poolMode === ""
+      ? false : input.poolMode === true || input.poolMode === "true";
     return {
       baseUrl,
       apiKey,
@@ -523,6 +536,8 @@ export class UpstreamManagementService {
       priority,
       capacity,
       groupIds,
+      platform,
+      poolMode,
       operationId: operationId(input.operationId, "upstream-create"),
       description: input.description,
     };
@@ -571,6 +586,11 @@ export class UpstreamManagementService {
     if (ids.some((id) => !positiveInteger(id))) throw new Error("上游账号 ID 无效");
     const idempotency = operationId(operationIdValue, "upstream-usage");
     return await this.submitOperation(idempotency, { action: "usage", input: { accountIds: ids } });
+  }
+
+  async syncModels(accountIds: number[]): Promise<Record<string, unknown>> {
+    if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
+    return await this.runtime.syncUpstreamModels(accountIds, this.config.operations.upstreamManagement.mutationTimeoutMs);
   }
 
   async submitRecovery(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
@@ -1287,6 +1307,8 @@ export class UpstreamManagementService {
     groupIds?: unknown;
     operationId?: string | null;
     description?: string;
+    platform: "openai" | "grok" | "anthropic";
+    poolMode: boolean;
   }): Promise<Record<string, unknown>> {
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const suffix = validateSuffix(input.suffix);
@@ -1333,7 +1355,7 @@ export class UpstreamManagementService {
       if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
       try {
         const result = await this.runtime.createApiKeyAccount({
-          name, platform: "openai", type: "apikey",
+          name, platform: input.platform, type: "apikey",
           credentials: { base_url: baseUrl, api_key: input.apiKey.trim() },
           extra: {}, priority, concurrency: capacity, proxy_id: settings.proxyId,
           group_ids: groupIds, auto_pause_on_expired: true, schedulable: true,
@@ -1373,15 +1395,20 @@ export class UpstreamManagementService {
         if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
         const needsRuntimeSettings = resolvedAccount.priority !== priority || resolvedAccount.capacity !== capacity
           || (resolvedAccount.proxyId ?? 0) !== settings.proxyId || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds);
-        // Sub2API 原生批量更新同时写运行参数和切号模板，避免创建流程产生两次远程 mutation。
+        // 切号模板只对 OpenAI 上游生效；Grok/Claude 账号保持原生凭据语义。
         await this.runtime.configureApiKeyAccounts(
           [resolvedAccountId],
           {
             ...(needsRuntimeSettings ? { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId } : {}),
             credentials: {
-              pool_mode: false,
-              temp_unschedulable_enabled: true,
-              temp_unschedulable_rules: this.config.operations.upstreamManagement.failoverRules,
+              pool_mode: input.poolMode,
+              ...(input.platform === "openai" ? {
+                temp_unschedulable_enabled: true,
+                temp_unschedulable_rules: this.config.operations.upstreamManagement.failoverRules,
+              } : {
+                temp_unschedulable_enabled: false,
+                temp_unschedulable_rules: [],
+              }),
             },
           },
           settings.mutationTimeoutMs,
@@ -1440,15 +1467,20 @@ export class UpstreamManagementService {
       if (!suffix || rate === null) throw new Error("当前账号缺少可解析的后缀或费率，请同时填写后缀和费率");
       name = formatUpstreamName(account.baseUrl, suffix, rate);
     }
-    // 名称和切号模板一次性写入，避免更新费率时产生两次远程 mutation。
+    // 名称和运行设置一次性写入；只有 OpenAI 账号更新切号模板。
     const groupIds = input.groupIds === undefined ? undefined : validateGroupIds(input.groupIds);
     await this.runtime.configureApiKeyAccounts([id], {
       ...(name && name !== account.name ? { name } : {}),
       ...(groupIds ? { group_ids: groupIds } : {}),
       credentials: {
-        pool_mode: false,
-        temp_unschedulable_enabled: true,
-        temp_unschedulable_rules: this.config.operations.upstreamManagement.failoverRules,
+        pool_mode: account.poolMode,
+        ...(account.platform.toLowerCase() === "openai" ? {
+          temp_unschedulable_enabled: true,
+          temp_unschedulable_rules: this.config.operations.upstreamManagement.failoverRules,
+        } : {
+          temp_unschedulable_enabled: false,
+          temp_unschedulable_rules: [],
+        }),
       },
     }, this.config.operations.upstreamManagement.mutationTimeoutMs);
     const updated = await this.accountQuery(id);

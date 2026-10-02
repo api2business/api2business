@@ -80,13 +80,31 @@ export class Sub2ApiRuntimeService {
     this.apiKeyFailoverRules = rules;
   }
 
-  private apiKeyCredentials(value: unknown): Row {
+  private apiKeyCredentials(value: unknown, platform?: string): Row {
+    const input = record(value) ?? {};
+    const defaultTemplate = platform === undefined || platform.toLowerCase() === "openai";
     return {
-      ...(record(value) ?? {}),
-      pool_mode: false,
-      temp_unschedulable_enabled: true,
-      temp_unschedulable_rules: this.apiKeyFailoverRules,
+      ...input,
+      pool_mode: typeof input.pool_mode === "boolean" ? input.pool_mode : false,
+      temp_unschedulable_enabled: typeof input.temp_unschedulable_enabled === "boolean" ? input.temp_unschedulable_enabled : defaultTemplate,
+      temp_unschedulable_rules: Array.isArray(input.temp_unschedulable_rules) ? input.temp_unschedulable_rules : defaultTemplate ? this.apiKeyFailoverRules : [],
     };
+  }
+
+  async syncUpstreamModels(accountIds: number[], timeoutMs?: number): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+      throw new Error("model sync requires stable positive account IDs");
+    }
+    const results: Array<Record<string, unknown>> = [];
+    for (const accountId of ids) {
+      const result = await this.client.mutate<Record<string, unknown>>(
+        "POST", `/admin/accounts/${accountId}/models/sync-upstream`, undefined, undefined, timeoutMs,
+      );
+      const models = Array.isArray(result.models) ? result.models : [];
+      results.push({ accountId, modelCount: models.length, models });
+    }
+    return { ok: true, accountIds: ids, results, valuesPrinted: true };
   }
 
   async importAccounts(input: {
@@ -154,7 +172,7 @@ export class Sub2ApiRuntimeService {
     } else if (types.has("apikey")) {
       const prepared = accounts.map((account) => ({
         ...account,
-        credentials: this.apiKeyCredentials(account.credentials),
+        credentials: this.apiKeyCredentials(account.credentials, String(account.platform ?? "")),
         priority: input.priority,
         concurrency: input.capacity,
         load_factor: rateMultiplier,

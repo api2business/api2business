@@ -146,6 +146,11 @@ export class AdminHttpClient {
       body: JSON.stringify({ accountIds, operationId }),
     }, 30000);
   }
+  upstreamModelsSync(accountIds: number[]): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/models-sync", {
+      method: "POST", body: JSON.stringify({ accountIds }),
+    }, 120000);
+  }
   upstreamUsageCache(results: Array<Record<string, unknown>>, apiAmountUsdTotal: number | null = null, recordSample = false): Promise<Record<string, unknown>> {
     return this.request("/api/internal/upstream-usage-cache", {
       method: "POST",

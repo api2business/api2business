@@ -98,6 +98,8 @@ interface Parsed {
   idempotencyKey: string | null;
   ticketStdin: boolean;
   codeStdin: boolean;
+  platform: string | null;
+  poolMode: boolean | null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -124,7 +126,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -217,6 +219,11 @@ function parseArgs(args: string[]): Parsed {
     format: value(args, "--format") as "sub2" | "cpa" | null, hubId: value(args, "--hub-id"),
     state: value(args, "--state"), beforeId: value(args, "--before-id"), idempotencyKey: value(args, "--idempotency-key"),
     ticketStdin: args.includes("--ticket-stdin"), codeStdin: args.includes("--code-stdin") || args.includes("--card-code-stdin"),
+    platform: value(args, "--platform"),
+    poolMode: value(args, "--pool-mode") === null ? null
+      : value(args, "--pool-mode") === "true" ? true
+      : value(args, "--pool-mode") === "false" ? false
+      : (() => { throw new Error("--pool-mode must be true or false"); })(),
   };
 }
 
@@ -272,6 +279,7 @@ function help(): Record<string, unknown> {
       "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
       "upstreams list [--page N --search <text>] --over-api",
       "upstreams usage [--accounts <id-or-range,...>] --over-api",
+      "upstreams models sync --accounts <id-or-range,...> [--confirm] --over-api",
       "upstreams usage-cache [--accounts <id-or-range,...>] --over-api",
       "upstreams quota-summary --over-api",
       "upstreams recharge-candidates [--json] --over-api",
@@ -281,7 +289,7 @@ function help(): Record<string, unknown> {
       "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
-      "upstreams create --base-url <https-url> --suffix <name> [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
+      "upstreams create --platform openai|grok|anthropic --base-url <https-url> --suffix <name> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
       "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api",
       "upstreams recharge --base-url <https-url> --recharge-cny <CNY> [--idempotency-key <key>] [--confirm] --over-api",
       "upstreams recharge-status --id <workflow-id> --over-api",
@@ -661,6 +669,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     return await client.upstreamUsage(accountIds, `upstream-usage-${crypto.randomUUID()}`);
   }
+  if (group === "upstreams" && action === "models" && parsed.command[2] === "sync") {
+    if (!parsed.accounts) throw new Error("upstreams models sync requires --accounts");
+    const accountIds = parseAccountIdSelector(parsed.accounts);
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-models-sync", accountIds, hint: "add --confirm to execute" };
+    return await client.upstreamModelsSync(accountIds);
+  }
   if (group === "upstreams" && action === "usage-cache") {
     if (parsed.command[2] === "restore") {
       const accountId = Number(parsed.id);
@@ -713,9 +727,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await verifyRechargeWorkflow(client, { workflowId: parsed.id });
   }
   if (group === "upstreams" && action === "create") {
+    if (!parsed.platform || !["openai", "grok", "anthropic"].includes(parsed.platform)) throw new Error("upstreams create requires --platform openai|grok|anthropic");
     if (!parsed.baseUrl || !parsed.suffix) throw new Error("upstreams create requires --base-url and --suffix");
     if (!parsed.apiKeyStdin) throw new Error("upstreams create requires --api-key-stdin; API keys are never accepted in argv");
-    const input = { baseUrl: parsed.baseUrl, suffix: parsed.suffix,
+    const input = { platform: parsed.platform, poolMode: parsed.poolMode ?? false, baseUrl: parsed.baseUrl, suffix: parsed.suffix,
       ...(parsed.rate === null ? {} : { rateCnyPerApiUsd: parsed.rate }),
       priority: parsed.priority ?? 1, capacity: parsed.capacity ?? 16,
       groupIds: (parsed.groups ?? "2,3").split(",").map(Number), rechargeCny: parsed.rechargeCny };
