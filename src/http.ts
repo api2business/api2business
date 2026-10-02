@@ -185,13 +185,23 @@ function operationRequest(value: Record<string, unknown>): OperationRequest | nu
   };
 }
 
+export function frontendStaticCacheHeaders(): Record<string, string> {
+  return {
+    // 前端入口和模块随部署变化，禁止浏览器/共享代理保留旧版本。
+    "cache-control": "private, no-store, max-age=0, must-revalidate",
+    pragma: "no-cache",
+    expires: "0",
+    "surrogate-control": "no-store",
+  };
+}
+
 async function staticFile(name: string, contentType: string): Promise<Response> {
   const file = Bun.file(resolve(staticRoot, name));
   if (!(await file.exists())) return json({ ok: false, error: "not found" }, 404);
   return new Response(file, {
     headers: {
       "content-type": contentType,
-      "cache-control": "no-cache",
+      ...frontendStaticCacheHeaders(),
     },
   });
 }

@@ -1,7 +1,24 @@
 import { expect, test } from "bun:test";
-import { apiCacheRefreshRequested, isApiResponseCacheable, readApiCache, refreshThenReadApiCache } from "./http";
+import { apiCacheRefreshRequested, frontendStaticCacheHeaders, isApiResponseCacheable, readApiCache, refreshThenReadApiCache } from "./http";
 
 const get = (pathname: string) => new Request(`https://api2business.example${pathname}`);
+
+test("frontend static resources are never stored across deployments", () => {
+  expect(frontendStaticCacheHeaders()).toMatchObject({
+    "cache-control": "private, no-store, max-age=0, must-revalidate",
+    pragma: "no-cache",
+    expires: "0",
+    "surrogate-control": "no-store",
+  });
+});
+
+test("the Vite production entry also disables immutable module caching", async () => {
+  const config = await Bun.file(new URL("../vite.config.ts", import.meta.url)).text();
+  expect(config).toContain("frontendNoStoreHeaders");
+  expect(config).toContain('"Cache-Control": "private, no-store, max-age=0, must-revalidate"');
+  expect(config).toContain("headers: frontendNoStoreHeaders");
+  expect(config).toContain("preview: { headers: frontendNoStoreHeaders }");
+});
 
 test("persistent snapshot APIs bypass the generic response cache", () => {
   for (const pathname of [

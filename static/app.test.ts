@@ -207,7 +207,8 @@ test("shared navigation remains stable and horizontally scrollable", async () =>
   expect(css).toContain("flex-wrap: nowrap");
   expect(css).toContain("overflow-x: auto");
   expect(css).toContain("-webkit-overflow-scrolling: touch");
-  expect(http).toContain('\"cache-control\": \"no-cache\"');
+  expect(http).toContain('private, no-store, max-age=0, must-revalidate');
+  expect(http).toContain('surrogate-control');
   expect(http).not.toContain('public, max-age=300');
 });
 
