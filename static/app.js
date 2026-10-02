@@ -1304,10 +1304,21 @@ function renderQuotaMonitor() {
   document.querySelectorAll('[data-quota-filter]').forEach((button) => button.classList.toggle('is-active', button.dataset.quotaFilter === quotaMonitorFilter))
 }
 
+let quotaGroupHistoryPoints = []
+let quotaHistoryResizeObserver = null
+
 function renderQuotaGroupHistory(points) {
   const chart = $('#quota-group-history-chart')
   if (!chart) return
-  chart.innerHTML = historyChartMarkup(Array.isArray(points) ? points : [], {
+  quotaGroupHistoryPoints = Array.isArray(points) ? points : []
+  const chartWidth = Math.max(280, chart.clientWidth)
+  const chartHeight = Math.max(180, chart.clientHeight)
+  chart.setAttribute('viewBox', `0 0 ${chartWidth} ${chartHeight}`)
+  if (!quotaHistoryResizeObserver) {
+    quotaHistoryResizeObserver = new ResizeObserver(() => renderQuotaGroupHistory(quotaGroupHistoryPoints))
+    quotaHistoryResizeObserver.observe(chart)
+  }
+  chart.innerHTML = historyChartMarkup(quotaGroupHistoryPoints, {
     series: [
       { key: 'codexMix', className: 'chart-quota-codex', label: 'Codex 混池' },
       { key: 'noDegrade', className: 'chart-quota-no-degrade', label: '不降智' },
@@ -1317,6 +1328,9 @@ function renderQuotaGroupHistory(points) {
     valueFormatter: (value) => `¥${number(value, 2)}`,
     unit: '人民币余额',
     ariaLabel: '四个额度分组人民币余额趋势',
+    chartWidth,
+    chartHeight,
+    plotRight: chartWidth - 12,
     yMin: 0,
     plotLeft: 0,
   })
