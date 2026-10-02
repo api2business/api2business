@@ -547,6 +547,15 @@ test("quota monitor places the shared four-group balance history between cards a
   expect(app).toContain('usageBuckets');
 });
 
+test("quota monitor binds range changes to the select and keeps the select styled", async () => {
+  const app = await frontendSource();
+  const styles = await Bun.file(new URL("./styles.css", import.meta.url)).text();
+  expect(app).toContain("const rangeSelect = $('#quota-monitor-range')");
+  expect(app).toContain("rangeSelect.addEventListener('change'");
+  expect(styles).toContain('.quota-range-filter select');
+  expect(styles).toContain('min-width:156px');
+});
+
 test("upstream create and update expose timestamped workflow logs", async () => {
   const app = await frontendSource();
   const html = await Bun.file(new URL("./upstreams.html", import.meta.url)).text();

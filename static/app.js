@@ -1336,7 +1336,11 @@ async function quotaMonitorPage() {
       quotaMonitorPageNumber = 1
       renderQuotaMonitor()
     })
-    $('#quota-monitor-range')?.addEventListener('change', (event) => {
+  }
+  const rangeSelect = $('#quota-monitor-range')
+  if (rangeSelect && rangeSelect.dataset.bound !== '1') {
+    rangeSelect.dataset.bound = '1'
+    rangeSelect.addEventListener('change', (event) => {
       quotaMonitorRange = event.target.value === 'today' || event.target.value === '1h' ? event.target.value : '24h'
       quotaMonitorPageNumber = 1
       renderQuotaMonitor()
