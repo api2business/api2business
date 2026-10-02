@@ -959,7 +959,7 @@ body[data-page="quota-monitor"] .page-head > div { min-width: 0; }
 .quota-monitor-actions { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
 .quota-monitor-actions .query-command { max-width: 100%; white-space: normal; }
 .quota-history-section { height: clamp(260px, 36vh, 440px); }
-.quota-history-section svg { height: 100% !important; min-width: 0; }
+.quota-history-section svg { height: var(--quota-chart-height, 340px) !important; min-width: 0; }
 .quota-history-section .history-chart-meta { flex-wrap: wrap; gap: 6px; }
 .quota-history-section .history-chart-legend { flex-wrap: wrap; gap: 8px; }
 @media (max-width: 760px) {

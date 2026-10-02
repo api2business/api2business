@@ -1320,6 +1320,7 @@ function renderQuotaGroupHistory(points) {
   const chartHeight = Math.max(260, Math.min(440, frameHeight))
   chart.setAttribute('viewBox', `0 0 ${chartWidth} ${chartHeight}`)
   chart.setAttribute('preserveAspectRatio', 'none')
+  chart.style.setProperty('--quota-chart-height', `${chartHeight}px`)
   chart.style.height = `${chartHeight}px`
   if (!quotaHistoryResizeObserver) {
     quotaHistoryResizeObserver = new ResizeObserver(() => renderQuotaGroupHistory(quotaGroupHistoryPoints))
