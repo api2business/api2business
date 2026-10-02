@@ -1312,10 +1312,12 @@ function renderQuotaGroupHistory(points) {
   if (!chart) return
   quotaGroupHistoryPoints = Array.isArray(points) ? points : []
   const chartHost = chart.parentElement
+  if (chartHost) chartHost.style.height = 'clamp(260px, 36vh, 440px)'
   const chartWidth = Math.max(280, chartHost?.clientWidth ?? chart.clientWidth)
   const chartHeight = Math.max(180, chartHost?.clientHeight ?? chart.clientHeight)
   chart.setAttribute('viewBox', `0 0 ${chartWidth} ${chartHeight}`)
   chart.setAttribute('preserveAspectRatio', 'none')
+  chart.style.height = `${chartHeight}px`
   if (!quotaHistoryResizeObserver) {
     quotaHistoryResizeObserver = new ResizeObserver(() => renderQuotaGroupHistory(quotaGroupHistoryPoints))
     quotaHistoryResizeObserver.observe(chartHost ?? chart)

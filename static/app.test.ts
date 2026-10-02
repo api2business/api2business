@@ -530,7 +530,7 @@ test("quota monitor places the shared four-group balance history between cards a
   expect(html).toContain('id="quota-monitor-sample"');
   expect(html).toContain('id="quota-monitor-refresh-interval"');
   expect(html).toContain('id="quota-monitor-range"');
-  expect(html).toContain('quota-monitor-v17');
+  expect(html).toContain('quota-monitor-v18');
   expect(html).toContain('今天（北京时间）');
   expect(html).toContain('最近 1 小时');
   expect(app).toContain("renderQuotaGroupHistory(summary.groupHistory)");
