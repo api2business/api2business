@@ -17,6 +17,8 @@ test("quota query derates each billed row before applying the live upstream rate
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   expect(source).toContain("SUM(u.actual_cost / NULLIF(u.rate_multiplier, 0))");
   expect(source).toContain("saleRateMissingCount");
+  expect(source).toContain("usage_buckets");
+  expect(source).toContain("floor(extract(epoch FROM u2.created_at) / 300)");
 });
 
 test("upstream names preserve historical six-decimal rates", () => {

@@ -916,6 +916,15 @@ export class UpstreamManagementService {
           COALESCE(SUM(${upstreamCostBasisSql("u")}), 0)::numeric AS api_amount_usd,
           COALESCE(SUM(u.actual_cost / NULLIF(u.rate_multiplier, 0)), 0)::numeric AS actual_div_sale_usd,
           COUNT(*) FILTER (WHERE u.actual_cost > 0 AND (u.rate_multiplier IS NULL OR u.rate_multiplier <= 0))::int AS sale_rate_missing_count,
+          (SELECT jsonb_agg(jsonb_build_object('sampledAt', bucket_at, 'groupName', group_name, 'apiAmountUsd', api_amount_usd, 'requestCount', request_count) ORDER BY bucket_at)
+             FROM (SELECT to_timestamp(floor(extract(epoch FROM u2.created_at) / 300) * 300) AS bucket_at,
+                          COALESCE(g2.name, '') AS group_name,
+                          SUM(u2.actual_cost / NULLIF(u2.rate_multiplier, 0))::numeric AS api_amount_usd,
+                          COUNT(*)::int AS request_count
+                     FROM usage_logs u2 LEFT JOIN groups g2 ON g2.id = u2.group_id
+                    WHERE u2.account_id = a.id AND u2.created_at >= now() - INTERVAL '24 hours'
+                      AND LOWER(CONCAT_WS(' ', u2.requested_model, u2.model, u2.upstream_model)) NOT LIKE '%luna%'
+                    GROUP BY 1, 2) usage_buckets) AS usage_buckets,
           COUNT(u.id)::int AS request_count
         FROM accounts a
         LEFT JOIN usage_logs u ON u.account_id = a.id
@@ -927,7 +936,17 @@ export class UpstreamManagementService {
         GROUP BY a.id, g.name ORDER BY a.id, g.name`,
       parameters: ids.length ? [ids.join(",")] : [],
     });
-    const rows = query.rows.map((row) => ({ accountId: Number(row.account_id), status: String(row.status ?? ''), schedulable: row.schedulable === true, tempUnschedulableUntil: row.temp_unschedulable_until == null ? null : String(row.temp_unschedulable_until), rateLimitResetAt: row.rate_limit_reset_at == null ? null : String(row.rate_limit_reset_at), overloadUntil: row.overload_until == null ? null : String(row.overload_until), expiresAt: row.expires_at == null ? null : String(row.expires_at), autoPauseOnExpired: row.auto_pause_on_expired === true, groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), actualDivSaleUsd: Number(row.actual_div_sale_usd || 0), saleRateMissingCount: Number(row.sale_rate_missing_count || 0), requestCount: Number(row.request_count || 0) }));
+    const rows = query.rows.map((row) => {
+      let usageBuckets: Row[] = [];
+      if (Array.isArray(row.usage_buckets)) usageBuckets = row.usage_buckets as Row[];
+      else if (typeof row.usage_buckets === 'string') {
+        try {
+          const parsed = JSON.parse(row.usage_buckets);
+          if (Array.isArray(parsed)) usageBuckets = parsed as Row[];
+        } catch { /* malformed optional bucket data stays empty */ }
+      }
+      return { accountId: Number(row.account_id), status: String(row.status ?? ''), schedulable: row.schedulable === true, tempUnschedulableUntil: row.temp_unschedulable_until == null ? null : String(row.temp_unschedulable_until), rateLimitResetAt: row.rate_limit_reset_at == null ? null : String(row.rate_limit_reset_at), overloadUntil: row.overload_until == null ? null : String(row.overload_until), expiresAt: row.expires_at == null ? null : String(row.expires_at), autoPauseOnExpired: row.auto_pause_on_expired === true, groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), actualDivSaleUsd: Number(row.actual_div_sale_usd || 0), saleRateMissingCount: Number(row.sale_rate_missing_count || 0), usageBuckets, requestCount: Number(row.request_count || 0) };
+    });
     // Sub2API actual_cost 可能已包含下游售卖倍率；用实时有效倍率折回供应商实际成本。
     // 一个账号可能按组聚合成多行，只把账号级实际成本落到一个业务组，避免重复计入。
     const byAccount = new Map<number, typeof rows>();
@@ -937,12 +956,18 @@ export class UpstreamManagementService {
       const missingSaleRate = accountRows.some((row) => Number(row.saleRateMissingCount || 0) > 0);
       const deRatedActual = Number(accountRows.reduce((sum, row) => sum + Number(row.actualDivSaleUsd || 0), 0));
       const actual = missingSaleRate ? null : providerActualCostUsd(deRatedActual, rate);
+      const target = accountRows.find((row) => row.groupName && !row.groupName.startsWith('api2business-probe-') && row.groupName !== '自用') ?? accountRows[0];
       if (actual === null) {
-        for (const row of accountRows) row.apiAmountUsd = null;
+        for (const row of accountRows) { row.apiAmountUsd = null; row.usageBuckets = []; }
         continue;
       }
-      const target = accountRows.find((row) => row.groupName && !row.groupName.startsWith('api2business-probe-') && row.groupName !== '自用') ?? accountRows[0];
-      for (const row of accountRows) row.apiAmountUsd = row === target ? actual : null;
+      // usage_buckets 是账号级相关子查询，会在每个分组聚合行重复返回；只取一份。
+      const sourceBuckets = accountRows.find((row) => row.usageBuckets.length > 0)?.usageBuckets ?? [];
+      const usageBuckets = sourceBuckets.map((bucket) => ({
+        sampledAt: String(bucket.sampledAt ?? ''), groupName: String(bucket.groupName ?? ''),
+        apiAmountUsd: providerActualCostUsd(Number(bucket.apiAmountUsd), rate), requestCount: Number(bucket.requestCount ?? 0),
+      })).filter((bucket) => bucket.apiAmountUsd !== null && bucket.sampledAt);
+      for (const row of accountRows) { row.apiAmountUsd = row === target ? actual : null; row.usageBuckets = row === target ? usageBuckets : []; }
     }
     return { ok: true, windowHours: 24, rows, databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs };
   }

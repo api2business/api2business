@@ -528,6 +528,9 @@ test("quota monitor places the shared four-group balance history between cards a
   expect(html).not.toContain("每 10 分钟一个采样点，共用时间轴");
   expect(html).toContain('id="quota-monitor-sample"');
   expect(html).toContain('id="quota-monitor-refresh-interval"');
+  expect(html).toContain('id="quota-monitor-range"');
+  expect(html).toContain('今天（北京时间）');
+  expect(html).toContain('最近 1 小时');
   expect(app).toContain("renderQuotaGroupHistory(summary.groupHistory)");
   expect(app).toContain("/api/upstreams/quota-monitor/sample");
   expect(app).toContain("runQuotaRefresh");
@@ -539,6 +542,9 @@ test("quota monitor places the shared four-group balance history between cards a
   expect(app).toContain('yMin: 0');
   expect(app).toContain('plotLeft: 0');
   expect(app).toContain("from './quota-grouping.js'");
+  expect(app).toContain('function quotaRangeCutoff');
+  expect(app).toContain('refreshQuotaConsumption()');
+  expect(app).toContain('usageBuckets');
 });
 
 test("upstream create and update expose timestamped workflow logs", async () => {
