@@ -1311,12 +1311,13 @@ function renderQuotaGroupHistory(points) {
   const chart = $('#quota-group-history-chart')
   if (!chart) return
   quotaGroupHistoryPoints = Array.isArray(points) ? points : []
-  const chartWidth = Math.max(280, chart.clientWidth)
-  const chartHeight = Math.max(180, chart.clientHeight)
+  const chartHost = chart.parentElement
+  const chartWidth = Math.max(280, chartHost?.clientWidth ?? chart.clientWidth)
+  const chartHeight = Math.max(180, chartHost?.clientHeight ?? chart.clientHeight)
   chart.setAttribute('viewBox', `0 0 ${chartWidth} ${chartHeight}`)
   if (!quotaHistoryResizeObserver) {
     quotaHistoryResizeObserver = new ResizeObserver(() => renderQuotaGroupHistory(quotaGroupHistoryPoints))
-    quotaHistoryResizeObserver.observe(chart)
+    quotaHistoryResizeObserver.observe(chartHost ?? chart)
   }
   chart.innerHTML = historyChartMarkup(quotaGroupHistoryPoints, {
     series: [
