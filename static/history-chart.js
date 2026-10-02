@@ -31,7 +31,9 @@ export function historyChartMarkup(points, { series, valueFormatter, unit = '', 
   const max = upperBound ?? rawMax + padding
   const span = Math.max(max - min, 0.001)
   const requestedLeft = Number(requestedPlotLeft), requestedRight = Number(requestedPlotRight)
-  const plotLeft = Math.max(0, Number.isFinite(requestedLeft) ? requestedLeft : 64), plotRight = Math.min(chartWidth - 2, Math.max(plotLeft + 100, Number.isFinite(requestedRight) ? requestedRight : 986)), plotTop = chartHeight === 180 ? 18 : 42, plotBottom = chartHeight - 22
+  const plotLeft = Math.max(0, Number.isFinite(requestedLeft) ? requestedLeft : 64), plotRight = Math.min(chartWidth - 2, Math.max(plotLeft + 100, Number.isFinite(requestedRight) ? requestedRight : 986))
+  // 坐标区随画框缩放，保留最小文字安全边距，桌面和移动端使用同一比例。
+  const plotTop = Math.max(24, Math.round(chartHeight * 0.08)), plotBottom = chartHeight - Math.max(16, Math.round(chartHeight * 0.05))
   const x = (index) => plotLeft + index * (plotRight - plotLeft) / Math.max(1, chartPoints.length - 1)
   const y = (value) => plotBottom - (Math.min(max, Math.max(min, value)) - min) / span * (plotBottom - plotTop)
   const formatValue = typeof valueFormatter === 'function' ? valueFormatter : (value) => number(value, 2)

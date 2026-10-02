@@ -549,6 +549,12 @@ test("quota monitor places the shared four-group balance history between cards a
   expect(app).toContain('usageBuckets');
 });
 
+test("quota history chart uses proportional plot margins for every viewport", async () => {
+  const chart = await Bun.file(new URL("./history-chart.js", import.meta.url)).text();
+  expect(chart).toContain('chartHeight * 0.08');
+  expect(chart).toContain('chartHeight * 0.05');
+});
+
 test("quota monitor binds range changes to the select and keeps the select styled", async () => {
   const app = await frontendSource();
   const styles = await Bun.file(new URL("./styles.css", import.meta.url)).text();
