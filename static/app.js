@@ -2,7 +2,7 @@ import { scoreFreshnessLabel, shouldApplyScorePayload } from './score-display-fr
 import { quotaAccountAvailable, quotaAvailabilityTotals } from './quota-availability.js'
 import { sampleTimeDisplay } from './sample-time.js'
 import { buildSupplierQualityAssets } from './upstream-quality-assets.js'
-import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=quota-monitor-v16'
+import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=quota-monitor-v17'
 import { quotaGroup, quotaMemberships } from './quota-grouping.js'
 
 const page = document.body.dataset.page
@@ -1211,7 +1211,8 @@ async function rankingPage() {
 let quotaMonitorRows = []
 let quotaMonitorTotalRemaining = null
 let quotaMonitorFilter = 'all'
-let quotaMonitorRange = '24h'
+const quotaRangeQuery = new URLSearchParams(location.search).get('range')
+let quotaMonitorRange = quotaRangeQuery === 'today' || quotaRangeQuery === '1h' ? quotaRangeQuery : '24h'
 let quotaMonitorPageNumber = 1
 let quotaMonitorSort = { key: 'remaining', direction: 'desc' }
 const quotaMonitorPageSize = 12
@@ -1340,8 +1341,13 @@ async function quotaMonitorPage() {
   const rangeSelect = $('#quota-monitor-range')
   if (rangeSelect && rangeSelect.dataset.bound !== '1') {
     rangeSelect.dataset.bound = '1'
+    rangeSelect.value = quotaMonitorRange
     rangeSelect.addEventListener('change', (event) => {
       quotaMonitorRange = event.target.value === 'today' || event.target.value === '1h' ? event.target.value : '24h'
+      const url = new URL(location.href)
+      if (quotaMonitorRange === '24h') url.searchParams.delete('range')
+      else url.searchParams.set('range', quotaMonitorRange)
+      history.replaceState({}, '', url)
       quotaMonitorPageNumber = 1
       renderQuotaMonitor()
     })

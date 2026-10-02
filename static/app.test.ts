@@ -529,6 +529,7 @@ test("quota monitor places the shared four-group balance history between cards a
   expect(html).toContain('id="quota-monitor-sample"');
   expect(html).toContain('id="quota-monitor-refresh-interval"');
   expect(html).toContain('id="quota-monitor-range"');
+  expect(html).toContain('quota-monitor-v17');
   expect(html).toContain('今天（北京时间）');
   expect(html).toContain('最近 1 小时');
   expect(app).toContain("renderQuotaGroupHistory(summary.groupHistory)");
@@ -552,6 +553,8 @@ test("quota monitor binds range changes to the select and keeps the select style
   const styles = await Bun.file(new URL("./styles.css", import.meta.url)).text();
   expect(app).toContain("const rangeSelect = $('#quota-monitor-range')");
   expect(app).toContain("rangeSelect.addEventListener('change'");
+  expect(app).toContain('new URLSearchParams(location.search).get(\'range\')');
+  expect(app).toContain('history.replaceState({}, \'\', url)');
   expect(styles).toContain('.quota-range-filter select');
   expect(styles).toContain('min-width:156px');
 });
