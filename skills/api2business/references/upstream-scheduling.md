@@ -184,6 +184,7 @@
   - 切号分别输出 `recoveredFailoverRate`、`unrecoveredFailoverRate` 和 `effectiveFailoverRate`；有效率为 `未恢复 + 0.25 × 已恢复`，再线性计入切号分。
 - `E` 是独立证据分：请求样本量占 `50%`、首 Token 样本量占 `25%`、首 Token 覆盖率占 `25%`；只影响连续排序，不做可调度硬过滤。
 - 优先使用探测成本；探测成本缺失时再使用手工成本。
+- 可调度候选中某个账号缺少探测和手工成本时，只要同一候选集合存在有效成本，使用该集合的算术平均成本参加排序；计划行的 `costSource` 标为 `imputed-average`，不再因为缺成本直接落到 `topk-tail`。只有整组候选都没有成本证据时，才保留无成本证据的保守尾部处理。
 - 成本维度采用扣分制：以本轮可调度账号的实际人民币成本范围做线性归一化，最低成本扣 `0` 分，最高成本扣 `100` 分，中间成本按比例扣分；`costWeight` 是扣分幅度，不使用负权重。
 - 成本范围的锚点优先取当前可调度、具有成本数据且满足 `requiredConfidence` 的账号：
   - 该证据集缺失或成本全部相同时，回退所有当前可调度候选的成本区间。
@@ -203,12 +204,11 @@
 - 评分样本范围必须按层级区分：
   - 上游调度 V2 是独立页面和独立 `/api/v2/upstream-scheduling/*` 只读读模型；旧 `/scores`
     页面与接口保持原状，不能用 V2 页面替换旧页面。
-  - V2 先支持 `codex`，再支持 `claude` 的只读评分；作用域的 `platform`、候选分组和
+  - V2 先支持 `codex`，再支持 `claude` 的评分；作用域的 `platform`、候选分组和
     `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe`、
     `upstreamWrite` 均只从 owning YAML 的 `operations.upstreamSchedulingV2.scopes.*`
-    读取，代码不得硬编码关闭或开启。当前 Claude 打开 `scoreRead`、`planRead`，
-    `planWrite`、`priorityAutomation`、`idleProbe`、`upstreamWrite` 仍保持关闭。
-  - V2 只读页面必须复用旧评分页的资产/成本、综合质量、趋势、参与比例、完整账号表、
+    读取，代码不得硬编码关闭或开启。V2 页面是否只读由这些开关的实际组合决定。
+  - V2 页面必须复用旧评分页的资产/成本、综合质量、趋势、参与比例、完整账号表、
     错误、调整、探活和自动调度状态组件；页面不能只保留简化账号表，也不能把后台读模型
     核对结果展示为页面内容。
   - `upstream-scheduling-v2 snapshot|plan --over-api` 是核对和计划的受控 CLI 入口；
@@ -225,13 +225,17 @@
   - Claude 的主动探活能力保留为显式边界但当前不启用，不创建 Claude 探针分组，也不写入
     Claude 探活记录；页面必须显示“未启用”，不能把 Codex 探活数据投影到 Claude。
   - `/scores` 的调整记录和优先级计划按当前全局平台投影。
-  - 周期自动优先级调度受 `operations.writePolicy.enabled` 控制，当前 owning YAML 关闭。
+  - 周期自动优先级调度同时受全局写入安全开关 `operations.writePolicy.enabled`、Claude
+    专用写入开关 `operations.writePolicy.claudeEnabled` 和作用域
+    `features.priorityAutomation` 控制；作用域开关关闭时，自动计划不会选择该作用域的变更。
+    周期的间隔和样本档位以 `priority automation get --over-api` 回读为准，需与 Codex 对齐时使用同一组值。
   - Claude 一次性优先级调度：
     - 用户授权本次调度后，临时打开 `operations.writePolicy.claudeEnabled`。
     - 通过 V2 Claude 只读计划计算排序，核对目标平台、分组、账号和优先级范围。
     - 将该计划的 Claude 优先级传给 `priority plan manual-create`，再确认同一个计划。
-    - 保持周期调度开关与 V2 写入开关关闭，完成后关闭临时 Claude 写入开关。
-    - 关闭时 Claude 只读，不能展示 `Codex + Grok` 复合标签。
+    - 若不启用周期调度，确认完成后关闭临时 Claude 写入开关；若要启用周期调度，先回读
+      三个写入/作用域开关和间隔，再保留经用户授权的运行配置。
+    - Claude 视图始终按 Anthropic 作用域读取，不能展示 `Codex + Grok` 复合标签。
   - 修改页面投影后必须更新静态资源版本并重新读取线上页面；旧浏览器缓存不能作为验收依据。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
     - 探活产生的 502、503、524、延迟和切号结果按正常评分规则计入；

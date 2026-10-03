@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AppConfig } from "./config";
-import { applyPlanTypeRefunds, latestSuccessfulUsageByWallet, normalizeUpstreamWallet, OperationsService, upstreamBalanceRateByWallet } from "./operations-service";
+import { applyPlanTypeRefunds, filterAutomaticPriorityPlan, latestSuccessfulUsageByWallet, normalizeUpstreamWallet, OperationsService, upstreamBalanceRateByWallet } from "./operations-service";
 import type { OperationsStore } from "./operations-store";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -87,6 +87,41 @@ function candidatePlan(queryDurationMs = 800) {
     })),
   };
 }
+
+test("automatic priority plans follow per-scope feature switches", () => {
+  const plan = {
+    priorities: { "1": 101, "2": 102, "3": 103 },
+    changedCount: 3,
+    profiles: {
+      codex: { changedCount: 1 },
+      claude: { changedCount: 1 },
+      grok: { changedCount: 1 },
+    },
+    changes: [
+      { accountId: 1, profile: "codex", change: "update", desiredPriority: 101 },
+      { accountId: 2, profile: "claude", change: "update", desiredPriority: 102 },
+      { accountId: 3, profile: "grok", change: "update", desiredPriority: 103 },
+    ],
+  };
+  const config = {
+    operations: {
+      upstreamSchedulingV2: {
+        enabled: true,
+        scopes: {
+          codex: { enabled: true, features: { priorityAutomation: true } },
+          claude: { enabled: false, features: { priorityAutomation: true } },
+        },
+      },
+    },
+  } as AppConfig;
+
+  expect(filterAutomaticPriorityPlan(plan, config)).toMatchObject({
+    priorities: { "1": 101 },
+    changedCount: 1,
+    changes: [{ accountId: 1, profile: "codex" }],
+    profiles: { codex: { changedCount: 1 } },
+  });
+});
 
 function serviceFixture(candidate: Record<string, unknown>) {
   const created: Array<Record<string, unknown>> = [];
@@ -689,6 +724,7 @@ test("a waiting optimization cannot start scoring until the previous automatic f
   } as unknown as OperationsStore;
   const config = {
     operations: {
+      writePolicy: { enabled: true, claudeEnabled: true },
       planTtlMinutes: 15,
       automationJitterPercent: 0.1,
       automationSafety,
@@ -794,6 +830,7 @@ test("an automatic changed plan uses one full-flow queue lease through writeback
   } as unknown as OperationsStore;
   const config = {
     operations: {
+      writePolicy: { enabled: true, claudeEnabled: true },
       planTtlMinutes: 15,
       automationJitterPercent: 0.1,
       automationSafety,
@@ -895,6 +932,7 @@ test("a blocked automatic cycle remains inside the full optimization queue throu
   } as unknown as OperationsStore;
   const config = {
     operations: {
+      writePolicy: { enabled: true, claudeEnabled: true },
       planTtlMinutes: 15,
       automationJitterPercent: 0.1,
       automationSafety,
@@ -949,6 +987,7 @@ test("an expired automatic cycle is recovered without starting another optimizat
   } as unknown as OperationsStore;
   const config = {
     operations: {
+      writePolicy: { enabled: true, claudeEnabled: true },
       automationRunTimeoutMs: 600000,
       automationJitterPercent: 0.1,
     },

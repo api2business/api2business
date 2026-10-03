@@ -138,7 +138,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 上游调度 V2 先支持 Codex，再支持 Claude 的只读评分，使用
   `upstream-scheduling-v2 scopes|snapshot|plan --over-api`；页面和接口独立于旧 `/scores`，
   所有作用域功能开关只认 `operations.upstreamSchedulingV2.scopes.*`，核对证据不投影到 UI。
-  Claude 当前打开 `scoreRead`、`planRead`；其余写入和探活开关保持关闭。
+  `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和 `upstreamWrite`
+  必须逐项按作用域配置；默认示例关闭写入、自动调度和探活，不能由代码强制替代 YAML。
   一次性优先级调度的临时开关、作用域核对和关闭顺序只见
   [上游与调度](references/upstream-scheduling.md)。
 - 账号评分只有一条计算路径。

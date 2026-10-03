@@ -146,6 +146,31 @@ function object(value: unknown): Record<string, unknown> {
     : {};
 }
 
+export function filterAutomaticPriorityPlan(
+  plan: Record<string, unknown>,
+  config: AppConfig,
+): Record<string, unknown> {
+  const scheduling = config.operations.upstreamSchedulingV2;
+  if (!scheduling?.enabled) return plan;
+  const enabledProfiles = new Set(Object.entries(scheduling.scopes)
+    .filter(([, scope]) => scope.enabled && scope.features.priorityAutomation)
+    .map(([profile]) => profile));
+  const changes = records(plan.changes)
+    .filter((change) => enabledProfiles.has(String(change.profile ?? "")));
+  const priorities = Object.fromEntries(changes
+    .filter((change) => change.change === "update")
+    .map((change) => [String(change.accountId), Number(change.desiredPriority)]));
+  const profiles = Object.fromEntries(Object.entries(object(plan.profiles))
+    .filter(([profile]) => enabledProfiles.has(profile)));
+  return {
+    ...plan,
+    priorities,
+    changedCount: Object.keys(priorities).length,
+    changes,
+    profiles,
+  };
+}
+
 export class OperationsService {
   private readonly idleProbe: IdleAccountProbeService;
   private readonly upstreamBenchmark: UpstreamBenchmarkService;
@@ -1058,7 +1083,10 @@ export class OperationsService {
         detectedCostRateCnyPerApiUsd: Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null,
       };
     });
-    const result = buildAccountPriorityPlan({ ...ranking, accounts }, this.config);
+    const built = buildAccountPriorityPlan({ ...ranking, accounts }, this.config);
+    const result = priority === "automatic"
+      ? filterAutomaticPriorityPlan(built, this.config)
+      : built;
     return { ...result, refreshedAt: new Date().toISOString() };
   }
 

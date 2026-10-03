@@ -197,6 +197,46 @@ test("Claude priority planning isolates Anthropic group 119 and preserves the ra
   expect(appliedPlan.priorities).toEqual({});
 });
 
+test("missing Claude account cost uses the eligible-candidate average instead of the tail priority", () => {
+  const knownCheap = {
+    ...account(21, "https://claude-cheap.example ccmax 0.1", 90),
+    platform: "anthropic",
+    groupIds: [119],
+    priority: 100,
+    usage: { costRateCnyPerApiUsd: 0.1 },
+  };
+  const missingCost = {
+    ...account(22, "https://claude-missing.example ccmax", 89),
+    platform: "anthropic",
+    groupIds: [119],
+    priority: 100,
+  };
+  delete (missingCost as Record<string, unknown>).usage;
+  const knownExpensive = {
+    ...account(23, "https://claude-expensive.example ccmax 0.3", 88),
+    platform: "anthropic",
+    groupIds: [119],
+    priority: 100,
+    usage: { costRateCnyPerApiUsd: 0.3 },
+  };
+
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [knownCheap, missingCost, knownExpensive] }, config);
+  const missingChange = (plan.changes as Array<Record<string, unknown>>)
+    .find((row) => row.profile === "claude" && row.accountId === 22);
+  const claudeProfile = (plan.profiles as Record<string, Record<string, unknown>>).claude;
+
+  expect(plan.profiles).toMatchObject({ claude: { eligibleCount: 3 } });
+  expect(claudeProfile.costRange).toMatchObject({
+    minimumCostRateCnyPerApiUsd: 0.1,
+    maximumCostRateCnyPerApiUsd: 0.3,
+  });
+  expect(missingChange).toMatchObject({
+    priorityMode: "stable-rank",
+    costRateCnyPerApiUsd: 0.2,
+    costSource: "imputed-average",
+  });
+});
+
 test("Codex economic ranking keeps the highest-cost quality leader below better-value accounts", () => {
   const weightedConfig = structuredClone(config);
   weightedConfig.sub2api.priorityPlan.reliabilityWeight = 45;

@@ -139,6 +139,12 @@ function costRate(row: ScoreRow): number | null {
   return number((row.usage as ScoreRow).costRateCnyPerApiUsd);
 }
 
+function costSource(row: ScoreRow): "detected" | "manual" | null {
+  const detected = number(row.detectedCostRateCnyPerApiUsd);
+  if (detected !== null && detected > 0) return "detected";
+  return costRate(row) === null ? null : "manual";
+}
+
 function linearCostPenalty(cost: number, minimumCost: number, maximumCost: number): number {
   if (maximumCost === minimumCost) return 0;
   return 100 * (Math.min(maximumCost, Math.max(minimumCost, cost)) - minimumCost)
@@ -297,7 +303,7 @@ function buildPriorityProfile(
       .filter((row) => row.change === "update")
       .map((row) => [String(row.accountId), row.desiredPriority]),
   );
-  const eligible = rows.filter((row) => {
+  const candidateRows = rows.filter((row) => {
     const accountId = number(row.accountId);
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
     const hasExplorationEvidence = policy.explorationWeight > 0
@@ -306,13 +312,22 @@ function buildPriorityProfile(
       && accountId !== null
       && !fixedAccountIds.has(String(accountId))
       && (!policy.requireCurrentAvailable || row.currentAvailable === true)
-      && (number(row.score) !== null || hasExplorationEvidence)
-      && costRate(row) !== null;
+      && (number(row.score) !== null || hasExplorationEvidence);
   });
+  const knownCandidateCosts = candidateRows
+    .map((row) => costRate(row))
+    .filter((value): value is number => value !== null);
+  const averageCandidateCost = knownCandidateCosts.length === 0
+    ? null
+    : knownCandidateCosts.reduce((sum, value) => sum + value, 0) / knownCandidateCosts.length;
+  const resolvedCost = (row: ScoreRow): number | null => costRate(row) ?? averageCandidateCost;
+  const resolvedCostSource = (row: ScoreRow): "detected" | "manual" | "imputed-average" | null =>
+    costSource(row) ?? (averageCandidateCost === null ? null : "imputed-average");
+  const eligible = candidateRows.filter((row) => resolvedCost(row) !== null);
   const trustedCosts = eligible
     .filter((row) => row.confidence === policy.requiredConfidence)
-    .map((row) => costRate(row)!);
-  const fallbackCosts = eligible.map((row) => costRate(row)!);
+    .map((row) => resolvedCost(row)!);
+  const fallbackCosts = eligible.map((row) => resolvedCost(row)!);
   const trustedCostHasRange = trustedCosts.length > 1
     && Math.min(...trustedCosts) < Math.max(...trustedCosts);
   const costEvidence = trustedCostHasRange ? trustedCosts : fallbackCosts;
@@ -416,7 +431,7 @@ function buildPriorityProfile(
   const baseEconomicScore = (row: ScoreRow): number => {
     const dimensions = qualityDimensions(row, policy, latencyNormalization);
     const evidence = evidenceDimensions(row, policy);
-    const cost = costRate(row)!;
+    const cost = resolvedCost(row)!;
     const costPenalty = linearCostPenalty(cost, minimumCost, maximumCost);
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
     const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
@@ -447,7 +462,7 @@ function buildPriorityProfile(
     const score = number(row.score);
     const dimensions = qualityDimensions(row, policy, latencyNormalization);
     const evidence = evidenceDimensions(row, policy);
-    const cost = costRate(row)!;
+    const cost = resolvedCost(row)!;
     const costPenalty = linearCostPenalty(cost, minimumCost, maximumCost);
     const latencyValue = number(row.ttftP95Ms);
     const latencyPenalty = latencyValue !== null
@@ -517,7 +532,7 @@ function buildPriorityProfile(
       balanceScore: weightedBalanceScore,
       baseCombinedScore: baseEconomicScore(row),
       accountBalanceCny: number(row.accountBalanceCny),
-      costSource: number(row.detectedCostRateCnyPerApiUsd) !== null ? "detected" : "manual",
+      costSource: resolvedCostSource(row),
       combinedScore,
       rank,
       rankCount: ranked.length,
