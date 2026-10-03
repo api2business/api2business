@@ -195,6 +195,10 @@
   - `/scores` 是 Codex 专用视图：评分快照只接收 `platform=openai` 且命中
     `sub2api.priorityPlan.eligibleGroupIds` 的 API-key 上游；Grok、Claude 和未知平台
     不得回退进入 Codex 表格或筛选。
+  - `/scores` 的调整记录也只投影 Codex：后端优先级计划可以保留独立平台结果，页面必须
+    过滤非 Codex 记录，并按 Codex 的 `profile_changed_counts.codex` 展示调整数；不能把
+    `Codex + Grok` 复合标签当作 Codex 页面内容。
+  - 修改页面投影后必须更新静态资源版本并重新读取线上页面；旧浏览器缓存不能作为验收依据。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
     - 探活产生的 502、503、524、延迟和切号结果按正常评分规则计入；
   - `scores pool-quality` 排除内部 monitor 和 `api2business-probe-*` 探活，只衡量真实用户业务池；
