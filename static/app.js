@@ -1638,16 +1638,13 @@ function renderPriorityHistoryPage() {
   const start = (priorityHistoryPage - 1) * priorityHistoryPageSize
   const rows = priorityHistoryRecords.slice(start, start + priorityHistoryPageSize)
   $('#priority-history-body').innerHTML = rows.length ? rows.map((row) => {
-    const profiles = Array.isArray(row.profiles) && row.profiles.length ? row.profiles : [row.profile ?? 'codex']
-    const label = (profile) => profile === 'grok' ? 'Grok' : 'Codex'
-    const profileLabel = profiles.map(label).join(' + ')
     const counts = row.profile_changed_counts ?? {}
-    const breakdown = profiles.map((profile) => `${label(profile)} ${number(counts[profile] ?? 0)}`).join(' · ')
+    const codexChangedCount = number(counts.codex ?? 0)
     return `<tr>
-    <td class="history-profile"><b>${escapeHtml(profileLabel)}</b><small>${escapeHtml(breakdown)}</small></td>
+    <td class="history-profile"><b>Codex</b><small>Codex ${codexChangedCount ?? 0}</small></td>
     <td>${time(row.started_at)}</td><td>${row.trigger_type === 'automatic' ? '自动' : '手动'}</td>
     <td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.created_by)}</td>
-    <td>${number(row.recent_call_limit)}</td><td>${Number(row.changed_count) === 0 ? '<span class="converged-state">已收敛</span>' : number(row.changed_count)}</td>
+    <td>${number(row.recent_call_limit)}</td><td>${codexChangedCount === 0 ? '<span class="converged-state">已收敛</span>' : codexChangedCount}</td>
     <td>${time(row.completed_at)}</td>
     <td>${row.duration_ms == null ? '—' : `${number(Number(row.duration_ms) / 1000, 1)} 秒`}</td>
   </tr>`
@@ -1667,7 +1664,10 @@ async function loadPriorityHistory() {
   $('#history-page-state').textContent = '正在刷新记录…'
   priorityHistoryInFlight = requestJson('/api/operations/priority-history', { cache: 'no-store' })
     .then((data) => {
-      priorityHistoryRecords = data.records ?? []
+      priorityHistoryRecords = (data.records ?? []).filter((row) => {
+        const profiles = Array.isArray(row.profiles) ? row.profiles : [row.profile ?? 'codex']
+        return profiles.includes('codex')
+      })
       renderPriorityHistoryPage()
       return data
     })

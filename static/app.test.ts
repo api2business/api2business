@@ -450,17 +450,18 @@ test("score page reads the cache on open and keeps periodic refresh disabled by 
 test("zero-change priority history is labelled as converged", async () => {
   const app = await frontendSource();
 
-  expect(app).toContain("Number(row.changed_count) === 0");
+  expect(app).toContain("codexChangedCount === 0");
   expect(app).toContain("已收敛");
 });
 
-test("priority history renders one combined pool label with per-pool counts", async () => {
+test("priority history renders a Codex-only label", async () => {
   const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
-  expect(app).toContain("profiles.map(label).join(' + ')");
   expect(app).toContain("row.profile_changed_counts ?? {}");
-  expect(app).toContain("`${label(profile)} ${number(counts[profile] ?? 0)}`");
+  expect(app).toContain("const codexChangedCount = number(counts.codex ?? 0)");
+  expect(app).toContain('<b>Codex</b><small>Codex ${codexChangedCount ?? 0}</small>');
+  expect(app).toContain("codexChangedCount === 0");
   expect(app).toContain("key: 'rollingScore'");
   expect(app).toContain("label: '100 点滚动'");
   expect(html).toContain('id="score-create-upstream"');
