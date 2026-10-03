@@ -192,12 +192,14 @@
   - 未归属错误只说明运行面归因数据不完整，禁止推断或扣分到任何单一账号；
   - 该指标不参与账号优先级计算，只用于核查错误归因与观测质量。
 - 评分样本范围必须按层级区分：
-  - `/scores` 是 Codex 专用视图：评分快照只接收 `platform=openai` 且命中
-    `sub2api.priorityPlan.eligibleGroupIds` 的 API-key 上游；Grok、Claude 和未知平台
-    不得回退进入 Codex 表格或筛选。
-  - `/scores` 的调整记录也只投影 Codex：后端优先级计划可以保留独立平台结果，页面必须
-    过滤非 Codex 记录，并按 Codex 的 `profile_changed_counts.codex` 展示调整数；不能把
-    `Codex + Grok` 复合标签当作 Codex 页面内容。
+  - `/scores` 使用顶部的全局平台切换：Codex 只接收 `platform=openai` 且命中
+    `sub2api.priorityPlan.eligibleGroupIds` 的 API-key 上游；Claude 只接收
+    `platform=anthropic` 的 API-key 上游；Grok 和未知平台不进入这两个视图。
+  - Claude 第一阶段只做被动评分，复用 Codex 的质量公式读取真实业务
+    `usage_logs` 与 `ops_error_logs`；不得启动主动探活、创建探针分组或写入探活记录。
+  - `/scores` 的调整记录按当前全局平台投影；优先级计划暂只对 Codex 生效，Claude 显示
+    被动评分和历史样本，不展示 Codex 的目标优先级，也不能把 `Codex + Grok` 复合标签
+    当作任一单平台页面内容。
   - 修改页面投影后必须更新静态资源版本并重新读取线上页面；旧浏览器缓存不能作为验收依据。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
     - 探活产生的 502、503、524、延迟和切号结果按正常评分规则计入；

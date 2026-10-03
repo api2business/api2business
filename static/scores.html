@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>上游资产与实时成本 | Api2Business</title>
   <link rel="stylesheet" href="/styles.css?v=score-freshness-v1" />
-  <script src="/app.js?v=codex-only-v2" type="module"></script>
+  <script src="/app.js?v=platform-score-v1" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
@@ -22,6 +22,10 @@
         <dl class="pool-quality-metrics"><div><dt>成功 / 失败</dt><dd id="pool-quality-outcomes">—</dd><small id="pool-quality-failure-rate">失败率 —</small></div><div><dt>切号恢复</dt><dd id="pool-quality-failover">—</dd><small>恢复 / 触发</small></div><div><dt>TTFT P95</dt><dd id="pool-quality-ttft">—</dd><small id="pool-quality-ttft-samples">首 token 样本 —</small></div></dl>
       </section>
       <div class="page-actions score-head-actions">
+        <div class="score-profile-switch" role="tablist" aria-label="评分平台">
+          <button class="profile-tab is-active" type="button" role="tab" aria-selected="true" data-score-profile="codex">Codex</button>
+          <button class="profile-tab" type="button" role="tab" aria-selected="false" data-score-profile="claude">Claude</button>
+        </div>
         <div id="score-updated" class="refresh-clock score-head-clock">
           <span>数据新鲜度</span>
           <strong id="score-updated-time">尚无成功快照</strong>
@@ -65,9 +69,6 @@
           <button id="generate-plan" class="query-command" type="button">生成调整计划</button>
           <button id="confirm-plan" class="query-command" type="button" disabled>确认调整</button>
         </div>
-      </div>
-      <div class="profile-tabs" role="tablist" aria-label="评分账号类型">
-        <button class="profile-tab is-active" type="button" role="tab" aria-selected="true" data-score-profile="codex">Codex</button>
       </div>
       <p id="plan-refresh-state" class="section-state">尚未生成调整计划</p>
       <div id="plan-progress" class="operation-progress" aria-live="polite"></div>

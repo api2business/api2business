@@ -3,9 +3,9 @@ import { AccountScoreService, type ScoreSnapshotStore } from "./account-score-se
 
 function fixture(status: "ready" | "refreshing" | "stale") {
   const row: Record<string, unknown> = {
-    schema_version: "api-key-only-v1",
+    schema_version: "api-key-platform-v1",
     payload: {
-      cacheVersion: "api-key-only-v1",
+      cacheVersion: "api-key-platform-v1",
       ok: true,
       status: "ready",
       refreshedAt: "2026-08-05T01:00:00.000Z",
@@ -75,7 +75,7 @@ test("rank refreshes the shared snapshot and both reads return the policy score"
   const store = {
     async getSnapshot() { return stored; },
     async beginSnapshotRefresh() {},
-    async completeSnapshot(_key: string, _schema: string, payload: Record<string, unknown>) { stored = { schema_version: "api-key-only-v1", payload, refresh_started_at: null, last_error: null }; },
+    async completeSnapshot(_key: string, _schema: string, payload: Record<string, unknown>) { stored = { schema_version: "api-key-platform-v1", payload, refresh_started_at: null, last_error: null }; },
     async failSnapshotRefresh() {},
   } satisfies ScoreSnapshotStore;
   const reads = {
@@ -99,6 +99,22 @@ test("rank refreshes the shared snapshot and both reads return the policy score"
           failover_requests: 0,
           first_token_samples: 0,
           selected_calls: 51,
+        }, {
+          account_id: 479,
+          account_name: "https://claude.example plus",
+          platform: "anthropic",
+          account_type: "apikey",
+          status: "active",
+          schedulable: true,
+          priority: 196,
+          group_ids: [119],
+          group_names: ["Claude"],
+          success_requests: 12,
+          failure_requests: 0,
+          attributed_requests: 12,
+          failover_requests: 0,
+          first_token_samples: 0,
+          selected_calls: 12,
         }],
         cached: false,
         queueDurationMs: 1,
@@ -114,6 +130,8 @@ test("rank refreshes the shared snapshot and both reads return the policy score"
   const snapshot = await service.state();
   expect(queriedLimit).toBe(1000);
   expect(ranked.recentCallLimit).toBe(1000);
+  expect(ranked.accountCount).toBe(2);
+  expect((ranked.accounts as Array<Record<string, unknown>>).some((row) => row.platform === "anthropic")).toBe(true);
   expect((ranked.accounts as Array<Record<string, unknown>>)[0]?.score).toBe(72.3);
   expect(snapshot.accounts[0]?.score).toBe(72.3);
   expect(snapshot.accounts[0]?.score).toBe((ranked.accounts as Array<Record<string, unknown>>)[0]?.score);

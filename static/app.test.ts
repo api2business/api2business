@@ -370,14 +370,16 @@ test("OAuth runtime monitoring reuses the upstream history chart component", asy
   expect(html).not.toContain("OAuth 滚动成本");
 });
 
-test("score table keeps a single Codex profile", async () => {
+test("score table uses a global Codex and Claude profile switch", async () => {
   const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
   expect(html).toContain('data-score-profile="codex"');
-  expect(html).not.toContain('data-score-profile="grok"');
+  expect(html).toContain('data-score-profile="claude"');
+  expect(html).toContain('score-profile-switch');
+  expect(html).not.toContain('<div class="profile-tabs"');
   expect(app).toContain("scoreRowsForActiveProfile()");
-  expect(app).toContain("platform === 'openai' ? 'codex' : 'unsupported'");
+  expect(app).toContain("platform === 'openai' ? 'codex' : platform === 'anthropic' ? 'claude' : 'unsupported'");
   expect(app).toContain("candidate.setAttribute('aria-selected', String(selected))");
 });
 
@@ -450,18 +452,17 @@ test("score page reads the cache on open and keeps periodic refresh disabled by 
 test("zero-change priority history is labelled as converged", async () => {
   const app = await frontendSource();
 
-  expect(app).toContain("codexChangedCount === 0");
+  expect(app).toContain("profileChangedCount === 0");
   expect(app).toContain("已收敛");
 });
 
-test("priority history renders a Codex-only label", async () => {
+test("priority history follows the global score profile", async () => {
   const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
   expect(app).toContain("row.profile_changed_counts ?? {}");
-  expect(app).toContain("const codexChangedCount = number(counts.codex ?? 0)");
-  expect(app).toContain('<b>Codex</b><small>Codex ${codexChangedCount ?? 0}</small>');
-  expect(app).toContain("codexChangedCount === 0");
+  expect(app).toContain("const profileChangedCount = number(counts[activeScoreProfile] ?? 0)");
+  expect(app).toContain("const profileLabel = activeScoreProfile === 'claude' ? 'Claude' : 'Codex'");
   expect(app).toContain("key: 'rollingScore'");
   expect(app).toContain("label: '100 点滚动'");
   expect(html).toContain('id="score-create-upstream"');

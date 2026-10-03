@@ -30,7 +30,7 @@ export interface ScoreSnapshotStore {
   failSnapshotRefresh(key: string, schemaVersion: string, error: string): Promise<void>;
 }
 
-const scoreCacheVersion = "api-key-only-v1";
+const scoreCacheVersion = "api-key-platform-v1";
 const scoreSnapshotKey = "account-scores";
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -232,7 +232,8 @@ export class AccountScoreService {
     return accounts.filter((row) => {
       if (isOAuthAccount(row)) return false;
       const platform = String(row.platform ?? "").trim().toLowerCase();
-      if (platform !== "openai") return false;
+      if (platform !== "openai" && platform !== "anthropic") return false;
+      if (platform === "anthropic") return true;
       const eligibleGroupIds = this.config.sub2api.priorityPlan.eligibleGroupIds;
       const groupIds = Array.isArray(row.groupIds) ? row.groupIds.map(Number) : [];
       return groupIds.some((id) => eligibleGroupIds.includes(id));

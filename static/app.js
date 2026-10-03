@@ -196,7 +196,7 @@ export async function loadExternalCutoffHistory() {
 
 function scoreProfile(row) {
   const platform = String(row.platform ?? '').toLowerCase()
-  return platform === 'openai' ? 'codex' : 'unsupported'
+  return platform === 'openai' ? 'codex' : platform === 'anthropic' ? 'claude' : 'unsupported'
 }
 
 function scoreRowsForActiveProfile() {
@@ -1058,6 +1058,7 @@ async function scoresPage() {
     button.addEventListener('click', () => {
       activeScoreProfile = button.dataset.scoreProfile
       scorePage = 1
+      priorityHistoryPage = 1
       document.querySelectorAll('[data-score-profile]').forEach((candidate) => {
         const selected = candidate === button
         candidate.classList.toggle('is-active', selected)
@@ -1065,6 +1066,7 @@ async function scoresPage() {
       })
       renderScoreMetrics()
       renderScoreRows()
+      void loadPriorityHistory()
     })
   })
   $('#query-scores').addEventListener('click', () => void Promise.allSettled([
@@ -1639,12 +1641,13 @@ function renderPriorityHistoryPage() {
   const rows = priorityHistoryRecords.slice(start, start + priorityHistoryPageSize)
   $('#priority-history-body').innerHTML = rows.length ? rows.map((row) => {
     const counts = row.profile_changed_counts ?? {}
-    const codexChangedCount = number(counts.codex ?? 0)
+    const profileChangedCount = number(counts[activeScoreProfile] ?? 0)
+    const profileLabel = activeScoreProfile === 'claude' ? 'Claude' : 'Codex'
     return `<tr>
-    <td class="history-profile"><b>Codex</b><small>Codex ${codexChangedCount ?? 0}</small></td>
+    <td class="history-profile"><b>${profileLabel}</b><small>${profileLabel} ${profileChangedCount ?? 0}</small></td>
     <td>${time(row.started_at)}</td><td>${row.trigger_type === 'automatic' ? '自动' : '手动'}</td>
     <td>${escapeHtml(row.status)}</td><td>${escapeHtml(row.created_by)}</td>
-    <td>${number(row.recent_call_limit)}</td><td>${codexChangedCount === 0 ? '<span class="converged-state">已收敛</span>' : codexChangedCount}</td>
+    <td>${number(row.recent_call_limit)}</td><td>${profileChangedCount === 0 ? '<span class="converged-state">已收敛</span>' : profileChangedCount}</td>
     <td>${time(row.completed_at)}</td>
     <td>${row.duration_ms == null ? '—' : `${number(Number(row.duration_ms) / 1000, 1)} 秒`}</td>
   </tr>`
@@ -1666,7 +1669,7 @@ async function loadPriorityHistory() {
     .then((data) => {
       priorityHistoryRecords = (data.records ?? []).filter((row) => {
         const profiles = Array.isArray(row.profiles) ? row.profiles : [row.profile ?? 'codex']
-        return profiles.includes('codex')
+        return profiles.includes(activeScoreProfile)
       })
       renderPriorityHistoryPage()
       return data
