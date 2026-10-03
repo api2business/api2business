@@ -360,6 +360,32 @@ operations:
   writePolicy:
     enabled: false
     claudeEnabled: false
+  upstreamSchedulingV2:
+    enabled: true
+    defaultScope: codex
+    scopes:
+      codex:
+        enabled: true
+        platform: openai
+        eligibleGroupIds: [2, 3]
+        features:
+          scoreRead: true
+          planRead: true
+          planWrite: false
+          priorityAutomation: false
+          idleProbe: false
+          upstreamWrite: false
+      claude:
+        enabled: false
+        platform: anthropic
+        eligibleGroupIds: [119]
+        features:
+          scoreRead: false
+          planRead: false
+          planWrite: false
+          priorityAutomation: false
+          idleProbe: false
+          upstreamWrite: false
   databaseUrlEnv: API2BUSINESS_DATABASE_URL
   ledgerYamlPath: /var/lib/api2business/sub2api-pool.yaml
   accountImportLedgerPath: /var/lib/api2business/ledger/account-import-costs.jsonl

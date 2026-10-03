@@ -140,6 +140,28 @@ export interface PriorityPlanPolicy {
   };
 }
 
+export interface UpstreamSchedulingV2Features {
+  scoreRead: boolean;
+  planRead: boolean;
+  planWrite: boolean;
+  priorityAutomation: boolean;
+  idleProbe: boolean;
+  upstreamWrite: boolean;
+}
+
+export interface UpstreamSchedulingV2Scope {
+  enabled: boolean;
+  platform: "openai" | "anthropic" | "grok";
+  eligibleGroupIds: number[];
+  features: UpstreamSchedulingV2Features;
+}
+
+export interface UpstreamSchedulingV2Config {
+  enabled: boolean;
+  defaultScope: string;
+  scopes: Record<string, UpstreamSchedulingV2Scope>;
+}
+
 export interface AppConfig {
   apiVersion: string;
   kind: string;
@@ -233,6 +255,7 @@ export interface AppConfig {
       enabled: boolean;
       claudeEnabled: boolean;
     };
+    upstreamSchedulingV2?: UpstreamSchedulingV2Config;
     databaseUrlEnv: string;
     ledgerYamlPath: string;
     accountImportLedgerPath: string;
@@ -571,6 +594,47 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
   };
 }
 
+function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedulingV2Config {
+  const root = object(value, path);
+  const scopesValue = object(root.scopes, `${path}.scopes`);
+  const scopes: Record<string, UpstreamSchedulingV2Scope> = {};
+  for (const [name, rawScope] of Object.entries(scopesValue)) {
+    if (!/^[a-z][a-z0-9-]{1,48}$/u.test(name)) {
+      throw new Error(`${path}.scopes contains invalid scope name: ${name}`);
+    }
+    const scopePath = `${path}.scopes.${name}`;
+    const scope = object(rawScope, scopePath);
+    const features = object(scope.features, `${scopePath}.features`);
+    const platform = stringValue(scope, "platform", scopePath);
+    if (!["openai", "anthropic", "grok"].includes(platform)) {
+      throw new Error(`${scopePath}.platform must be openai, anthropic, or grok`);
+    }
+    const eligibleGroupIds = integers(scope, "eligibleGroupIds", scopePath, 1, Number.MAX_SAFE_INTEGER);
+    if (eligibleGroupIds.length === 0) throw new Error(`${scopePath}.eligibleGroupIds must not be empty`);
+    scopes[name] = {
+      enabled: booleanValue(scope, "enabled", scopePath),
+      platform: platform as UpstreamSchedulingV2Scope["platform"],
+      eligibleGroupIds: [...new Set(eligibleGroupIds)].sort((a, b) => a - b),
+      features: {
+        scoreRead: booleanValue(features, "scoreRead", `${scopePath}.features`),
+        planRead: booleanValue(features, "planRead", `${scopePath}.features`),
+        planWrite: booleanValue(features, "planWrite", `${scopePath}.features`),
+        priorityAutomation: booleanValue(features, "priorityAutomation", `${scopePath}.features`),
+        idleProbe: booleanValue(features, "idleProbe", `${scopePath}.features`),
+        upstreamWrite: booleanValue(features, "upstreamWrite", `${scopePath}.features`),
+      },
+    };
+  }
+  if (Object.keys(scopes).length === 0) throw new Error(`${path}.scopes must contain at least one scope`);
+  const defaultScope = stringValue(root, "defaultScope", path);
+  if (!scopes[defaultScope]) throw new Error(`${path}.defaultScope references missing scope: ${defaultScope}`);
+  const enabled = booleanValue(root, "enabled", path);
+  if (enabled && scopes[defaultScope]?.enabled !== true) {
+    throw new Error(`${path}.defaultScope must reference an enabled scope when V2 is enabled`);
+  }
+  return { enabled, defaultScope, scopes };
+}
+
 export function loadConfig(path: string): AppConfig {
   const configPath = resolve(path);
   const rootDirectory = resolve(dirname(configPath), "..");
@@ -602,6 +666,10 @@ export function loadConfig(path: string): AppConfig {
   const accountLifecycle = object(operations.accountLifecycle, "operations.accountLifecycle");
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
   const upstreamManagement = object(operations.upstreamManagement, "operations.upstreamManagement");
+  const upstreamSchedulingV2 = readUpstreamSchedulingV2(
+    operations.upstreamSchedulingV2,
+    "operations.upstreamSchedulingV2",
+  );
   const upstreamBenchmark = object(operations.upstreamBenchmark, "operations.upstreamBenchmark");
   const templateFiles = object(upstreamManagement.templateFiles, "operations.upstreamManagement.templateFiles");
   const codexTemplatePath = stringValue(templateFiles, "codex", "operations.upstreamManagement.templateFiles");
@@ -923,6 +991,7 @@ export function loadConfig(path: string): AppConfig {
           claudeEnabled: booleanValue(value, "claudeEnabled", "operations.writePolicy"),
         };
       })(),
+      upstreamSchedulingV2,
       databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
       ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),
       accountImportLedgerPath: stringValue(operations, "accountImportLedgerPath", "operations"),

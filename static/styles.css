@@ -88,6 +88,8 @@ button:disabled { cursor: wait; opacity: .48; }
 .score-head-actions .score-auto-refresh { min-width: 0; }
 .score-head-actions .score-auto-refresh select { min-width: 0; width: 100%; }
 .score-head-actions .state-badge { justify-content: center; }
+.v2-write-state[data-state="success"] { color: var(--signal); }
+.v2-write-state[data-state="warning"] { color: var(--warning); }
 .filter-field { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
 .filter-field input { width: 260px; height: 34px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); color: var(--paper); padding: 0 10px; outline: 0; }
 .filter-field input:focus { border-color: var(--signal); }

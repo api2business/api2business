@@ -14,6 +14,7 @@ import { createWorkerOperationExecutor } from "./worker-operation";
 import { ProbeIsolationService } from "./probe-isolation";
 import { BugTeamClient } from "./bugteam-client";
 import { BugTeamPurchaseImportService } from "./bugteam-purchase-import-service";
+import { UpstreamSchedulingV2Service } from "./upstream-scheduling-v2";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -46,6 +47,7 @@ const operations = new OperationsService(
   context.runtime,
   probeIsolation,
 );
+const upstreamSchedulingV2 = new UpstreamSchedulingV2Service(config, dispatcher, operations);
 const imports = new AccountImportService(config, reads, temporal, null, context.runtime);
 const purchases = new BugTeamPurchaseImportService(config, temporal);
 const lifecycle = new AccountLifecycleService(config, reads, temporal, null, context.runtime);
@@ -72,7 +74,7 @@ const executeWorkerOperation = createWorkerOperationExecutor({
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, purchases, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, purchases, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation, upstreamSchedulingV2),
 });
 const stopConfigHotReload = startConfigHotReload(config, requiredOption("--config"), (next) => {
   context.runtime.updateApiKeyFailoverRules(

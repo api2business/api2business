@@ -1,0 +1,25 @@
+import { expect, test } from "bun:test";
+
+test("upstream scheduling V2 is a Codex-first read-only page", async () => {
+  const html = await Bun.file(new URL("./upstream-scheduling-v2.html", import.meta.url)).text();
+  const script = await Bun.file(new URL("./upstream-scheduling-v2.js", import.meta.url)).text();
+  const app = await Bun.file(new URL("./app.js", import.meta.url)).text();
+  expect(html).toContain("上游调度 V2");
+  expect(html).toContain('data-page="upstream-scheduling-v2"');
+  expect(html).toContain('id="v2-scope-switch"');
+  expect(html).toContain('class="pool-quality-head"');
+  expect(html).toContain('unified-quota-monitor');
+  expect(html).toContain('class="pool-quality-band"');
+  expect(html).toContain("unified-upstream-table");
+  expect(html).toContain('id="v2-error-body"');
+  expect(html).toContain('id="v2-history-body"');
+  expect(html).toContain('id="v2-probe-body"');
+  expect(html).toContain('id="v2-automation-state"');
+  expect(html).not.toContain("对账");
+  expect(script).not.toContain("对账");
+  expect(script).toContain("/api/v2/upstream-scheduling/scopes");
+  expect(script).toContain("/api/v2/upstream-scheduling/snapshot");
+  expect(script).toContain("/api/v2/upstream-scheduling/plan");
+  expect(script).not.toMatch(/method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]/u);
+  expect(app).toContain("upstream-scheduling-v2");
+});

@@ -11,6 +11,8 @@ import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { isRecoverableDatabaseConnectionError } from "./database-connection";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
+import type { UpstreamSchedulingV2Service } from "./upstream-scheduling-v2";
+import { UpstreamSchedulingV2Error } from "./upstream-scheduling-v2";
 import { TemporalSubmissionError } from "./temporal-client";
 import { matchExternalCutoff } from "./external-cutoff-match";
 import {
@@ -40,6 +42,7 @@ const persistentSnapshotApiPaths = [
   /^\/api\/admin\/errors(?:\/|$)/u,
   /^\/api\/operations\/priority-(?:automation|history|state)$/u,
   /^\/api\/operations\/idle-probe\/(?:history|summary|coverage)$/u,
+  /^\/api\/v2\/upstream-scheduling\//u,
 ];
 
 export function isApiResponseCacheable(request: Request): boolean {
@@ -220,6 +223,7 @@ export function createHandler(
   reads: Sub2ApiReadClient,
   runtime: Sub2ApiRuntimeService,
   executeWorkerOperation?: (operation: OperationRequest) => Promise<unknown>,
+  upstreamSchedulingV2?: UpstreamSchedulingV2Service,
 ): (request: Request) => Promise<Response> {
   const cacheKey = (request: Request) => createHash("sha256").update(`${request.method} ${new URL(request.url).pathname}${new URL(request.url).search}`).digest("hex");
   const cacheRefreshes = new Map<string, Promise<ApiCacheRefreshResult>>();
@@ -253,6 +257,7 @@ export function createHandler(
       }
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/styles.css") return await staticFile("styles.css", "text/css; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/app.js") return await staticFile("app.js", "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/upstream-scheduling-v2.js") return await staticFile("upstream-scheduling-v2.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/ledger-pages.js") return await staticFile("ledger-pages.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/api2business-icon.svg") {
         return await staticFile("api2business-icon.svg", "image/svg+xml");
@@ -276,12 +281,33 @@ export function createHandler(
         return await staticFile("bugteam-cost.js", "text/javascript; charset=utf-8");
       }
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
-      const page = ({ "/scores": "scores.html", "/quota-monitor": "quota-monitor.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
+      const page = ({ "/scores": "scores.html", "/upstream-scheduling-v2": "upstream-scheduling-v2.html", "/quota-monitor": "quota-monitor.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
       if (request.method === "GET" && url.pathname === "/api/upstreams/options") {
         return json(upstreams.options());
+      }
+      if (url.pathname.startsWith("/api/v2/upstream-scheduling")) {
+        if (!upstreamSchedulingV2) return json({ ok: false, error: "上游调度 V2 未配置" }, 404);
+        const scope = url.searchParams.get("scope");
+        try {
+          if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/scopes") {
+            return json(upstreamSchedulingV2.listScopes());
+          }
+          if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/snapshot") {
+            return json(await upstreamSchedulingV2.snapshot(scope));
+          }
+          if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/plan") {
+            return json(await upstreamSchedulingV2.plan(scope));
+          }
+          return json({ ok: false, error: "not found" }, 404);
+        } catch (error) {
+          if (error instanceof UpstreamSchedulingV2Error) {
+            return json({ ok: false, error: error.message, code: error.code }, error.status);
+          }
+          throw error;
+        }
       }
       if (request.method === "GET" && /^\/api\/upstreams\/jobs\/[^/]+$/u.test(url.pathname)) {
         const workflowId = decodeURIComponent(url.pathname.split("/")[4]!);

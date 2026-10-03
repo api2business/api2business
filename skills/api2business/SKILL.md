@@ -135,6 +135,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 分开核对滚动分、固定时间段业务记录、账号容量和会话绑定；
   - 模板及排序变更必须独立回读运行态，不以工作流成功代替业务恢复。
 - 池级质量调查使用 `scores pool-quality --over-api`，该查询只读。
+- 上游调度 V2 首阶段只读 Codex 作用域，使用
+  `upstream-scheduling-v2 scopes|snapshot|plan --over-api`；页面和接口独立于旧 `/scores`，
+  所有作用域功能开关只认 `operations.upstreamSchedulingV2.scopes.*`，核对证据不投影到 UI。
 - 账号评分只有一条计算路径。
 - `/scores` 顶部全局平台切换、Codex/Claude 的综合质量与优先级隔离，以及 Claude 探活未启用边界见
   [上游与调度](references/upstream-scheduling.md)；切换不得只改变账号表局部视图。

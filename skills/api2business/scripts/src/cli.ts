@@ -235,6 +235,7 @@ function help(): Record<string, unknown> {
       "config validate",
       "backend check",
       "scores get|pool-quality|pool-quality-refresh|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
+      "upstream-scheduling-v2 scopes|snapshot|plan [--scope codex] --over-api (read-only; Codex phase first)",
       "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
@@ -1060,6 +1061,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     throw new Error("priority automation requires get, create, update, or delete");
   }
   if (group === "backend" && action === "check") return await client.backendCheck();
+  if (group === "upstream-scheduling-v2") {
+    if (action === "scopes") return await client.upstreamSchedulingV2Scopes();
+    if (action === "snapshot") return await client.upstreamSchedulingV2Snapshot(parsed.scope);
+    if (action === "plan") return await client.upstreamSchedulingV2Plan(parsed.scope);
+    throw new Error("upstream-scheduling-v2 requires scopes, snapshot, or plan");
+  }
   if (group === "scores" && action === "get") return await client.scores();
   if (group === "scores" && action === "pool-quality") return await client.poolQuality();
   if (group === "scores" && action === "pool-quality-refresh") return await client.workflowSubmit({ kind: "pool.quality.sample" });
@@ -1287,6 +1294,7 @@ export async function runCli(args: string[]): Promise<void> {
     const nativeReadCommand = (
       parsed.command.join(" ") === "scores rank"
       || parsed.command.join(" ") === "scores priority-plan"
+      || parsed.command[0] === "upstream-scheduling-v2"
       || parsed.command.join(" ") === "reads status"
       || parsed.command[0] === "errors"
       || parsed.command.join(" ") === "users impact"

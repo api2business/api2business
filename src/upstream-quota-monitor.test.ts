@@ -1,9 +1,21 @@
 import { expect, test } from "bun:test";
-import { buildQuotaSamples, quotaHistory, summarizeQuotaSamples } from "./upstream-quota-monitor";
+import { buildQuotaSamples, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
 
 const costInputs = (apiAmountUsdTotal: number, costRateCnyPerApiUsd: number, accountId = 1) => ([{
   accountId, apiAmountUsdTotal, costRateCnyPerApiUsd, source: "detected" as const,
 }]);
+
+test("keeps shared wallet balance while scoping output and cost inputs to selected accounts", () => {
+  const samples = [
+    { walletKey: "wallet", accountId: 1, sampledAt: "2026-08-02T00:00:00Z", schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 10, cnyPerUsd: 1, remainingCny: 10, apiAmountUsdTotal: 10, accountCostInputs: costInputs(4, 0.1, 1) },
+    { walletKey: "wallet", accountId: 2, sampledAt: "2026-08-02T00:00:00Z", schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 10, cnyPerUsd: 1, remainingCny: 10, apiAmountUsdTotal: 10, accountCostInputs: costInputs(6, 0.2, 2) },
+  ];
+  const selected = quotaSamplesForAccounts(samples, [1], ["wallet"]);
+  expect(selected).toHaveLength(2);
+  expect(selected[0]!.remainingCny).toBe(10);
+  expect(selected[0]!.accountCostInputs).toEqual(costInputs(4, 0.1, 1));
+  expect(selected[0]!.apiAmountUsdTotal).toBe(4);
+});
 
 test("deduplicates shared wallets and preserves schedulability", () => {
   const samples = buildQuotaSamples([

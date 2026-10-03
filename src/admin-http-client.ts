@@ -53,6 +53,17 @@ export class AdminHttpClient {
   creditTest(execute: boolean): Promise<Record<string, unknown>> { return this.request("/api/admin/credit-test", { method: "POST", body: JSON.stringify({ execute }) }); }
   serviceStatus(): Promise<Record<string, unknown>> { return this.request("/api/status"); }
   scores(): Promise<Record<string, unknown>> { return this.request("/api/scores"); }
+  upstreamSchedulingV2Scopes(): Promise<Record<string, unknown>> {
+    return this.request("/api/v2/upstream-scheduling/scopes");
+  }
+  upstreamSchedulingV2Snapshot(scope?: string | null): Promise<Record<string, unknown>> {
+    const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    return this.request(`/api/v2/upstream-scheduling/snapshot${query}`, {}, 60000);
+  }
+  upstreamSchedulingV2Plan(scope?: string | null): Promise<Record<string, unknown>> {
+    const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    return this.request(`/api/v2/upstream-scheduling/plan${query}`, {}, 60000);
+  }
   poolQuality(): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/pool-quality", {}, 60000);
   }

@@ -56,7 +56,7 @@ import {
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
-import { buildQuotaSamples, quotaHistory, summarizeQuotaSamples } from "./upstream-quota-monitor";
+import { buildQuotaSamples, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
 import {
   buildOAuthRuntimeSample,
   oauthRuntimeHistory,
@@ -423,11 +423,11 @@ export class OperationsService {
     await this.store.setUpstreamUsageCache(results, samples, apiAmountUsdTotal);
   }
 
-  async upstreamQuotaSummary() {
+  async upstreamQuotaSummary(accountIds?: number[]) {
     const displayHours = 8;
     const calculationWindowHours = 1;
     const rows = await this.store.getUpstreamQuotaSamples(displayHours + calculationWindowHours) as Array<Record<string, unknown>>;
-    const samples = rows.map((row) => ({
+    let samples = rows.map((row) => ({
       sampledAt: new Date(String(row.sampled_at)).toISOString(), walletKey: normalizeUpstreamWallet(row.wallet_key), accountId: Number(row.account_id),
       schedulable: row.schedulable === true, status: String(row.status), provider: String(row.provider),
       probeOk: row.probe_ok === true, remainingUsd: row.remaining_usd == null ? null : Number(row.remaining_usd),
@@ -469,13 +469,18 @@ export class OperationsService {
         GROUP BY aw.account_id, aw.wallet_key, aw.platform`,
       parameters: [walletKeys.join(",")],
     });
-    type AccountMeta = { walletKey: string; platform: string; names: string[] };
+    type AccountMeta = { accountId: number; walletKey: string; platform: string; names: string[] };
     const accountsByWallet = new Map<string, AccountMeta[]>();
     for (const row of groupRows.rows) {
       const wallet = normalizeUpstreamWallet(row.wallet_key);
       const entries = accountsByWallet.get(wallet) ?? [];
-      entries.push({ walletKey: wallet, platform: String(row.platform ?? ""), names: String(row.group_names ?? "").split("||| ").filter(Boolean) });
+      entries.push({ accountId: Number(row.account_id), walletKey: wallet, platform: String(row.platform ?? ""), names: String(row.group_names ?? "").split("||| ").filter(Boolean) });
       accountsByWallet.set(wallet, entries);
+    }
+    if (accountIds) {
+      const ids = new Set(accountIds);
+      const wallets = [...accountsByWallet].filter(([, entries]) => entries.some((meta) => ids.has(meta.accountId))).map(([wallet]) => wallet);
+      samples = quotaSamplesForAccounts(samples, accountIds, wallets);
     }
     type HistoryKey = "codexMix" | "noDegrade" | "claude" | "grok";
     const groupedHistory = [...new Set(samples.map((row) => row.sampledAt))].sort((left, right) => Date.parse(left) - Date.parse(right)).map((sampledAt) => {

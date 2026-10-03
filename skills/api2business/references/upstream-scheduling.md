@@ -192,6 +192,20 @@
   - 未归属错误只说明运行面归因数据不完整，禁止推断或扣分到任何单一账号；
   - 该指标不参与账号优先级计算，只用于核查错误归因与观测质量。
 - 评分样本范围必须按层级区分：
+  - 上游调度 V2 是独立页面和独立 `/api/v2/upstream-scheduling/*` 只读读模型；旧 `/scores`
+    页面与接口保持原状，不能用 V2 页面替换旧页面。
+  - V2 首阶段只启用 `codex` 作用域；作用域的 `platform`、候选分组和
+    `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe`、
+    `upstreamWrite` 均只从 owning YAML 的 `operations.upstreamSchedulingV2.scopes.*`
+    读取，代码不得硬编码关闭或开启。
+  - V2 只读页面必须复用旧评分页的资产/成本、综合质量、趋势、参与比例、完整账号表、
+    错误、调整、探活和自动调度状态组件；页面不能只保留简化账号表，也不能把后台读模型
+    核对结果展示为页面内容。
+  - `upstream-scheduling-v2 snapshot|plan --over-api` 是核对和计划的受控 CLI 入口；
+    核对结果只作为后端/CLI 验收证据，`plan` 在 `planWrite=false` 时必须返回
+    `mutation=false`，不得持久化优先级或触发调度。
+  - V2 作用域资产允许共享钱包余额，但 API 产出、成本和账号评分必须按作用域账号 ID
+    过滤，不能把其他平台的产出分母混入 Codex 视图。
   - `/scores` 使用顶部的全局平台切换：Codex 只接收 `platform=openai` 且命中
     `sub2api.priorityPlan.eligibleGroupIds` 的 API-key 上游；Claude 只接收
     `platform=anthropic` 且命中 `sub2api.claudePriorityPlan.eligibleGroupIds` 的 API-key 上游；

@@ -26,6 +26,24 @@ export interface UpstreamAccountCostInput {
   source: "detected" | "manual";
 }
 
+// 钱包余额共享，产出与成本只统计所选账号，不能沿用全局产出分母。
+export function quotaSamplesForAccounts(
+  samples: UpstreamQuotaSample[],
+  accountIds: number[],
+  wallets: string[],
+): UpstreamQuotaSample[] {
+  const ids = new Set(accountIds);
+  const selectedWallets = new Set(wallets);
+  const selected = samples.filter((row) => selectedWallets.has(row.walletKey))
+    .map((row) => ({ ...row, accountCostInputs: (row.accountCostInputs ?? []).filter((input) => ids.has(input.accountId)) }));
+  const totals = new Map<string, number>();
+  for (const row of selected) {
+    totals.set(row.sampledAt, (totals.get(row.sampledAt) ?? 0)
+      + row.accountCostInputs.reduce((sum, input) => sum + input.apiAmountUsdTotal, 0));
+  }
+  return selected.map((row) => ({ ...row, apiAmountUsdTotal: totals.get(row.sampledAt) ?? null }));
+}
+
 function object(value: unknown): Row {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 }

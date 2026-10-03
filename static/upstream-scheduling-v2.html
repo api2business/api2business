@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111412" />
+  <link rel="icon" href="/api2business-icon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+  <link rel="apple-touch-icon" href="/favicon-192.png" />
+  <title>上游调度 V2 | Api2Business</title>
+  <link rel="stylesheet" href="/styles.css?v=platform-score-v2" />
+  <script src="/app.js?v=platform-score-v2" type="module"></script>
+</head>
+<body data-page="upstream-scheduling-v2">
+  <div data-shell></div>
+  <main class="workspace">
+    <header class="page-head upstream-slim-head">
+      <div class="score-page-title">
+        <div>
+          <p class="eyebrow">UPSTREAM SCHEDULING / READ MODEL V2</p>
+          <h1>上游调度 V2</h1>
+          <p class="live-head-sample">按作用域查看评分、资产、成本和调度计划；当前只读</p>
+        </div>
+        <div class="score-profile-switch" role="tablist" aria-label="V2 调度作用域" id="v2-scope-switch"><span class="section-state">正在读取作用域…</span></div>
+      </div>
+      <section class="pool-quality-head" aria-labelledby="v2-quality-title">
+        <header class="pool-quality-copy"><p class="eyebrow">PLATFORM QUALITY / PASSIVE SAMPLE</p><h2 id="v2-quality-title">Codex 综合质量</h2><p id="v2-quality-state">等待读取被动采样</p></header>
+        <div class="pool-quality-score" data-grade="insufficient"><span>综合评分</span><strong id="v2-quality-score">—</strong><small id="v2-quality-grade">证据不足</small></div>
+        <dl class="pool-quality-metrics"><div><dt>成功 / 失败</dt><dd id="v2-quality-outcomes">—</dd><small id="v2-quality-failure-rate">失败率 —</small></div><div><dt>切号恢复</dt><dd id="v2-quality-failover">—</dd><small>恢复 / 触发</small></div><div><dt>TTFT P95</dt><dd id="v2-quality-ttft">—</dd><small id="v2-quality-ttft-samples">首 token 样本 —</small></div></dl>
+      </section>
+      <div class="page-actions score-head-actions"><div class="refresh-clock score-head-clock"><span>数据新鲜度</span><strong id="v2-snapshot-time">尚无成功快照</strong><small id="v2-snapshot-detail">最近快照：尚无成功时间</small><small id="v2-data-detail">等待读取</small><small id="v2-write-state" class="v2-write-state" data-state="success">写入关闭</small></div><span id="v2-data-state" class="state-badge" data-state="refreshing">读取中</span><button id="v2-refresh" class="icon-command" type="button" title="刷新 V2 读模型" aria-label="刷新 V2 读模型">↻</button></div>
+    </header>
+
+    <section class="quota-monitor unified-quota-monitor" aria-label="作用域资产与实时成本">
+      <div class="quota-monitor-copy"><p class="eyebrow">LIVE QUOTA / 1H ROLLING</p><h2>资产与成本总览</h2><p id="v2-quota-monitor-state">正在读取持久化采样</p></div>
+      <div class="quota-donut-pair">
+        <div class="donut-stack"><div class="quota-ring" id="v2-quota-ring"><span id="v2-quota-ring-ratio">—</span><small>总余额</small></div><p id="v2-quota-ring-detail" class="donut-hover-detail">悬停查看上游余额</p></div>
+        <div class="donut-stack"><div class="quota-ring supplier-quality-ring" id="v2-supplier-quality-ring" role="img" aria-label="按余额加权的供应商质量分布"><strong>—</strong><small>优质余额</small></div><p id="v2-supplier-quality-detail" class="donut-hover-detail">悬停查看供应商评分</p></div>
+        <p class="supplier-quality-scale" aria-label="供应商质量颜色说明"><span data-band="good">优质 &gt;80</span><span data-band="mid">一般 60–80</span><span data-band="risk">不良（含未知）</span></p>
+      </div>
+      <dl class="quota-monitor-values"><div class="quota-rate-metric"><dt>当前采样速率</dt><dd id="v2-quota-sample-speed">—</dd><small>API 美元 / 小时</small></div><div class="quota-rate-metric"><dt>一小时滚动速率</dt><dd id="v2-quota-rolling-speed">—</dd><small>API 美元 / 小时</small></div><div class="quota-cost-metric"><dt>当前采样成本</dt><dd id="v2-quota-sample-cost">—</dd><small>探测费率优先 · 人民币 / API 美元</small></div><div class="quota-cost-metric"><dt>一小时滚动成本</dt><dd id="v2-quota-realtime-cost">—</dd><small>探测费率优先 · 人民币 / API 美元</small></div><div><dt>总剩余额度</dt><dd id="v2-quota-total">—</dd></div><div><dt>可调度剩余额度</dt><dd id="v2-quota-schedulable">—</dd></div><div><dt>最近 1 小时消耗</dt><dd id="v2-quota-consumed">—</dd></div><div><dt>最近 1 小时 API 产出</dt><dd id="v2-quota-output">—</dd></div><div><dt>预计可用时间</dt><dd id="v2-quota-estimated-hours">—</dd></div><div class="quota-quality-metric"><dt>优质额度可用时间</dt><dd id="v2-quota-quality-estimated-hours">—</dd><small id="v2-quota-quality-balance">评分 &gt;80 · 等待数据</small></div></dl>
+      <div class="quota-charts">
+        <figure><figcaption><span>API 消耗速率</span><small>最近 8 小时</small></figcaption><svg id="v2-quota-balance-chart" viewBox="0 0 1000 150" role="img" aria-label="上游最近八小时消耗速率"></svg></figure>
+        <figure><figcaption><span>实时成本</span><small>最近 8 小时</small></figcaption><svg id="v2-quota-cost-chart" viewBox="0 0 1000 150" role="img" aria-label="上游最近八小时实时成本"></svg></figure>
+      </div>
+    </section>
+    <section class="pool-quality-band" aria-label="综合质量趋势与上游参与比例"><figure class="pool-quality-trend"><figcaption><span>平台综合评分趋势</span><small>当前作用域最近 100 个采样点</small></figcaption><svg id="v2-quality-chart" viewBox="0 0 1000 150" role="img" aria-label="当前作用域最近一百个采样点综合质量评分"></svg></figure><figure class="pool-participation"><figcaption><span>上游参与比例</span><small>最近被动调用</small></figcaption><div class="pool-participation-body"><div class="donut-stack"><div id="v2-participation-ring" class="pool-participation-ring" role="img" aria-label="各上游参与比例"><strong>—</strong><small>调用</small></div><p id="v2-participation-detail" class="donut-hover-detail">按账号查看参与比例</p></div><ol id="v2-participation-legend" class="pool-participation-legend"><li class="empty">暂无参与样本</li></ol></div></figure></section>
+
+    <section class="table-section"><div class="table-toolbar score-table-toolbar"><div class="score-query-controls"><div class="filter-field"><span>筛选</span><input id="v2-account-filter" type="search" placeholder="账号、URL、分组或状态" /></div><label class="select-field"><span>评分样本</span><select id="v2-call-limit" disabled><option value="1000" selected>最近 1,000 次</option><option value="500">最近 500 次</option><option value="100">最近 100 次</option></select></label><button id="v2-filter-apply" class="query-command" type="button">应用筛选</button></div><div class="table-toolbar-side record-table-controls"><button id="v2-generate-plan" class="query-command" type="button">生成只读 plan</button></div></div><p id="v2-account-state-detail" class="section-state">只展示当前作用域的被动评分快照</p><p id="v2-score-write-state" class="section-state score-readonly-state">本页只读；计划、自动调度、探活和上游写入均由作用域 YAML 开关控制。</p><div class="table-wrap score-table-wrap"><table class="data-table unified-upstream-table" aria-label="当前作用域上游账号资产评分与实时成本"><colgroup><col class="score-col-account"><col class="score-col-status"><col class="score-col-score"><col class="score-col-priority"><col class="score-col-balance"><col class="score-col-cost"><col class="score-col-output"><col class="score-col-sample"><col class="score-col-failure"><col class="score-col-ttft"><col class="score-col-failover"><col class="score-col-groups"><col class="score-col-actions"></colgroup><thead><tr><th>账号</th><th>状态</th><th>评分</th><th>优先级</th><th>账号余额</th><th>成本</th><th>API 产出</th><th>最新样本</th><th>失败率</th><th>TTFT P95</th><th>失败 / 切号 / 恢复</th><th>分组</th><th>操作</th></tr></thead><tbody id="v2-account-body"><tr><td colspan="13" class="empty">正在合并评分与资产数据...</td></tr></tbody></table></div><footer class="table-footer"><nav class="table-pagination" aria-label="作用域账号评分分页"><button id="v2-account-prev" class="query-command" type="button" disabled>上一页</button><span id="v2-account-page" class="section-state" aria-live="polite">正在读取…</span><button id="v2-account-next" class="query-command" type="button" disabled>下一页</button></nav></footer></section>
+
+    <section class="table-section pool-error-section" aria-labelledby="v2-error-title"><div class="table-toolbar record-table-toolbar"><div><h2 id="v2-error-title">错误记录</h2><p id="v2-error-state" class="section-state">只读取当前作用域的错误证据</p></div><div class="table-toolbar-side record-table-controls"><nav class="table-pagination" aria-label="错误记录分页"><button id="v2-error-prev" class="query-command" type="button" disabled>上一页</button><span id="v2-error-page" class="section-state" aria-live="polite">正在读取…</span><button id="v2-error-next" class="query-command" type="button" disabled>下一页</button></nav></div></div><p id="v2-error-models" class="pool-error-models">模型分布：等待读取</p><div class="table-wrap"><table class="data-table pool-error-table" aria-label="当前作用域错误记录"><thead><tr><th>时间</th><th>模型</th><th>用户</th><th>上游账号</th><th>记录 / 上游状态</th><th>端点</th><th>模式</th><th>最终错误</th></tr></thead><tbody id="v2-error-body"><tr><td colspan="8" class="empty">正在读取错误记录…</td></tr></tbody></table></div></section>
+
+    <section class="table-section"><div class="table-toolbar record-table-toolbar"><h2>调整记录</h2><nav class="table-pagination" aria-label="作用域调整记录分页"><button id="v2-history-prev" class="query-command" type="button" disabled>上一页</button><span id="v2-history-page" class="section-state" aria-live="polite">正在读取…</span><button id="v2-history-next" class="query-command" type="button" disabled>下一页</button></nav></div><div class="table-wrap"><table class="data-table"><thead><tr><th>调优池</th><th>开始时间</th><th>方式</th><th>状态</th><th>操作者</th><th>样本</th><th>调整数</th><th>完成时间</th><th>耗时</th></tr></thead><tbody id="v2-history-body"><tr><td colspan="9" class="empty">正在读取调整记录</td></tr></tbody></table></div></section>
+
+    <section class="table-section"><div class="table-toolbar record-table-toolbar"><h2>探活记录</h2><nav class="table-pagination" aria-label="作用域探活记录分页"><button id="v2-probe-prev" class="query-command" type="button" disabled>上一页</button><span id="v2-probe-page" class="section-state" aria-live="polite">作用域开关读取中</span><button id="v2-probe-next" class="query-command" type="button" disabled>下一页</button></nav></div><div class="table-wrap"><table class="data-table"><thead><tr><th>开始时间</th><th>方式</th><th>状态</th><th>计划</th><th>就绪</th><th>成功</th><th>失败</th><th>未就绪</th><th>完成时间</th><th>耗时</th></tr></thead><tbody id="v2-probe-body"><tr><td colspan="10" class="empty">作用域探活开关读取中</td></tr></tbody></table></div></section>
+
+    <section class="table-section automation-section"><div class="table-toolbar"><h2>定时自动调整</h2></div><div class="score-query-controls"><label class="select-field"><span>作用域开关</span><select id="v2-automation-enabled" disabled><option value="false">停用</option><option value="true">启用</option></select></label><label class="filter-field"><span>周期（秒）</span><input id="v2-automation-interval" type="number" disabled /></label><label class="select-field"><span>计划执行</span><select id="v2-automation-plan" disabled><option value="false">关闭</option><option value="true">开启</option></select></label></div><p id="v2-automation-state" class="section-state">正在读取作用域开关…</p></section>
+
+    <section class="table-section"><div class="table-toolbar score-table-toolbar"><div><h2>只读优先级计划</h2><p id="v2-plan-state" class="section-state">允许生成 plan；确认和执行始终关闭</p></div></div><div class="table-wrap score-table-wrap"><table class="data-table unified-upstream-table"><thead><tr><th>账号</th><th>评分</th><th>当前优先级</th><th>建议优先级</th><th>证据</th><th>状态</th></tr></thead><tbody id="v2-plan-body"><tr><td colspan="6" class="empty">点击“生成只读 plan”读取建议</td></tr></tbody></table></div></section>
+  </main>
+</body>
+</html>

@@ -85,6 +85,7 @@ function shell() {
   if (!mount) return
   const links = [
     ['scores', '/scores', '上游资产与成本'],
+    ['upstream-scheduling-v2', '/upstream-scheduling-v2', '上游调度 V2'],
     ['quota-monitor', '/quota-monitor', '额度监控'],
     ['ranking', '/ranking', '用户用量'],
     ['lottery', '/lottery', '额度抽奖'],
@@ -2166,6 +2167,10 @@ async function boot() {
   if (page === 'login') return await loginPage()
   shell()
   if (page === 'scores') return await scoresPage()
+  if (page === 'upstream-scheduling-v2') {
+    const v2 = await import('./upstream-scheduling-v2.js')
+    return await v2.upstreamSchedulingV2Page()
+  }
   if (page === 'quota-monitor') return await quotaMonitorPage()
   if (page === 'ranking') return await rankingPage()
   if (page === 'lottery') return await lotteryPage()
