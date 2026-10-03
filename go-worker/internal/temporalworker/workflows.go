@@ -25,10 +25,6 @@ type ScheduleInput struct {
 	Scope                       string `json:"scope,omitempty"`
 	RecentCallLimit             int    `json:"recentCallLimit,omitempty"`
 }
-type PriorityAutomationRunResult struct {
-	NextDelayMS int `json:"nextDelayMs"`
-}
-
 type ApiKeyCutoffWorkflowResult struct {
 	OK                  bool   `json:"ok"`
 	AccountIDs          []any  `json:"accountIds"`
@@ -41,17 +37,6 @@ type ApiKeyCutoffWorkflowResult struct {
 	Guard               any    `json:"guard"`
 	Restore             any    `json:"restore"`
 	RestoreReason       string `json:"restoreReason"`
-}
-
-func priorityAutomationDelayMilliseconds(result PriorityAutomationRunResult, fallback int) int {
-	delay := result.NextDelayMS
-	if delay <= 0 {
-		delay = fallback
-	}
-	if delay < minimumPriorityAutomationPollMilliseconds {
-		delay = minimumPriorityAutomationPollMilliseconds
-	}
-	return delay
 }
 
 func activityOptions(timeout string, attempts int32) workflow.ActivityOptions {
@@ -228,7 +213,7 @@ func UpstreamQuotaScheduleWorkflow(ctx workflow.Context, input ScheduleInput) er
 	return workflow.NewContinueAsNewError(ctx, UpstreamQuotaScheduleWorkflow, input)
 }
 
-func IdleAccountProbeScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
+func UpstreamSchedulingV2IdleProbeScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
 	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions((time.Duration(input.RoundTimeoutMS)*time.Millisecond).String(), 1))
 	for iteration := 0; iteration < 500; iteration++ {
 		request := OperationRequest{OperationID: fmt.Sprintf("%s:idle-probe:%d", workflow.GetInfo(ctx).WorkflowExecution.RunID, iteration), Command: map[string]any{"kind": "account.idle-probe.run", "accountIds": []int{}, "rounds": 1}}
@@ -240,7 +225,7 @@ func IdleAccountProbeScheduleWorkflow(ctx workflow.Context, input ScheduleInput)
 			return err
 		}
 	}
-	return workflow.NewContinueAsNewError(ctx, IdleAccountProbeScheduleWorkflow, input)
+	return workflow.NewContinueAsNewError(ctx, UpstreamSchedulingV2IdleProbeScheduleWorkflow, input)
 }
 
 func BugTeamCostScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
@@ -255,32 +240,11 @@ func BugTeamCostScheduleWorkflow(ctx workflow.Context, input ScheduleInput) erro
 	return workflow.NewContinueAsNewError(ctx, BugTeamCostScheduleWorkflow, input)
 }
 
-func PriorityAutomationScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
+func UpstreamSchedulingV2PriorityAutomationScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
 	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions(input.ActivityStartToCloseTimeout, 1))
 	intervalMS := input.IntervalMS
-	if intervalMS < minimumPriorityAutomationPollMilliseconds {
-		intervalMS = minimumPriorityAutomationPollMilliseconds
-	}
-	for iteration := 0; iteration < 5000; iteration++ {
-		request := OperationRequest{
-			OperationID: fmt.Sprintf("%s:priority-automation:%d", workflow.GetInfo(ctx).WorkflowExecution.RunID, iteration),
-			Command:     map[string]any{"kind": "priority.automation.run"},
-		}
-		var result PriorityAutomationRunResult
-		_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, &result)
-		delayMS := priorityAutomationDelayMilliseconds(result, intervalMS)
-		if err := workflow.Sleep(ctx, time.Duration(delayMS)*time.Millisecond); err != nil {
-			return err
-		}
-	}
-	return workflow.NewContinueAsNewError(ctx, PriorityAutomationScheduleWorkflow, input)
-}
-
-func PriorityAutomationV2ScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
-	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions(input.ActivityStartToCloseTimeout, 1))
-	intervalMS := input.IntervalMS
-	if intervalMS < minimumPriorityAutomationPollMilliseconds {
-		intervalMS = minimumPriorityAutomationPollMilliseconds
+	if intervalMS < minimumScopedAutomationIntervalMilliseconds {
+		intervalMS = minimumScopedAutomationIntervalMilliseconds
 	}
 	if input.Scope == "" || input.RecentCallLimit < 1 {
 		return fmt.Errorf("V2 priority automation requires scope and recent call limit")
@@ -297,5 +261,5 @@ func PriorityAutomationV2ScheduleWorkflow(ctx workflow.Context, input ScheduleIn
 			return err
 		}
 	}
-	return workflow.NewContinueAsNewError(ctx, PriorityAutomationV2ScheduleWorkflow, input)
+	return workflow.NewContinueAsNewError(ctx, UpstreamSchedulingV2PriorityAutomationScheduleWorkflow, input)
 }

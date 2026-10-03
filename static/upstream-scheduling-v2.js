@@ -1,6 +1,7 @@
 import { renderDonut, poolParticipationColors } from './score-visuals.js'
 import { buildSupplierQualityAssets } from './upstream-quality-assets.js'
 import { bindHistoryChartTooltip, historyChartMarkup } from './history-chart.js'
+import { sampleTimeDisplay } from './sample-time.js'
 
 const $ = (selector) => document.querySelector(selector)
 const state = { scopes: [], activeScope: null, snapshot: null, accounts: [], accountPage: 1, errorPage: 1, historyPage: 1, probePage: 1, filter: '', scopeRequestId: 0 }
@@ -77,7 +78,22 @@ function renderQuota(summary = {}, accounts = [], usage = []) {
 function filteredAccounts() { const needle = state.filter.trim().toLowerCase(); return state.accounts.filter((row) => !needle || [row.accountName, row.accountId, row.currentStatus, row.status, row.groupName, ...(row.groupNames ?? [])].join(' ').toLowerCase().includes(needle)) }
 function renderAccounts() {
   const rows = filteredAccounts(); const pages = Math.max(1, Math.ceil(rows.length / accountPageSize)); state.accountPage = Math.min(Math.max(state.accountPage, 1), pages); const visible = rows.slice((state.accountPage - 1) * accountPageSize, state.accountPage * accountPageSize)
-  $('#v2-account-body').innerHTML = visible.length ? visible.map((row) => `<tr><td><strong>${escapeHtml(row.accountName ?? row.accountId)}</strong><small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>—</td><td>${row.usage?.costRateCnyPerApiUsd == null ? '—' : `¥${number(row.usage.costRateCnyPerApiUsd, 4)}/刀`}</td><td>${usd(row.usage?.apiAmountUsd)}</td><td>${escapeHtml(time(row.latestSampleAt))}</td><td>${percent(row.failureRate)}</td><td>${row.ttftP95Ms == null ? '—' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`}</td><td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}</td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`).join('') : '<tr><td colspan="13" class="empty">当前作用域没有评分账号</td></tr>'
+  $('#v2-account-body').innerHTML = visible.length ? visible.map((row) => {
+    const sample = sampleTimeDisplay(row.latestSampleAt)
+    const quotaSample = sampleTimeDisplay(row.quotaCacheAt)
+    const attempts = row.attemptCount ?? row.selectedCalls ?? row.observedAttempts ?? 0
+    const quotaValue = row.quotaCacheStatus === 'unlimited'
+      ? '不限额'
+      : row.quotaCacheStatus === 'unavailable'
+        ? '缓存不可用'
+        : row.quota?.remaining == null ? '—' : usd(row.quota.remaining)
+    const quotaLabel = row.quotaCacheStatus === 'cached'
+      ? `额度缓存 · ${escapeHtml(quotaSample.label)}`
+      : row.quotaCacheStatus === 'unlimited'
+        ? `额度缓存 · 不限额 · ${escapeHtml(quotaSample.label)}`
+        : row.quotaCacheStatus === 'unavailable' ? '额度缓存不可用' : '额度缓存缺失'
+    return `<tr><td><strong>${escapeHtml(row.accountName ?? row.accountId)}</strong><small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td>${row.usage?.costRateCnyPerApiUsd == null ? '—' : `¥${number(row.usage.costRateCnyPerApiUsd, 4)}/刀`}</td><td>${usd(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td><td>${percent(row.failureRate)}<small>${number(attempts)} 次尝试</small></td><td>${row.ttftP95Ms == null ? '—' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`}</td><td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
+  }).join('') : '<tr><td colspan="13" class="empty">当前作用域没有评分账号</td></tr>'
   $('#v2-account-page').textContent = rows.length ? `${state.accountPage} / ${pages} · 共 ${number(rows.length)} 条` : '0 条'; $('#v2-account-prev').disabled = state.accountPage <= 1; $('#v2-account-next').disabled = state.accountPage >= pages
 }
 
@@ -110,7 +126,29 @@ async function loadProbeHistory(page) {
   if (scope === state.activeScope) renderProbeHistory(data)
 }
 
-function renderSnapshot(data) { state.snapshot = data; state.accounts = data.data?.accounts ?? []; const quality = data.data?.poolQuality ?? {}; $('#v2-snapshot-time').textContent = time(data.data?.refreshedAt); $('#v2-snapshot-detail').textContent = `最近快照：${time(data.data?.refreshedAt)}`; $('#v2-data-state').textContent = data.data?.status ?? '不可用'; $('#v2-data-state').dataset.state = data.data?.status === 'ready' ? 'ready' : 'unavailable'; $('#v2-data-detail').textContent = `${number(state.accounts.length)} 个账号 · 作用域读取`; $('#v2-account-state-detail').textContent = `${number(state.accounts.length)} 个账号 · 最近样本 ${number(data.data?.recentCallLimit)}`; $('#v2-plan-state').textContent = data.features?.planRead === true ? `允许生成只读 plan · 手动执行${data.features?.planWrite === true ? '开启' : '关闭'} · 自动优先级${data.features?.priorityAutomation === true ? '开启' : '关闭'}` : '当前作用域未启用 plan 读取'; renderScopeFeatures(data.features, data.data?.automation); renderQuality(quality, data.scope); renderQuota(data.data?.quota, state.accounts, data.data?.usage ?? []); renderAccounts(); renderErrors(data.data?.errors ?? {}); renderHistory(data.data?.priorityHistory ?? []); renderProbeHistory(data.data?.probeHistory ?? {}); $('#v2-plan-body').innerHTML = '<tr><td colspan="6" class="empty">点击“生成只读 plan”读取建议</td></tr>' }
+function renderSnapshot(data) {
+  state.snapshot = data
+  state.accounts = data.data?.accounts ?? []
+  const quality = data.data?.poolQuality ?? {}
+  const quotaCoverage = data.data?.quotaCoverage ?? {}
+  const unavailableCount = (quotaCoverage.unavailableAccountIds ?? []).length
+  const missingCount = (quotaCoverage.missingAccountIds ?? []).length
+  $('#v2-snapshot-time').textContent = time(data.data?.refreshedAt)
+  $('#v2-snapshot-detail').textContent = `最近快照：${time(data.data?.refreshedAt)}`
+  $('#v2-data-state').textContent = data.data?.status ?? '不可用'
+  $('#v2-data-state').dataset.state = data.data?.status === 'ready' ? 'ready' : 'unavailable'
+  $('#v2-data-detail').textContent = `${number(state.accounts.length)} 个账号 · 作用域读取`
+  $('#v2-account-state-detail').textContent = `${number(state.accounts.length)} 个账号 · 最近样本 ${number(data.data?.recentCallLimit)} · 额度缓存 ${number(quotaCoverage.cachedAccountCount)} / ${number(quotaCoverage.accountCount)} · 数值 ${number(quotaCoverage.numericAccountCount)} · 不限额 ${number(quotaCoverage.unlimitedAccountCount)} · 不可用 ${number(unavailableCount)} · 缺失 ${number(missingCount)}${quotaCoverage.cacheRowsComplete ? ' · 缓存覆盖完整' : ''}`
+  $('#v2-plan-state').textContent = data.features?.planRead === true ? `允许生成只读 plan · 手动执行${data.features?.planWrite === true ? '开启' : '关闭'} · 自动优先级${data.features?.priorityAutomation === true ? '开启' : '关闭'}` : '当前作用域未启用 plan 读取'
+  renderScopeFeatures(data.features, data.data?.automation)
+  renderQuality(quality, data.scope)
+  renderQuota(data.data?.quota, state.accounts, data.data?.usage ?? [])
+  renderAccounts()
+  renderErrors(data.data?.errors ?? {})
+  renderHistory(data.data?.priorityHistory ?? [])
+  renderProbeHistory(data.data?.probeHistory ?? {})
+  $('#v2-plan-body').innerHTML = '<tr><td colspan="6" class="empty">点击“生成只读 plan”读取建议</td></tr>'
+}
 
 async function loadScope() { if (!state.activeScope) return; const scope = state.activeScope; const requestId = ++state.scopeRequestId; $('#v2-data-state').textContent = '读取中'; try { const data = await requestJson(`/api/v2/upstream-scheduling/snapshot?scope=${encodeURIComponent(scope)}`); if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; renderSnapshot(data) } catch (error) { if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
 async function loadPlan() { if (!state.activeScope || state.snapshot?.features?.planRead !== true) return; const button = $('#v2-generate-plan'); button.disabled = true; try { const data = await requestJson(`/api/v2/upstream-scheduling/plan?scope=${encodeURIComponent(state.activeScope)}`); renderPlan(data.changes ?? []); $('#v2-plan-state').textContent = `已生成 ${number(data.changedCount)} 项建议；执行开关：${data.apply?.enabled === true ? '开启' : '关闭'}，本页只读` } catch (error) { $('#v2-plan-state').textContent = `plan 读取失败：${error instanceof Error ? error.message : String(error)}` } finally { button.disabled = false } }

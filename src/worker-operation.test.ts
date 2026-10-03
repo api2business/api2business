@@ -25,10 +25,7 @@ function services(overrides: Record<string, unknown> = {}) {
     setUpstreamUsageCache: async (results: Array<Record<string, unknown>>) => { cached.push(...results); },
     sampleOAuthRuntime: async () => ({ ok: true }),
     samplePoolQuality: async () => ({ ok: true }),
-    runDueAutomation: async () => ({ ok: true }),
     runV2AutomaticPriorityPlan: async (scope: string, recentCallLimit: number) => ({ ok: true, scope, recentCallLimit }),
-    priorityAutomationDispatchDelay: async () => ({ due: false, delayMs: 637000, reason: "waiting" }),
-    deferPriorityAutomationAfterDispatchFailure: async () => ({ ok: true }),
   };
   return {
     value: {
@@ -40,13 +37,6 @@ function services(overrides: Record<string, unknown> = {}) {
     completed, cached, synchronized, operations, upstreams,
   };
 }
-
-test("worker executor returns the authoritative automation delay", async () => {
-  const fixture = services();
-  const execute = createWorkerOperationExecutor(fixture.value as never);
-  const result = await execute({ operationId: "automation-delay", command: { kind: "priority.automation.run" } }) as Record<string, unknown>;
-  expect(result).toMatchObject({ ok: true, nextDelayMs: 637000, nextDelayReason: "waiting" });
-});
 
 test("worker executor routes V2 priority automation with its scope", async () => {
   const fixture = services();
@@ -85,16 +75,6 @@ test("worker executor applies fallback rate when post-create detection fails", a
   expect(updates).toEqual([{ rateCnyPerApiUsd: 0.1 }]);
   expect(String((result.warnings as string[])[0])).toContain("已回退费率 0.1");
   expect(fixture.completed).toEqual(["create-2"]);
-});
-
-test("worker executor persists automation failure deferral before retry", async () => {
-  let deferred = 0;
-  const fixture = services();
-  fixture.operations.runDueAutomation = async () => { throw new Error("dispatch failed"); };
-  fixture.operations.deferPriorityAutomationAfterDispatchFailure = async () => { deferred += 1; return { ok: true }; };
-  const execute = createWorkerOperationExecutor(fixture.value as never);
-  await expect(execute({ operationId: "automation-1", command: { kind: "priority.automation.run" } })).rejects.toThrow("dispatch failed");
-  expect(deferred).toBe(1);
 });
 
 test("successful OpenAI OAuth imports do not submit an automatic API Key cutoff", async () => {

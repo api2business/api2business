@@ -2,8 +2,6 @@ import { fileURLToPath } from "node:url";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { loadConfig } from "./config";
 import { AdminHttpClient } from "./admin-http-client";
-import { automationPollDelayMs } from "./automation-poll-backoff";
-import { automationDispatchDelayMs } from "./priority-automation-dispatch";
 import type { OperationRequest } from "./contracts";
 import { requiredOption } from "./runtime-args";
 import { temporalAddress, TemporalGateway } from "./temporal-client";
@@ -19,7 +17,6 @@ import { AccountImportService, type ImportJob } from "./account-import-service";
 import { AccountLifecycleService, type LifecycleJob } from "./account-lifecycle-service";
 import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import { ProbeIsolationService } from "./probe-isolation";
-import { idleProbeScheduleFreshness } from "./idle-probe-schedule-watchdog";
 import { scoreScheduleFreshness } from "./score-schedule-watchdog";
 import { BugTeamClient } from "./bugteam-client";
 import { BugTeamPurchaseImportService, type BugTeamPurchaseJob } from "./bugteam-purchase-import-service";
@@ -168,16 +165,6 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
   if (command.kind === "account.idle-probe.reconcile") {
     return await operations.reconcileIdleProbe(command.accountIds);
   }
-  if (command.kind === "priority.plan.create") {
-    return await operations.generatePriorityPlan(command.recentCallLimit, command.operator);
-  }
-  if (command.kind === "priority.plan.manual-create") {
-    return await operations.createManualPriorityPlan(command.priorities, command.operator);
-  }
-  if (command.kind === "priority.plan.confirm") {
-    return await operations.confirmPriorityPlan(command.planId, command.operator);
-  }
-  if (command.kind === "priority.automation.run") return await operations.runDueAutomation();
   if (command.kind === "priority.automation.v2.run") {
     return await operations.runV2AutomaticPriorityPlan(command.scope, command.recentCallLimit);
   }
@@ -311,12 +298,8 @@ const schedule = temporalGateway
   };
 const quotaSchedule = temporalGateway ? await temporalGateway.ensureUpstreamQuotaSchedule() : { started: false, workflowId: null };
 const bugTeamCostSchedule = temporalGateway ? await temporalGateway.ensureBugTeamCostSchedule() : { started: false, workflowId: null };
-const legacySchedulingEnabled = config.operations.legacyScheduling?.enabled !== false;
-const idleProbeSchedule = temporalGateway
-  && legacySchedulingEnabled
-  ? await temporalGateway.ensureIdleProbeSchedule()
-  : { started: false, workflowId: null };
 let state: "ready" | "stopping" = "ready";
+
 const health = Bun.serve({
   hostname: target.workerHealthHost,
   port: target.workerHealthPort,
@@ -337,7 +320,6 @@ const health = Bun.serve({
       schedule,
       quotaSchedule,
       bugTeamCostSchedule,
-      idleProbeSchedule,
     }, { status: ok ? 200 : 503 });
   },
 });
@@ -353,65 +335,11 @@ console.log(JSON.stringify({
   schedule,
   quotaSchedule,
   bugTeamCostSchedule,
-  idleProbeSchedule,
   valuesPrinted: false,
 }));
 
 let stopping = false;
-let wakeIdleProbeWatchdog = () => {};
 let wakeScoreWatchdog = () => {};
-async function waitForIdleProbeWatchdog(delayMs: number): Promise<void> {
-  if (stopping) return;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      wakeIdleProbeWatchdog = () => {};
-      resolve();
-    }, delayMs);
-    wakeIdleProbeWatchdog = () => {
-      clearTimeout(timer);
-      wakeIdleProbeWatchdog = () => {};
-      resolve();
-    };
-  });
-}
-const idleProbeWatchdogStartedAtMs = Date.now();
-const idleProbeWatchdog = (async () => {
-  if (!temporalGateway || !legacySchedulingEnabled || !config.sub2api.idleProbe.enabled) return;
-  while (!stopping) {
-    try {
-      const latest = await operationsStore.latestAutomaticIdleProbeRound();
-      const freshness = idleProbeScheduleFreshness({
-        nowMs: Date.now(),
-        workerStartedAtMs: idleProbeWatchdogStartedAtMs,
-        lastAutomaticCompletedAt: latest?.completed_at ?? null,
-        intervalSeconds: config.sub2api.idleProbe.intervalSeconds,
-        roundTimeoutSeconds: config.sub2api.idleProbe.roundTimeoutSeconds,
-      });
-      if (freshness.stale) {
-        const recovered = await temporalGateway.replaceIdleProbeSchedule(
-          `automatic idle probe stale for ${freshness.ageMs}ms (${freshness.reference})`,
-        );
-        console.log(JSON.stringify({
-          ok: true,
-          component: "idle-probe-schedule-watchdog",
-          action: "replaced",
-          ...freshness,
-          ...recovered,
-          valuesPrinted: false,
-        }));
-      }
-    } catch (error) {
-      console.error(JSON.stringify({
-        ok: false,
-        component: "idle-probe-schedule-watchdog",
-        action: "deferred-to-next-cycle",
-        error: error instanceof Error ? error.message : String(error),
-        valuesPrinted: false,
-      }));
-    }
-    await waitForIdleProbeWatchdog(config.sub2api.idleProbe.intervalSeconds * 1000);
-  }
-})();
 const scoreWatchdogStartedAtMs = Date.now();
 const scoreWatchdog = (async () => {
   if (!temporalGateway || !config.monitor.automaticRefresh.enabled) return;
@@ -461,58 +389,6 @@ const scoreWatchdog = (async () => {
     });
   }
 })();
-let consecutiveAutomationFailures = 0;
-const automationLoop = (async () => {
-  if (!legacySchedulingEnabled) return;
-  while (!stopping) {
-    let nextDelayMs = config.operations.automationPollMs;
-    try {
-      const dispatch = automationDispatchDelayMs(
-        await operations.priorityAutomationDispatchState(),
-        Date.now(),
-        config.operations.automationRunTimeoutMs,
-        config.operations.automationFailureBackoffMaxMs,
-      );
-      if (!dispatch.due) {
-        consecutiveAutomationFailures = 0;
-        nextDelayMs = dispatch.delayMs;
-        if (!stopping) await Bun.sleep(nextDelayMs);
-        continue;
-      }
-      const result = temporalGateway
-        ? await temporalGateway.execute({ kind: "priority.automation.run" }) as Awaited<ReturnType<OperationsService["runDueAutomation"]>>
-        : await operations.runDueAutomation();
-      consecutiveAutomationFailures = 0;
-      nextDelayMs = config.operations.automationPollMs;
-      if (result.due || (result as Record<string, unknown>).recovered === true) {
-        console.log(JSON.stringify({ component: "priority-automation", ...result, valuesPrinted: false }));
-      }
-    } catch (error) {
-      consecutiveAutomationFailures += 1;
-      const deferred = await operations.deferPriorityAutomationAfterDispatchFailure(error).catch(() => null);
-      nextDelayMs = deferred
-        ? config.operations.automationPollMs
-        : automationPollDelayMs(
-          config.operations.automationPollMs,
-          config.operations.automationFailureBackoffMaxMs,
-          consecutiveAutomationFailures,
-          config.operations.automationFailureRetryLimit,
-          config.operations.automationFailureCooldownMs,
-        );
-      console.error(JSON.stringify({
-        ok: false, component: "priority-automation",
-        error: error instanceof Error ? error.message : String(error), valuesPrinted: false,
-        consecutiveFailures: consecutiveAutomationFailures,
-        deferredToNextCycle: deferred !== null,
-        nextRunAt: deferred?.next_run_at ?? null,
-        nextPollDelayMs: nextDelayMs,
-      }));
-    }
-    if (!stopping) {
-      await Bun.sleep(nextDelayMs);
-    }
-  }
-})();
 let resolveStandaloneStop = () => {};
 const standaloneStop = new Promise<void>((resolve) => {
   resolveStandaloneStop = resolve;
@@ -521,7 +397,6 @@ async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
   stopConfigHotReload();
-  wakeIdleProbeWatchdog();
   wakeScoreWatchdog();
   state = "stopping";
   health.stop(true);
@@ -535,13 +410,10 @@ try {
   else await standaloneStop;
 } finally {
   stopping = true;
-  wakeIdleProbeWatchdog();
   wakeScoreWatchdog();
   state = "stopping";
   health.stop(true);
-  await idleProbeWatchdog;
   await scoreWatchdog;
-  await automationLoop;
   scores.close();
   await operations.close();
   if (temporalGateway) await temporalGateway.close();

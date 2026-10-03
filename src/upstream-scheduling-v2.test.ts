@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { loadConfig } from "./config";
 import { UpstreamSchedulingV2Service } from "./upstream-scheduling-v2";
 
-function fixture() {
+function fixture(usageRows = [{
+  account_id: 101,
+  last_success_at: "2026-10-03T00:01:00.000Z",
+  last_success_result: { ok: true, quota: { unit: "USD", remaining: 12.5, limit: 20, used: 7.5, unlimited: false } },
+}]) {
   const config = loadConfig("config/api2business.example.yaml");
   const row = {
     accountId: 101,
@@ -51,7 +55,7 @@ function fixture() {
     priorityHistory: async () => ({ ok: true, records: [] }),
     getPriorityAutomation: async () => ({ ok: true, automation: { enabled: false } }),
     upstreamQuotaSummary: async () => ({ ok: true, history: [], walletDistribution: [] }),
-    getUpstreamUsageCache: async () => [],
+    getUpstreamUsageCache: async () => usageRows,
     idleProbeHistory: async () => ({ ok: true, records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
   } as never;
   return { config, row, claudeRow, service: new UpstreamSchedulingV2Service(config, dispatcher, operations) };
@@ -62,7 +66,20 @@ describe("upstream scheduling v2", () => {
     const { service, row } = fixture();
     const snapshot = await service.snapshot("codex");
     expect(snapshot.scope).toBe("codex");
-    expect(snapshot.data.accounts).toEqual([row]);
+    expect(snapshot.data.accounts).toHaveLength(1);
+    expect(snapshot.data.accounts[0]).toMatchObject(row);
+    expect(snapshot.data.accounts[0]).toMatchObject({
+      quota: { unit: "USD", remaining: 12.5 },
+      quotaCacheAt: "2026-10-03T00:01:00.000Z",
+      quotaCacheStatus: "cached",
+    });
+    expect(snapshot.data.quotaCoverage).toMatchObject({
+      accountCount: 1,
+      cachedAccountCount: 1,
+      missingAccountIds: [],
+      complete: true,
+      source: "quota-monitor-usage-cache",
+    });
     expect(snapshot.reconciliation.status).toBe("matched");
     expect(snapshot.reconciliation.checks.find((check) => check.name === "write-boundary")?.status).toBe("matched");
     expect(snapshot.readOnly).toBeTrue();
@@ -80,7 +97,15 @@ describe("upstream scheduling v2", () => {
     const snapshot = await service.snapshot("claude");
     expect(snapshot.scope).toBe("claude");
     expect(snapshot.platform).toBe("anthropic");
-    expect(snapshot.data.accounts).toEqual([claudeRow]);
+    expect(snapshot.data.accounts).toHaveLength(1);
+    expect(snapshot.data.accounts[0]).toMatchObject(claudeRow);
+    expect(snapshot.data.accounts[0].quotaCacheStatus).toBe("missing");
+    expect(snapshot.data.quotaCoverage).toMatchObject({
+      accountCount: 1,
+      cachedAccountCount: 0,
+      missingAccountIds: [202],
+      complete: false,
+    });
     expect(snapshot.data.poolQuality.platform).toBe("claude");
     expect(snapshot.readOnly).toBeTrue();
     expect(snapshot.features).toMatchObject({
@@ -90,6 +115,27 @@ describe("upstream scheduling v2", () => {
       priorityAutomation: false,
       idleProbe: false,
       upstreamWrite: false,
+    });
+  });
+
+  test("keeps cached unlimited and unavailable states explicit", async () => {
+    const { service } = fixture([
+      { account_id: 101, last_success_at: "2026-10-03T00:01:00.000Z", last_success_result: { ok: true, quota: { unit: "USD", remaining: 12.5 } } },
+      { account_id: 202, queried_at: "2026-10-03T00:02:00.000Z", result: { ok: true, quota: { unlimited: true } } },
+    ]);
+    const snapshot = await service.snapshot("claude");
+    expect(snapshot.data.accounts[0]).toMatchObject({
+      quota: { remaining: null, unlimited: true },
+      quotaCacheStatus: "unlimited",
+    });
+    expect(snapshot.data.quotaCoverage).toMatchObject({
+      cachedAccountCount: 1,
+      numericAccountCount: 0,
+      unlimitedAccountCount: 1,
+      unavailableAccountIds: [],
+      missingAccountIds: [],
+      complete: false,
+      cacheRowsComplete: true,
     });
   });
 

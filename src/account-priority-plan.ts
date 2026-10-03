@@ -367,7 +367,7 @@ function buildPriorityProfile(
     });
     return {
       ok: true,
-      action: "scores-priority-plan",
+      action: "upstream-scheduling-v2-priority-plan",
       mutation: false,
       recentCallLimit: ranking.recentCallLimit,
       profile,
@@ -599,7 +599,7 @@ function buildPriorityProfile(
     : { enabled: false, statusAlerts: [], recommendations: [] };
   return {
     ok: true,
-    action: "scores-priority-plan",
+    action: "upstream-scheduling-v2-priority-plan",
     mutation: false,
     recentCallLimit: ranking.recentCallLimit,
     profile,
@@ -625,7 +625,7 @@ function buildPriorityProfile(
     changes: [...fixedChanges, ...dynamicChanges, ...tailChanges],
     procurementAdvice,
     apply: {
-      through: "api2business-priority-plan-confirm",
+      through: "upstream-scheduling-v2-priority-write",
       target: config.monitor.target,
       writeMode: "backend-api-paced",
       batchSize: config.operations.priorityWrite.batchSize,

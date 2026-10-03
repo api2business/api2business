@@ -205,7 +205,6 @@ export interface AppConfig {
       minimumWeight: number;
     };
     idleProbe: {
-      enabled: boolean;
       intervalSeconds: number;
       idleSeconds: number;
       model: string;
@@ -259,9 +258,6 @@ export interface AppConfig {
       enabled: boolean;
       claudeEnabled: boolean;
     };
-    legacyScheduling?: {
-      enabled: boolean;
-    };
     upstreamSchedulingV2?: UpstreamSchedulingV2Config;
     databaseUrlEnv: string;
     ledgerYamlPath: string;
@@ -305,11 +301,6 @@ export interface AppConfig {
     auditLimit: number;
     priorityVerificationTimeoutMs: number;
     priorityVerificationPollMs: number;
-    automationPollMs: number;
-    automationRunTimeoutMs: number;
-    automationFailureBackoffMaxMs: number;
-    automationFailureRetryLimit: number;
-    automationFailureCooldownMs: number;
     automationJitterPercent: number;
     automationSafety: {
       maximumScoreQueryDurationMs: number;
@@ -679,13 +670,9 @@ export function loadConfig(path: string): AppConfig {
   const ranking = object(raw.ranking, "ranking");
   const records = object(raw.records, "records");
   const operations = object(raw.operations, "operations");
-  const legacySchedulingValue = operations.legacyScheduling;
-  const legacyScheduling = legacySchedulingValue === undefined
-    ? { enabled: true }
-    : (() => {
-      const value = object(legacySchedulingValue, "operations.legacyScheduling");
-      return { enabled: booleanValue(value, "enabled", "operations.legacyScheduling") };
-    })();
+  const retiredConfigKeys = ["legacyScheduling", "automationPollMs", "automationRunTimeoutMs", "automationFailureBackoffMaxMs", "automationFailureRetryLimit", "automationFailureCooldownMs"];
+  const staleKey = retiredConfigKeys.find((key) => Object.prototype.hasOwnProperty.call(operations, key));
+  if (staleKey) throw new Error(`operations.${staleKey} was retired; configure operations.upstreamSchedulingV2 instead`);
   const accountLifecycle = object(operations.accountLifecycle, "operations.accountLifecycle");
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
   const upstreamManagement = object(operations.upstreamManagement, "operations.upstreamManagement");
@@ -923,7 +910,6 @@ export function loadConfig(path: string): AppConfig {
           throw new Error("sub2api.idleProbe.reasoningEffort must be low, medium, or high");
         }
         return {
-          enabled: booleanValue(idleProbe, "enabled", "sub2api.idleProbe"),
           intervalSeconds: integerValue(idleProbe, "intervalSeconds", "sub2api.idleProbe", 10, 3600),
           idleSeconds: integerValue(idleProbe, "idleSeconds", "sub2api.idleProbe", 10, 86400),
           model: stringValue(idleProbe, "model", "sub2api.idleProbe"),
@@ -1014,7 +1000,6 @@ export function loadConfig(path: string): AppConfig {
           claudeEnabled: booleanValue(value, "claudeEnabled", "operations.writePolicy"),
         };
       })(),
-      legacyScheduling,
       upstreamSchedulingV2,
       databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
       ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),
@@ -1119,23 +1104,6 @@ export function loadConfig(path: string): AppConfig {
       auditLimit: integerValue(operations, "auditLimit", "operations", 1, 1000),
       priorityVerificationTimeoutMs: integerValue(operations, "priorityVerificationTimeoutMs", "operations", 1000, 120000),
       priorityVerificationPollMs: integerValue(operations, "priorityVerificationPollMs", "operations", 100, 10000),
-      automationPollMs: integerValue(operations, "automationPollMs", "operations", 100, 600000),
-      automationRunTimeoutMs: integerValue(operations, "automationRunTimeoutMs", "operations", 60000, 3600000),
-      automationFailureBackoffMaxMs: integerValue(
-        operations,
-        "automationFailureBackoffMaxMs",
-        "operations",
-        1000,
-        300000,
-      ),
-      automationFailureRetryLimit: integerValue(operations, "automationFailureRetryLimit", "operations", 0, 10),
-      automationFailureCooldownMs: integerValue(
-        operations,
-        "automationFailureCooldownMs",
-        "operations",
-        60000,
-        86400000,
-      ),
       automationJitterPercent: numberValue(operations, "automationJitterPercent", "operations", 0, 0.5),
       automationSafety: {
         maximumScoreQueryDurationMs: integerValue(

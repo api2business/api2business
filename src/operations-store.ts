@@ -1,5 +1,4 @@
 import { SQL } from "bun";
-import { jitteredIntervalSeconds } from "./priority-automation-schedule";
 import { isRecoverableDatabaseConnectionError } from "./database-connection";
 
 export type CashDirection = "income" | "expense";
@@ -68,26 +67,6 @@ export class OperationsStore {
         ADD COLUMN IF NOT EXISTS completed_at timestamptz;
       ALTER TABLE api2business_priority_plans
         ADD COLUMN IF NOT EXISTS execution_started_at timestamptz;
-      CREATE TABLE IF NOT EXISTS api2business_priority_automation (
-        id text PRIMARY KEY CHECK (id='default'),
-        enabled boolean NOT NULL,
-        interval_seconds integer NOT NULL CHECK (interval_seconds BETWEEN 5 AND 86400),
-        recent_call_limit integer NOT NULL,
-        next_run_at timestamptz NOT NULL,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        updated_by text NOT NULL
-      );
-      ALTER TABLE api2business_priority_automation
-        ADD COLUMN IF NOT EXISTS run_id uuid;
-      ALTER TABLE api2business_priority_automation
-        ADD COLUMN IF NOT EXISTS run_started_at timestamptz;
-      ALTER TABLE api2business_priority_automation
-        ADD COLUMN IF NOT EXISTS run_claimed_at timestamptz;
-      ALTER TABLE api2business_priority_automation
-        ADD COLUMN IF NOT EXISTS last_completed_at timestamptz;
-      ALTER TABLE api2business_priority_automation
-        ADD COLUMN IF NOT EXISTS last_run_status text;
       CREATE TABLE IF NOT EXISTS api2business_operation_audit (
         id uuid PRIMARY KEY,
         action text NOT NULL,
@@ -1008,33 +987,10 @@ export class OperationsStore {
       `;
       if (!plan) throw new Error("priority plan does not exist");
 
-      let nextRunAt: unknown = null;
-      if (plan.trigger_type === "manual") {
-        const [automation] = await tx`
-          SELECT interval_seconds
-          FROM api2business_priority_automation
-          WHERE id='default'
-          FOR UPDATE
-        `;
-        if (automation) {
-          const nextDelay = jitteredIntervalSeconds(
-            Number(automation.interval_seconds),
-            jitterPercent,
-          );
-          const [updated] = await tx`
-            UPDATE api2business_priority_automation
-            SET next_run_at=now() + make_interval(secs => ${nextDelay}),
-              updated_at=now()
-            WHERE id='default'
-            RETURNING next_run_at
-          `;
-          nextRunAt = updated?.next_run_at ?? null;
-        }
-      }
       return {
         execution_started_at: plan.execution_started_at,
         completed_at: plan.completed_at,
-        next_run_at: nextRunAt,
+        next_run_at: null,
       };
     });
   }
@@ -1051,191 +1007,6 @@ export class OperationsStore {
       FROM api2business_priority_plans
       ORDER BY created_at DESC LIMIT ${limit}
     `;
-  }
-
-  async getAutomation() {
-    const [row] = await this.sql`
-      SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at,
-        created_at, updated_at, updated_by, run_id, run_claimed_at, run_started_at,
-        last_completed_at, last_run_status
-      FROM api2business_priority_automation WHERE id='default'
-    `;
-    return row ?? null;
-  }
-
-  async createAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string; jitterPercent: number }) {
-    const nextDelay = jitteredIntervalSeconds(input.intervalSeconds, input.jitterPercent);
-    const [row] = await this.sql`
-      INSERT INTO api2business_priority_automation
-        (id, enabled, interval_seconds, recent_call_limit, next_run_at, updated_by)
-      VALUES ('default', ${input.enabled}, ${input.intervalSeconds}, ${input.recentCallLimit},
-        now() + make_interval(secs => ${nextDelay}), ${input.operator})
-      RETURNING *
-    `;
-    return row;
-  }
-
-  async updateAutomation(input: { enabled: boolean; intervalSeconds: number; recentCallLimit: number; operator: string; jitterPercent: number }) {
-    const nextDelay = jitteredIntervalSeconds(input.intervalSeconds, input.jitterPercent);
-    const [row] = await this.sql`
-      UPDATE api2business_priority_automation
-      SET enabled=${input.enabled}, interval_seconds=${input.intervalSeconds},
-        recent_call_limit=${input.recentCallLimit},
-        next_run_at=CASE WHEN run_id IS NULL
-          THEN now() + make_interval(secs => ${nextDelay})
-          ELSE next_run_at END,
-        updated_at=now(), updated_by=${input.operator}
-      WHERE id='default' RETURNING *
-    `;
-    if (!row) throw new Error("priority automation does not exist");
-    return row;
-  }
-
-  async deleteAutomation() {
-    const [row] = await this.sql`
-      DELETE FROM api2business_priority_automation WHERE id='default' RETURNING id
-    `;
-    if (!row) throw new Error("priority automation does not exist");
-    return row;
-  }
-
-  async claimDueAutomation(runTimeoutMs: number, jitterPercent: number) {
-    return await this.sql.begin(async (tx) => {
-      const [row] = await tx`
-        SELECT id, enabled, interval_seconds, recent_call_limit, next_run_at,
-          run_id, run_claimed_at, run_started_at, updated_at,
-          next_run_at <= now() AS due,
-          COALESCE(run_started_at, run_claimed_at, updated_at)
-            <= now() - (${runTimeoutMs} * interval '1 millisecond') AS run_expired
-        FROM api2business_priority_automation
-        WHERE id='default'
-        FOR UPDATE SKIP LOCKED
-      `;
-      if (!row) return null;
-      if (row.run_id) {
-        if (row.run_expired !== true) return null;
-        const runId = String(row.run_id);
-        const [pendingPlan] = await tx`
-          SELECT id FROM api2business_priority_plans
-          WHERE trigger_type='automatic' AND status='pending'
-            AND execution_started_at=${row.run_started_at ?? null}
-          ORDER BY created_at DESC LIMIT 1
-          FOR UPDATE
-        `;
-        const recoveryResult = {
-          changedCount: 0,
-          writeMode: "cycle-timeout",
-          reason: "automation-run-timeout",
-          runTimeoutMs,
-        };
-        if (pendingPlan) {
-          await tx`
-            UPDATE api2business_priority_plans
-            SET status='failed', applied_at=now(), completed_at=now(),
-              apply_result=${recoveryResult}::jsonb
-            WHERE id=${pendingPlan.id}
-          `;
-        }
-        const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
-        const [recovered] = await tx`
-          UPDATE api2business_priority_automation
-          SET run_id=NULL, run_claimed_at=NULL, run_started_at=NULL,
-            last_completed_at=now(), last_run_status='failed',
-            next_run_at=now() + make_interval(secs => ${nextDelay}), updated_at=now()
-          WHERE id='default' AND run_id=${runId}
-          RETURNING next_run_at, last_completed_at
-        `;
-        await tx`
-          INSERT INTO api2business_operation_audit
-            (id, action, status, operator, input_summary, result_summary)
-          VALUES (${crypto.randomUUID()}, 'priority.automation.run', 'failed', 'scheduler',
-            ${{ runTimeoutMs }}::jsonb,
-            ${{ planId: pendingPlan?.id ?? null, ...recoveryResult }}::jsonb)
-        `;
-        return {
-          recovered: true,
-          plan_id: pendingPlan?.id ?? null,
-          next_run_at: recovered?.next_run_at ?? null,
-          last_completed_at: recovered?.last_completed_at ?? null,
-          ...recoveryResult,
-        };
-      }
-      if (row.enabled !== true || row.due !== true) return null;
-      const runId = crypto.randomUUID();
-      const [claimed] = await tx`
-        UPDATE api2business_priority_automation
-        SET run_id=${runId}, run_claimed_at=now(), run_started_at=NULL,
-          updated_at=now()
-        WHERE id='default'
-        RETURNING id, enabled, interval_seconds, recent_call_limit,
-          next_run_at, run_id, run_claimed_at, run_started_at
-      `;
-      return claimed ?? null;
-    });
-  }
-
-  async markAutomationRunStarted(runId: string) {
-    const [row] = await this.sql`
-      UPDATE api2business_priority_automation
-      SET run_started_at=COALESCE(run_started_at, now()), updated_at=now()
-      WHERE id='default' AND run_id=${runId}
-      RETURNING id, run_id, run_started_at
-    `;
-    if (!row) throw new Error("priority automation run token no longer exists");
-    return row;
-  }
-
-  async completeAutomationRun(runId: string, jitterPercent: number, status: string) {
-    return await this.sql.begin(async (tx) => {
-      const [row] = await tx`
-        SELECT interval_seconds
-        FROM api2business_priority_automation
-        WHERE id='default' AND run_id=${runId}
-        FOR UPDATE
-      `;
-      if (!row) return null;
-      const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
-      const [completed] = await tx`
-        UPDATE api2business_priority_automation
-        SET run_id=NULL, run_claimed_at=NULL, run_started_at=NULL, last_completed_at=now(),
-          last_run_status=${status},
-          next_run_at=now() + make_interval(secs => ${nextDelay}),
-          updated_at=now()
-        WHERE id='default' AND run_id=${runId}
-        RETURNING id, enabled, interval_seconds, recent_call_limit,
-          next_run_at, last_completed_at, last_run_status
-      `;
-      return completed ?? null;
-    });
-  }
-
-  async deferDueAutomationAfterDispatchFailure(jitterPercent: number, error: string) {
-    return await this.sql.begin(async (tx) => {
-      const [row] = await tx`
-        SELECT interval_seconds
-        FROM api2business_priority_automation
-        WHERE id='default' AND enabled=true AND run_id IS NULL AND next_run_at <= now()
-        FOR UPDATE SKIP LOCKED
-      `;
-      if (!row) return null;
-      const nextDelay = jitteredIntervalSeconds(Number(row.interval_seconds), jitterPercent);
-      const [deferred] = await tx`
-        UPDATE api2business_priority_automation
-        SET last_completed_at=now(), last_run_status='dispatch-failed',
-          next_run_at=now() + make_interval(secs => ${nextDelay}), updated_at=now()
-        WHERE id='default' AND run_id IS NULL
-        RETURNING id, interval_seconds, recent_call_limit, next_run_at,
-          last_completed_at, last_run_status
-      `;
-      await tx`
-        INSERT INTO api2business_operation_audit
-          (id, action, status, operator, input_summary, result_summary)
-        VALUES (${crypto.randomUUID()}, 'priority.automation.run', 'failed', 'scheduler',
-          ${{ stage: "temporal-dispatch" }}::jsonb,
-          ${{ reason: "temporal-dispatch-failed", error }}::jsonb)
-      `;
-      return deferred ?? null;
-    });
   }
 
   async audit(action: string, status: string, operator: string, input: unknown, result: unknown) {

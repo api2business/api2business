@@ -212,10 +212,9 @@
   - V2 是当前上游调度的作用域权威，页面和接口统一使用
     `/api/v2/upstream-scheduling/*`，数据按作用域的 `platform`、账号 ID 和
     `eligibleGroupIds` 过滤。
-  - 旧的全局 Codex 优先级调度和旧全局探活由
-    `operations.legacyScheduling.enabled` 控制；设为 `false` 时，Go Temporal
-    与兼容 Bun worker 都停止旧调度。根路径和主导航指向 V2；旧 `/scores` 页面仅保留
-    兼容展示，旧数据库自动化记录只保留审计，不再驱动写入。
+  - V2 是唯一上游调度运行面。旧全局页面、工作流、写入 API、CLI 命令和配置字段已经
+    删除；根路径和主导航只指向 V2，旧入口直接重定向或返回未找到，不保留迁移兼容层。
+    配置加载会拒绝退役字段，避免旧调度重新启动。
   - V2 工作流按作用域独立运行。每个作用域的
     `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和
     `upstreamWrite` 都只从 owning YAML 读取，代码不得替代开关。
@@ -233,8 +232,8 @@
     后台对账结果只作为 CLI/API 证据，不投影成页面事实。
   - Claude 和 Codex 是平等作用域。Claude 的平台、分组、成本、评分、优先级和
     探活是否启用均以 Claude 作用域开关为准，不把 Grok 或 Codex 数据投影到 Claude。
-  - 旧 `priority automation get|create|update` 仅用于观察或迁移旧全局记录；旧调度
-    已停用时，启用写入会被拒绝。V2 的间隔和样本档位从 `scopes`、`snapshot` 回读。
+  - V2 的间隔和样本档位从 `scopes`、`snapshot` 回读；旧 priority automation 和
+    priority plan 命令不再存在。
   - 修改页面投影后必须更新静态资源并重新读取正式入口；CLI/API 事实先于截图，截图
     只用于人工核对真实页面。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
@@ -243,6 +242,25 @@
     用户业务池；比较账号分、池分和优先级分时必须同时报告样本范围。
   - 账号分、池分和优先级排序分不可互相替代，报告中必须写明查询命令、时间窗口、
     探活是否纳入及滚动或即时口径。
+- 账号额度来源：
+  - V2 账号余额只读取额度监控已经持久化的 `api2business_upstream_usage_cache`，与额度
+    监控页面使用同一缓存口径，不为补齐 V2 快照再次请求供应商额度接口。
+  - 快照返回 `quotaCoverage`，包含账号总数、缓存行覆盖数、数值余额数、已知不限额数、
+    不可用账号 ID、缺失账号 ID、`cacheRowsComplete` 和数值 `complete`；
+    `complete=false` 时页面必须显示缺失或不可用范围，不能把未知额度当作零或最低优先级。
+    账号行的 `quotaCacheStatus` 明确区分 `cached`、`unlimited`、`unavailable` 和 `missing`，
+    不允许用短横线掩盖缓存状态。
+  - 共享钱包汇总仍读取额度监控的持久化汇总；账号级余额和钱包级余额不得互相替代。
+- Claude `Upstream access forbidden` 的切号边界：
+  - `config/failover-templates/claude.yaml` 已按 Anthropic 平台配置精确的 `502` 状态码与
+    `upstream access forbidden` 关键词，且运行时已回读到全部 Claude API-key 账号。
+  - 如果供应商返回 HTTP 200 和有效 JSON `type=error` 正文，当前非流式处理只校验 JSON，
+    随后按 200 透传，不进入 HTTP 错误切号模板；不能用日志中的语义 502 推断真实 HTTP
+    状态码，也不能仅凭状态差异断定是 SSE。
+  - 此类 200 错误信封要实现切号，必须先在 Sub2API 网关识别错误正文并进入原生 failover
+    路径，再由运行面验证。扩大 403 或增加 200 模板均不能修复绕过模板的处理路径。
+  - 模板调查先同时核对 `stream`、记录状态、语义上游状态、响应正文和模板回读；模板
+    本身已有精确规则且错误不进入匹配路径时，不再堆叠近义词规则。
 - 充值候选分析：
   - `upstreams recharge-candidates --over-api` 同时列出当前欠费账号和最新人民币余额低于
     `operations.upstreamManagement.rechargeCandidates.lowBalanceCny` 的账号，默认阈值为 `¥10`；等于阈值不纳入低余额候选。
@@ -367,14 +385,14 @@
 
 ### 有效做法
 
-- 先把旧全局调度的停止开关写入 owning YAML，再创建按作用域命名的新工作流；identity
-  变化时终止旧版本，并同时检查旧状态、V2 状态和业务记录。
+- 新增或调整作用域时先核对 owning YAML 的独立功能开关，再检查 V2 状态、业务记录和
+  作用域范围；禁止通过旧全局状态推断当前作用域。
 - 手动探活先验证 HTTP 结果、模型白名单、`ordinaryLogRecorded` 和轮次汇总，成功后才
   打开该作用域的 `features.idleProbe`。
 - 探活模型从账号白名单动态选择，固定优先级为 Terra 后 Sol；缺少成本时使用当前候选
   集合的平均成本并标记 `imputed-average`。
-- 生产调度由 Go Temporal worker 执行，兼容 Bun worker 也使用同一旧调度开关；评分、池分
-  和优先级分保持独立。
+- 生产调度由 Go Temporal worker 执行；评分、池分和优先级分保持独立，所有工作流均带有
+  V2 作用域身份。
 - 详细规则只维护在本参考，skill、UniDesk 入口和项目规格只保留摘要并交叉引用本参考。
 
 ### 失败或误判模式

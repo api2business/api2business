@@ -26,10 +26,6 @@ export type AppCommand =
   | { kind: "account.import"; jobId: string }
   | { kind: "account.lifecycle.detect"; jobId: string }
   | { kind: "account.lifecycle.settle"; jobId: string; candidateIds: number[] }
-  | { kind: "priority.plan.create"; recentCallLimit: number; operator: string }
-  | { kind: "priority.plan.manual-create"; priorities: Record<string, number>; operator: string }
-  | { kind: "priority.plan.confirm"; planId: string; operator: string }
-  | { kind: "priority.automation.run" }
   | { kind: "priority.automation.v2.run"; scope: string; recentCallLimit: number };
 
 export interface OperationRequest {
@@ -48,11 +44,6 @@ export interface ScheduledScoreRefreshInput extends WorkflowOptions {
 export interface ScheduledUpstreamQuotaInput extends WorkflowOptions {
   intervalMs: number;
   roundTimeoutMs: number;
-}
-export interface ScheduledIdleProbeInput extends WorkflowOptions {
-  intervalMs: number;
-  roundTimeoutMs: number;
-  provisionTimeoutMs: number;
 }
 export interface ScheduledBugTeamCostInput extends WorkflowOptions {
   intervalMs: number;
@@ -79,9 +70,5 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "account.import"
     || command.kind === "account.lifecycle.detect"
     || command.kind === "account.lifecycle.settle"
-    || command.kind === "priority.plan.create"
-    || command.kind === "priority.plan.manual-create"
-    || command.kind === "priority.plan.confirm"
-    || command.kind === "priority.automation.run"
     || command.kind === "priority.automation.v2.run";
 }

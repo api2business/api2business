@@ -12,13 +12,11 @@ import { emitUserImpact } from "./user-impact-output";
 import { emitErrorAggregate } from "./error-aggregate-output";
 import { emitErrorDiagnosis, emitErrorInspection } from "./error-diagnose-output";
 import { emitCooldownDiagnosis } from "./error-diagnose-output";
-import { emitPriorityPlan } from "./priority-plan-output";
 import { emitAccountEconomics, emitAccountImportEconomics } from "./account-economics-output";
 import { emitOAuthEconomics } from "./oauth-economics-output";
 import { emitDailyProfit } from "./daily-profit-output";
 import { parseAccountIdSelector } from "../../../../src/account-batch-economics";
 import { runBoundedProcess } from "../../../../src/bounded-process";
-import { parseManualPriorityAssignments } from "./priority-plan-input";
 import { readSecret } from "../../../../src/secrets";
 import { BugTeamClient } from "./bugteam-client";
 import { PublicRecoveryClient } from "./public-recovery-client";
@@ -50,8 +48,6 @@ interface Parsed {
   since: string | null;
   until: string | null;
   affectedOnly: boolean;
-  intervalSeconds: number | null;
-  enabled: boolean | null;
   file: string | null;
   priority: number | null;
   capacity: number | null;
@@ -87,7 +83,6 @@ interface Parsed {
   search: string | null;
   apiKeyStdin: boolean;
   templateOnly: boolean;
-  priorities: string | null;
   product: string | null;
   quantity: number | null;
   output: string | null;
@@ -126,7 +121,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--interval-seconds", "--enabled", "--file", "--output", "--priority", "--priorities", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -192,11 +187,6 @@ function parseArgs(args: string[]): Parsed {
     profile: value(args, "--profile"),
     model: value(args, "--model"),
     affectedOnly: args.includes("--affected-only"),
-    intervalSeconds: integer("--interval-seconds"),
-    enabled: value(args, "--enabled") === null ? null
-      : value(args, "--enabled") === "true" ? true
-      : value(args, "--enabled") === "false" ? false
-      : (() => { throw new Error("--enabled must be true or false"); })(),
     file: value(args, "--file"), priority: integer("--priority"), capacity: integer("--capacity"),
     rateMultiplier: (() => {
       const parsed = integer("--rate-multiplier");
@@ -214,7 +204,6 @@ function parseArgs(args: string[]): Parsed {
     windowMinutes: integer("--window-minutes"),
     page: integer("--page"), search: value(args, "--search"), apiKeyStdin: args.includes("--api-key-stdin"),
     templateOnly: args.includes("--template-only"),
-    priorities: value(args, "--priorities"),
     product: value(args, "--product"), quantity: integer("--quantity"), output: value(args, "--output"),
     format: value(args, "--format") as "sub2" | "cpa" | null, hubId: value(args, "--hub-id"),
     state: value(args, "--state"), beforeId: value(args, "--before-id"), idempotencyKey: value(args, "--idempotency-key"),
@@ -234,7 +223,7 @@ function help(): Record<string, unknown> {
     commands: [
       "config validate",
       "backend check",
-      "scores get|pool-quality|pool-quality-refresh|refresh|rank|priority-plan [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
+      "scores get|pool-quality|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "upstream-scheduling-v2 scopes|snapshot|plan [--scope codex] --over-api (read-only; Codex phase first)",
       "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
@@ -254,10 +243,6 @@ function help(): Record<string, unknown> {
       "api smoke --over-api",
       "web screenshot [--profile <owning smoke profile>] --over-api",
       "workflow status --id <workflow-id>",
-      "priority automation get|create|update|delete --over-api [--interval-seconds N --calls N --enabled true|false] [--confirm]",
-      "priority plan create --over-api [--calls N]",
-      "priority plan manual-create --over-api --priorities ACCOUNT_ID:PRIORITY[,ACCOUNT_ID:PRIORITY...]",
-      "priority plan confirm --over-api --id ID --confirm",
       "priority history --over-api",
       "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api",
       "accounts status --id <job-id> --over-api",
@@ -575,8 +560,7 @@ function isAppCommand(value: AppCommand | Record<string, unknown>): value is App
 async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: EmbeddedCliTarget): Promise<unknown> {
   if (parsed.command[0] === "priority") throw new Error("priority runtime CRUD requires --over-api");
   if (
-    parsed.command.join(" ") === "scores priority-plan"
-    || parsed.command.join(" ") === "scores rank"
+    parsed.command.join(" ") === "scores rank"
     || parsed.command[0] === "errors"
     || parsed.command.join(" ") === "users impact"
     || parsed.command.join(" ") === "users balance-liability"
@@ -1029,37 +1013,6 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await client.disableLunaForAccounts(parseAccountIdSelector(parsed.accounts), parsed.confirm);
   }
   if (group === "priority" && action === "history") return await client.priorityHistory();
-  if (group === "priority" && action === "plan") {
-    const verb = parsed.command[2];
-    if (verb === "create") return await client.createPriorityPlan(parsed.calls ?? config.monitor.recentCallLimit);
-    if (verb === "manual-create") {
-      if (!parsed.priorities) throw new Error("priority plan manual-create requires --priorities");
-      return await client.createManualPriorityPlan(parseManualPriorityAssignments(parsed.priorities));
-    }
-    if (verb === "confirm") {
-      if (!parsed.id) throw new Error("priority plan confirm requires --id");
-      return parsed.confirm ? await client.confirmPriorityPlan(parsed.id)
-        : { ok: true, mutation: false, id: parsed.id, hint: "add --confirm to execute" };
-    }
-    throw new Error("priority plan requires create, manual-create, or confirm");
-  }
-  if (group === "priority" && parsed.command[1] === "automation") {
-    const verb = parsed.command[2];
-    if (verb === "get") return await client.priorityAutomation();
-    if (verb === "delete") {
-      return parsed.confirm ? await client.deletePriorityAutomation()
-        : { ok: true, mutation: false, hint: "add --confirm to delete priority automation" };
-    }
-    if (verb === "create" || verb === "update") {
-      if (parsed.intervalSeconds === null || parsed.calls === null || parsed.enabled === null) {
-        throw new Error(`${verb} requires --interval-seconds, --calls, and --enabled`);
-      }
-      const input = { intervalSeconds: parsed.intervalSeconds, recentCallLimit: parsed.calls, enabled: parsed.enabled };
-      if (!parsed.confirm) return { ok: true, mutation: false, action: `priority-automation-${verb}`, plan: input, hint: "add --confirm to execute" };
-      return verb === "create" ? await client.createPriorityAutomation(input) : await client.updatePriorityAutomation(input);
-    }
-    throw new Error("priority automation requires get, create, update, or delete");
-  }
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "upstream-scheduling-v2") {
     if (action === "scopes") return await client.upstreamSchedulingV2Scopes();
@@ -1073,13 +1026,6 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
   if (group === "scores" && action === "rank") {
     return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account, parsed.group);
-  }
-  if (group === "scores" && action === "priority-plan") {
-    return await client.priorityState(
-      parsed.calls ?? config.monitor.recentCallLimit,
-      parsed.account,
-      parsed.group,
-    );
   }
   if (group === "reads" && action === "status") return await client.readStatus();
   if (group === "errors" && action === "aggregate") {
@@ -1192,12 +1138,39 @@ async function runWebScreenshot(
   if (cookieName !== config.webAuth.cookieName || cookieValue === "") {
     throw new Error(`Api2Business session response is missing ${config.webAuth.cookieName}`);
   }
-  const profile = parsed.profile ?? "scores-layout";
+  const raw = record(Bun.YAML.parse(readFileSync(parsed.configPath, "utf8"))) ?? {};
+  const webProbe = record(raw.webProbe) ?? {};
+  const origin = record(webProbe.origin) ?? {};
+  const profileName = parsed.profile ?? String(webProbe.defaultSmokeProfile ?? "");
+  if (!profileName) throw new Error("webProbe.defaultSmokeProfile is required");
+  const profiles = record(webProbe.smokeProfiles) ?? {};
+  const profile = record(profiles[profileName]) ?? {};
+  if (!profileName || Object.keys(profile).length === 0) {
+    throw new Error(`unknown webProbe smoke profile: ${profileName}`);
+  }
+  const originBaseUrl = typeof origin.baseUrl === "string" ? origin.baseUrl : target.baseUrl;
+  const path = typeof profile.path === "string" ? profile.path : "";
+  const viewport = record(profile.viewport);
+  const mobileViewport = record(profile.mobileViewport);
+  const viewportValue = `${Number(viewport.width)}x${Number(viewport.height)}`;
+  const mobileViewportValue = `${Number(mobileViewport.width)}x${Number(mobileViewport.height)}`;
+  const readySelector = typeof profile.readySelector === "string" ? profile.readySelector : null;
+  const settleMs = Number(profile.settleMs ?? 0);
+  if (!path.startsWith("/") || !Number.isSafeInteger(viewport.width) || !Number.isSafeInteger(viewport.height)
+    || !Number.isSafeInteger(mobileViewport.width) || !Number.isSafeInteger(mobileViewport.height)
+    || !Number.isSafeInteger(settleMs) || settleMs < 0) {
+    throw new Error(`invalid webProbe smoke profile: ${profileName}`);
+  }
   const probe = await runBoundedProcess([
     config.monitor.cli.executable,
     config.monitor.cli.entrypoint,
-    "web-probe",
-    "api2business-screenshot",
+    "web-probe", "screenshot",
+    "--url", `${originBaseUrl.replace(/\/+$/u, "")}${path}`,
+    "--provided-session-cookie-source", "env:API2BUSINESS_WEB_PROBE_SESSION_COOKIE",
+    "--provided-session-cookie-name", config.webAuth.cookieName,
+    "--viewports", `${viewportValue},${mobileViewportValue}`,
+    "--settle-ms", String(settleMs),
+    ...(readySelector ? ["--wait-for-selector", readySelector] : []),
     "--json",
   ], {
     cwd: config.monitor.cli.workDir,
@@ -1209,7 +1182,10 @@ async function runWebScreenshot(
     throw new Error("WebProbe output contained session material and was blocked");
   }
   let result: Record<string, unknown> | null = null;
-  try { result = record(JSON.parse(probe.stdout)); } catch { result = null; }
+  try {
+    const jsonLine = probe.stdout.trim().split(/\r?\n/u).reverse().find((line) => line.trim().startsWith("{"));
+    result = jsonLine ? record(JSON.parse(jsonLine)) : null;
+  } catch { result = null; }
   if (result === null) {
     const stderr = probe.stderr.replace(/\s+/gu, " ").trim().slice(-500);
     const stdout = probe.stdout.replace(/\s+/gu, " ").trim().slice(-500);
@@ -1222,18 +1198,19 @@ async function runWebScreenshot(
   if (probe.exitCode !== 0 || result.ok !== true) return {
     ok: false,
     action: "web-screenshot",
-    profile,
+    profile: profileName,
     session: { cookieName, present: true, valuesPrinted: false },
     probe: result,
     mutation: false,
     valuesPrinted: false,
   };
+  const projection = record(result.data ?? result) ?? {};
   return {
-    ok: result.ok === true,
+    ok: projection.ok === true,
     action: "web-screenshot",
-    profile,
+    profile: profileName,
     session: { cookieName, present: true, valuesPrinted: false },
-    probe: result,
+    probe: projection,
     mutation: false,
     valuesPrinted: false,
   };
@@ -1293,7 +1270,6 @@ export async function runCli(args: string[]): Promise<void> {
     }
     const nativeReadCommand = (
       parsed.command.join(" ") === "scores rank"
-      || parsed.command.join(" ") === "scores priority-plan"
       || parsed.command[0] === "upstream-scheduling-v2"
       || parsed.command.join(" ") === "reads status"
       || parsed.command[0] === "errors"
@@ -1321,7 +1297,6 @@ export async function runCli(args: string[]): Promise<void> {
     const result = target.mode === "embedded" ? await embedded(parsed, config, target) : await remote(parsed, config, target);
     const output = { target: targetId, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...result as Record<string, unknown> };
     if (parsed.command.join(" ") === "scores rank") emitScoreRanking(output, parsed.json);
-    else if (parsed.command.join(" ") === "scores priority-plan") emitPriorityPlan(output, parsed.json);
     else if (parsed.command.join(" ") === "scores pool-quality") emitPoolQuality(output, parsed.json);
     else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
     else if (parsed.command.join(" ") === "errors diagnose") emitErrorDiagnosis(output, parsed.json);

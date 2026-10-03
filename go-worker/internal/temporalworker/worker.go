@@ -101,14 +101,14 @@ func scheduleOptions(id, taskQueue string) client.StartWorkflowOptions {
 }
 
 type scheduleIdentities struct {
-	Score, Quota, IdleProbe, IdleProvision, PriorityAutomation, BugTeamCost string
+	Score, Quota, BugTeamCost string
 }
 
-const minimumPriorityAutomationPollMilliseconds = 60 * 1000
+const minimumScopedAutomationIntervalMilliseconds = 60 * 1000
 
-func priorityAutomationPollMilliseconds(configured int) int {
-	if configured < minimumPriorityAutomationPollMilliseconds {
-		return minimumPriorityAutomationPollMilliseconds
+func scopedAutomationIntervalMilliseconds(configured int) int {
+	if configured < minimumScopedAutomationIntervalMilliseconds {
+		return minimumScopedAutomationIntervalMilliseconds
 	}
 	return configured
 }
@@ -116,35 +116,41 @@ func priorityAutomationPollMilliseconds(configured int) int {
 func configuredScheduleIdentities(cfg Config) scheduleIdentities {
 	base := cfg.ScoreScheduleWorkflowID
 	return scheduleIdentities{
-		Score:              fmt.Sprintf("%s-snapshot-%dm-v3", base, cfg.RefreshIntervalMinutes),
-		Quota:              base + "-upstream-quota-v4",
-		IdleProbe:          base + "-idle-account-probe-v5",
-		IdleProvision:      base + "-idle-account-provision-v1",
-		PriorityAutomation: base + "-priority-automation-v3",
-		BugTeamCost:        base + "-bugteam-cost-v1",
+		Score:       fmt.Sprintf("%s-snapshot-%dm-v3", base, cfg.RefreshIntervalMinutes),
+		Quota:       base + "-upstream-quota-v4",
+		BugTeamCost: base + "-bugteam-cost-v1",
 	}
 }
 
 func v2PriorityAutomationWorkflowID(base, scope string) string {
-	return fmt.Sprintf("%s-upstream-scheduling-v2-%s-priority-automation-v3", base, scope)
+	return fmt.Sprintf("%s-upstream-scheduling-v2-%s-priority-automation-v4", base, scope)
 }
 
 func v2IdleProbeWorkflowID(base, scope string) string {
-	return fmt.Sprintf("%s-upstream-scheduling-v2-%s-idle-probe-v3", base, scope)
+	return fmt.Sprintf("%s-upstream-scheduling-v2-%s-idle-probe-v4", base, scope)
 }
 
-func v2PriorityAutomationLegacyWorkflowIDs(base, scope string) []string {
-	return []string{
-		fmt.Sprintf("%s-upstream-scheduling-v2-%s-priority-automation-v1", base, scope),
-		fmt.Sprintf("%s-upstream-scheduling-v2-%s-priority-automation-v2", base, scope),
+// 只终止已退役的历史 execution，不注册或恢复其工作流类型。
+func retireReplacedSchedulingWorkflows(c client.Client, cfg Config) error {
+	base := cfg.ScoreScheduleWorkflowID
+	suffixes := []string{"-idle-account-provision-v1", "-idle-account-probe"}
+	for version := 1; version <= 5; version++ {
+		suffixes = append(suffixes, fmt.Sprintf("-idle-account-probe-v%d", version))
 	}
-}
-
-func v2IdleProbeLegacyWorkflowIDs(base, scope string) []string {
-	return []string{
-		fmt.Sprintf("%s-upstream-scheduling-v2-%s-idle-probe-v1", base, scope),
-		fmt.Sprintf("%s-upstream-scheduling-v2-%s-idle-probe-v2", base, scope),
+	for version := 1; version <= 3; version++ {
+		suffixes = append(suffixes, fmt.Sprintf("-priority-automation-v%d", version))
+		for _, scope := range cfg.V2ScopeNames {
+			suffixes = append(suffixes,
+				fmt.Sprintf("-upstream-scheduling-v2-%s-priority-automation-v%d", scope, version),
+				fmt.Sprintf("-upstream-scheduling-v2-%s-idle-probe-v%d", scope, version))
+		}
 	}
+	for _, suffix := range suffixes {
+		if err := terminateIfRunning(c, cfg.Namespace, base+suffix, "replaced by scoped upstream scheduling V2 workflows"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureSchedules(c client.Client, cfg Config) error {
@@ -170,42 +176,13 @@ func ensureSchedules(c client.Client, cfg Config) error {
 			return err
 		}
 	}
-	if cfg.LegacySchedulingEnabled && cfg.IdleProbeEnabled {
-		for _, legacy := range []string{base + "-idle-account-probe-v2", base + "-idle-account-probe-v3", base + "-idle-account-probe-v4"} {
-			if err := terminateIfRunning(c, cfg.Namespace, legacy, "migrated to Go idle probe schedule v5"); err != nil {
-				return err
-			}
-		}
-		if err := terminateIfRunning(c, cfg.Namespace, identities.IdleProvision, "probe isolation provisioning is manual-only"); err != nil {
-			return err
-		}
-		if err := startWorkflow(c, scheduleOptions(identities.IdleProbe, cfg.TaskQueue), "idleAccountProbeScheduleWorkflow", ScheduleInput{IntervalMS: cfg.IdleProbeIntervalSeconds * 1000, RoundTimeoutMS: cfg.IdleProbeTimeoutSeconds * 1000, ActivityStartToCloseTimeout: cfg.ActivityTimeout, MaximumAttempts: 1}); err != nil {
-			return err
-		}
-	} else {
-		for _, id := range []string{base + "-idle-account-probe-v2", base + "-idle-account-probe-v3", base + "-idle-account-probe-v4", identities.IdleProbe, identities.IdleProvision} {
-			if err := terminateIfRunning(c, cfg.Namespace, id, "idle probe disabled by configuration"); err != nil {
-				return err
-			}
-		}
-	}
 	activeIdleScopes := make(map[string]struct{}, len(cfg.V2IdleProbeScopes))
 	for _, scope := range cfg.V2IdleProbeScopes {
 		activeIdleScopes[scope] = struct{}{}
 	}
 	for _, scope := range cfg.V2ScopeNames {
 		if _, active := activeIdleScopes[scope]; active {
-			for _, legacyID := range v2IdleProbeLegacyWorkflowIDs(base, scope) {
-				if err := terminateIfRunning(c, cfg.Namespace, legacyID, "migrated to V2 idle probe schedule v3"); err != nil {
-					return err
-				}
-			}
 			continue
-		}
-		for _, legacyID := range v2IdleProbeLegacyWorkflowIDs(base, scope) {
-			if err := terminateIfRunning(c, cfg.Namespace, legacyID, "upstream scheduling v2 idle probe disabled by scope configuration"); err != nil {
-				return err
-			}
 		}
 		if err := terminateIfRunning(c, cfg.Namespace, v2IdleProbeWorkflowID(base, scope), "upstream scheduling v2 idle probe disabled by scope configuration"); err != nil {
 			return err
@@ -214,7 +191,7 @@ func ensureSchedules(c client.Client, cfg Config) error {
 	if len(cfg.V2IdleProbeScopes) > 0 {
 		for _, scope := range cfg.V2IdleProbeScopes {
 			workflowID := v2IdleProbeWorkflowID(base, scope)
-			if err := startWorkflow(c, scheduleOptions(workflowID, cfg.TaskQueue), "idleAccountProbeScheduleWorkflow", ScheduleInput{
+			if err := startWorkflow(c, scheduleOptions(workflowID, cfg.TaskQueue), "upstreamSchedulingV2IdleProbeScheduleWorkflow", ScheduleInput{
 				IntervalMS:                  cfg.IdleProbeIntervalSeconds * 1000,
 				RoundTimeoutMS:              cfg.IdleProbeTimeoutSeconds * 1000,
 				ActivityStartToCloseTimeout: cfg.ActivityTimeout,
@@ -234,39 +211,13 @@ func ensureSchedules(c client.Client, cfg Config) error {
 	} else if err := terminateIfRunning(c, cfg.Namespace, identities.BugTeamCost, "BugTeam cost monitor disabled by configuration"); err != nil {
 		return err
 	}
-	if cfg.LegacySchedulingEnabled && cfg.AutomationPollMilliseconds > 0 {
-		for _, legacy := range []string{base + "-priority-automation-v1", base + "-priority-automation-v2"} {
-			if err := terminateIfRunning(c, cfg.Namespace, legacy, "migrated to YAML-paced priority automation schedule v3"); err != nil {
-				return err
-			}
-		}
-		if err := startWorkflow(c, scheduleOptions(identities.PriorityAutomation, cfg.TaskQueue), "priorityAutomationScheduleWorkflow", ScheduleInput{IntervalMS: priorityAutomationPollMilliseconds(cfg.AutomationPollMilliseconds), ActivityStartToCloseTimeout: cfg.ActivityTimeout, MaximumAttempts: 1}); err != nil {
-			return err
-		}
-	} else {
-		for _, id := range []string{base + "-priority-automation-v1", base + "-priority-automation-v2", identities.PriorityAutomation} {
-			if err := terminateIfRunning(c, cfg.Namespace, id, "priority automation disabled by configuration"); err != nil {
-				return err
-			}
-		}
-	}
 	activeAutomationScopes := make(map[string]struct{}, len(cfg.V2PriorityAutomationScopes))
 	for _, scope := range cfg.V2PriorityAutomationScopes {
 		activeAutomationScopes[scope] = struct{}{}
 	}
 	for _, scope := range cfg.V2ScopeNames {
 		if _, active := activeAutomationScopes[scope]; active {
-			for _, legacyID := range v2PriorityAutomationLegacyWorkflowIDs(base, scope) {
-				if err := terminateIfRunning(c, cfg.Namespace, legacyID, "migrated to V2 priority automation schedule v3"); err != nil {
-					return err
-				}
-			}
 			continue
-		}
-		for _, legacyID := range v2PriorityAutomationLegacyWorkflowIDs(base, scope) {
-			if err := terminateIfRunning(c, cfg.Namespace, legacyID, "upstream scheduling v2 priority automation disabled by scope configuration"); err != nil {
-				return err
-			}
 		}
 		if err := terminateIfRunning(c, cfg.Namespace, v2PriorityAutomationWorkflowID(base, scope), "upstream scheduling v2 priority automation disabled by scope configuration"); err != nil {
 			return err
@@ -274,7 +225,7 @@ func ensureSchedules(c client.Client, cfg Config) error {
 	}
 	for _, scope := range cfg.V2PriorityAutomationScopes {
 		workflowID := v2PriorityAutomationWorkflowID(base, scope)
-		if err := startWorkflow(c, scheduleOptions(workflowID, cfg.TaskQueue), "priorityAutomationV2ScheduleWorkflow", ScheduleInput{
+		if err := startWorkflow(c, scheduleOptions(workflowID, cfg.TaskQueue), "upstreamSchedulingV2PriorityAutomationScheduleWorkflow", ScheduleInput{
 			IntervalMS:                  cfg.V2AutomationIntervalSeconds * 1000,
 			ActivityStartToCloseTimeout: cfg.ActivityTimeout,
 			MaximumAttempts:             1,
@@ -367,10 +318,9 @@ func Run(ctx context.Context, cfg Config) error {
 	w.RegisterWorkflowWithOptions(ApiKeyCutoffWorkflow, workflow.RegisterOptions{Name: "apiKeyCutoffWorkflow"})
 	w.RegisterWorkflowWithOptions(ScoreRefreshScheduleWorkflow, workflow.RegisterOptions{Name: "scoreRefreshScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(UpstreamQuotaScheduleWorkflow, workflow.RegisterOptions{Name: "upstreamQuotaScheduleWorkflow"})
-	w.RegisterWorkflowWithOptions(IdleAccountProbeScheduleWorkflow, workflow.RegisterOptions{Name: "idleAccountProbeScheduleWorkflow"})
+	w.RegisterWorkflowWithOptions(UpstreamSchedulingV2IdleProbeScheduleWorkflow, workflow.RegisterOptions{Name: "upstreamSchedulingV2IdleProbeScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(BugTeamCostScheduleWorkflow, workflow.RegisterOptions{Name: "bugTeamCostScheduleWorkflow"})
-	w.RegisterWorkflowWithOptions(PriorityAutomationScheduleWorkflow, workflow.RegisterOptions{Name: "priorityAutomationScheduleWorkflow"})
-	w.RegisterWorkflowWithOptions(PriorityAutomationV2ScheduleWorkflow, workflow.RegisterOptions{Name: "priorityAutomationV2ScheduleWorkflow"})
+	w.RegisterWorkflowWithOptions(UpstreamSchedulingV2PriorityAutomationScheduleWorkflow, workflow.RegisterOptions{Name: "upstreamSchedulingV2PriorityAutomationScheduleWorkflow"})
 	activityTimeout, parseErr := time.ParseDuration(cfg.ActivityTimeout)
 	if parseErr != nil || activityTimeout <= 0 {
 		activityTimeout = 15 * time.Minute
@@ -384,6 +334,9 @@ func Run(ctx context.Context, cfg Config) error {
 	cancelAPI()
 	if err := terminateLegacyOperationWorkflows(ctx, c, cfg); err != nil {
 		return fmt.Errorf("legacy operation workflow migration: %w", err)
+	}
+	if err := retireReplacedSchedulingWorkflows(c, cfg); err != nil {
+		return fmt.Errorf("retire replaced scheduling workflows: %w", err)
 	}
 	if err := w.Start(); err != nil {
 		return err

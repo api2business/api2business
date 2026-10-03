@@ -31,6 +31,89 @@ function rowKey(row: Row): string {
   ]);
 }
 
+function cachedUsageResult(row: Row): Row {
+  return object(row.last_success_result ?? row.result);
+}
+
+function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[]) {
+  const cachedByAccount = new Map<number, {
+    result: Row;
+    cachedAt: string | null;
+    status: "cached" | "unlimited" | "unavailable";
+  }>();
+  for (const row of records(usageRows)) {
+    const accountId = Number(row.account_id ?? row.accountId);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) continue;
+    const result = cachedUsageResult(row);
+    const quota = object(result.quota);
+    const remaining = Number(quota.remaining);
+    const hasQuota = result.ok === true
+      && String(quota.unit ?? "").toUpperCase() === "USD"
+      && quota.remaining !== null && quota.remaining !== undefined
+      && Number.isFinite(remaining);
+    const status = hasQuota
+      ? "cached"
+      : result.ok === true && quota.unlimited === true
+        ? "unlimited"
+        : "unavailable";
+    cachedByAccount.set(accountId, {
+      result,
+      status,
+      cachedAt: row.last_success_at == null
+        ? row.queried_at == null ? null : String(row.queried_at)
+        : String(row.last_success_at),
+    });
+  }
+  const missingAccountIds: number[] = [];
+  const unavailableAccountIds: number[] = [];
+  let numericAccountCount = 0;
+  let unlimitedAccountCount = 0;
+  const enriched: Row[] = accounts.map((account) => {
+    const accountId = Number(account.accountId);
+    const cached = cachedByAccount.get(accountId);
+    if (!cached) {
+      if (Number.isSafeInteger(accountId) && accountId > 0) missingAccountIds.push(accountId);
+      return {
+        ...account,
+        quota: null,
+        quotaCacheAt: null,
+        quotaCacheStatus: "missing",
+      };
+    }
+    const quota = object(cached.result.quota);
+    if (cached.status === "cached") numericAccountCount += 1;
+    if (cached.status === "unlimited") unlimitedAccountCount += 1;
+    if (cached.status === "unavailable") unavailableAccountIds.push(accountId);
+    return {
+      ...account,
+      quota: {
+        limit: quota.limit ?? null,
+        used: quota.used ?? null,
+        remaining: cached.status === "cached" ? Number(quota.remaining) : null,
+        unlimited: quota.unlimited ?? null,
+        unit: quota.unit == null ? null : String(quota.unit),
+      },
+      quotaCacheAt: cached.cachedAt,
+      quotaCacheStatus: cached.status,
+    };
+  });
+  return {
+    accounts: enriched,
+    quotaCoverage: {
+      accountCount: enriched.length,
+      cachedAccountCount: enriched.length - missingAccountIds.length,
+      numericAccountCount,
+      unlimitedAccountCount,
+      unavailableAccountIds: unavailableAccountIds.sort((a, b) => a - b),
+      missingAccountIds: missingAccountIds.sort((a, b) => a - b),
+      complete: missingAccountIds.length === 0 && unavailableAccountIds.length === 0 && unlimitedAccountCount === 0,
+      cacheRowsComplete: missingAccountIds.length === 0,
+      source: "quota-monitor-usage-cache",
+      valuesPrinted: false,
+    },
+  };
+}
+
 function accountBelongsToScope(row: Row, scope: UpstreamSchedulingV2Scope): boolean {
   if (String(row.platform ?? "").trim().toLowerCase() !== scope.platform) return false;
   const groupIds = normalizedIds(row.groupIds);
@@ -82,7 +165,6 @@ export class UpstreamSchedulingV2Service {
       ok: true,
       version: "v2",
       defaultScope: configuration.defaultScope,
-      legacySchedulingEnabled: this.config.operations.legacyScheduling?.enabled !== false,
       scopes: Object.entries(configuration.scopes).map(([name, scope]) => ({
         name,
         enabled: scope.enabled,
@@ -110,7 +192,7 @@ export class UpstreamSchedulingV2Service {
       throw new UpstreamSchedulingV2Error(409, "platform_unsupported", `V2 暂不支持平台：${scope.platform}`);
     }
     const accountIds = accounts.map((row) => Number(row.accountId));
-    const [poolQuality, errors, priorityHistory, quota, usage, probeHistory] = await Promise.all([
+    const [poolQuality, errors, priorityHistory, quota, usageRows, probeHistory] = await Promise.all([
       this.operations.poolQualitySummary(qualityProfile),
       this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all" }),
       this.operations.priorityHistory(),
@@ -118,9 +200,11 @@ export class UpstreamSchedulingV2Service {
       accountIds.length ? this.operations.getUpstreamUsageCache(accountIds) : Promise.resolve([]),
       qualityProfile === "codex" ? this.operations.idleProbeHistory(1, 10) : Promise.resolve({ records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
     ]);
+    const quotaProjection = enrichAccountsWithQuotaCache(accounts, usageRows);
     return {
       scoreSnapshot,
-      accounts,
+      accounts: quotaProjection.accounts,
+      quotaCoverage: quotaProjection.quotaCoverage,
       poolQuality,
       errors,
       priorityHistory: filteredHistory(priorityHistory.records, scopeName),
@@ -132,7 +216,7 @@ export class UpstreamSchedulingV2Service {
         scope: scopeName,
       },
       quota,
-      usage: records(usage).map((row) => row.last_success_result ?? row.result).filter(Boolean),
+      usage: records(usageRows).map(cachedUsageResult).filter((row) => Object.keys(row).length > 0),
       probeHistory,
     };
   }
@@ -173,7 +257,7 @@ export class UpstreamSchedulingV2Service {
       {
         name: "pool-quality",
         status: source.poolQuality.platform === scopeName && normalizedIds(source.poolQuality.groupIds).join(",") === scope.eligibleGroupIds.join(",") ? "matched" : "mismatch",
-        oldSource: "legacy-pool-quality-read",
+        oldSource: "codex-reconciliation-read-model",
         v2Source: "v2-scope-projection",
         score: source.poolQuality.score ?? null,
         platform: source.poolQuality.platform ?? null,
@@ -196,7 +280,7 @@ export class UpstreamSchedulingV2Service {
     const mismatches = checks.filter((check) => check.status !== "matched");
     return {
       status: mismatches.length === 0 ? "matched" : "mismatch",
-      mode: "legacy-score-read-model-to-v2-scope-projection",
+      mode: "codex-read-model-to-v2-scope-projection",
       scope: scopeName,
       checkedAt: new Date().toISOString(),
       checks,
@@ -223,6 +307,7 @@ export class UpstreamSchedulingV2Service {
         recentCallLimit: source.scoreSnapshot.recentCallLimit ?? this.config.monitor.recentCallLimit,
         status: source.scoreSnapshot.status ?? "unavailable",
         accounts: source.accounts,
+        quotaCoverage: source.quotaCoverage,
         poolQuality: source.poolQuality,
         errors: source.errors,
         priorityHistory: source.priorityHistory,

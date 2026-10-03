@@ -65,17 +65,6 @@ webProbe:
     cookieName: api2business_session
   defaultSmokeProfile: upstream-scheduling-v2
   smokeProfiles:
-    scores-layout:
-      path: /scores
-      readySelector: "#score-updated-time"
-      screenshotName: api2business-scores-desktop.png
-      mobileScreenshotName: api2business-scores-mobile.png
-      viewport: { width: 1920, height: 1080 }
-      mobileViewport: { width: 390, height: 844 }
-      navigationTimeoutMs: 30000
-      settleMs: 5000
-      commandTimeoutSeconds: 90
-      outputLimits: { failures: 12, network: 40, console: 12 }
     upstream-scheduling-v2:
       path: /upstream-scheduling-v2
       readySelector: "#v2-data-state"
@@ -171,7 +160,6 @@ sub2api:
     decayStep: 0.1
     minimumWeight: 0.1
   idleProbe:
-    enabled: true
     intervalSeconds: 60
     idleSeconds: 600
     model: gpt-5.6-terra
@@ -371,8 +359,6 @@ operations:
   writePolicy:
     enabled: false
     claudeEnabled: false
-  legacyScheduling:
-    enabled: false
   upstreamSchedulingV2:
     enabled: true
     defaultScope: codex
@@ -477,11 +463,6 @@ operations:
   auditLimit: 200
   priorityVerificationTimeoutMs: 15000
   priorityVerificationPollMs: 500
-  automationPollMs: 600000
-  automationRunTimeoutMs: 600000
-  automationFailureBackoffMaxMs: 60000
-  automationFailureRetryLimit: 3
-  automationFailureCooldownMs: 1800000
   automationJitterPercent: 0.1
   automationSafety:
     maximumScoreQueryDurationMs: 3000

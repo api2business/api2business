@@ -23,9 +23,13 @@ monitor:
   refreshIntervalMinutes: 5
   automaticRefresh: { enabled: true }
 sub2api:
-  idleProbe: { enabled: true, intervalSeconds: 60, roundTimeoutSeconds: 50 }
+  idleProbe: { intervalSeconds: 60, roundTimeoutSeconds: 50 }
 operations:
-  automationPollMs: 60000
+  upstreamSchedulingV2:
+    enabled: true
+    automation: { intervalSeconds: 120, recentCallLimit: 1000 }
+    scopes:
+      codex: { enabled: true, platform: openai, features: { priorityAutomation: true, idleProbe: true } }
   upstreamManagement: { quotaSampleIntervalSeconds: 300, quotaSampleTimeoutSeconds: 240 }
 temporal:
   addressEnv: TEMPORAL_ADDRESS
@@ -57,8 +61,27 @@ runtime:
 	if cfg.APIBaseURL != "http://127.0.0.1:8080" || cfg.TaskQueue != "api2business-native" {
 		t.Fatalf("unexpected runtime config: %#v", cfg)
 	}
-	if !cfg.AutomaticRefreshEnabled || !cfg.IdleProbeEnabled || cfg.AutomationPollMilliseconds != 60000 {
+	if !cfg.AutomaticRefreshEnabled || cfg.V2AutomationIntervalSeconds != 120 || cfg.V2AutomationRecentCallLimit != 1000 {
 		t.Fatalf("missing periodic worker config: %#v", cfg)
+	}
+}
+
+func TestLoadConfigRejectsRetiredGlobalSchedulingKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "api2business.yaml")
+	data := `
+monitor: { refreshIntervalMinutes: 5, automaticRefresh: { enabled: false } }
+operations: { legacyScheduling: { enabled: true } }
+temporal: { addressEnv: TEMPORAL_ADDRESS, namespace: unidesk, submissionTimeoutMs: 1000, workflowExecutionTimeout: 1m, activityStartToCloseTimeout: 1m, retry: { maximumAttempts: 1 } }
+runtime: { serverTargets: { native: { listenHost: 127.0.0.1, listenPort: 8080, workerHealthPort: 8081, temporalTaskQueue: queue, scoreScheduleWorkflowId: score, adminTokenEnv: API_TOKEN } } }
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadConfig([]string{"--config", path, "--runtime", "native"}, func(key string) string {
+		return map[string]string{"TEMPORAL_ADDRESS": "127.0.0.1:7233", "API_TOKEN": "test-token"}[key]
+	})
+	if err == nil || !strings.Contains(err.Error(), "operations.legacyScheduling was retired") {
+		t.Fatalf("expected retired scheduling rejection, got %v", err)
 	}
 }
 
@@ -82,36 +105,21 @@ func TestConfiguredScheduleIdentitiesRemainStable(t *testing.T) {
 		RefreshIntervalMinutes:  5,
 	})
 	expected := scheduleIdentities{
-		Score:              "api2business-native-score-refresh-schedule-snapshot-5m-v3",
-		Quota:              "api2business-native-score-refresh-schedule-upstream-quota-v4",
-		IdleProbe:          "api2business-native-score-refresh-schedule-idle-account-probe-v5",
-		IdleProvision:      "api2business-native-score-refresh-schedule-idle-account-provision-v1",
-		PriorityAutomation: "api2business-native-score-refresh-schedule-priority-automation-v3",
-		BugTeamCost:        "api2business-native-score-refresh-schedule-bugteam-cost-v1",
+		Score:       "api2business-native-score-refresh-schedule-snapshot-5m-v3",
+		Quota:       "api2business-native-score-refresh-schedule-upstream-quota-v4",
+		BugTeamCost: "api2business-native-score-refresh-schedule-bugteam-cost-v1",
 	}
 	if identities != expected {
 		t.Fatalf("schedule identities changed: %#v", identities)
 	}
 }
 
-func TestPriorityAutomationPollHasSafeMinimum(t *testing.T) {
-	if got := priorityAutomationPollMilliseconds(1000); got != minimumPriorityAutomationPollMilliseconds {
+func TestScopedAutomationIntervalHasSafeMinimum(t *testing.T) {
+	if got := scopedAutomationIntervalMilliseconds(1000); got != minimumScopedAutomationIntervalMilliseconds {
 		t.Fatalf("poll interval was not clamped: %d", got)
 	}
-	if got := priorityAutomationPollMilliseconds(120000); got != 120000 {
+	if got := scopedAutomationIntervalMilliseconds(120000); got != 120000 {
 		t.Fatalf("valid poll interval was changed: %d", got)
-	}
-}
-
-func TestPriorityAutomationUsesAuthoritativeDelay(t *testing.T) {
-	if got := priorityAutomationDelayMilliseconds(PriorityAutomationRunResult{NextDelayMS: 637000}, 600000); got != 637000 {
-		t.Fatalf("authoritative delay was changed: %d", got)
-	}
-	if got := priorityAutomationDelayMilliseconds(PriorityAutomationRunResult{}, 600000); got != 600000 {
-		t.Fatalf("missing delay did not use fallback: %d", got)
-	}
-	if got := priorityAutomationDelayMilliseconds(PriorityAutomationRunResult{NextDelayMS: 1000}, 600000); got != minimumPriorityAutomationPollMilliseconds {
-		t.Fatalf("short delay was not clamped: %d", got)
 	}
 }
 

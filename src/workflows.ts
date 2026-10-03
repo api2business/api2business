@@ -1,5 +1,5 @@
 import { condition, continueAsNew, defineSignal, log, proxyActivities, setHandler, sleep, workflowInfo } from "@temporalio/workflow";
-import type { AppCommand, OperationRequest, ScheduledBugTeamCostInput, ScheduledIdleProbeInput, ScheduledScoreRefreshInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
+import type { AppCommand, OperationRequest, ScheduledBugTeamCostInput, ScheduledScoreRefreshInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
 
 export interface Activities {
   executeOperation(request: OperationRequest): Promise<unknown>;
@@ -92,26 +92,6 @@ export async function upstreamQuotaScheduleWorkflow(input: ScheduledUpstreamQuot
     await sleep(input.intervalMs);
   }
   await continueAsNew<typeof upstreamQuotaScheduleWorkflow>(input);
-}
-
-export async function idleAccountProbeScheduleWorkflow(input: ScheduledIdleProbeInput): Promise<void> {
-  const probeActivity = proxyActivities<Activities>({
-    startToCloseTimeout: input.roundTimeoutMs,
-    scheduleToCloseTimeout: input.roundTimeoutMs,
-    retry: { maximumAttempts: 1 },
-  });
-  for (let iteration = 0; iteration < 500; iteration += 1) {
-    try {
-      await probeActivity.executeOperation({
-        operationId: `${workflowInfo().runId}:idle-probe:${iteration}`,
-        command: { kind: "account.idle-probe.run", accountIds: [], rounds: 1 },
-      });
-    } catch {
-      // 单轮失败直接跳过，下一分钟重新选择仍无请求的账号。
-    }
-    await sleep(input.intervalMs);
-  }
-  await continueAsNew<typeof idleAccountProbeScheduleWorkflow>(input);
 }
 
 export async function bugTeamCostScheduleWorkflow(input: ScheduledBugTeamCostInput): Promise<void> {

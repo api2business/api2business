@@ -84,19 +84,6 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
       scope: command.scope,
     });
     if (command.kind === "account.idle-probe.reconcile") return await services.operations.reconcileIdleProbe(command.accountIds);
-    if (command.kind === "priority.plan.create") return await services.operations.generatePriorityPlan(command.recentCallLimit, command.operator);
-    if (command.kind === "priority.plan.manual-create") return await services.operations.createManualPriorityPlan(command.priorities, command.operator);
-    if (command.kind === "priority.plan.confirm") return await services.operations.confirmPriorityPlan(command.planId, command.operator);
-    if (command.kind === "priority.automation.run") {
-      try {
-        const result = await services.operations.runDueAutomation();
-        const dispatch = await services.operations.priorityAutomationDispatchDelay();
-        return { ...result, nextDelayMs: dispatch.delayMs, nextDelayReason: dispatch.reason };
-      } catch (error) {
-        await services.operations.deferPriorityAutomationAfterDispatchFailure(error).catch(() => null);
-        throw error;
-      }
-    }
     if (command.kind === "priority.automation.v2.run") {
       return await services.operations.runV2AutomaticPriorityPlan(command.scope, command.recentCallLimit);
     }

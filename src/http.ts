@@ -7,7 +7,6 @@ import type { AccountImportService, ImportJobPatch, AccountImportRequest } from 
 import type { BugTeamPurchaseImportService, BugTeamPurchaseJobPatch, BugTeamPurchaseRequest } from "./bugteam-purchase-import-service";
 import { UpstreamManagementError, type UpstreamManagementService } from "./upstream-management";
 import type { AppCommand, OperationRequest } from "./contracts";
-import { normalizeManualPriorityAssignments } from "./manual-priority-plan";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { isRecoverableDatabaseConnectionError } from "./database-connection";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
@@ -229,7 +228,7 @@ export function createHandler(
   const cacheRefreshes = new Map<string, Promise<ApiCacheRefreshResult>>();
   const handle = async (request: Request) => {
     const url = new URL(request.url);
-    const schedulingHome = config.operations.legacyScheduling?.enabled === false ? "/upstream-scheduling-v2" : "/scores";
+    const schedulingHome = "/upstream-scheduling-v2";
     const session = sessionAuthorized(request, config, auth);
       const apiKey = apiKeyAuthorized(request, auth) || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
     try {
@@ -260,6 +259,10 @@ export function createHandler(
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/app.js") return await staticFile("app.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/upstream-scheduling-v2.js") return await staticFile("upstream-scheduling-v2.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/ledger-pages.js") return await staticFile("ledger-pages.js", "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/score-visuals.js") return await staticFile("score-visuals.js", "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/sample-time.js") return await staticFile("sample-time.js", "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/quota-availability.js") return await staticFile("quota-availability.js", "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/quota-grouping.js") return await staticFile("quota-grouping.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/api2business-icon.svg") {
         return await staticFile("api2business-icon.svg", "image/svg+xml");
       }
@@ -268,9 +271,6 @@ export function createHandler(
       }
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/favicon-192.png") {
         return await staticFile("favicon-192.png", "image/png");
-      }
-      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/score-display-freshness.js") {
-        return await staticFile("score-display-freshness.js", "text/javascript; charset=utf-8");
       }
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/upstream-quality-assets.js") {
         return await staticFile("upstream-quality-assets.js", "text/javascript; charset=utf-8");
@@ -282,10 +282,10 @@ export function createHandler(
         return await staticFile("bugteam-cost.js", "text/javascript; charset=utf-8");
       }
       if (request.method === "GET" && url.pathname === "/") return redirect(session ? schedulingHome : "/login");
-      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/scores" && config.operations.legacyScheduling?.enabled === false) {
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/scores") {
         return redirect(session ? schedulingHome : "/login");
       }
-      const page = ({ "/scores": "scores.html", "/upstream-scheduling-v2": "upstream-scheduling-v2.html", "/quota-monitor": "quota-monitor.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
+      const page = ({ "/upstream-scheduling-v2": "upstream-scheduling-v2.html", "/quota-monitor": "quota-monitor.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
@@ -781,10 +781,6 @@ export function createHandler(
         if (!operation) return json({ ok: false, error: "invalid operation request" }, 400);
         return json({ ok: true, operationId: operation.operationId, result: await executeWorkerOperation(operation) });
       }
-      if (request.method === "POST" && url.pathname === "/api/internal/priority-automation/run-due") {
-        if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
-        return json({ ok: true, due: false, skipped: true, reason: "priority automation is owned by Temporal worker" });
-      }
       if (request.method === "GET" && url.pathname === "/api/status") {
         const scores = await dispatcher.dispatch({ kind: "scores.get" }) as Record<string, unknown>;
         return json({ ok: true, service: "api2business", scoreStatus: scores.status, refreshedAt: scores.refreshedAt, nextRefreshAt: scores.nextRefreshAt });
@@ -888,63 +884,8 @@ export function createHandler(
         const id = decodeURIComponent(url.pathname.split("/")[4]!);
         return json(await operations.voidCash(id, input.reason.trim(), config.webAuth.username));
       }
-      if (request.method === "POST" && url.pathname === "/api/operations/priority-plans") {
-        const input = await body(request);
-        if (input.priorities !== undefined) {
-          let priorities: Record<string, number>;
-          try {
-            priorities = normalizeManualPriorityAssignments(input.priorities);
-          } catch (error) {
-            return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
-          }
-          return json(await dispatcher.submit({
-            kind: "priority.plan.manual-create",
-            priorities,
-            operator: config.webAuth.username,
-          }), 202);
-        }
-        const limit = Number(input.recentCallLimit ?? config.monitor.recentCallLimit);
-        if (!config.monitor.recentCallOptions.includes(limit)) return json({ ok: false, error: "评分样本档位无效" }, 400);
-        return json(await dispatcher.submit({
-          kind: "priority.plan.create",
-          recentCallLimit: limit,
-          operator: config.webAuth.username,
-        }), 202);
-      }
-      if (request.method === "GET" && url.pathname === "/api/operations/priority-state") {
-        const limit = Number(url.searchParams.get("recentCallLimit") ?? config.monitor.recentCallLimit);
-        if (!config.monitor.recentCallOptions.includes(limit)) return json({ ok: false, error: "评分样本档位无效" }, 400);
-        return json(await operations.priorityState(
-          limit,
-          "manual",
-          url.searchParams.get("account"),
-          url.searchParams.get("group"),
-        ));
-      }
       if (request.method === "GET" && url.pathname === "/api/operations/priority-history") {
         return json(await operations.priorityHistory());
-      }
-      if (request.method === "GET" && url.pathname === "/api/operations/priority-automation") {
-        return json(await operations.getPriorityAutomation());
-      }
-      if (request.method === "POST" && url.pathname === "/api/operations/priority-automation") {
-        const input = await body(request);
-        return json(await operations.createPriorityAutomation({
-          enabled: input.enabled, intervalSeconds: input.intervalSeconds, recentCallLimit: input.recentCallLimit,
-        }, config.webAuth.username));
-      }
-      if (request.method === "PATCH" && url.pathname === "/api/operations/priority-automation") {
-        const input = await body(request);
-        return json(await operations.updatePriorityAutomation({
-          enabled: input.enabled, intervalSeconds: input.intervalSeconds, recentCallLimit: input.recentCallLimit,
-        }, config.webAuth.username));
-      }
-      if (request.method === "DELETE" && url.pathname === "/api/operations/priority-automation") {
-        return json(await operations.deletePriorityAutomation(config.webAuth.username));
-      }
-      if (request.method === "POST" && /^\/api\/operations\/priority-plans\/[^/]+\/confirm$/u.test(url.pathname)) {
-        const id = decodeURIComponent(url.pathname.split("/")[4]!);
-        return json(await dispatcher.submit({ kind: "priority.plan.confirm", planId: id, operator: config.webAuth.username }), 202);
       }
       if (request.method === "POST" && url.pathname === "/api/operations/procurement") {
         const input = await body(request);

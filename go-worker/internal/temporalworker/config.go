@@ -20,12 +20,9 @@ type Config struct {
 	ActivityTimeout, WorkflowExecutionTimeout                   string
 	SubmissionTimeout                                           time.Duration
 	MaximumAttempts, QuotaIntervalSeconds, QuotaTimeoutSeconds  int
-	AutomationPollMilliseconds                                  int
-	LegacySchedulingEnabled                                     bool
 	V2AutomationIntervalSeconds, V2AutomationRecentCallLimit    int
 	V2ScopeNames, V2PriorityAutomationScopes, V2IdleProbeScopes []string
 	AutomaticRefreshEnabled                                     bool
-	IdleProbeEnabled                                            bool
 	IdleProbeIntervalSeconds, IdleProbeTimeoutSeconds           int
 	BugTeamCostMonitorEnabled                                   bool
 	BugTeamCostIntervalSeconds                                  int
@@ -40,16 +37,11 @@ type fileConfig struct {
 	} `yaml:"monitor"`
 	Sub2API struct {
 		IdleProbe struct {
-			Enabled             bool `yaml:"enabled"`
-			IntervalSeconds     int  `yaml:"intervalSeconds"`
-			RoundTimeoutSeconds int  `yaml:"roundTimeoutSeconds"`
+			IntervalSeconds     int `yaml:"intervalSeconds"`
+			RoundTimeoutSeconds int `yaml:"roundTimeoutSeconds"`
 		} `yaml:"idleProbe"`
 	} `yaml:"sub2api"`
 	Operations struct {
-		AutomationPollMilliseconds int `yaml:"automationPollMs"`
-		LegacyScheduling           *struct {
-			Enabled *bool `yaml:"enabled"`
-		} `yaml:"legacyScheduling"`
 		UpstreamSchedulingV2 struct {
 			Enabled    bool `yaml:"enabled"`
 			Automation struct {
@@ -121,6 +113,17 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return Config{}, err
 	}
+	var rawKeys map[string]any
+	if err := yaml.Unmarshal(data, &rawKeys); err != nil {
+		return Config{}, err
+	}
+	if operations, ok := rawKeys["operations"].(map[string]any); ok {
+		for _, retired := range []string{"legacyScheduling", "automationPollMs", "automationRunTimeoutMs", "automationFailureBackoffMaxMs", "automationFailureRetryLimit", "automationFailureCooldownMs"} {
+			if _, exists := operations[retired]; exists {
+				return Config{}, fmt.Errorf("operations.%s was retired; configure operations.upstreamSchedulingV2 instead", retired)
+			}
+		}
+	}
 	target, ok := raw.Runtime.ServerTargets[runtimeID]
 	if !ok {
 		return Config{}, fmt.Errorf("runtime.serverTargets.%s does not exist", runtimeID)
@@ -167,10 +170,6 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 			}
 		}
 	}
-	legacySchedulingEnabled := true
-	if raw.Operations.LegacyScheduling != nil && raw.Operations.LegacyScheduling.Enabled != nil {
-		legacySchedulingEnabled = *raw.Operations.LegacyScheduling.Enabled
-	}
 	sort.Strings(v2PriorityAutomationScopes)
 	sort.Strings(v2IdleProbeScopes)
 	sort.Strings(v2ScopeNames)
@@ -185,15 +184,13 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 		MaximumAttempts:             raw.Temporal.Retry.MaximumAttempts,
 		QuotaIntervalSeconds:        raw.Operations.UpstreamManagement.QuotaSampleIntervalSeconds,
 		QuotaTimeoutSeconds:         raw.Operations.UpstreamManagement.QuotaSampleTimeoutSeconds,
-		AutomationPollMilliseconds:  raw.Operations.AutomationPollMilliseconds,
-		LegacySchedulingEnabled:     legacySchedulingEnabled,
 		V2AutomationIntervalSeconds: raw.Operations.UpstreamSchedulingV2.Automation.IntervalSeconds,
 		V2AutomationRecentCallLimit: raw.Operations.UpstreamSchedulingV2.Automation.RecentCallLimit,
 		V2PriorityAutomationScopes:  v2PriorityAutomationScopes,
 		V2IdleProbeScopes:           v2IdleProbeScopes,
 		V2ScopeNames:                v2ScopeNames,
-		IdleProbeEnabled:            raw.Sub2API.IdleProbe.Enabled, IdleProbeIntervalSeconds: raw.Sub2API.IdleProbe.IntervalSeconds,
-		IdleProbeTimeoutSeconds:   raw.Sub2API.IdleProbe.RoundTimeoutSeconds,
-		BugTeamCostMonitorEnabled: raw.BugTeam.Monitor.Enabled, BugTeamCostIntervalSeconds: raw.BugTeam.Monitor.SampleIntervalSeconds,
+		IdleProbeIntervalSeconds:    raw.Sub2API.IdleProbe.IntervalSeconds,
+		IdleProbeTimeoutSeconds:     raw.Sub2API.IdleProbe.RoundTimeoutSeconds,
+		BugTeamCostMonitorEnabled:   raw.BugTeam.Monitor.Enabled, BugTeamCostIntervalSeconds: raw.BugTeam.Monitor.SampleIntervalSeconds,
 	}, nil
 }

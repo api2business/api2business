@@ -196,7 +196,6 @@ export class AdminHttpClient {
       body: JSON.stringify({ accountIds, operationId }),
     }, 30000);
   }
-  priorityAutomation(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-automation"); }
   priorityHistory(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-history"); }
   accountImport(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request("/api/account-import/jobs", { method: "POST", body: JSON.stringify(input) }, 30000);
@@ -314,38 +313,6 @@ export class AdminHttpClient {
       body: JSON.stringify({ day }),
     }, 60000);
   }
-  createPriorityPlan(recentCallLimit: number): Promise<Record<string, unknown>> {
-    return this.request("/api/operations/priority-plans", { method: "POST", body: JSON.stringify({ recentCallLimit }) }, 60000);
-  }
-  createManualPriorityPlan(priorities: Record<string, number>): Promise<Record<string, unknown>> {
-    return this.request("/api/operations/priority-plans", { method: "POST", body: JSON.stringify({ priorities }) }, 60000);
-  }
-  confirmPriorityPlan(id: string): Promise<Record<string, unknown>> {
-    return this.request(`/api/operations/priority-plans/${encodeURIComponent(id)}/confirm`, { method: "POST", body: "{}" }, 240000);
-  }
-  createPriorityAutomation(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.request("/api/operations/priority-automation", { method: "POST", body: JSON.stringify(input) });
-  }
-  updatePriorityAutomation(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.request("/api/operations/priority-automation", { method: "PATCH", body: JSON.stringify(input) });
-  }
-  deletePriorityAutomation(): Promise<Record<string, unknown>> {
-    return this.request("/api/operations/priority-automation", { method: "DELETE" });
-  }
-  priorityState(
-    recentCallLimit: number,
-    account: string | null,
-    group: string | null,
-  ): Promise<Record<string, unknown>> {
-    const query = new URLSearchParams({ recentCallLimit: String(recentCallLimit) });
-    if (account) query.set("account", account);
-    if (group) query.set("group", group);
-    return this.request(
-      `/api/operations/priority-state?${query}`,
-      {},
-      60000,
-    );
-  }
   ledger(period?: string, page = 1): Promise<Record<string, unknown>> {
     const query = new URLSearchParams({ page: String(page) });
     if (period) query.set("period", period);
@@ -439,12 +406,5 @@ export class AdminHttpClient {
       method: "POST",
       body: "{}",
     });
-  }
-  runDueAutomation(): Promise<Record<string, unknown>> {
-    return this.request(
-      "/api/internal/priority-automation/run-due",
-      { method: "POST", body: "{}" },
-      this.config.operations.automationRunTimeoutMs + 30000,
-    );
   }
 }
