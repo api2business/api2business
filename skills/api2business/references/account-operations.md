@@ -49,6 +49,9 @@
 
 - 探活覆盖对象是 OpenAI `type=apikey` 上游账号；Grok、Anthropic 和 OAuth 账号不套用
   这套 OpenAI Responses 探活隔离入口，必须使用各自的专用采样或评测入口。
+- 探活请求模型读取账号 `credentials.model_mapping` 白名单，优先选择
+  `gpt-5.6-terra`，其次选择 `gpt-5.6-sol`；白名单为空时使用 owning YAML 默认模型，
+  白名单存在但没有这两个模型时跳过该账号并返回模型不可用记录，不添加临时别名。
 - 账号级验收口径是：每个 `active` 且 `schedulable=true` 的目标上游在最近 20 分钟内
   至少存在一条由探活专用 Key 产生的 `usage_logs` 或 `ops_error_logs` 记录；成功和失败
   都算记录，不能用普通用户流量或仅有探活轮次汇总冒充账号级覆盖。
