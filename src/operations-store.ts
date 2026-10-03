@@ -491,6 +491,13 @@ export class OperationsStore {
         api_amount_usd_total, wallet_api_amount_usd_total, account_cost_inputs
       FROM api2business_upstream_quota_samples
       WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
+         OR (wallet_key, sampled_at) IN (
+           SELECT DISTINCT ON (wallet_key) wallet_key, sampled_at
+           FROM api2business_upstream_quota_samples
+           WHERE probe_ok=true AND remaining_usd IS NOT NULL
+             AND sampled_at < now() - (${hours}::text || ' hours')::interval
+           ORDER BY wallet_key, sampled_at DESC
+         )
          OR sampled_at IN (
            SELECT sampled_at FROM (
              SELECT DISTINCT sampled_at FROM api2business_upstream_quota_samples

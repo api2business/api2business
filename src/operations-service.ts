@@ -55,7 +55,7 @@ import {
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
-import { buildQuotaSamples, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
+import { buildQuotaSamples, carryForwardFailedQuotaBalances, carryForwardQuotaHistory, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
 import {
   buildOAuthRuntimeSample,
   oauthRuntimeHistory,
@@ -454,10 +454,14 @@ export class OperationsService {
   async setUpstreamUsageCache(results: Array<Record<string, unknown>>, apiAmountUsdTotal: number | null = null, recordSample = false): Promise<void> {
     const policy = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
     const sampledAt = new Date().toISOString();
-    const samples = recordSample ? buildQuotaSamples(
-      results, sampledAt,
-      (wallet) => upstreamBalanceRateByWallet(wallet, policy.defaultCnyPerApiUsd, policy.walletCnyPerApiUsd),
-    ) : [];
+    const rateForWallet = (wallet: string) => upstreamBalanceRateByWallet(wallet, policy.defaultCnyPerApiUsd, policy.walletCnyPerApiUsd);
+    const samples = recordSample
+      ? carryForwardFailedQuotaBalances(
+        buildQuotaSamples(results, sampledAt, rateForWallet),
+        records(await this.store.getUpstreamUsageCache([])),
+        rateForWallet,
+      )
+      : [];
     await this.store.setUpstreamUsageCache(results, samples, apiAmountUsdTotal);
   }
 
@@ -487,6 +491,7 @@ export class OperationsService {
           && item.costRateCnyPerApiUsd > 0)
         : [],
     }));
+    samples = carryForwardQuotaHistory(samples);
     const walletKeys = [...new Set(samples.map((row) => row.walletKey).filter(Boolean))];
     const groupRows = walletKeys.length === 0 ? { rows: [] as Record<string, unknown>[] } : await this.reads.query<Record<string, unknown>>({
       key: `upstream-quota-history-groups:${walletKeys.join(",")}`,

@@ -26,6 +26,59 @@ export interface UpstreamAccountCostInput {
   source: "detected" | "manual";
 }
 
+// A failed quota request is not evidence that the wallet reached zero. Keep the
+// last successful numeric balance in the monitoring series while retaining the
+// current sample's probeOk=false marker for diagnosis.
+export function carryForwardFailedQuotaBalances(
+  samples: UpstreamQuotaSample[],
+  cacheRows: Row[],
+  rateForWallet: (wallet: string) => number,
+): UpstreamQuotaSample[] {
+  const lastSuccessByWallet = new Map<string, { result: Row; at: number; queriedAt: string | null }>();
+  for (const row of cacheRows) {
+    const accountId = Number(row.account_id ?? row.accountId);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) continue;
+    const result = object(row.last_success_result);
+    const wallet = normalizeUpstreamWallet(result.baseUrl);
+    const quota = object(result.quota);
+    const remaining = finite(quota.remaining);
+    if (wallet && result.ok === true && String(quota.unit ?? "").toUpperCase() === "USD" && remaining !== null && remaining >= 0) {
+      const at = Date.parse(String(row.last_success_at ?? result.queriedAt ?? "")) || 0;
+      if (at >= (lastSuccessByWallet.get(wallet)?.at ?? -1)) {
+        lastSuccessByWallet.set(wallet, { result, at, queriedAt: result.queriedAt == null ? null : String(result.queriedAt) });
+      }
+    }
+  }
+  return samples.map((sample) => {
+    if (sample.probeOk || sample.remainingCny !== null) return sample;
+    const cached = lastSuccessByWallet.get(sample.walletKey);
+    if (!cached) return sample;
+    const remainingUsd = finite(object(cached.result.quota).remaining);
+    if (remainingUsd === null || remainingUsd < 0) return sample;
+    return {
+      ...sample,
+      remainingUsd,
+      remainingCny: remainingUsd * rateForWallet(sample.walletKey),
+      sourceQueriedAt: cached.queriedAt,
+    };
+  });
+}
+
+export function carryForwardQuotaHistory(samples: UpstreamQuotaSample[]): UpstreamQuotaSample[] {
+  const balances = new Map<string, UpstreamQuotaSample>();
+  return [...samples].sort((a, b) => Date.parse(a.sampledAt) - Date.parse(b.sampledAt)).map((sample) => {
+    if (sample.probeOk && sample.remainingUsd !== null && sample.remainingCny !== null) {
+      balances.set(sample.walletKey, sample);
+      return sample;
+    }
+    const previous = balances.get(sample.walletKey);
+    if (sample.probeOk || sample.remainingCny !== null || !previous) return sample;
+    return { ...sample, remainingUsd: previous.remainingUsd,
+      remainingCny: previous.remainingUsd! * sample.cnyPerUsd,
+      sourceQueriedAt: previous.sourceQueriedAt };
+  });
+}
+
 // 钱包余额共享，产出与成本只统计所选账号，不能沿用全局产出分母。
 export function quotaSamplesForAccounts(
   samples: UpstreamQuotaSample[],

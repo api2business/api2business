@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildQuotaSamples, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
+import { buildQuotaSamples, carryForwardFailedQuotaBalances, carryForwardQuotaHistory, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
 
 const costInputs = (apiAmountUsdTotal: number, costRateCnyPerApiUsd: number, accountId = 1) => ([{
   accountId, apiAmountUsdTotal, costRateCnyPerApiUsd, source: "detected" as const,
@@ -28,6 +28,55 @@ test("deduplicates shared wallets and preserves schedulability", () => {
     { accountId: 1, apiAmountUsdTotal: 4, costRateCnyPerApiUsd: 0.08, source: "detected" },
     { accountId: 2, apiAmountUsdTotal: 6, costRateCnyPerApiUsd: 0.2, source: "detected" },
   ]);
+});
+
+test("carries forward the last successful balance when a quota request fails", () => {
+  const samples = buildQuotaSamples([
+    { accountId: 1, baseUrl: "https://a.test", ok: false, status: "error", schedulable: true, provider: "sub2api", quota: null },
+  ], "2026-08-02T01:00:00Z", () => 0.5);
+  const carried = carryForwardFailedQuotaBalances(samples, [{
+    account_id: 1,
+    last_success_result: { ok: true, baseUrl: "https://a.test", quota: { unit: "USD", remaining: 12 } },
+  }], () => 0.5);
+  expect(carried[0]).toMatchObject({ probeOk: false, remainingUsd: 12, remainingCny: 6 });
+});
+
+test("keeps an actual zero balance instead of treating it as a failed request", () => {
+  const samples = buildQuotaSamples([
+    { accountId: 1, baseUrl: "https://a.test", ok: true, status: "active", schedulable: true, provider: "sub2api", quota: { unit: "USD", remaining: 0 } },
+  ], "2026-08-02T01:00:00Z", () => 1);
+  const carried = carryForwardFailedQuotaBalances(samples, [{
+    account_id: 1,
+    last_success_result: { ok: true, baseUrl: "https://a.test", quota: { unit: "USD", remaining: 12 } },
+  }], () => 1);
+  expect(carried[0]).toMatchObject({ probeOk: true, remainingUsd: 0, remainingCny: 0 });
+});
+
+test("failed history points retain previous balances without using future successes", () => {
+  const base = { walletKey: "https://a.test", accountId: 1, schedulable: true,
+    status: "active", provider: "sub2api", cnyPerUsd: 1, sourceQueriedAt: null };
+  const rows = carryForwardQuotaHistory([
+    { ...base, sampledAt: "2026-08-02T00:00:00Z", probeOk: false, remainingUsd: null, remainingCny: null },
+    { ...base, sampledAt: "2026-08-02T01:00:00Z", probeOk: true, remainingUsd: 12, remainingCny: 12 },
+    { ...base, sampledAt: "2026-08-02T02:00:00Z", probeOk: false, remainingUsd: null, remainingCny: null },
+    { ...base, sampledAt: "2026-08-02T03:00:00Z", probeOk: false, remainingUsd: null, remainingCny: null },
+    { ...base, sampledAt: "2026-08-02T04:00:00Z", probeOk: true, remainingUsd: 0, remainingCny: 0 },
+  ]);
+  expect(rows.map((row) => row.remainingCny)).toEqual([null, 12, 12, 12, 0]);
+  expect(rows[2]!.probeOk).toBe(false);
+  expect(quotaHistory(rows).map((row) => row.totalRemainingCny)).toEqual([0, 12, 12, 12, 0]);
+});
+
+test("shared wallet fallback selects the latest successful cache regardless of account", () => {
+  const samples = buildQuotaSamples([
+    { accountId: 1, baseUrl: "https://a.test", ok: false, status: "active", schedulable: true },
+  ], "2026-08-02T03:00:00Z", () => 1);
+  const cache = [12, 10].map((remaining, index) => ({
+    account_id: index + 2, last_success_at: `2026-08-02T0${index + 1}:00:00Z`,
+    last_success_result: { ok: true, baseUrl: "https://a.test/v1", quota: { unit: "USD", remaining } },
+  }));
+  expect(carryForwardFailedQuotaBalances(samples, cache, () => 1)[0]!.remainingUsd).toBe(10);
+  expect(carryForwardFailedQuotaBalances(samples, [], () => 1)[0]!.remainingUsd).toBeNull();
 });
 
 test("computes wallet burn and rolling realtime cost without recharge offsets", () => {
