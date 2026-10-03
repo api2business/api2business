@@ -370,14 +370,14 @@ test("OAuth runtime monitoring reuses the upstream history chart component", asy
   expect(html).not.toContain("OAuth 滚动成本");
 });
 
-test("score table separates Codex and Grok accounts with profile tabs", async () => {
+test("score table keeps a single Codex profile", async () => {
   const app = await frontendSource();
   const html = await Bun.file(new URL("./scores.html", import.meta.url)).text();
 
   expect(html).toContain('data-score-profile="codex"');
-  expect(html).toContain('data-score-profile="grok"');
+  expect(html).not.toContain('data-score-profile="grok"');
   expect(app).toContain("scoreRowsForActiveProfile()");
-  expect(app).toContain("String(row.platform ?? '').toLowerCase() === 'grok'");
+  expect(app).toContain("platform === 'openai' ? 'codex' : 'unsupported'");
   expect(app).toContain("candidate.setAttribute('aria-selected', String(selected))");
 });
 

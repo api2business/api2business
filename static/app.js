@@ -195,7 +195,8 @@ export async function loadExternalCutoffHistory() {
 }
 
 function scoreProfile(row) {
-  return String(row.platform ?? '').toLowerCase() === 'grok' ? 'grok' : 'codex'
+  const platform = String(row.platform ?? '').toLowerCase()
+  return platform === 'openai' ? 'codex' : 'unsupported'
 }
 
 function scoreRowsForActiveProfile() {

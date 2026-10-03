@@ -231,9 +231,9 @@ export class AccountScoreService {
   private poolAccounts(accounts: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
     return accounts.filter((row) => {
       if (isOAuthAccount(row)) return false;
-      const eligibleGroupIds = String(row.platform ?? "").toLowerCase() === "grok"
-        ? this.config.sub2api.grokPriorityPlan.eligibleGroupIds
-        : this.config.sub2api.priorityPlan.eligibleGroupIds;
+      const platform = String(row.platform ?? "").trim().toLowerCase();
+      if (platform !== "openai") return false;
+      const eligibleGroupIds = this.config.sub2api.priorityPlan.eligibleGroupIds;
       const groupIds = Array.isArray(row.groupIds) ? row.groupIds.map(Number) : [];
       return groupIds.some((id) => eligibleGroupIds.includes(id));
     });

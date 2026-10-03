@@ -192,6 +192,9 @@
   - 未归属错误只说明运行面归因数据不完整，禁止推断或扣分到任何单一账号；
   - 该指标不参与账号优先级计算，只用于核查错误归因与观测质量。
 - 评分样本范围必须按层级区分：
+  - `/scores` 是 Codex 专用视图：评分快照只接收 `platform=openai` 且命中
+    `sub2api.priorityPlan.eligibleGroupIds` 的 API-key 上游；Grok、Claude 和未知平台
+    不得回退进入 Codex 表格或筛选。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
     - 探活产生的 502、503、524、延迟和切号结果按正常评分规则计入；
   - `scores pool-quality` 排除内部 monitor 和 `api2business-probe-*` 探活，只衡量真实用户业务池；
