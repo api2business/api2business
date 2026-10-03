@@ -144,6 +144,7 @@ test("account imports and scheduled sampling keep independent failure boundaries
 
 test("failover template uses the Sub2API native error_code schema", async () => {
   const config = await Bun.file(new URL("../config/api2business.example.yaml", import.meta.url)).text();
+  const codexTemplate = await Bun.file(new URL("../config/failover-templates/codex.yaml", import.meta.url)).text();
   const parsed = loadConfig("config/api2business.example.yaml");
   const badResponseRule = parsed.operations.upstreamManagement.failoverRules.find(
     (rule) => rule.error_code === 400
@@ -153,8 +154,8 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   const openAIErrorRules = parsed.operations.upstreamManagement.failoverRules.filter(
     (rule) => rule.keywords.includes("openai_error"),
   );
-  expect(config).toContain("errorCode: 502");
-  expect(config).toContain("errorCode: 524");
+  expect(codexTemplate).toContain("errorCode: 502");
+  expect(codexTemplate).toContain("errorCode: 524");
   expect(badResponseRule?.duration_minutes).toBe(3);
   expect(openAIErrorRules.map((rule) => rule.error_code)).toEqual([400]);
   expect(parsed.operations.upstreamManagement.failoverRules
@@ -166,15 +167,15 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   expect(parsed.operations.upstreamManagement.failoverRules
     .flatMap((rule) => rule.keywords))
     .not.toContain("gpt-5.6-luna");
-  expect(config).not.toContain("input must be a list");
-  expect(config).not.toContain("input exceeds the context window of this model");
-  expect(config).not.toContain("context_length_exceeded");
-  expect(config).not.toContain("maximum context length");
-  expect(config).not.toContain("model_not_found");
-  expect(config).not.toMatch(/errorCode: 404\n/u);
-  expect(config).not.toContain("statusCode:");
-  expect(config).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
-  expect(config).toContain("description: 上游明确返回 gpt-5.6-terra 或 gpt-5.6-sol 的 Provider 不支持、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障");
+  expect(codexTemplate).not.toContain("input must be a list");
+  expect(codexTemplate).not.toContain("input exceeds the context window of this model");
+  expect(codexTemplate).not.toContain("context_length_exceeded");
+  expect(codexTemplate).not.toContain("maximum context length");
+  expect(codexTemplate).not.toContain("model_not_found");
+  expect(codexTemplate).not.toMatch(/errorCode: 404\n/u);
+  expect(codexTemplate).not.toContain("statusCode:");
+  expect(codexTemplate).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
+  expect(codexTemplate).toContain("description: 上游明确返回 gpt-5.6-terra 或 gpt-5.6-sol 的 Provider 不支持、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障");
 });
 
 test("usage target discovery uses one queued database read", async () => {
@@ -278,4 +279,18 @@ test("detected rate synchronization uses the native bulk update API", async () =
   const synchronize = source.slice(source.indexOf("  async synchronizeDetectedRates("), source.indexOf("  async create(input:"));
   expect(synchronize).toContain("this.runtime.configureApiKeyAccounts([result.accountId], { name }");
   expect(synchronize).not.toContain("this.runtime.updateAccount(result.accountId, { name }");
+});
+
+test("keeps Codex and Claude templates as separate platform files", () => {
+  const parsed = loadConfig("config/api2business.example.yaml");
+  const codex = parsed.operations.upstreamManagement.failoverTemplates.codex;
+  const claude = parsed.operations.upstreamManagement.failoverTemplates.claude;
+  expect(codex.platform).toBe("openai");
+  expect(claude.platform).toBe("anthropic");
+  expect(claude.rules.some((rule) => rule.keywords.includes("local_capacity_exhausted"))).toBe(true);
+  expect(claude.rules.flatMap((rule) => rule.keywords).some((keyword) => /gpt-/u.test(keyword))).toBe(false);
+  expect(parsed.operations.upstreamManagement.templateFiles).toEqual({
+    codex: "config/failover-templates/codex.yaml",
+    claude: "config/failover-templates/claude.yaml",
+  });
 });

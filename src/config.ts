@@ -11,6 +11,18 @@ export type OAuthIdealApiUsdPerAccount = Record<OAuthPlanType, number>;
 export interface UpstreamManagementConfig {
   pageSize: number;
   defaultTemplate: string;
+  templateFiles: {
+    codex: string;
+    claude: string;
+  };
+  failoverTemplates: {
+    codex: FailoverTemplate;
+    claude: FailoverTemplate;
+  };
+  failoverRulesByPlatform: {
+    openai: FailoverRule[];
+    anthropic: FailoverRule[];
+  };
   primaryGroupId: number;
   groupIds: number[];
   priority: number;
@@ -41,6 +53,12 @@ export interface UpstreamManagementConfig {
       description: string;
     }>;
   };
+}
+
+export interface FailoverTemplate {
+  name: string;
+  platform: "openai" | "anthropic";
+  rules: FailoverRule[];
 }
 
 export interface SecretRef {
@@ -401,6 +419,29 @@ function strings(parent: ObjectValue, key: string, path: string): string[] {
   return value as string[];
 }
 
+function loadFailoverTemplate(rootDirectory: string, fileValue: string, templateKey: "codex" | "claude"): FailoverTemplate {
+  const filePath = resolve(rootDirectory, fileValue);
+  const path = `operations.upstreamManagement.templateFiles.${templateKey}`;
+  const raw = object(parse(readFileSync(filePath, "utf8")), path);
+  const name = stringValue(raw, "name", path);
+  const platform = stringValue(raw, "platform", path);
+  const expectedPlatform = templateKey === "codex" ? "openai" : "anthropic";
+  if (platform !== expectedPlatform) throw new Error(`${path}.platform must be ${expectedPlatform}`);
+  const rulesValue = raw.rules;
+  if (!Array.isArray(rulesValue) || rulesValue.length === 0) throw new Error(`${path}.rules must be a non-empty array`);
+  const rules: FailoverRule[] = rulesValue.map((value, index) => {
+    const rule = object(value, `${path}.rules[${index}]`);
+    return {
+      error_code: integerValue(rule, "errorCode", `${path}.rules[${index}]`, 100, 599),
+      keywords: strings(rule, "keywords", `${path}.rules[${index}]`),
+      duration_minutes: integerValue(rule, "durationMinutes", `${path}.rules[${index}]`, 1, 60),
+      description: stringValue(rule, "description", `${path}.rules[${index}]`),
+    };
+  });
+  validateFailoverRules(rules);
+  return { name, platform: platform as FailoverTemplate["platform"], rules };
+}
+
 function integers(parent: ObjectValue, key: string, path: string, minimum: number, maximum: number): number[] {
   const value = parent[key];
   if (!Array.isArray(value) || value.length === 0) throw new Error(`${path}.${key} must be a non-empty integer array`);
@@ -557,20 +598,14 @@ export function loadConfig(path: string): AppConfig {
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
   const upstreamManagement = object(operations.upstreamManagement, "operations.upstreamManagement");
   const upstreamBenchmark = object(operations.upstreamBenchmark, "operations.upstreamBenchmark");
-  const upstreamFailoverRulesValue = upstreamManagement.failoverRules;
-  if (!Array.isArray(upstreamFailoverRulesValue) || upstreamFailoverRulesValue.length === 0) {
-    throw new Error("operations.upstreamManagement.failoverRules must be a non-empty array");
-  }
-  const upstreamFailoverRules: FailoverRule[] = upstreamFailoverRulesValue.map((value, index) => {
-    const rule = object(value, `operations.upstreamManagement.failoverRules[${index}]`);
-    return {
-      error_code: integerValue(rule, "errorCode", `operations.upstreamManagement.failoverRules[${index}]`, 100, 599),
-      keywords: strings(rule, "keywords", `operations.upstreamManagement.failoverRules[${index}]`),
-      duration_minutes: integerValue(rule, "durationMinutes", `operations.upstreamManagement.failoverRules[${index}]`, 1, 60),
-      description: stringValue(rule, "description", `operations.upstreamManagement.failoverRules[${index}]`),
-    };
-  });
-  validateFailoverRules(upstreamFailoverRules);
+  const templateFiles = object(upstreamManagement.templateFiles, "operations.upstreamManagement.templateFiles");
+  const codexTemplatePath = stringValue(templateFiles, "codex", "operations.upstreamManagement.templateFiles");
+  const claudeTemplatePath = stringValue(templateFiles, "claude", "operations.upstreamManagement.templateFiles");
+  const failoverTemplates = {
+    codex: loadFailoverTemplate(rootDirectory, codexTemplatePath, "codex"),
+    claude: loadFailoverTemplate(rootDirectory, claudeTemplatePath, "claude"),
+  };
+  const upstreamFailoverRules = failoverTemplates.codex.rules;
   const externalCutoff = object(upstreamManagement.externalCutoff, "operations.upstreamManagement.externalCutoff");
   const externalCutoffRulesValue = externalCutoff.rules;
   if (!Array.isArray(externalCutoffRulesValue) || externalCutoffRulesValue.length === 0) {
@@ -909,6 +944,12 @@ export function loadConfig(path: string): AppConfig {
       upstreamManagement: {
         pageSize: integerValue(upstreamManagement, "pageSize", "operations.upstreamManagement", 1, 100),
         defaultTemplate: stringValue(upstreamManagement, "defaultTemplate", "operations.upstreamManagement"),
+        templateFiles: { codex: codexTemplatePath, claude: claudeTemplatePath },
+        failoverTemplates,
+        failoverRulesByPlatform: {
+          openai: failoverTemplates.codex.rules,
+          anthropic: failoverTemplates.claude.rules,
+        },
         primaryGroupId: upstreamPrimaryGroupId,
         groupIds: upstreamGroupIds,
         priority: integerValue(upstreamManagement, "priority", "operations.upstreamManagement", 1, 1000),

@@ -29,7 +29,11 @@ export function createEmbeddedContext(config: AppConfig, target: EmbeddedCliTarg
     store,
     monitor,
     auth: { password: "embedded", apiKey: "embedded", sessionSecret: "embedded" },
-    runtime: new Sub2ApiRuntimeService(client, config.operations.upstreamManagement.failoverRules),
+    runtime: new Sub2ApiRuntimeService(
+      client,
+      config.operations.upstreamManagement.failoverRules,
+      config.operations.upstreamManagement.failoverRulesByPlatform,
+    ),
     admin: client,
     close: () => { monitor.close(); store.close(); },
   };
@@ -63,7 +67,11 @@ export function createServerContext(
     store,
     monitor,
     auth: { password: webPassword, apiKey, sessionSecret },
-    runtime: new Sub2ApiRuntimeService(client, config.operations.upstreamManagement.failoverRules),
+    runtime: new Sub2ApiRuntimeService(
+      client,
+      config.operations.upstreamManagement.failoverRules,
+      config.operations.upstreamManagement.failoverRulesByPlatform,
+    ),
     admin: client,
     close: () => { monitor.close(); store.close(); },
   };

@@ -35,6 +35,10 @@
   - 最终费率以探测回写后的排队回读为准。
   - 回写超时不重建账号，保留占位费率，交给后续采样重试。
   - 然后只对该账号执行切号模板作业。
+  - 切号模板按平台分离：`config/failover-templates/codex.yaml` 只服务 OpenAI，
+    `config/failover-templates/claude.yaml` 只服务 Anthropic；Grok 保持空规则。
+    `operations.upstreamManagement.templateFiles` 是两份文件的唯一配置入口，不能把
+    Codex 规则复制到 Claude 账号。
   - 回读该作业的 `verifiedCount`、`failedCount` 和 `misalignedCount`。
   - 再只对该账号执行 `upstreams isolation --confirm --over-api`。
   - 隔离并集是当前分组、owning YAML 的 `operations.upstreamManagement.groupIds`，
@@ -137,7 +141,7 @@
     - 只有响应提交前未发生切号，且证据证明运行态缺少对应状态码或关键词时，才增强模板。
     - 模板增强只作用于 API-key 上游。
     - 先按文末「配置生效」确认持有规则的进程已加载新声明，再同步。
-    - 声明变更用 `upstreams template --confirm --over-api` 覆盖全部 API-key 上游。
+    - 声明变更用 `upstreams template --confirm --over-api` 覆盖全部 OpenAI/Anthropic API-key 上游；Grok 保持不套模板。
     - 只给新账号套用现有模板时，加上 `--accounts <id>`，不重写全池。
     - 回读原 workflow 的 `verifiedCount`、`failedCount` 和 `misalignedCount`。
     - `verifiedCount` 只证明执行进程自校验。
@@ -299,7 +303,8 @@
   - 不扩展成通用 404、`model_not_found` 或普通模型不存在短语；
   - 验证已捕获页面可命中、普通模型错误与错误状态码不命中，再回读运行态并复测原会话。
 - 配置生效：
-  - owning YAML 的 `operations.upstreamManagement.failoverRules` 是唯一模板声明。
+  - owning YAML 的 `operations.upstreamManagement.templateFiles` 是唯一模板声明；
+    `codex` 文件只服务 OpenAI，`claude` 文件只服务 Anthropic。
   - 执行模板写入的是持有该快照的 API 进程。
   - 只转发作业的 Temporal worker 不持有切号规则。
   - API 按配置文件指纹热加载：校验通过后替换内存配置，并更新运行时切号规则。

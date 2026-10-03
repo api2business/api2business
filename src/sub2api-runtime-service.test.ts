@@ -386,3 +386,27 @@ test("waits for every concurrent bulk write before reporting one failure", async
   );
   expect(slowWriteFinished).toBe(true);
 });
+
+test("applies the Claude template with pool mode and Anthropic rules", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {
+    calls.push({ path, body });
+    return { success: 2, failed: 0, success_ids: [518, 519], failed_ids: [] };
+  } } as unknown as Sub2ApiClient;
+  const claudeRules = [{ error_code: 503, keywords: ["local_capacity_exhausted"], duration_minutes: 3 }];
+  const runtime = new Sub2ApiRuntimeService(client, [], { anthropic: claudeRules });
+
+  await runtime.applyApiKeyFailoverTemplates([519, 518], 120000, "anthropic");
+
+  expect(calls).toEqual([{
+    path: "/admin/accounts/bulk-update",
+    body: {
+      account_ids: [518, 519],
+      credentials: {
+        pool_mode: true,
+        temp_unschedulable_enabled: true,
+        temp_unschedulable_rules: claudeRules,
+      },
+    },
+  }]);
+});

@@ -52,6 +52,8 @@
 - 探活请求模型读取账号 `credentials.model_mapping` 白名单，优先选择
   `gpt-5.6-terra`，其次选择 `gpt-5.6-sol`；白名单为空时使用 owning YAML 默认模型，
   白名单存在但没有这两个模型时跳过该账号并返回模型不可用记录，不添加临时别名。
+- API-key 切号模板按平台选择：OpenAI 使用 Codex 模板，Anthropic 使用 Claude 模板，
+  Grok 不启用模板；模板文件由 `operations.upstreamManagement.templateFiles` 分别声明。
 - 账号级验收口径是：每个 `active` 且 `schedulable=true` 的目标上游在最近 20 分钟内
   至少存在一条由探活专用 Key 产生的 `usage_logs` 或 `ops_error_logs` 记录；成功和失败
   都算记录，不能用普通用户流量或仅有探活轮次汇总冒充账号级覆盖。

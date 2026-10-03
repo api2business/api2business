@@ -1164,10 +1164,11 @@ export class UpstreamManagementService {
       kind: "upstream-template-targets",
       priority: "manual",
       cacheMode: "bypass-cache",
-      sql: `SELECT a.id
+      sql: `SELECT a.id, a.platform
         FROM accounts a
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
+          AND LOWER(a.platform) IN ('openai', 'anthropic')
           AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
           AND ($1::text = '' OR a.id = ANY(string_to_array($1::text, $2::text)::bigint[]))
         ORDER BY a.id`,
@@ -1176,10 +1177,25 @@ export class UpstreamManagementService {
     const ids = query.rows.map((item) => Number(item.id)).filter((id) => positiveInteger(id) !== null);
     const applied = ids;
     const failed: Array<{ accountId: number; error: string }> = [];
-    try {
-      await this.runtime.applyApiKeyFailoverTemplates(ids, this.config.operations.upstreamManagement.mutationTimeoutMs);
-    } catch (error) {
-      failed.push(...ids.map((accountId) => ({ accountId, error: safeMessage(error instanceof Error ? error.message : String(error)) })));
+    const platformGroups = new Map<string, number[]>();
+    for (const row of query.rows) {
+      const accountId = Number(row.id);
+      const platform = String(row.platform ?? "").toLowerCase();
+      if (positiveInteger(accountId) === null || !["openai", "anthropic"].includes(platform)) continue;
+      const group = platformGroups.get(platform) ?? [];
+      group.push(accountId);
+      platformGroups.set(platform, group);
+    }
+    for (const [platform, platformAccountIds] of platformGroups) {
+      try {
+        await this.runtime.applyApiKeyFailoverTemplates(
+          platformAccountIds,
+          this.config.operations.upstreamManagement.mutationTimeoutMs,
+          platform,
+        );
+      } catch (error) {
+        failed.push(...platformAccountIds.map((accountId) => ({ accountId, error: safeMessage(error instanceof Error ? error.message : String(error)) })));
+      }
     }
     const verify = applied.length ? await this.reads.query<Row>({
       key: `upstream-template-verify:${applied.join(",")}`,
@@ -1196,7 +1212,7 @@ export class UpstreamManagementService {
         ORDER BY id`,
       parameters: [applied.join(","), ","],
     }) : null;
-    const expectedRules = this.config.operations.upstreamManagement.failoverRules;
+    const expectedRulesByPlatform = this.config.operations.upstreamManagement.failoverRulesByPlatform;
     const verified: number[] = [];
     const misaligned: Array<{
       accountId: number;
@@ -1211,8 +1227,11 @@ export class UpstreamManagementService {
       const rawRules = typeof row.temp_rules === "string" ? (() => {
         try { return JSON.parse(row.temp_rules) as unknown; } catch { return []; }
       })() : row.temp_rules;
+      const platform = String(query.rows.find((candidate) => Number(candidate.id) === accountId)?.platform ?? "").toLowerCase();
+      const expectedRules = expectedRulesByPlatform[platform as "openai" | "anthropic"] ?? [];
       const rulesAligned = canonicalJson(rawRules) === canonicalJson(expectedRules);
-      if (row.pool_mode === false && row.temp_enabled === true && rulesAligned) verified.push(accountId);
+      const expectedPoolMode = platform === "anthropic";
+      if (row.pool_mode === expectedPoolMode && row.temp_enabled === true && rulesAligned) verified.push(accountId);
       else misaligned.push({
         accountId,
         reason: "runtime-template-readback-mismatch",
@@ -1395,16 +1414,20 @@ export class UpstreamManagementService {
         if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
         const needsRuntimeSettings = resolvedAccount.priority !== priority || resolvedAccount.capacity !== capacity
           || (resolvedAccount.proxyId ?? 0) !== settings.proxyId || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds);
-        // 切号模板只对 OpenAI 上游生效；Grok/Claude 账号保持原生凭据语义。
+        const templateRules = input.platform === "openai"
+          ? this.config.operations.upstreamManagement.failoverRulesByPlatform.openai
+          : input.platform === "anthropic"
+            ? this.config.operations.upstreamManagement.failoverRulesByPlatform.anthropic
+            : [];
         await this.runtime.configureApiKeyAccounts(
           [resolvedAccountId],
           {
             ...(needsRuntimeSettings ? { priority, concurrency: capacity, group_ids: effectiveGroupIds, proxy_id: settings.proxyId } : {}),
             credentials: {
               pool_mode: input.poolMode,
-              ...(input.platform === "openai" ? {
+              ...(templateRules.length > 0 ? {
                 temp_unschedulable_enabled: true,
-                temp_unschedulable_rules: this.config.operations.upstreamManagement.failoverRules,
+                temp_unschedulable_rules: templateRules,
               } : {
                 temp_unschedulable_enabled: false,
                 temp_unschedulable_rules: [],
@@ -1467,16 +1490,20 @@ export class UpstreamManagementService {
       if (!suffix || rate === null) throw new Error("当前账号缺少可解析的后缀或费率，请同时填写后缀和费率");
       name = formatUpstreamName(account.baseUrl, suffix, rate);
     }
-    // 名称和运行设置一次性写入；只有 OpenAI 账号更新切号模板。
+    const templateRules = account.platform.toLowerCase() === "openai"
+      ? this.config.operations.upstreamManagement.failoverRulesByPlatform.openai
+      : account.platform.toLowerCase() === "anthropic"
+        ? this.config.operations.upstreamManagement.failoverRulesByPlatform.anthropic
+        : [];
     const groupIds = input.groupIds === undefined ? undefined : validateGroupIds(input.groupIds);
     await this.runtime.configureApiKeyAccounts([id], {
       ...(name && name !== account.name ? { name } : {}),
       ...(groupIds ? { group_ids: groupIds } : {}),
       credentials: {
         pool_mode: account.poolMode,
-        ...(account.platform.toLowerCase() === "openai" ? {
+        ...(templateRules.length > 0 ? {
           temp_unschedulable_enabled: true,
-          temp_unschedulable_rules: this.config.operations.upstreamManagement.failoverRules,
+          temp_unschedulable_rules: templateRules,
         } : {
           temp_unschedulable_enabled: false,
           temp_unschedulable_rules: [],

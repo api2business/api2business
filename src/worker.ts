@@ -49,9 +49,16 @@ const email = process.env[target.sub2apiAdminEmailEnv];
 const password = process.env[target.sub2apiAdminPasswordEnv];
 if (!email || !password) throw new Error("worker requires Sub2API admin credentials");
 const sub2apiClient = new Sub2ApiClient(config, { email, password });
-const runtime = new Sub2ApiRuntimeService(sub2apiClient, config.operations.upstreamManagement.failoverRules);
+const runtime = new Sub2ApiRuntimeService(
+  sub2apiClient,
+  config.operations.upstreamManagement.failoverRules,
+  config.operations.upstreamManagement.failoverRulesByPlatform,
+);
 const stopConfigHotReload = startConfigHotReload(config, requiredOption("--config"), (next) => {
-  runtime.updateApiKeyFailoverRules(next.operations.upstreamManagement.failoverRules);
+  runtime.updateApiKeyFailoverRules(
+    next.operations.upstreamManagement.failoverRules,
+    next.operations.upstreamManagement.failoverRulesByPlatform,
+  );
 });
 const probeIsolation = new ProbeIsolationService(config, sub2apiClient, runtime);
 const accountImports = new AccountImportService(config, remoteReads, null, {

@@ -70,24 +70,39 @@ export function runtimeImportIdempotencyKey(operationKey: string, value: unknown
 
 export class Sub2ApiRuntimeService {
   private apiKeyFailoverRules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }>;
+  private apiKeyFailoverRulesByPlatform: Record<string, Array<{ error_code: number; keywords: string[]; duration_minutes: number }>>;
 
   constructor(
     private readonly client: Sub2ApiClient,
     apiKeyFailoverRules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }> = [],
-  ) { this.apiKeyFailoverRules = apiKeyFailoverRules; }
+    apiKeyFailoverRulesByPlatform: Record<string, Array<{ error_code: number; keywords: string[]; duration_minutes: number }>> = {},
+  ) {
+    this.apiKeyFailoverRules = apiKeyFailoverRules;
+    this.apiKeyFailoverRulesByPlatform = { openai: apiKeyFailoverRules, ...apiKeyFailoverRulesByPlatform };
+  }
 
-  updateApiKeyFailoverRules(rules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }>): void {
+  updateApiKeyFailoverRules(
+    rules: Array<{ error_code: number; keywords: string[]; duration_minutes: number }>,
+    rulesByPlatform: Record<string, Array<{ error_code: number; keywords: string[]; duration_minutes: number }>> = {},
+  ): void {
     this.apiKeyFailoverRules = rules;
+    this.apiKeyFailoverRulesByPlatform = { openai: rules, ...rulesByPlatform };
+  }
+
+  private failoverRulesForPlatform(platform?: string): Array<{ error_code: number; keywords: string[]; duration_minutes: number }> {
+    const normalized = String(platform ?? "openai").trim().toLowerCase();
+    return this.apiKeyFailoverRulesByPlatform[normalized] ?? [];
   }
 
   private apiKeyCredentials(value: unknown, platform?: string): Row {
     const input = record(value) ?? {};
-    const defaultTemplate = platform === undefined || platform.toLowerCase() === "openai";
+    const rules = this.failoverRulesForPlatform(platform);
+    const defaultTemplate = platform === undefined || rules.length > 0;
     return {
       ...input,
       pool_mode: typeof input.pool_mode === "boolean" ? input.pool_mode : false,
       temp_unschedulable_enabled: typeof input.temp_unschedulable_enabled === "boolean" ? input.temp_unschedulable_enabled : defaultTemplate,
-      temp_unschedulable_rules: Array.isArray(input.temp_unschedulable_rules) ? input.temp_unschedulable_rules : defaultTemplate ? this.apiKeyFailoverRules : [],
+      temp_unschedulable_rules: Array.isArray(input.temp_unschedulable_rules) ? input.temp_unschedulable_rules : defaultTemplate ? rules : [],
     };
   }
 
@@ -437,11 +452,11 @@ export class Sub2ApiRuntimeService {
       throw new Error(`account ${accountId} is not an API-key account`);
     }
     return await this.updateAccount(accountId, {
-      credentials: this.apiKeyCredentials(account.credentials),
+      credentials: this.apiKeyCredentials(account.credentials, String(account.platform ?? "")),
     }, timeoutMs);
   }
 
-  async applyApiKeyFailoverTemplates(accountIds: number[], timeoutMs?: number): Promise<Record<string, unknown>> {
+  async applyApiKeyFailoverTemplates(accountIds: number[], timeoutMs?: number, platform = "openai"): Promise<Record<string, unknown>> {
     const ids = [...new Set(accountIds)].sort((left, right) => left - right);
     if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
       throw new Error("bulk API-key template requires stable positive account IDs");
@@ -449,9 +464,9 @@ export class Sub2ApiRuntimeService {
     const result = await this.client.mutate<Record<string, unknown>>("POST", "/admin/accounts/bulk-update", {
       account_ids: ids,
       credentials: {
-        pool_mode: false,
+        pool_mode: platform.toLowerCase() === "anthropic",
         temp_unschedulable_enabled: true,
-        temp_unschedulable_rules: this.apiKeyFailoverRules,
+        temp_unschedulable_rules: this.failoverRulesForPlatform(platform),
       },
     }, undefined, timeoutMs);
     return { accountIds: ids, result };

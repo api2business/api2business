@@ -1,0 +1,57 @@
+apiVersion: api2business.pikapython.com/v1
+kind: FailoverTemplate
+name: claude-upstream-failover
+platform: anthropic
+rules:
+- errorCode: 429
+  keywords:
+  - rate_limit_error
+  - rate limit exceeded
+  - too many pending requests
+  - selected model is at capacity
+  durationMinutes: 3
+  description: Claude 上游限流、并发或模型容量暂时不足
+- errorCode: 403
+  keywords:
+  - insufficient balance
+  - insufficient_balance
+  - insufficient_quota
+  - credit_balance_exhausted
+  - payment required
+  - account balance depleted
+  - invalid api key
+  - invalid_api_key
+  durationMinutes: 10
+  description: Claude 上游余额不足或 API key 失效
+- errorCode: 502
+  keywords:
+  - upstream_error
+  - upstream request failed
+  - upstream response stream was interrupted
+  - upstream stream disconnected
+  - stream_read_error
+  - origin web server returned an invalid or incomplete response
+  - bad_response_status_code
+  durationMinutes: 3
+  description: Claude 上游网关、流中断或包装层故障
+- errorCode: 503
+  keywords:
+  - local_capacity_exhausted
+  - service temporarily unavailable
+  - temporarily unavailable
+  - upstream service temporarily unavailable
+  - upstream_error
+  - overloaded
+  - please try again later
+  - 服务暂时繁忙
+  - 服务暂时不可用
+  durationMinutes: 3
+  description: Claude 上游服务暂时不可用或容量耗尽
+- errorCode: 521
+  keywords:
+  - origin_down
+  - connection was refused
+  - 'error code: 521'
+  - 'status code: 521'
+  durationMinutes: 3
+  description: Claude 上游 Cloudflare origin 不可达

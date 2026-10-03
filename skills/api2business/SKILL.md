@@ -129,6 +129,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   显式声明本批结算单价；该模式只支持单一账号类型，并在计划与确认回读中固定成本。
 - 退役删除按 `operations.accountLifecycle.deleteBatchSize` 分批调用原生批量接口；单批失败会跳过并继续，终态只以排队回读为准，失败且有剩余账号时复用原计划恢复。
 - 上游、评分、优先级、定时稳定性观察和截图报错归因读取 `references/upstream-scheduling.md`。
+- API-key 切号模板由 owning YAML 的 `operations.upstreamManagement.templateFiles` 管理：
+  `codex.yaml` 只给 OpenAI，`claude.yaml` 只给 Anthropic；Grok 不套模板。
 - 多轮号池优化先读取该参考的“评分、容量与冷却联动评估”：
   - 分开核对滚动分、固定时间段业务记录、账号容量和会话绑定；
   - 模板及排序变更必须独立回读运行态，不以工作流成功代替业务恢复。

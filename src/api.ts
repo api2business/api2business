@@ -75,7 +75,10 @@ const server = Bun.serve({
   fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, purchases, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation),
 });
 const stopConfigHotReload = startConfigHotReload(config, requiredOption("--config"), (next) => {
-  context.runtime.updateApiKeyFailoverRules(next.operations.upstreamManagement.failoverRules);
+  context.runtime.updateApiKeyFailoverRules(
+    next.operations.upstreamManagement.failoverRules,
+    next.operations.upstreamManagement.failoverRulesByPlatform,
+  );
 });
 
 console.log(JSON.stringify({
