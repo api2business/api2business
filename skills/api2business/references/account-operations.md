@@ -47,38 +47,14 @@
 
 ## 空闲探活
 
-- 探活覆盖对象是 OpenAI `type=apikey` 上游账号；Grok、Anthropic 和 OAuth 账号不套用
-  这套 OpenAI Responses 探活隔离入口，必须使用各自的专用采样或评测入口。
-- 探活请求模型读取账号 `credentials.model_mapping` 白名单，优先选择
-  `gpt-5.6-terra`，其次选择 `gpt-5.6-sol`；白名单为空时使用 owning YAML 默认模型，
-  白名单存在但没有这两个模型时跳过该账号并返回模型不可用记录，不添加临时别名。
-- API-key 切号模板的平台边界、配置生效和回读验收统一见
-  [上游与调度](upstream-scheduling.md)；本文只规定探活账号范围。
-- 账号级验收口径是：每个 `active` 且 `schedulable=true` 的目标上游在最近 20 分钟内
-  至少存在一条由探活专用 Key 产生的 `usage_logs` 或 `ops_error_logs` 记录；成功和失败
-  都算记录，不能用普通用户流量或仅有探活轮次汇总冒充账号级覆盖。
-- `status=error` 的上游允许没有探活记录，不得为了补记录而调用恢复接口；报告中只需
-  单独列出这类账号，不计入 active+schedulable 探活覆盖缺口。
-- 自动探活只选择 `status=active` 且 `schedulable=true` 的账号；错误、限流或不可调度账号
-  不得为了探活而强行恢复运行态，需在覆盖报告中明确列为运行态阻断。
-- 每轮通过排队数据库读取生成稳定计划，不由探活流程解除异常状态。
-- 自动计划只取 `candidateLimit` 个候选。
-- 候选若没有已就绪的私有分组和专用 Key，仍会占用计划名额。
-- 这时形成 `planned > ready` 的覆盖缺口。
-- 新 API-key 上游的私有探活绑定使用 `upstreams isolation --accounts <id> --confirm --over-api`。
-- 该入口不依赖空闲探活计划缓存。
-- 分组、切号模板和隔离的先后顺序见 [上游与调度](upstream-scheduling.md)。
-- 隔离会并入 YAML 默认分组。
-- 用户指定分组少于该并集时的收回，只见 [上游与调度](upstream-scheduling.md)。
-- `accounts idle-probe reconcile` 先生成计划，再为计划中未就绪的存量账号补绑定。
-- 计划返回缓存尚未刷新时，只说明计划缓存未热。
-- 这不是绑定失败，也不能代替刚创建账号的 `upstreams isolation`。
-- 绑定完成不等于已经产生探活记录。
-- 覆盖仍按上文的专用 Key 记录验收。
-- 对计划内账号并发请求普通业务端点，并为每个请求加入独立随机抖动。
-- 单账号每轮只请求一次，不在当前轮重试。
-- 上一轮未结束时跳过新一轮，避免死锁和重试风暴。
-- 充值后的恢复由充值流程处理，不与空闲探活耦合。
-- 探活请求进入普通用量和错误记录，不额外直读结果。
-- 页面“最新样本”若来自评分或普通用量聚合，不等于最后一次探活时间；排障和验收必须
-  使用探活专用 Key 归因后的账号级记录查询。
+- 探活账号范围、隔离分组、模型白名单、轮次终态和覆盖判定统一见
+  [上游与调度](upstream-scheduling.md)；跨系统边界见 UniDesk 仓库的
+  `.agents/skills/unidesk-sub2api/references/idle-probe-isolation.md`。
+- 当前自动探活只对 owning YAML 打开的 Codex/OpenAI API-key 作用域生效；Claude、Grok 和
+  OAuth 账号不套用这套 OpenAI Responses 隔离入口。
+- `accounts idle-probe plan` 只读，`accounts idle-probe reconcile` 只负责显式补齐隔离绑定，
+  `accounts idle-probe run` 只执行 active 且 schedulable 的已就绪账号，不恢复异常账号。
+- 自动探活前必须先完成同作用域的手动探活，并核对 HTTP、`ordinaryLogRecorded` 和轮次
+  终态；工作流 `running` 不能代替业务记录成功。
+- 探活请求进入普通用量和错误记录；覆盖必须按专用 Key 归因的账号级记录验收，不能用
+  普通用户流量或轮次汇总替代。
