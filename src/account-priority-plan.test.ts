@@ -7,6 +7,7 @@ const config = {
     target: "example-runtime",
   },
   operations: {
+    writePolicy: { enabled: true, claudeEnabled: true },
     priorityWrite: {
       batchSize: 3,
     },

@@ -631,14 +631,24 @@ export function buildAccountPriorityPlan(
     eligibleGroupIds: [],
   };
   const claude = buildPriorityProfile(ranking, config, "claude", claudePolicy);
+  const claudeReadOnly = config.operations.writePolicy?.claudeEnabled === true ? claude : {
+    // owning YAML 关闭 Claude 写入时只保留资格统计，不把排序结果转成变更。
+    ...claude,
+    changedCount: 0,
+    candidateChangedCount: 0,
+    notSelectedChangedCount: 0,
+    priorities: {},
+    changes: [],
+    readOnly: true,
+  };
   const priorities = {
     ...(codex.priorities as Record<string, number>),
-    ...(claude.priorities as Record<string, number>),
+    ...(claudeReadOnly.priorities as Record<string, number>),
     ...(grok.priorities as Record<string, number>),
   };
   const changes = [
     ...(codex.changes as Array<Record<string, unknown>>),
-    ...(claude.changes as Array<Record<string, unknown>>),
+    ...(claudeReadOnly.changes as Array<Record<string, unknown>>),
     ...(grok.changes as Array<Record<string, unknown>>),
   ];
   return {
@@ -655,13 +665,14 @@ export function buildAccountPriorityPlan(
         costRange: codex.costRange,
       },
       claude: {
-        eligibleCount: claude.eligibleCount,
-        fixedCount: claude.fixedCount,
-        changedCount: claude.changedCount,
-        anchorScore: claude.anchorScore,
-        observedAnchorScore: claude.observedAnchorScore,
-        priorityReferenceScore: claude.priorityReferenceScore,
-        costRange: claude.costRange,
+        eligibleCount: claudeReadOnly.eligibleCount,
+        fixedCount: claudeReadOnly.fixedCount,
+        changedCount: claudeReadOnly.changedCount,
+        anchorScore: claudeReadOnly.anchorScore,
+        observedAnchorScore: claudeReadOnly.observedAnchorScore,
+        priorityReferenceScore: claudeReadOnly.priorityReferenceScore,
+        costRange: claudeReadOnly.costRange,
+        readOnly: claudeReadOnly.readOnly === true,
       },
       grok: {
         eligibleCount: grok.eligibleCount,
@@ -673,7 +684,7 @@ export function buildAccountPriorityPlan(
         costRange: grok.costRange,
       },
     },
-    eligibleCount: Number(codex.eligibleCount) + Number(claude.eligibleCount) + Number(grok.eligibleCount),
+    eligibleCount: Number(codex.eligibleCount) + Number(claudeReadOnly.eligibleCount) + Number(grok.eligibleCount),
     changedCount: Object.keys(priorities).length,
     priorities,
     changes,

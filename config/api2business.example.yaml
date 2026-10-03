@@ -357,6 +357,9 @@ records:
   publicLimit: 20
 
 operations:
+  writePolicy:
+    enabled: false
+    claudeEnabled: false
   databaseUrlEnv: API2BUSINESS_DATABASE_URL
   ledgerYamlPath: /var/lib/api2business/sub2api-pool.yaml
   accountImportLedgerPath: /var/lib/api2business/ledger/account-import-costs.jsonl

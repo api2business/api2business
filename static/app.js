@@ -142,6 +142,11 @@ let scoreNextRefreshAt = null
 let priorityPlanRows = new Map()
 let priorityPlanVisible = false
 let activeScoreProfile = 'codex'
+let scoreWritePolicy = { enabled: false, claudeEnabled: false }
+
+function scoreWritesAllowed() {
+  return scoreWritePolicy.enabled === true && (activeScoreProfile !== 'claude' || scoreWritePolicy.claudeEnabled === true)
+}
 let scorePage = 1
 const scorePageSize = 10
 const scoreRefreshIntervals = new Set([0, 300, 900, 1800])
@@ -228,6 +233,21 @@ function updateProfileDependentControls() {
   if (automationState && automationState.dataset.loaded === 'true') {
     automationState.textContent = `${label} 使用同一套自动优先级调度配置 · ${automationState.dataset.detail ?? ''}`.replace(/ · $/u, '')
   }
+  const writeState = $('#score-write-state')
+  if (writeState) writeState.textContent = scoreWritesAllowed()
+    ? `${label} 允许受控写入`
+    : `${label} 当前仅可读取、分析和评分；写入、修改和自动调度均已关闭（由 owning YAML 控制）`
+  applyScoreWritePolicy()
+}
+
+function applyScoreWritePolicy() {
+  const writesAllowed = scoreWritesAllowed()
+  for (const selector of ['#generate-plan', '#confirm-plan', '#score-create-upstream', '#automation-enabled', '#automation-interval', '#automation-limit']) {
+    const node = $(selector)
+    if (node) { node.disabled = !writesAllowed; node.title = writesAllowed ? '' : '当前只读，写入与修改已关闭（由 owning YAML 控制）' }
+  }
+  const automationSubmit = $('#automation-form button[type="submit"]')
+  if (automationSubmit) { automationSubmit.disabled = !writesAllowed; automationSubmit.title = writesAllowed ? '' : '自动调度已关闭（由 owning YAML 控制）' }
 }
 
 function gradeClass(value) {
@@ -449,7 +469,7 @@ function renderScoreRows() {
         <small>未触发 ${number(row.failoverNotTriggered)}</small>
       </td>
       <td>${groupLabels(row)}</td>
-      <td>${upstream ? `<div class="table-row-actions"><button class="icon-command benchmark-trigger${scoreBenchmarksById.get(Number(row.accountId))?.state === 'running' ? ' is-running' : ''}" type="button" data-score-benchmark="${escapeHtml(row.accountId)}" title="智商评测" aria-label="智商评测"><span>⌁</span></button><button class="text-command table-action" type="button" data-score-upstream-edit="${escapeHtml(row.accountId)}">调整</button></div>${scoreBenchmarksById.has(Number(row.accountId)) ? `<small class="benchmark-inline">${scoreBenchmarksById.get(Number(row.accountId)).state === 'running' ? '评测中' : `智商 ${scoreBenchmarksById.get(Number(row.accountId)).score == null ? '—' : number(scoreBenchmarksById.get(Number(row.accountId)).score, 1)}`} · ${escapeHtml(scoreBenchmarksById.get(Number(row.accountId)).state)}</small>` : ''}` : '—'}</td>
+      <td>${!scoreWritesAllowed() ? '<span class="upstream-muted">只读</span>' : upstream ? `<div class="table-row-actions"><button class="icon-command benchmark-trigger${scoreBenchmarksById.get(Number(row.accountId))?.state === 'running' ? ' is-running' : ''}" type="button" data-score-benchmark="${escapeHtml(row.accountId)}" title="智商评测" aria-label="智商评测"><span>⌁</span></button><button class="text-command table-action" type="button" data-score-upstream-edit="${escapeHtml(row.accountId)}">调整</button></div>${scoreBenchmarksById.has(Number(row.accountId)) ? `<small class="benchmark-inline">${scoreBenchmarksById.get(Number(row.accountId)).state === 'running' ? '评测中' : `智商 ${scoreBenchmarksById.get(Number(row.accountId)).score == null ? '—' : number(scoreBenchmarksById.get(Number(row.accountId)).score, 1)}`} · ${escapeHtml(scoreBenchmarksById.get(Number(row.accountId)).state)}</small>` : ''}` : '—'}</td>
     </tr>`
   }).join('') : '<tr><td colspan="13" class="empty">没有匹配的账号</td></tr>'
   const range = filteredRows.length === 0 ? '0 条' : `${start + 1}-${Math.min(start + scorePageSize, filteredRows.length)} / ${number(filteredRows.length)} 条`
@@ -1769,6 +1789,14 @@ async function loadIdleProbeHistory(page = idleProbeHistoryPage) {
 
 async function loadPriorityAutomation() {
   const data = await requestJson('/api/operations/priority-automation')
+  if (data.writePolicy && typeof data.writePolicy === 'object') {
+    scoreWritePolicy = {
+      enabled: data.writePolicy.enabled === true,
+      claudeEnabled: data.writePolicy.claudeEnabled === true,
+    }
+    applyScoreWritePolicy()
+    renderScoreRows()
+  }
   const policy = data.automation
   if (!policy) {
     priorityAutomationExists = false
@@ -1808,6 +1836,7 @@ async function setupPriorityPanel(options) {
   })
   $('#automation-form').addEventListener('submit', async (event) => {
     event.preventDefault()
+    if (!scoreWritesAllowed()) return
     const input = {
       enabled: $('#automation-enabled').value === 'true',
       intervalSeconds: Number($('#automation-interval').value),
@@ -1823,6 +1852,7 @@ async function setupPriorityPanel(options) {
     $('#automation-state').textContent = `${activeScoreProfileLabel()} 使用同一套自动优先级调度配置 · ${$('#automation-state').dataset.detail}`
   })
   $('#generate-plan').addEventListener('click', async () => {
+    if (!scoreWritesAllowed()) return
     const button = $('#generate-plan')
     button.disabled = true
     planProgress('开始读取最近调用并生成调整计划', true)
@@ -1842,7 +1872,7 @@ async function setupPriorityPanel(options) {
     } finally { button.disabled = false }
   })
   $('#confirm-plan').addEventListener('click', async () => {
-    if (!activePlanId) return
+    if (!activePlanId || !scoreWritesAllowed()) return
     const button = $('#confirm-plan')
     button.disabled = true
     $('#generate-plan').disabled = true
@@ -1871,6 +1901,7 @@ async function setupPriorityPanel(options) {
     loadIdleProbeHistory(),
     loadPriorityAutomation(),
   ])
+  applyScoreWritePolicy()
 }
 
 function renderOperations(ledger, audits) {

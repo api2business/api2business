@@ -880,6 +880,12 @@ export class OperationsService {
         String(rowsById.get(accountId)?.account_type ?? "").trim().toLowerCase() === "oauth"
       );
       if (oauthIds.length > 0) throw new Error(`manual priority plan rejected OAuth accounts: ${oauthIds.join(",")}`);
+      const claudeIds = accountIds.filter((accountId) =>
+        String(rowsById.get(accountId)?.platform ?? "").trim().toLowerCase() === "anthropic"
+      );
+      if (claudeIds.length > 0 && this.config.operations.writePolicy?.claudeEnabled !== true) {
+        throw new Error(`Claude priority writes are disabled by operations.writePolicy.claudeEnabled: ${claudeIds.join(",")}`);
+      }
 
       const changes = accountIds.map((accountId) => {
         const row = rowsById.get(accountId)!;
@@ -1248,8 +1254,13 @@ export class OperationsService {
     if (new Date(String(plan.expires_at)).getTime() <= Date.now()) throw new Error("priority plan has expired");
     const priorities = object(plan.priorities) as Record<string, number>;
     const planResult = object(plan.result);
+    const planChanges = records(planResult.changes);
+    if (planChanges.some((change) => String(change.profile ?? "") === "claude")
+      && this.config.operations.writePolicy?.claudeEnabled !== true) {
+      throw new Error("Claude priority writes are disabled by operations.writePolicy.claudeEnabled");
+    }
     const profileQueues = buildPriorityWriteProfileQueues(
-      { priorities, changes: planResult.changes },
+      { priorities, changes: planChanges },
       this.config.operations.priorityWrite.batchSize,
     );
     const batches = profileQueues.flatMap((profileQueue) => profileQueue.batches);
@@ -1459,7 +1470,11 @@ export class OperationsService {
   }
 
   async getPriorityAutomation() {
-    return { ok: true, automation: await this.store.getAutomation() };
+    return {
+      ok: true,
+      automation: await this.store.getAutomation(),
+      writePolicy: this.config.operations.writePolicy,
+    };
   }
 
   private validateAutomation(input: { enabled: unknown; intervalSeconds: unknown; recentCallLimit: unknown }) {
@@ -1530,6 +1545,9 @@ export class OperationsService {
   }
 
   async runDueAutomation() {
+    if (this.config.operations.writePolicy?.enabled !== true) {
+      return { ok: true, due: false, disabled: true, reason: "operations.writePolicy.enabled=false" };
+    }
     const policy = await this.store.claimDueAutomation(
       this.config.operations.automationRunTimeoutMs,
       this.config.operations.automationJitterPercent,

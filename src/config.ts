@@ -229,6 +229,10 @@ export interface AppConfig {
   ranking: { timezone: string; windowDays: number; sourceLimit: number; displayLimit: number };
   records: { publicLimit: number };
   operations: {
+    writePolicy: {
+      enabled: boolean;
+      claudeEnabled: boolean;
+    };
     databaseUrlEnv: string;
     ledgerYamlPath: string;
     accountImportLedgerPath: string;
@@ -912,6 +916,13 @@ export function loadConfig(path: string): AppConfig {
     },
     records: { publicLimit: integerValue(records, "publicLimit", "records", 1) },
     operations: {
+      writePolicy: (() => {
+        const value = object(operations.writePolicy, "operations.writePolicy");
+        return {
+          enabled: booleanValue(value, "enabled", "operations.writePolicy"),
+          claudeEnabled: booleanValue(value, "claudeEnabled", "operations.writePolicy"),
+        };
+      })(),
       databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
       ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),
       accountImportLedgerPath: stringValue(operations, "accountImportLedgerPath", "operations"),
