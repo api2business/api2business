@@ -202,47 +202,40 @@
   - 未归属错误只说明运行面归因数据不完整，禁止推断或扣分到任何单一账号；
   - 该指标不参与账号优先级计算，只用于核查错误归因与观测质量。
 - 评分样本范围必须按层级区分：
-  - 上游调度 V2 是独立页面和独立 `/api/v2/upstream-scheduling/*` 只读读模型；旧 `/scores`
-    页面与接口保持原状，不能用 V2 页面替换旧页面。
-  - V2 先支持 `codex`，再支持 `claude` 的评分；作用域的 `platform`、候选分组和
-    `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe`、
-    `upstreamWrite` 均只从 owning YAML 的 `operations.upstreamSchedulingV2.scopes.*`
-    读取，代码不得硬编码关闭或开启。V2 页面是否只读由这些开关的实际组合决定。
-  - V2 页面必须复用旧评分页的资产/成本、综合质量、趋势、参与比例、完整账号表、
-    错误、调整、探活和自动调度状态组件；页面不能只保留简化账号表，也不能把后台读模型
-    核对结果展示为页面内容。
-  - `upstream-scheduling-v2 snapshot|plan --over-api` 是核对和计划的受控 CLI 入口；
-    核对结果只作为后端/CLI 验收证据，`plan` 在 `planWrite=false` 时必须返回
-    `mutation=false`，不得持久化优先级或触发调度。
-  - V2 作用域资产允许共享钱包余额，但 API 产出、成本和账号评分必须按作用域账号 ID
-    过滤，不能把其他平台的产出分母混入 Codex 视图。
-  - `/scores` 使用顶部的全局平台切换：Codex 只接收 `platform=openai` 且命中
-    `sub2api.priorityPlan.eligibleGroupIds` 的 API-key 上游；Claude 只接收
-    `platform=anthropic` 且命中 `sub2api.claudePriorityPlan.eligibleGroupIds` 的 API-key 上游；
-    Grok 和未知平台不进入这两个视图。
-  - Claude 的质量评分与 Codex 复用同一套被动质量公式读取真实业务
-    `usage_logs` 与 `ops_error_logs`；综合质量、错误证据、账号评分和历史均按平台隔离。
-  - Claude 的主动探活能力保留为显式边界但当前不启用，不创建 Claude 探针分组，也不写入
-    Claude 探活记录；页面必须显示“未启用”，不能把 Codex 探活数据投影到 Claude。
-  - `/scores` 的调整记录和优先级计划按当前全局平台投影。
-  - 周期自动优先级调度同时受全局写入安全开关 `operations.writePolicy.enabled`、Claude
-    专用写入开关 `operations.writePolicy.claudeEnabled` 和作用域
-    `features.priorityAutomation` 控制；作用域开关关闭时，自动计划不会选择该作用域的变更。
-    周期的间隔和样本档位以 `priority automation get --over-api` 回读为准，需与 Codex 对齐时使用同一组值。
-  - Claude 一次性优先级调度：
-    - 用户授权本次调度后，临时打开 `operations.writePolicy.claudeEnabled`。
-    - 通过 V2 Claude 只读计划计算排序，核对目标平台、分组、账号和优先级范围。
-    - 将该计划的 Claude 优先级传给 `priority plan manual-create`，再确认同一个计划。
-    - 若不启用周期调度，确认完成后关闭临时 Claude 写入开关；若要启用周期调度，先回读
-      三个写入/作用域开关和间隔，再保留经用户授权的运行配置。
-    - Claude 视图始终按 Anthropic 作用域读取，不能展示 `Codex + Grok` 复合标签。
-  - 修改页面投影后必须更新静态资源版本并重新读取线上页面；旧浏览器缓存不能作为验收依据。
+  - V2 是当前上游调度的作用域权威，页面和接口统一使用
+    `/api/v2/upstream-scheduling/*`，数据按作用域的 `platform`、账号 ID 和
+    `eligibleGroupIds` 过滤。
+  - 旧的全局 Codex 优先级调度和旧全局探活由
+    `operations.legacyScheduling.enabled` 控制；设为 `false` 时，Go Temporal
+    与兼容 Bun worker 都停止旧调度。根路径和主导航指向 V2；旧 `/scores` 页面仅保留
+    兼容展示，旧数据库自动化记录只保留审计，不再驱动写入。
+  - V2 工作流按作用域独立运行。每个作用域的
+    `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和
+    `upstreamWrite` 都只从 owning YAML 读取，代码不得替代开关。
+  - `priorityAutomation` 是独立的周期优先级写入功能；它不等价于
+    `planWrite`。周期写入仍须同时满足 `operations.writePolicy.enabled`，并按平台
+    使用相应的写入开关。
+  - `upstream-scheduling-v2 scopes|snapshot|plan --over-api` 是只读核对入口；
+    `planWrite=false` 时 plan 必须返回 `mutation=false`，不创建写入计划。
+  - 启用自动探活前，先用同一作用域显式执行一次手动探活，并核对 HTTP 结果、
+    `ordinaryLogRecorded` 和探活轮次记录；手动成功后才打开该作用域的 `idleProbe`。
+  - 探活候选必须按作用域平台和分组查询，模型白名单动态选择
+    `gpt-5.6-terra`、`gpt-5.6-sol`，前者优先；探活失败、未就绪和普通记录缺失
+    分别保留，不把工作流 `running` 当作业务成功。
+  - V2 页面复用既有质量、趋势、参与比例、账号、错误、调整、探活和调度组件；
+    后台对账结果只作为 CLI/API 证据，不投影成页面事实。
+  - Claude 和 Codex 是平等作用域。Claude 的平台、分组、成本、评分、优先级和
+    探活是否启用均以 Claude 作用域开关为准，不把 Grok 或 Codex 数据投影到 Claude。
+  - 旧 `priority automation get|create|update` 仅用于观察或迁移旧全局记录；旧调度
+    已停用时，启用写入会被拒绝。V2 的间隔和样本档位从 `scopes`、`snapshot` 回读。
+  - 修改页面投影后必须更新静态资源并重新读取正式入口；CLI/API 事实先于截图，截图
+    只用于人工核对真实页面。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
-    - 探活产生的 502、503、524、延迟和切号结果按正常评分规则计入；
-  - `scores pool-quality` 排除内部 monitor 和 `api2business-probe-*` 探活，只衡量真实用户业务池；
-    - 这不是对单账号探活的否定，而是池级业务口径；
-  - 单账号只有探活样本时，低分表示探活路径本身失败，不能称为“探活污染”；同时要披露用户业务样本为零或不足；
-  - 账号分、池分和优先级排序分不可互相替代，报告中必须写明查询命令、时间窗口、探活是否纳入及滚动/即时口径。
+    探活产生的 502、503、524、延迟和切号结果按正常评分规则计入。
+  - `scores pool-quality` 排除内部 monitor 和 `api2business-probe-*` 探活，只衡量真实
+    用户业务池；比较账号分、池分和优先级分时必须同时报告样本范围。
+  - 账号分、池分和优先级排序分不可互相替代，报告中必须写明查询命令、时间窗口、
+    探活是否纳入及滚动或即时口径。
 - 充值候选分析：
   - `upstreams recharge-candidates --over-api` 同时列出当前欠费账号和最新人民币余额低于
     `operations.upstreamManagement.rechargeCandidates.lowBalanceCny` 的账号，默认阈值为 `¥10`；等于阈值不纳入低余额候选。

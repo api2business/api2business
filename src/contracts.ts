@@ -21,7 +21,7 @@ export type AppCommand =
   | { kind: "bugteam.purchase.import"; jobId: string }
   | { kind: "oauth.runtime.sample" }
   | { kind: "upstream.benchmark"; benchmarkRunId: string; accountId: number; model: string }
-  | { kind: "account.idle-probe.run"; accountIds: number[]; rounds: number }
+  | { kind: "account.idle-probe.run"; accountIds: number[]; rounds: number; scope?: string }
   | { kind: "account.idle-probe.reconcile"; accountIds: number[] }
   | { kind: "account.import"; jobId: string }
   | { kind: "account.lifecycle.detect"; jobId: string }
@@ -29,7 +29,8 @@ export type AppCommand =
   | { kind: "priority.plan.create"; recentCallLimit: number; operator: string }
   | { kind: "priority.plan.manual-create"; priorities: Record<string, number>; operator: string }
   | { kind: "priority.plan.confirm"; planId: string; operator: string }
-  | { kind: "priority.automation.run" };
+  | { kind: "priority.automation.run" }
+  | { kind: "priority.automation.v2.run"; scope: string; recentCallLimit: number };
 
 export interface OperationRequest {
   operationId: string;
@@ -81,5 +82,6 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "priority.plan.create"
     || command.kind === "priority.plan.manual-create"
     || command.kind === "priority.plan.confirm"
-    || command.kind === "priority.automation.run";
+    || command.kind === "priority.automation.run"
+    || command.kind === "priority.automation.v2.run";
 }

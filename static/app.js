@@ -80,9 +80,11 @@ async function loadScoreData() {
   return await requestJson('/api/scores')
 }
 
-function shell() {
+async function shell() {
   const mount = $('[data-shell]')
   if (!mount) return
+  const scheduling = await requestJson('/api/v2/upstream-scheduling/scopes', {}, 5000).catch(() => null)
+  const legacyEnabled = scheduling?.legacySchedulingEnabled !== false
   const links = [
     ['scores', '/scores', '上游资产与成本'],
     ['upstream-scheduling-v2', '/upstream-scheduling-v2', '上游调度 V2'],
@@ -95,8 +97,8 @@ function shell() {
     ['account-import', '/account-import', '账号导入'],
   ]
   mount.innerHTML = `<header class="topbar">
-    <a class="brand" href="/scores"><span class="brand-mark">AS</span><span><b>Api2Business</b><small>Sub2API Operations</small></span></a>
-    <nav class="primary-nav" aria-label="主导航">${links.map(([id, href, label]) => `<a href="${href}"${page === id ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
+    <a class="brand" href="/"><span class="brand-mark">AS</span><span><b>Api2Business</b><small>Sub2API Operations</small></span></a>
+    <nav class="primary-nav" aria-label="主导航">${links.filter(([id]) => id !== 'scores' || legacyEnabled).map(([id, href, label]) => `<a href="${href}"${page === id ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
     <div class="topbar-actions"><span class="live-sign"><i></i> PK01</span><button id="logout" class="text-command" type="button">退出</button></div>
   </header>`
   const primaryNav = mount.querySelector('.primary-nav')
@@ -123,7 +125,7 @@ async function loginPage() {
         method: 'POST',
         body: JSON.stringify({ username: $('#username').value, password: $('#password').value }),
       })
-      location.assign('/scores')
+      location.assign('/')
     } catch (cause) {
       error.textContent = cause instanceof Error ? cause.message : String(cause)
     } finally {
@@ -2165,7 +2167,7 @@ async function waitWorkflow(workflowId, timeoutMs = 600000, redirectOnUnauthoriz
 
 async function boot() {
   if (page === 'login') return await loginPage()
-  shell()
+  await shell()
   if (page === 'scores') return await scoresPage()
   if (page === 'upstream-scheduling-v2') {
     const v2 = await import('./upstream-scheduling-v2.js')

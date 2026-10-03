@@ -155,13 +155,20 @@ export function filterAutomaticPriorityPlan(
   const enabledProfiles = new Set(Object.entries(scheduling.scopes)
     .filter(([, scope]) => scope.enabled && scope.features.priorityAutomation)
     .map(([profile]) => profile));
+  return filterPriorityPlanProfiles(plan, enabledProfiles);
+}
+
+export function filterPriorityPlanProfiles(
+  plan: Record<string, unknown>,
+  profilesToKeep: ReadonlySet<string>,
+): Record<string, unknown> {
   const changes = records(plan.changes)
-    .filter((change) => enabledProfiles.has(String(change.profile ?? "")));
+    .filter((change) => profilesToKeep.has(String(change.profile ?? "")));
   const priorities = Object.fromEntries(changes
     .filter((change) => change.change === "update")
     .map((change) => [String(change.accountId), Number(change.desiredPriority)]));
   const profiles = Object.fromEntries(Object.entries(object(plan.profiles))
-    .filter(([profile]) => enabledProfiles.has(profile)));
+    .filter(([profile]) => profilesToKeep.has(profile)));
   return {
     ...plan,
     priorities,
@@ -293,10 +300,18 @@ export class OperationsService {
   async runIdleProbe(accountIds: number[] = [], rounds = 1, context?: {
     operationId: string;
     triggerType: "manual" | "automatic";
+    scope?: string;
   }) {
+    if (context?.scope && context.triggerType === "automatic") {
+      const scheduling = this.config.operations.upstreamSchedulingV2;
+      const scope = scheduling?.scopes[context.scope];
+      if (!scheduling?.enabled || !scope?.enabled || !scope.features.idleProbe) {
+        return { ok: true, skipped: true, scope: context.scope, reason: "scope idle probe is disabled", valuesPrinted: false };
+      }
+    }
     const startedAt = new Date();
     try {
-      const result = await this.idleProbe.run(accountIds, rounds) as Record<string, unknown>;
+      const result = await this.idleProbe.run(accountIds, rounds, context?.scope) as Record<string, unknown>;
       if (context) {
         const failed = Number(result.failed ?? 0);
         const attempted = Number(result.attempted ?? 0);
@@ -1507,6 +1522,7 @@ export class OperationsService {
       ok: true,
       automation: await this.store.getAutomation(),
       writePolicy: this.config.operations.writePolicy,
+      retired: this.config.operations.legacyScheduling?.enabled === false,
     };
   }
 
@@ -1515,6 +1531,9 @@ export class OperationsService {
     const intervalSeconds = Number(input.intervalSeconds);
     const recentCallLimit = Number(input.recentCallLimit);
     if (typeof enabled !== "boolean") throw new Error("enabled must be boolean");
+    if (enabled && this.config.operations.legacyScheduling?.enabled === false) {
+      throw new Error("旧全局调度已停用；请在 YAML 配置 V2 作用域的 priorityAutomation");
+    }
     if (!Number.isInteger(intervalSeconds) || intervalSeconds < 5 || intervalSeconds > 86400) {
       throw new Error("intervalSeconds must be an integer from 5 to 86400");
     }
@@ -1551,8 +1570,9 @@ export class OperationsService {
   async priorityAutomationDispatchState() {
     const row = await this.store.getAutomation();
     if (!row) return null;
+    const legacyEnabled = this.config.operations.legacyScheduling?.enabled !== false;
     return {
-      enabled: row.enabled === true,
+      enabled: legacyEnabled && row.enabled === true,
       nextRunAt: row.next_run_at ?? null,
       runId: row.run_id === null || row.run_id === undefined ? null : String(row.run_id),
       runClaimedAt: row.run_claimed_at ?? null,
@@ -1578,6 +1598,9 @@ export class OperationsService {
   }
 
   async runDueAutomation() {
+    if (this.config.operations.legacyScheduling?.enabled === false) {
+      return { ok: true, due: false, disabled: true, retired: true, reason: "operations.legacyScheduling.enabled=false" };
+    }
     if (this.config.operations.writePolicy?.enabled !== true) {
       return { ok: true, due: false, disabled: true, reason: "operations.writePolicy.enabled=false" };
     }
@@ -1765,6 +1788,106 @@ export class OperationsService {
       }
       throw error;
     }
+  }
+
+  async runV2AutomaticPriorityPlan(scopeName: string, recentCallLimit: number) {
+    const scheduling = this.config.operations.upstreamSchedulingV2;
+    const scope = scheduling?.enabled ? scheduling.scopes[scopeName] : undefined;
+    if (!scope?.enabled || !scope.features.priorityAutomation) {
+      return {
+        ok: true,
+        due: false,
+        skipped: true,
+        scope: scopeName,
+        reason: "scope priority automation is disabled",
+      };
+    }
+    if (this.config.operations.writePolicy?.enabled !== true) {
+      return {
+        ok: true,
+        due: false,
+        skipped: true,
+        scope: scopeName,
+        reason: "operations.writePolicy.enabled=false",
+      };
+    }
+    return await this.store.withPriorityOptimizationQueue(async (queue) => {
+      const operator = `v2-scheduler:${scopeName}`;
+      const candidate = await this.priorityState(recentCallLimit, "automatic");
+      const scoped = filterPriorityPlanProfiles(candidate, new Set([scopeName]));
+      const prepared = preparePriorityAutomationBatch(
+        scoped,
+        this.config.operations.automationSafety,
+        this.config.operations.priorityWrite.batchSize,
+      );
+      const priorities = prepared.selectedPriorities as Record<string, number>;
+      const { selectedPriorities: _selectedPriorities, ...automationSafety } = prepared;
+      const result = {
+        ...scoped,
+        priorities,
+        changedCount: Object.keys(priorities).length,
+        candidateChangedCount: automationSafety.fullChangedCount,
+        notSelectedChangedCount: automationSafety.notSelectedChangedCount,
+        automationSafety,
+        scope: scopeName,
+        scheduler: "upstream-scheduling-v2",
+      };
+      const plan = await this.store.createPlan({
+        operator,
+        recentCallLimit,
+        ttlMinutes: this.config.operations.planTtlMinutes,
+        priorities,
+        result,
+        triggerType: "automatic",
+        executionStartedAt: new Date().toISOString(),
+      });
+      if (automationSafety.allowed !== true) {
+        const blocked = {
+          changedCount: 0,
+          candidateChangedCount: Number(result.candidateChangedCount ?? 0),
+          notSelectedChangedCount: Number(result.notSelectedChangedCount ?? 0),
+          writeMode: "cycle-skipped",
+          verification: "not-started",
+          safety: automationSafety,
+          scope: scopeName,
+          scheduler: "upstream-scheduling-v2",
+          queue,
+        };
+        await this.store.finishPlan(plan.id, "failed", blocked, this.config.operations.automationJitterPercent);
+        await this.store.audit("priority.automation.v2.run", "blocked", operator,
+          { scope: scopeName, recentCallLimit }, { planId: plan.id, ...blocked });
+        return { ok: true, due: true, planId: plan.id, ...blocked };
+      }
+      if (Object.keys(priorities).length === 0) {
+        const unchanged = {
+          changedCount: 0,
+          candidateChangedCount: Number(result.candidateChangedCount ?? 0),
+          notSelectedChangedCount: Number(result.notSelectedChangedCount ?? 0),
+          writeMode: "no-change",
+          verification: "not-started",
+          verifiedCount: 0,
+          scope: scopeName,
+          scheduler: "upstream-scheduling-v2",
+          queue,
+        };
+        await this.store.finishPlan(plan.id, "applied", unchanged, this.config.operations.automationJitterPercent);
+        await this.store.audit("priority.automation.v2.run", "succeeded", operator,
+          { scope: scopeName, recentCallLimit }, { planId: plan.id, ...unchanged });
+        return { ok: true, due: true, planId: plan.id, ...unchanged };
+      }
+      const confirmation = await this.confirmPriorityPlanQueued(plan.id, operator, queue) as Record<string, unknown>;
+      const { planId: _planId, ok: _ok, ...confirmationData } = confirmation;
+      const outcome = {
+        ...confirmationData,
+        scope: scopeName,
+        scheduler: "upstream-scheduling-v2",
+        candidateChangedCount: Number(result.candidateChangedCount ?? confirmation.changedCount),
+        notSelectedChangedCount: Number(result.notSelectedChangedCount ?? 0),
+      };
+      await this.store.audit("priority.automation.v2.run", "succeeded", operator,
+        { scope: scopeName, recentCallLimit }, { planId: plan.id, ...outcome });
+      return { ok: true, due: true, planId: plan.id, ...outcome };
+    });
   }
 
   async procurement(budgetCny: number, operator: string, page = 1, pageSize = 10) {

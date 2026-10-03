@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -13,18 +14,21 @@ import (
 )
 
 type Config struct {
-	Address, Namespace, TaskQueue, ScoreScheduleWorkflowID     string
-	APIBaseURL, AdminToken, HealthHost                         string
-	HealthPort, RefreshIntervalMinutes                         int
-	ActivityTimeout, WorkflowExecutionTimeout                  string
-	SubmissionTimeout                                          time.Duration
-	MaximumAttempts, QuotaIntervalSeconds, QuotaTimeoutSeconds int
-	AutomationPollMilliseconds                                 int
-	AutomaticRefreshEnabled                                    bool
-	IdleProbeEnabled                                           bool
-	IdleProbeIntervalSeconds, IdleProbeTimeoutSeconds          int
-	BugTeamCostMonitorEnabled                                  bool
-	BugTeamCostIntervalSeconds                                 int
+	Address, Namespace, TaskQueue, ScoreScheduleWorkflowID      string
+	APIBaseURL, AdminToken, HealthHost                          string
+	HealthPort, RefreshIntervalMinutes                          int
+	ActivityTimeout, WorkflowExecutionTimeout                   string
+	SubmissionTimeout                                           time.Duration
+	MaximumAttempts, QuotaIntervalSeconds, QuotaTimeoutSeconds  int
+	AutomationPollMilliseconds                                  int
+	LegacySchedulingEnabled                                     bool
+	V2AutomationIntervalSeconds, V2AutomationRecentCallLimit    int
+	V2ScopeNames, V2PriorityAutomationScopes, V2IdleProbeScopes []string
+	AutomaticRefreshEnabled                                     bool
+	IdleProbeEnabled                                            bool
+	IdleProbeIntervalSeconds, IdleProbeTimeoutSeconds           int
+	BugTeamCostMonitorEnabled                                   bool
+	BugTeamCostIntervalSeconds                                  int
 }
 
 type fileConfig struct {
@@ -43,7 +47,25 @@ type fileConfig struct {
 	} `yaml:"sub2api"`
 	Operations struct {
 		AutomationPollMilliseconds int `yaml:"automationPollMs"`
-		UpstreamManagement         struct {
+		LegacyScheduling           *struct {
+			Enabled *bool `yaml:"enabled"`
+		} `yaml:"legacyScheduling"`
+		UpstreamSchedulingV2 struct {
+			Enabled    bool `yaml:"enabled"`
+			Automation struct {
+				IntervalSeconds int `yaml:"intervalSeconds"`
+				RecentCallLimit int `yaml:"recentCallLimit"`
+			} `yaml:"automation"`
+			Scopes map[string]struct {
+				Enabled  bool   `yaml:"enabled"`
+				Platform string `yaml:"platform"`
+				Features struct {
+					PriorityAutomation bool `yaml:"priorityAutomation"`
+					IdleProbe          bool `yaml:"idleProbe"`
+				} `yaml:"features"`
+			} `yaml:"scopes"`
+		} `yaml:"upstreamSchedulingV2"`
+		UpstreamManagement struct {
 			QuotaSampleIntervalSeconds int `yaml:"quotaSampleIntervalSeconds"`
 			QuotaSampleTimeoutSeconds  int `yaml:"quotaSampleTimeoutSeconds"`
 		} `yaml:"upstreamManagement"`
@@ -130,6 +152,28 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 	if host == "" || host == "0.0.0.0" {
 		host = "127.0.0.1"
 	}
+	var v2ScopeNames, v2PriorityAutomationScopes, v2IdleProbeScopes []string
+	for name, scope := range raw.Operations.UpstreamSchedulingV2.Scopes {
+		v2ScopeNames = append(v2ScopeNames, name)
+		if raw.Operations.UpstreamSchedulingV2.Enabled {
+			if !scope.Enabled {
+				continue
+			}
+			if scope.Features.PriorityAutomation {
+				v2PriorityAutomationScopes = append(v2PriorityAutomationScopes, name)
+			}
+			if scope.Features.IdleProbe && scope.Platform == "openai" {
+				v2IdleProbeScopes = append(v2IdleProbeScopes, name)
+			}
+		}
+	}
+	legacySchedulingEnabled := true
+	if raw.Operations.LegacyScheduling != nil && raw.Operations.LegacyScheduling.Enabled != nil {
+		legacySchedulingEnabled = *raw.Operations.LegacyScheduling.Enabled
+	}
+	sort.Strings(v2PriorityAutomationScopes)
+	sort.Strings(v2IdleProbeScopes)
+	sort.Strings(v2ScopeNames)
 	return Config{
 		Address: address, Namespace: raw.Temporal.Namespace, TaskQueue: target.TemporalTaskQueue,
 		ScoreScheduleWorkflowID: target.ScoreScheduleWorkflowID,
@@ -137,12 +181,18 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 		HealthHost: target.WorkerHealthHost, HealthPort: target.WorkerHealthPort,
 		RefreshIntervalMinutes: raw.Monitor.RefreshIntervalMinutes, AutomaticRefreshEnabled: raw.Monitor.AutomaticRefresh.Enabled,
 		ActivityTimeout: raw.Temporal.ActivityTimeout, WorkflowExecutionTimeout: raw.Temporal.WorkflowExecutionTimeout,
-		SubmissionTimeout:          time.Duration(raw.Temporal.SubmissionTimeoutMS) * time.Millisecond,
-		MaximumAttempts:            raw.Temporal.Retry.MaximumAttempts,
-		QuotaIntervalSeconds:       raw.Operations.UpstreamManagement.QuotaSampleIntervalSeconds,
-		QuotaTimeoutSeconds:        raw.Operations.UpstreamManagement.QuotaSampleTimeoutSeconds,
-		AutomationPollMilliseconds: raw.Operations.AutomationPollMilliseconds,
-		IdleProbeEnabled:           raw.Sub2API.IdleProbe.Enabled, IdleProbeIntervalSeconds: raw.Sub2API.IdleProbe.IntervalSeconds,
+		SubmissionTimeout:           time.Duration(raw.Temporal.SubmissionTimeoutMS) * time.Millisecond,
+		MaximumAttempts:             raw.Temporal.Retry.MaximumAttempts,
+		QuotaIntervalSeconds:        raw.Operations.UpstreamManagement.QuotaSampleIntervalSeconds,
+		QuotaTimeoutSeconds:         raw.Operations.UpstreamManagement.QuotaSampleTimeoutSeconds,
+		AutomationPollMilliseconds:  raw.Operations.AutomationPollMilliseconds,
+		LegacySchedulingEnabled:     legacySchedulingEnabled,
+		V2AutomationIntervalSeconds: raw.Operations.UpstreamSchedulingV2.Automation.IntervalSeconds,
+		V2AutomationRecentCallLimit: raw.Operations.UpstreamSchedulingV2.Automation.RecentCallLimit,
+		V2PriorityAutomationScopes:  v2PriorityAutomationScopes,
+		V2IdleProbeScopes:           v2IdleProbeScopes,
+		V2ScopeNames:                v2ScopeNames,
+		IdleProbeEnabled:            raw.Sub2API.IdleProbe.Enabled, IdleProbeIntervalSeconds: raw.Sub2API.IdleProbe.IntervalSeconds,
 		IdleProbeTimeoutSeconds:   raw.Sub2API.IdleProbe.RoundTimeoutSeconds,
 		BugTeamCostMonitorEnabled: raw.BugTeam.Monitor.Enabled, BugTeamCostIntervalSeconds: raw.BugTeam.Monitor.SampleIntervalSeconds,
 	}, nil

@@ -18,6 +18,7 @@ test("the Vite production entry also disables immutable module caching", async (
   expect(config).toContain('"Cache-Control": "private, no-store, max-age=0, must-revalidate"');
   expect(config).toContain("headers: frontendNoStoreHeaders");
   expect(config).toContain("preview: { headers: frontendNoStoreHeaders }");
+  expect(config).toContain('pathname === "/upstream-scheduling-v2"');
 });
 
 test("persistent snapshot APIs bypass the generic response cache", () => {

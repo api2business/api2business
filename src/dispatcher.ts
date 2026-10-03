@@ -40,7 +40,8 @@ export async function dispatchDirect(services: DispatcherServices, command: AppC
     || command.kind === "priority.plan.create"
     || command.kind === "priority.plan.manual-create"
     || command.kind === "priority.plan.confirm"
-    || command.kind === "priority.automation.run") {
+    || command.kind === "priority.automation.run"
+    || command.kind === "priority.automation.v2.run") {
     throw new Error(`${command.kind} must be executed by the Temporal worker`);
   }
   const exhaustive: never = command;

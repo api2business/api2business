@@ -26,6 +26,7 @@ function services(overrides: Record<string, unknown> = {}) {
     sampleOAuthRuntime: async () => ({ ok: true }),
     samplePoolQuality: async () => ({ ok: true }),
     runDueAutomation: async () => ({ ok: true }),
+    runV2AutomaticPriorityPlan: async (scope: string, recentCallLimit: number) => ({ ok: true, scope, recentCallLimit }),
     priorityAutomationDispatchDelay: async () => ({ due: false, delayMs: 637000, reason: "waiting" }),
     deferPriorityAutomationAfterDispatchFailure: async () => ({ ok: true }),
   };
@@ -45,6 +46,13 @@ test("worker executor returns the authoritative automation delay", async () => {
   const execute = createWorkerOperationExecutor(fixture.value as never);
   const result = await execute({ operationId: "automation-delay", command: { kind: "priority.automation.run" } }) as Record<string, unknown>;
   expect(result).toMatchObject({ ok: true, nextDelayMs: 637000, nextDelayReason: "waiting" });
+});
+
+test("worker executor routes V2 priority automation with its scope", async () => {
+  const fixture = services();
+  const execute = createWorkerOperationExecutor(fixture.value as never);
+  const result = await execute({ operationId: "v2-automation", command: { kind: "priority.automation.v2.run", scope: "codex", recentCallLimit: 1000 } }) as Record<string, unknown>;
+  expect(result).toEqual({ ok: true, scope: "codex", recentCallLimit: 1000 });
 });
 
 test("worker executor preserves create detection, rate synchronization, and completion", async () => {

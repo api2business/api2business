@@ -82,6 +82,7 @@ export class UpstreamSchedulingV2Service {
       ok: true,
       version: "v2",
       defaultScope: configuration.defaultScope,
+      legacySchedulingEnabled: this.config.operations.legacyScheduling?.enabled !== false,
       scopes: Object.entries(configuration.scopes).map(([name, scope]) => ({
         name,
         enabled: scope.enabled,
@@ -109,11 +110,10 @@ export class UpstreamSchedulingV2Service {
       throw new UpstreamSchedulingV2Error(409, "platform_unsupported", `V2 暂不支持平台：${scope.platform}`);
     }
     const accountIds = accounts.map((row) => Number(row.accountId));
-    const [poolQuality, errors, priorityHistory, automation, quota, usage, probeHistory] = await Promise.all([
+    const [poolQuality, errors, priorityHistory, quota, usage, probeHistory] = await Promise.all([
       this.operations.poolQualitySummary(qualityProfile),
       this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all" }),
       this.operations.priorityHistory(),
-      this.operations.getPriorityAutomation(),
       this.operations.upstreamQuotaSummary(accountIds),
       accountIds.length ? this.operations.getUpstreamUsageCache(accountIds) : Promise.resolve([]),
       qualityProfile === "codex" ? this.operations.idleProbeHistory(1, 10) : Promise.resolve({ records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
@@ -124,7 +124,13 @@ export class UpstreamSchedulingV2Service {
       poolQuality,
       errors,
       priorityHistory: filteredHistory(priorityHistory.records, scopeName),
-      automation: automation.automation ?? null,
+      automation: {
+        enabled: scope.features.priorityAutomation,
+        interval_seconds: this.configuration().automation.intervalSeconds,
+        recent_call_limit: this.configuration().automation.recentCallLimit,
+        owner: "upstream-scheduling-v2",
+        scope: scopeName,
+      },
       quota,
       usage: records(usage).map((row) => row.last_success_result ?? row.result).filter(Boolean),
       probeHistory,
@@ -181,7 +187,7 @@ export class UpstreamSchedulingV2Service {
       },
       {
         name: "write-boundary",
-        status: scope.features.planWrite === false && scope.features.priorityAutomation === false && scope.features.upstreamWrite === false ? "matched" : "mismatch",
+        status: scope.features.planWrite === false && scope.features.upstreamWrite === false ? "matched" : "mismatch",
         planWrite: scope.features.planWrite,
         priorityAutomation: scope.features.priorityAutomation,
         upstreamWrite: scope.features.upstreamWrite,
@@ -228,6 +234,14 @@ export class UpstreamSchedulingV2Service {
       reconciliation: this.reconciliation(selected.name, selected.scope, source),
       valuesPrinted: false,
     };
+  }
+
+  async probeHistory(scopeName?: string | null, page = 1) {
+    const selected = this.scope(scopeName);
+    if (selected.scope.platform !== "openai") {
+      return { ok: true, scope: selected.name, records: [], pagination: { page: 1, totalPages: 1, total: 0 } };
+    }
+    return { ...await this.operations.idleProbeHistory(page, 10), scope: selected.name };
   }
 
   async plan(scopeName?: string | null) {

@@ -159,6 +159,10 @@ export interface UpstreamSchedulingV2Scope {
 export interface UpstreamSchedulingV2Config {
   enabled: boolean;
   defaultScope: string;
+  automation: {
+    intervalSeconds: number;
+    recentCallLimit: number;
+  };
   scopes: Record<string, UpstreamSchedulingV2Scope>;
 }
 
@@ -254,6 +258,9 @@ export interface AppConfig {
     writePolicy: {
       enabled: boolean;
       claudeEnabled: boolean;
+    };
+    legacyScheduling?: {
+      enabled: boolean;
     };
     upstreamSchedulingV2?: UpstreamSchedulingV2Config;
     databaseUrlEnv: string;
@@ -632,7 +639,16 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
   if (enabled && scopes[defaultScope]?.enabled !== true) {
     throw new Error(`${path}.defaultScope must reference an enabled scope when V2 is enabled`);
   }
-  return { enabled, defaultScope, scopes };
+  const automation = object(root.automation, `${path}.automation`);
+  return {
+    enabled,
+    defaultScope,
+    automation: {
+      intervalSeconds: integerValue(automation, "intervalSeconds", `${path}.automation`, 5, 86400),
+      recentCallLimit: integerValue(automation, "recentCallLimit", `${path}.automation`, 1, 100000),
+    },
+    scopes,
+  };
 }
 
 export function loadConfig(path: string): AppConfig {
@@ -663,6 +679,13 @@ export function loadConfig(path: string): AppConfig {
   const ranking = object(raw.ranking, "ranking");
   const records = object(raw.records, "records");
   const operations = object(raw.operations, "operations");
+  const legacySchedulingValue = operations.legacyScheduling;
+  const legacyScheduling = legacySchedulingValue === undefined
+    ? { enabled: true }
+    : (() => {
+      const value = object(legacySchedulingValue, "operations.legacyScheduling");
+      return { enabled: booleanValue(value, "enabled", "operations.legacyScheduling") };
+    })();
   const accountLifecycle = object(operations.accountLifecycle, "operations.accountLifecycle");
   const accountImportDefaults = object(operations.accountImportDefaults, "operations.accountImportDefaults");
   const upstreamManagement = object(operations.upstreamManagement, "operations.upstreamManagement");
@@ -991,6 +1014,7 @@ export function loadConfig(path: string): AppConfig {
           claudeEnabled: booleanValue(value, "claudeEnabled", "operations.writePolicy"),
         };
       })(),
+      legacyScheduling,
       upstreamSchedulingV2,
       databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
       ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),

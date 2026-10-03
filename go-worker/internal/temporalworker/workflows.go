@@ -22,6 +22,8 @@ type ScheduleInput struct {
 	RoundTimeoutMS              int    `json:"roundTimeoutMs"`
 	ActivityStartToCloseTimeout string `json:"activityStartToCloseTimeout"`
 	MaximumAttempts             int32  `json:"maximumAttempts"`
+	Scope                       string `json:"scope,omitempty"`
+	RecentCallLimit             int    `json:"recentCallLimit,omitempty"`
 }
 type PriorityAutomationRunResult struct {
 	NextDelayMS int `json:"nextDelayMs"`
@@ -230,6 +232,9 @@ func IdleAccountProbeScheduleWorkflow(ctx workflow.Context, input ScheduleInput)
 	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions((time.Duration(input.RoundTimeoutMS)*time.Millisecond).String(), 1))
 	for iteration := 0; iteration < 500; iteration++ {
 		request := OperationRequest{OperationID: fmt.Sprintf("%s:idle-probe:%d", workflow.GetInfo(ctx).WorkflowExecution.RunID, iteration), Command: map[string]any{"kind": "account.idle-probe.run", "accountIds": []int{}, "rounds": 1}}
+		if input.Scope != "" {
+			request.Command["scope"] = input.Scope
+		}
 		_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, nil)
 		if err := workflow.Sleep(ctx, time.Duration(input.IntervalMS)*time.Millisecond); err != nil {
 			return err
@@ -269,4 +274,28 @@ func PriorityAutomationScheduleWorkflow(ctx workflow.Context, input ScheduleInpu
 		}
 	}
 	return workflow.NewContinueAsNewError(ctx, PriorityAutomationScheduleWorkflow, input)
+}
+
+func PriorityAutomationV2ScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
+	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions(input.ActivityStartToCloseTimeout, 1))
+	intervalMS := input.IntervalMS
+	if intervalMS < minimumPriorityAutomationPollMilliseconds {
+		intervalMS = minimumPriorityAutomationPollMilliseconds
+	}
+	if input.Scope == "" || input.RecentCallLimit < 1 {
+		return fmt.Errorf("V2 priority automation requires scope and recent call limit")
+	}
+	for iteration := 0; iteration < 5000; iteration++ {
+		request := OperationRequest{
+			OperationID: fmt.Sprintf("%s:priority-automation-v2:%s:%d", workflow.GetInfo(ctx).WorkflowExecution.RunID, input.Scope, iteration),
+			Command: map[string]any{
+				"kind": "priority.automation.v2.run", "scope": input.Scope, "recentCallLimit": input.RecentCallLimit,
+			},
+		}
+		_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, nil)
+		if err := workflow.Sleep(ctx, time.Duration(intervalMS)*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return workflow.NewContinueAsNewError(ctx, PriorityAutomationV2ScheduleWorkflow, input)
 }

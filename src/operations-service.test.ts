@@ -123,6 +123,56 @@ test("automatic priority plans follow per-scope feature switches", () => {
   });
 });
 
+test("V2 automatic priority plans persist only the requested scope", async () => {
+  const created: Array<Record<string, unknown>> = [];
+  const store = {
+    async withPriorityOptimizationQueue<T>(operation: (lease: Record<string, unknown>) => Promise<T>) {
+      return await operation({ queueName: "priority-optimization-global", queuedAt: "queued", acquiredAt: "acquired", waitMs: 0 });
+    },
+    async createPlan(input: Record<string, unknown>) {
+      created.push(input);
+      return { id: "v2-plan", expiresAt: "2026-10-03T00:15:00.000Z" };
+    },
+    async finishPlan() {
+      return { execution_started_at: "2026-10-03T00:00:00.000Z", completed_at: "2026-10-03T00:00:01.000Z", next_run_at: null };
+    },
+    async audit() {},
+  } as unknown as OperationsStore;
+  const config = {
+    operations: {
+      writePolicy: { enabled: true, claudeEnabled: true },
+      upstreamSchedulingV2: {
+        enabled: true,
+        defaultScope: "codex",
+        automation: { intervalSeconds: 600, recentCallLimit: 1000 },
+        scopes: {
+          codex: {
+            enabled: true, platform: "openai", eligibleGroupIds: [2],
+            features: { scoreRead: true, planRead: true, planWrite: false, priorityAutomation: true, idleProbe: false, upstreamWrite: false },
+          },
+        },
+      },
+      planTtlMinutes: 15,
+      automationJitterPercent: 0.1,
+      automationSafety,
+      priorityWrite: { batchSize: 3 },
+    },
+  } as AppConfig;
+  const service = new OperationsService(config, store, unusedReads);
+  service.priorityState = async () => ({
+    queryDurationMs: 10,
+    profiles: { codex: { changedCount: 0 }, grok: { changedCount: 1 } },
+    changes: [{ accountId: 9, profile: "grok", change: "update", desiredPriority: 100 }],
+    priorities: {},
+    changedCount: 1,
+  });
+  const result = await service.runV2AutomaticPriorityPlan("codex", 1000);
+  expect(result).toMatchObject({ ok: true, scope: "codex", writeMode: "no-change" });
+  expect(created[0]?.operator).toBe("v2-scheduler:codex");
+  expect((created[0]?.result as Record<string, unknown>).profiles).toEqual({ codex: { changedCount: 0 } });
+  expect(created[0]?.executionStartedAt).toBeString();
+});
+
 function serviceFixture(candidate: Record<string, unknown>) {
   const created: Array<Record<string, unknown>> = [];
   const store = {

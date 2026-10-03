@@ -81,6 +81,7 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
     if (command.kind === "account.idle-probe.run") return await services.operations.runIdleProbe(command.accountIds, command.rounds, {
       operationId: operation.operationId,
       triggerType: operation.operationId.includes(":idle-probe:") ? "automatic" : "manual",
+      scope: command.scope,
     });
     if (command.kind === "account.idle-probe.reconcile") return await services.operations.reconcileIdleProbe(command.accountIds);
     if (command.kind === "priority.plan.create") return await services.operations.generatePriorityPlan(command.recentCallLimit, command.operator);
@@ -95,6 +96,9 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
         await services.operations.deferPriorityAutomationAfterDispatchFailure(error).catch(() => null);
         throw error;
       }
+    }
+    if (command.kind === "priority.automation.v2.run") {
+      return await services.operations.runV2AutomaticPriorityPlan(command.scope, command.recentCallLimit);
     }
     if (command.kind === "account.import") {
       const job = await services.imports.runWorker(command.jobId);

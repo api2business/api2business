@@ -216,23 +216,27 @@ export class IdleAccountProbeService {
     private readonly isolation: ProbeIsolationService | null = null,
   ) {}
 
-  async plan(accountIds: number[] = [], priority: Sub2ApiReadPriority = "manual"): Promise<Record<string, unknown>> {
+  async plan(accountIds: number[] = [], priority: Sub2ApiReadPriority = "manual", scopeName?: string): Promise<Record<string, unknown>> {
     const policy = this.config.sub2api.idleProbe;
     const explicit = [...new Set(accountIds)].filter((id) => Number.isSafeInteger(id) && id > 0);
     if (explicit.length !== accountIds.length) throw new Error("idle probe account IDs must be unique positive integers");
-    const groupIds = this.config.sub2api.priorityPlan.eligibleGroupIds;
+    const scope = scopeName ? this.config.operations.upstreamSchedulingV2?.scopes[scopeName] : undefined;
+    if (scopeName && (!this.config.operations.upstreamSchedulingV2?.enabled || !scope?.enabled)) {
+      throw new Error(`idle probe scope is unavailable: ${scopeName}`);
+    }
+    const groupIds = scope?.eligibleGroupIds ?? this.config.sub2api.priorityPlan.eligibleGroupIds;
     const result = await this.reads.query<Record<string, unknown>>({
-      key: JSON.stringify(["accounts.idle-probe.plan", explicit, policy.idleSeconds, policy.candidateLimit]),
+      key: JSON.stringify(["accounts.idle-probe.plan", scopeName ?? null, explicit, policy.idleSeconds, policy.candidateLimit]),
       kind: "accounts.idle-probe.plan",
       sql: idleProbeCandidatesSql,
       parameters: [
-        this.config.sub2api.priorityPlan.platform,
+        scope?.platform ?? this.config.sub2api.priorityPlan.platform,
         groupIds.join(","),
         policy.idleSeconds,
         explicit.length > 0 ? explicit.length : policy.candidateLimit,
         explicit.length > 0 ? explicit.join(",") : null,
         explicit.length > 0,
-        explicit.length > 0,
+        explicit.length > 0 && !scopeName,
       ],
       priority,
       cacheMode: "bypass-cache",
@@ -399,7 +403,7 @@ export class IdleAccountProbeService {
     };
   }
 
-  async run(accountIds: number[] = [], rounds = 1): Promise<Record<string, unknown>> {
+  async run(accountIds: number[] = [], rounds = 1, scopeName?: string): Promise<Record<string, unknown>> {
     if (!this.isolation) throw new Error("idle probe execution requires isolated probe API key");
     if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10) throw new Error("idle probe rounds must be an integer from 1 to 10");
     if (this.running) return { ok: true, skipped: true, reason: "in-flight", valuesPrinted: false };
@@ -417,7 +421,7 @@ export class IdleAccountProbeService {
           results.push({ round, skipped: true, reason: "round-timeout" });
           break;
         }
-        const plan = await this.plan(accountIds, "automatic");
+        const plan = await this.plan(accountIds, "automatic", scopeName);
         const plannedCandidates = plan.candidates as IdleProbeCandidate[];
         const candidates = plannedCandidates
           .filter((candidate) => candidate.status === "active" && candidate.schedulable === true)

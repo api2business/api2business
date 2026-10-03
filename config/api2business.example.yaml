@@ -63,13 +63,24 @@ webProbe:
   authentication:
     mode: provided-session-cookie
     cookieName: api2business_session
-  defaultSmokeProfile: scores-layout
+  defaultSmokeProfile: upstream-scheduling-v2
   smokeProfiles:
     scores-layout:
       path: /scores
       readySelector: "#score-updated-time"
       screenshotName: api2business-scores-desktop.png
       mobileScreenshotName: api2business-scores-mobile.png
+      viewport: { width: 1920, height: 1080 }
+      mobileViewport: { width: 390, height: 844 }
+      navigationTimeoutMs: 30000
+      settleMs: 5000
+      commandTimeoutSeconds: 90
+      outputLimits: { failures: 12, network: 40, console: 12 }
+    upstream-scheduling-v2:
+      path: /upstream-scheduling-v2
+      readySelector: "#v2-data-state"
+      screenshotName: api2business-upstream-scheduling-v2-desktop.png
+      mobileScreenshotName: api2business-upstream-scheduling-v2-mobile.png
       viewport: { width: 1920, height: 1080 }
       mobileViewport: { width: 390, height: 844 }
       navigationTimeoutMs: 30000
@@ -360,9 +371,14 @@ operations:
   writePolicy:
     enabled: false
     claudeEnabled: false
+  legacyScheduling:
+    enabled: false
   upstreamSchedulingV2:
     enabled: true
     defaultScope: codex
+    automation:
+      intervalSeconds: 600
+      recentCallLimit: 1000
     scopes:
       codex:
         enabled: true

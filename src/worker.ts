@@ -162,6 +162,7 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     return await operations.runIdleProbe(command.accountIds, command.rounds, {
       operationId: operation.operationId,
       triggerType: operation.operationId.includes(":idle-probe:") ? "automatic" : "manual",
+      scope: command.scope,
     });
   }
   if (command.kind === "account.idle-probe.reconcile") {
@@ -177,6 +178,9 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     return await operations.confirmPriorityPlan(command.planId, command.operator);
   }
   if (command.kind === "priority.automation.run") return await operations.runDueAutomation();
+  if (command.kind === "priority.automation.v2.run") {
+    return await operations.runV2AutomaticPriorityPlan(command.scope, command.recentCallLimit);
+  }
   if (command.kind === "account.import") {
     const job = await accountImports.runWorker(command.jobId);
     let postImportOAuthSample: Record<string, unknown> | null = null;
@@ -307,7 +311,9 @@ const schedule = temporalGateway
   };
 const quotaSchedule = temporalGateway ? await temporalGateway.ensureUpstreamQuotaSchedule() : { started: false, workflowId: null };
 const bugTeamCostSchedule = temporalGateway ? await temporalGateway.ensureBugTeamCostSchedule() : { started: false, workflowId: null };
+const legacySchedulingEnabled = config.operations.legacyScheduling?.enabled !== false;
 const idleProbeSchedule = temporalGateway
+  && legacySchedulingEnabled
   ? await temporalGateway.ensureIdleProbeSchedule()
   : { started: false, workflowId: null };
 let state: "ready" | "stopping" = "ready";
@@ -370,7 +376,7 @@ async function waitForIdleProbeWatchdog(delayMs: number): Promise<void> {
 }
 const idleProbeWatchdogStartedAtMs = Date.now();
 const idleProbeWatchdog = (async () => {
-  if (!temporalGateway || !config.sub2api.idleProbe.enabled) return;
+  if (!temporalGateway || !legacySchedulingEnabled || !config.sub2api.idleProbe.enabled) return;
   while (!stopping) {
     try {
       const latest = await operationsStore.latestAutomaticIdleProbeRound();
@@ -457,6 +463,7 @@ const scoreWatchdog = (async () => {
 })();
 let consecutiveAutomationFailures = 0;
 const automationLoop = (async () => {
+  if (!legacySchedulingEnabled) return;
   while (!stopping) {
     let nextDelayMs = config.operations.automationPollMs;
     try {

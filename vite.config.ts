@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -47,8 +47,19 @@ const frontendRevisionPlugin = {
   },
 };
 
+const pageRoutePlugin: Plugin = {
+  name: "api2business-page-routes",
+  configureServer(server) {
+    server.middlewares.use((request, _response, next) => {
+      const [pathname, query = ""] = String(request.url ?? "").split("?", 2);
+      if (pathname === "/upstream-scheduling-v2") request.url = `/upstream-scheduling-v2.html${query ? `?${query}` : ""}`;
+      next();
+    });
+  },
+};
+
 export default defineConfig({
-  plugins: [frontendRevisionPlugin],
+  plugins: [frontendRevisionPlugin, pageRoutePlugin],
   root: "static",
   server: {
     headers: frontendNoStoreHeaders,

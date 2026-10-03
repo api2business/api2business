@@ -229,6 +229,7 @@ export function createHandler(
   const cacheRefreshes = new Map<string, Promise<ApiCacheRefreshResult>>();
   const handle = async (request: Request) => {
     const url = new URL(request.url);
+    const schedulingHome = config.operations.legacyScheduling?.enabled === false ? "/upstream-scheduling-v2" : "/scores";
     const session = sessionAuthorized(request, config, auth);
       const apiKey = apiKeyAuthorized(request, auth) || request.headers.get("authorization") === `Bearer ${legacyAdminToken}`;
     try {
@@ -253,7 +254,7 @@ export function createHandler(
         return json({ ok: true }, 200, { "set-cookie": clearSessionCookie(config, secureCookies) });
       }
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/login") {
-        return session ? redirect("/scores") : await staticFile("login.html", "text/html; charset=utf-8");
+        return session ? redirect(schedulingHome) : await staticFile("login.html", "text/html; charset=utf-8");
       }
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/styles.css") return await staticFile("styles.css", "text/css; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/app.js") return await staticFile("app.js", "text/javascript; charset=utf-8");
@@ -280,7 +281,10 @@ export function createHandler(
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/bugteam-cost.js") {
         return await staticFile("bugteam-cost.js", "text/javascript; charset=utf-8");
       }
-      if (request.method === "GET" && url.pathname === "/") return redirect(session ? "/scores" : "/login");
+      if (request.method === "GET" && url.pathname === "/") return redirect(session ? schedulingHome : "/login");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/scores" && config.operations.legacyScheduling?.enabled === false) {
+        return redirect(session ? schedulingHome : "/login");
+      }
       const page = ({ "/scores": "scores.html", "/upstream-scheduling-v2": "upstream-scheduling-v2.html", "/quota-monitor": "quota-monitor.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
@@ -300,6 +304,9 @@ export function createHandler(
           }
           if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/plan") {
             return json(await upstreamSchedulingV2.plan(scope));
+          }
+          if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/probe-history") {
+            return json(await upstreamSchedulingV2.probeHistory(scope, pageNumber(url)));
           }
           return json({ ok: false, error: "not found" }, 404);
         } catch (error) {

@@ -135,12 +135,13 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 分开核对滚动分、固定时间段业务记录、账号容量和会话绑定；
   - 模板及排序变更必须独立回读运行态，不以工作流成功代替业务恢复。
 - 池级质量调查使用 `scores pool-quality --over-api`，该查询只读。
-- 上游调度 V2 先支持 Codex，再支持 Claude 的只读评分，使用
-  `upstream-scheduling-v2 scopes|snapshot|plan --over-api`；页面和接口独立于旧 `/scores`，
-  所有作用域功能开关只认 `operations.upstreamSchedulingV2.scopes.*`，核对证据不投影到 UI。
+- 上游调度 V2 按作用域平等支持 Codex、Claude 和后续平台，使用
+  `upstream-scheduling-v2 scopes|snapshot|plan --over-api`；作用域开关只认 owning YAML
+  的 `operations.upstreamSchedulingV2.scopes.*`，不能由代码替代。
   `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和 `upstreamWrite`
-  必须逐项按作用域配置；默认示例关闭写入、自动调度和探活，不能由代码强制替代 YAML。
-  一次性优先级调度的临时开关、作用域核对和关闭顺序只见
+  各自独立配置；旧全局调度由 `operations.legacyScheduling.enabled` 控制，关闭后不得
+  再驱动旧优先级或探活写入。自动探活必须先完成手动探活核验，再打开作用域开关。
+  作用域核对、调度迁移和失败判定只见
   [上游与调度](references/upstream-scheduling.md)。
 - 账号评分只有一条计算路径。
 - `/scores` 顶部全局平台切换、Codex/Claude 的综合质量与优先级隔离，以及 Claude 探活未启用边界见
