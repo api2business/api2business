@@ -12,6 +12,9 @@ SELECT a.id::int AS account_id, a.name AS account_name, a.platform, a.priority::
     FROM account_groups binding
     WHERE binding.account_id = a.id
   ), '{}') AS group_ids,
+  COALESCE(ARRAY(
+    SELECT jsonb_object_keys(COALESCE(a.credentials->'model_mapping', '{}'::jsonb))
+  ), '{}') AS model_mapping_keys,
   sample_stats.available_sample_count
 FROM accounts a
 CROSS JOIN LATERAL (
@@ -90,6 +93,17 @@ export interface IdleProbeCandidate {
   hadRuntimeBlock: boolean;
   availableSampleCount: number;
   groupIds: number[];
+  probeModel?: string | null;
+}
+
+const preferredProbeModels = ["gpt-5.6-terra", "gpt-5.6-sol"] as const;
+
+export function selectIdleProbeModel(modelNames: unknown, fallbackModel: string): string | null {
+  const names = Array.isArray(modelNames)
+    ? modelNames.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (names.length === 0) return fallbackModel;
+  return preferredProbeModels.find((model) => names.includes(model)) ?? null;
 }
 
 function numericIds(value: unknown): number[] {
@@ -237,6 +251,9 @@ export class IdleAccountProbeService {
         || row.temp_unschedulable_until != null,
       availableSampleCount: Number(row.available_sample_count ?? 0),
       groupIds: numericIds(row.group_ids),
+      ...((Array.isArray(row.model_mapping_keys) && row.model_mapping_keys.length > 0)
+        ? { probeModel: selectIdleProbeModel(row.model_mapping_keys, policy.model) }
+        : {}),
       } satisfies IdleProbeCandidate));
     const includeRollingUsage = priority !== "automatic";
     const rolling24Hours = includeRollingUsage ? await this.rollingUsage(priority) : null;
@@ -393,6 +410,7 @@ export class IdleAccountProbeService {
     let planned = 0;
     let ready = 0;
     const unreadyAccountIds = new Set<number>();
+    const modelUnavailableAccountIds = new Set<number>();
     try {
       for (let round = 1; round <= rounds; round += 1) {
         if (Date.now() - startedAt >= policy.roundTimeoutSeconds * 1000) {
@@ -403,6 +421,13 @@ export class IdleAccountProbeService {
         const plannedCandidates = plan.candidates as IdleProbeCandidate[];
         const candidates = plannedCandidates
           .filter((candidate) => candidate.status === "active" && candidate.schedulable === true)
+          .filter((candidate) => {
+            if (candidate.probeModel === null) {
+              modelUnavailableAccountIds.add(candidate.accountId);
+              return false;
+            }
+            return true;
+          })
           .filter((candidate) => {
             const binding = this.isolation!.get(candidate.accountId);
             return binding !== null && candidate.groupIds.includes(binding.groupId);
@@ -422,13 +447,14 @@ export class IdleAccountProbeService {
               await Bun.sleep(jitterMs);
               const response = await this.isolation!.probe(
                 candidate.accountId,
-                policy.model,
+                candidate.probeModel ?? policy.model,
                 policy.accountTimeoutMs,
                 policy.reasoningEffort,
               );
               return {
                 accountId: candidate.accountId,
                 accountName: candidate.accountName,
+                model: candidate.probeModel ?? policy.model,
                 recoveredBeforeProbe: true,
                 jitterMs,
                 previousRuntimeState: {
@@ -443,6 +469,7 @@ export class IdleAccountProbeService {
               return {
                 accountId: candidate.accountId,
                 accountName: candidate.accountName,
+                model: candidate.probeModel ?? policy.model,
                 recoveredBeforeProbe: false,
                 ok: false,
                 error: error instanceof Error ? error.message : String(error),
@@ -469,6 +496,7 @@ export class IdleAccountProbeService {
         planned,
         ready,
         unreadyAccountIds: [...unreadyAccountIds].sort((left, right) => left - right),
+        modelUnavailableAccountIds: [...modelUnavailableAccountIds].sort((left, right) => left - right),
         probeConcurrency: "all-ready-candidates",
         requestJitterMs: { minimum: policy.requestJitterMinMs, maximum: policy.requestJitterMaxMs },
         durationMs: Date.now() - startedAt,
