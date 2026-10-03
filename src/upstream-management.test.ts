@@ -291,6 +291,13 @@ test("keeps Codex and Claude templates as separate platform files", () => {
   const accessForbiddenRule = claude.rules.find((rule) =>
     rule.error_code === 502 && rule.keywords.includes("upstream access forbidden"));
   expect(accessForbiddenRule?.duration_minutes).toBe(10);
+  const forbiddenBody = JSON.stringify({ error: {
+    message: "Upstream access forbidden, please contact administrator",
+    type: "upstream_error",
+  } }).toLowerCase();
+  const firstForbiddenMatch = claude.rules.find((rule) =>
+    rule.error_code === 502 && rule.keywords.some((keyword) => forbiddenBody.includes(keyword.toLowerCase())));
+  expect(firstForbiddenMatch).toBe(accessForbiddenRule);
   expect(claude.rules.flatMap((rule) => rule.keywords)).toContain("api is at capacity");
   expect(claude.rules.flatMap((rule) => rule.keywords).some((keyword) => /gpt-/u.test(keyword))).toBe(false);
   expect(parsed.operations.upstreamManagement.templateFiles).toEqual({

@@ -187,6 +187,14 @@ test("Claude priority planning isolates Anthropic group 119 and preserves the ra
   expect(claudeChanges.find((row) => row.accountId === 13)).toMatchObject({ rank: 2, change: "update", desiredPriority: 276 });
   expect(plan.priorities).toMatchObject({ "13": 276 });
   expect(plan.priorities).not.toHaveProperty("12");
+
+  const appliedPlan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [
+    claude,
+    { ...claudeTail, priority: 276 },
+    codex,
+  ] }, config);
+  expect(appliedPlan.profiles).toMatchObject({ claude: { changedCount: 0 } });
+  expect(appliedPlan.priorities).toEqual({});
 });
 
 test("Codex economic ranking keeps the highest-cost quality leader below better-value accounts", () => {

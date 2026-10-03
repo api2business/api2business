@@ -98,6 +98,9 @@
   - 关键词规则：
     - 保留既有切号模板关键词，模板同步不得因为本地校验而静默删词；
     - 普通 `model_not_found`、`model not found` 不得写入模板，因为客户请求了全池都不存在的模型时，切号不能恢复请求。
+    - 同状态码的精确规则放在通用规则之前；原生按声明顺序触发冷却。
+    - 正文已含 `upstream_error` 时，原有通用规则可能已经覆盖；新增精确规则的作用可以是
+      区分冷却时长，不能仅凭未观测切号断言旧模板漏配。
   - 模型错误：
     - `selected model is at capacity` 表示模型或容量临时异常，可以切号；
     - `404 model_not_found` 不进入模板，直接保留标准模型错误。
@@ -143,7 +146,11 @@
     - 只有响应提交前未发生切号，且证据证明运行态缺少对应状态码或关键词时，才增强模板。
     - 模板增强只作用于 API-key 上游。
     - 先按文末「配置生效」确认持有规则的进程已加载新声明，再同步。
-    - 声明变更用 `upstreams template --confirm --over-api` 覆盖目标 OpenAI/Anthropic API-key 上游；Grok 保持不套模板。只改 Claude 时必须先按 `platform=anthropic` 和 owning 分组筛出账号，再传 `--accounts`，不得把 Codex 或 Grok 混入。
+    - 模板变更的应用范围：
+      - `upstreams template --confirm --over-api` 覆盖目标 OpenAI/Anthropic API-key 上游。
+      - Grok 保持不套模板。
+      - 只改 Claude 时，先按 `platform=anthropic` 和 owning 分组筛出账号，再传 `--accounts`。
+      - 不得把 Codex 或 Grok 混入 Claude 作业。
     - 只给新账号套用现有模板时，加上 `--accounts <id>`，不重写全池。
     - 回读原 workflow 的 `verifiedCount`、`failedCount` 和 `misalignedCount`。
     - `verifiedCount` 只证明执行进程自校验。
@@ -217,11 +224,14 @@
     `usage_logs` 与 `ops_error_logs`；综合质量、错误证据、账号评分和历史均按平台隔离。
   - Claude 的主动探活能力保留为显式边界但当前不启用，不创建 Claude 探针分组，也不写入
     Claude 探活记录；页面必须显示“未启用”，不能把 Codex 探活数据投影到 Claude。
-  - `/scores` 的调整记录和优先级计划按当前全局平台投影；周期自动优先级调度受
-    `operations.writePolicy.enabled` 控制，当前 owning YAML 关闭。Claude 的一次性优先级写入
-    还受 `operations.writePolicy.claudeEnabled` 控制；它只用于先生成、核对并确认 Claude
-    专属手工计划，不能绕过作用域筛选，也不会打开周期任务。关闭时 Claude 只读，不能展示
-    `Codex + Grok` 复合标签。
+  - `/scores` 的调整记录和优先级计划按当前全局平台投影。
+  - 周期自动优先级调度受 `operations.writePolicy.enabled` 控制，当前 owning YAML 关闭。
+  - Claude 一次性优先级调度：
+    - 用户授权本次调度后，临时打开 `operations.writePolicy.claudeEnabled`。
+    - 通过 V2 Claude 只读计划计算排序，核对目标平台、分组、账号和优先级范围。
+    - 将该计划的 Claude 优先级传给 `priority plan manual-create`，再确认同一个计划。
+    - 保持周期调度开关与 V2 写入开关关闭，完成后关闭临时 Claude 写入开关。
+    - 关闭时 Claude 只读，不能展示 `Codex + Grok` 复合标签。
   - 修改页面投影后必须更新静态资源版本并重新读取线上页面；旧浏览器缓存不能作为验收依据。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
     - 探活产生的 502、503、524、延迟和切号结果按正常评分规则计入；

@@ -138,9 +138,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 上游调度 V2 先支持 Codex，再支持 Claude 的只读评分，使用
   `upstream-scheduling-v2 scopes|snapshot|plan --over-api`；页面和接口独立于旧 `/scores`，
   所有作用域功能开关只认 `operations.upstreamSchedulingV2.scopes.*`，核对证据不投影到 UI。
-  Claude 当前打开 `scoreRead`、`planRead`；探活、V2 计划写入、V2 自动优先级和上游写入仍由
-  YAML 关闭。`operations.writePolicy.claudeEnabled` 只允许受控的手工优先级计划确认，
-  `operations.writePolicy.enabled` 仍关闭，因此不会启动周期自动调度。
+  Claude 当前打开 `scoreRead`、`planRead`；其余写入和探活开关保持关闭。
+  一次性优先级调度的临时开关、作用域核对和关闭顺序只见
+  [上游与调度](references/upstream-scheduling.md)。
 - 账号评分只有一条计算路径。
 - `/scores` 顶部全局平台切换、Codex/Claude 的综合质量与优先级隔离，以及 Claude 探活未启用边界见
   [上游与调度](references/upstream-scheduling.md)；切换不得只改变账号表局部视图。
