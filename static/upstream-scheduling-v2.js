@@ -17,11 +17,15 @@ function usd(value) { const parsed = Number(value); return Number.isFinite(parse
 function time(value) { if (!value) return '—'; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : '—' }
 function scopeLabel(scope) { return scope === 'claude' ? 'Claude' : scope === 'codex' ? 'Codex' : String(scope ?? '') }
 
-async function requestJson(path) {
-  const response = await fetch(path, { headers: { 'content-type': 'application/json' }, cache: 'no-store' })
-  const data = await response.json().catch(() => null)
-  if (!response.ok || !data?.ok) throw new Error(data?.error ?? `HTTP ${response.status}`)
-  return data
+async function requestJson(path, options = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 20000)
+  try {
+    const response = await fetch(path, { signal: controller.signal, headers: options.refresh ? { 'x-api2business-refresh': '1' } : {}, cache: 'no-store' })
+    const data = await response.json().catch(() => null)
+    if (!response.ok || !data?.ok) throw new Error(data?.error ?? `HTTP ${response.status}`)
+    return data
+  } finally { clearTimeout(timer) }
 }
 
 function renderScopeSwitch() {
@@ -137,7 +141,9 @@ function renderSnapshot(data) {
   $('#v2-snapshot-detail').textContent = `最近快照：${time(data.data?.refreshedAt)}`
   $('#v2-data-state').textContent = data.data?.status ?? '不可用'
   $('#v2-data-state').dataset.state = data.data?.status === 'ready' ? 'ready' : 'unavailable'
-  $('#v2-data-detail').textContent = `${number(state.accounts.length)} 个账号 · 作用域读取`
+  const cacheState = String(data.cache?.state ?? 'refreshed')
+  const cacheLabel = cacheState === 'hit' ? '缓存命中' : cacheState === 'stale' ? '陈旧缓存 · 后台刷新' : '刚完成刷新'
+  $('#v2-data-detail').textContent = `${number(state.accounts.length)} 个账号 · ${cacheLabel}`
   $('#v2-account-state-detail').textContent = `${number(state.accounts.length)} 个账号 · 最近样本 ${number(data.data?.recentCallLimit)} · 额度缓存 ${number(quotaCoverage.cachedAccountCount)} / ${number(quotaCoverage.accountCount)} · 数值 ${number(quotaCoverage.numericAccountCount)} · 不限额 ${number(quotaCoverage.unlimitedAccountCount)} · 不可用 ${number(unavailableCount)} · 缺失 ${number(missingCount)}${quotaCoverage.cacheRowsComplete ? ' · 缓存覆盖完整' : ''}`
   $('#v2-plan-state').textContent = data.features?.planRead === true ? `允许生成只读 plan · 手动执行${data.features?.planWrite === true ? '开启' : '关闭'} · 自动优先级${data.features?.priorityAutomation === true ? '开启' : '关闭'}` : '当前作用域未启用 plan 读取'
   renderScopeFeatures(data.features, data.data?.automation)
@@ -148,11 +154,12 @@ function renderSnapshot(data) {
   renderHistory(data.data?.priorityHistory ?? [])
   renderProbeHistory(data.data?.probeHistory ?? {})
   $('#v2-plan-body').innerHTML = '<tr><td colspan="6" class="empty">点击“生成只读 plan”读取建议</td></tr>'
+  performance.mark(`upstream-scheduling-v2:${data.scope}:rendered`)
 }
 
-async function loadScope() { if (!state.activeScope) return; const scope = state.activeScope; const requestId = ++state.scopeRequestId; $('#v2-data-state').textContent = '读取中'; try { const data = await requestJson(`/api/v2/upstream-scheduling/snapshot?scope=${encodeURIComponent(scope)}`); if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; renderSnapshot(data) } catch (error) { if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
+async function loadScope(forceRefresh = false) { if (!state.activeScope) return; const scope = state.activeScope; const requestId = ++state.scopeRequestId; $('#v2-data-state').textContent = forceRefresh ? '刷新中' : '读取中'; try { const data = await requestJson(`/api/v2/upstream-scheduling/snapshot?scope=${encodeURIComponent(scope)}`, { refresh: forceRefresh }); if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; renderSnapshot(data) } catch (error) { if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
 async function loadPlan() { if (!state.activeScope || state.snapshot?.features?.planRead !== true) return; const button = $('#v2-generate-plan'); button.disabled = true; try { const data = await requestJson(`/api/v2/upstream-scheduling/plan?scope=${encodeURIComponent(state.activeScope)}`); renderPlan(data.changes ?? []); $('#v2-plan-state').textContent = `已生成 ${number(data.changedCount)} 项建议；执行开关：${data.apply?.enabled === true ? '开启' : '关闭'}，本页只读` } catch (error) { $('#v2-plan-state').textContent = `plan 读取失败：${error instanceof Error ? error.message : String(error)}` } finally { button.disabled = false } }
 
-function bindControls() { $('#v2-refresh').addEventListener('click', () => void loadScope()); $('#v2-generate-plan').addEventListener('click', () => void loadPlan()); $('#v2-filter-apply').addEventListener('click', () => { state.filter = $('#v2-account-filter').value; state.accountPage = 1; renderAccounts() }); $('#v2-account-filter').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('#v2-filter-apply').click() }); $('#v2-account-prev').addEventListener('click', () => { state.accountPage -= 1; renderAccounts() }); $('#v2-account-next').addEventListener('click', () => { state.accountPage += 1; renderAccounts() }); $('#v2-history-prev').addEventListener('click', () => { state.historyPage -= 1; renderHistory(state.snapshot?.data?.priorityHistory ?? []) }); $('#v2-history-next').addEventListener('click', () => { state.historyPage += 1; renderHistory(state.snapshot?.data?.priorityHistory ?? []) }) }
+function bindControls() { $('#v2-refresh').addEventListener('click', () => void loadScope(true)); $('#v2-generate-plan').addEventListener('click', () => void loadPlan()); $('#v2-filter-apply').addEventListener('click', () => { state.filter = $('#v2-account-filter').value; state.accountPage = 1; renderAccounts() }); $('#v2-account-filter').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('#v2-filter-apply').click() }); $('#v2-account-prev').addEventListener('click', () => { state.accountPage -= 1; renderAccounts() }); $('#v2-account-next').addEventListener('click', () => { state.accountPage += 1; renderAccounts() }); $('#v2-history-prev').addEventListener('click', () => { state.historyPage -= 1; renderHistory(state.snapshot?.data?.priorityHistory ?? []) }); $('#v2-history-next').addEventListener('click', () => { state.historyPage += 1; renderHistory(state.snapshot?.data?.priorityHistory ?? []) }) }
 
-export async function upstreamSchedulingV2Page() { bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = data.scopes ?? []; state.activeScope = data.defaultScope ?? state.scopes.find((scope) => scope.enabled)?.name ?? null; renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
+export async function upstreamSchedulingV2Page() { bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = Array.isArray(data.scopes) ? data.scopes : []; state.activeScope = typeof data.defaultScope === 'string' ? data.defaultScope : state.scopes.find((scope) => scope.enabled)?.name ?? null; renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }

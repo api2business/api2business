@@ -362,6 +362,7 @@ operations:
   upstreamSchedulingV2:
     enabled: true
     defaultScope: codex
+    readModelCacheSeconds: 30
     automation:
       intervalSeconds: 600
       recentCallLimit: 1000

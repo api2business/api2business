@@ -5,6 +5,8 @@ import type { OperationsService } from "./operations-service";
 
 type Row = Record<string, unknown>;
 
+const readModelSchemaVersion = "upstream-scheduling-v2-read-model-v1";
+
 function records(value: unknown): Row[] {
   return Array.isArray(value)
     ? value.filter((item): item is Row => typeof item === "object" && item !== null && !Array.isArray(item))
@@ -135,6 +137,12 @@ export class UpstreamSchedulingV2Error extends Error {
 }
 
 export class UpstreamSchedulingV2Service {
+  private readonly memoryCache = new Map<string, {
+    payload: Row;
+    capturedAt: string;
+  }>();
+  private readonly inFlight = new Map<string, Promise<Row>>();
+
   constructor(
     private readonly config: AppConfig,
     private readonly dispatcher: ApplicationDispatcher,
@@ -157,6 +165,107 @@ export class UpstreamSchedulingV2Service {
       throw new UpstreamSchedulingV2Error(404, "scope_unavailable", `上游调度 V2 作用域不可用：${scopeName}`);
     }
     return { name: scopeName, scope };
+  }
+
+  private cacheKey(scopeName: string): string {
+    return `upstream-scheduling-v2:${scopeName}`;
+  }
+
+  private cacheMetadata(capturedAt: string, state: "hit" | "stale" | "refreshed", error: string | null = null) {
+    const capturedAtMs = Date.parse(capturedAt);
+    return {
+      state,
+      capturedAt,
+      ageMs: Number.isFinite(capturedAtMs) ? Math.max(0, Date.now() - capturedAtMs) : null,
+      ttlSeconds: this.config.operations.upstreamSchedulingV2?.readModelCacheSeconds ?? null,
+      error,
+      valuesPrinted: false,
+    };
+  }
+
+  private withCache(payload: Row, capturedAt: string, state: "hit" | "stale" | "refreshed", error: string | null = null): Row {
+    return { ...payload, cache: this.cacheMetadata(capturedAt, state, error) };
+  }
+
+  private async persistedCache(scopeName: string): Promise<{ payload: Row; capturedAt: string } | null> {
+    const key = this.cacheKey(scopeName);
+    const memory = this.memoryCache.get(key);
+    if (memory) return memory;
+    const row = await this.operations.getReadModelSnapshot(key);
+    const payload = object(row?.payload);
+    if (row?.schema_version !== readModelSchemaVersion || Object.keys(payload).length === 0) return null;
+    const capturedAt = row?.captured_at == null ? "" : String(row.captured_at);
+    if (!capturedAt) return null;
+    const cached = { payload, capturedAt };
+    this.memoryCache.set(key, cached);
+    return cached;
+  }
+
+  private async buildSnapshot(scopeName: string, scope: UpstreamSchedulingV2Scope): Promise<Row> {
+    const source = await this.source(scopeName, scope);
+    const payload: Row = {
+      ok: true,
+      version: "v2",
+      phase: scopeName === "codex" ? "codex-reconciliation" : "scope-read",
+      scope: scopeName,
+      platform: scope.platform,
+      eligibleGroupIds: scope.eligibleGroupIds,
+      features: scope.features,
+      readOnly: scope.features.planWrite !== true
+        && scope.features.priorityAutomation !== true
+        && scope.features.upstreamWrite !== true,
+      data: {
+        refreshedAt: source.scoreSnapshot.refreshedAt ?? null,
+        recentCallLimit: source.scoreSnapshot.recentCallLimit ?? this.config.monitor.recentCallLimit,
+        status: source.scoreSnapshot.status ?? "unavailable",
+        accounts: source.accounts,
+        quotaCoverage: source.quotaCoverage,
+        poolQuality: source.poolQuality,
+        errors: source.errors,
+        priorityHistory: source.priorityHistory,
+        automation: source.automation,
+        quota: source.quota,
+        usage: source.usage,
+        probeHistory: source.probeHistory,
+      },
+      reconciliation: this.reconciliation(scopeName, scope, source),
+      valuesPrinted: false,
+    };
+    const capturedAt = new Date().toISOString();
+    await this.operations.saveReadModelSnapshot(this.cacheKey(scopeName), readModelSchemaVersion, payload, capturedAt).catch((error) => {
+      console.error(JSON.stringify({
+        ok: false,
+        component: "upstream-scheduling-v2-cache",
+        action: "persist",
+        scope: scopeName,
+        error: error instanceof Error ? error.message : String(error),
+        valuesPrinted: false,
+      }));
+    });
+    this.memoryCache.set(this.cacheKey(scopeName), { payload, capturedAt });
+    return payload;
+  }
+
+  private async refreshInBackground(scopeName: string, scope: UpstreamSchedulingV2Scope, cached: { payload: Row; capturedAt: string }): Promise<void> {
+    if (this.inFlight.has(scopeName)) return;
+    const refresh = this.buildSnapshot(scopeName, scope).catch((error) => {
+      this.memoryCache.set(this.cacheKey(scopeName), cached);
+      throw error;
+    });
+    this.inFlight.set(scopeName, refresh);
+    try {
+      await refresh;
+    } catch (error) {
+      console.error(JSON.stringify({
+        ok: false,
+        component: "upstream-scheduling-v2-cache",
+        scope: scopeName,
+        error: error instanceof Error ? error.message : String(error),
+        valuesPrinted: false,
+      }));
+    } finally {
+      if (this.inFlight.get(scopeName) === refresh) this.inFlight.delete(scopeName);
+    }
   }
 
   listScopes() {
@@ -288,37 +397,35 @@ export class UpstreamSchedulingV2Service {
     };
   }
 
-  async snapshot(scopeName?: string | null) {
+  async snapshot(scopeName?: string | null, forceRefresh = false) {
     const selected = this.scope(scopeName);
-    const source = await this.source(selected.name, selected.scope);
-    return {
-      ok: true,
-      version: "v2",
-      phase: selected.name === "codex" ? "codex-reconciliation" : "scope-read",
-      scope: selected.name,
-      platform: selected.scope.platform,
-      eligibleGroupIds: selected.scope.eligibleGroupIds,
-      features: selected.scope.features,
-      readOnly: selected.scope.features.planWrite !== true
-        && selected.scope.features.priorityAutomation !== true
-        && selected.scope.features.upstreamWrite !== true,
-      data: {
-        refreshedAt: source.scoreSnapshot.refreshedAt ?? null,
-        recentCallLimit: source.scoreSnapshot.recentCallLimit ?? this.config.monitor.recentCallLimit,
-        status: source.scoreSnapshot.status ?? "unavailable",
-        accounts: source.accounts,
-        quotaCoverage: source.quotaCoverage,
-        poolQuality: source.poolQuality,
-        errors: source.errors,
-        priorityHistory: source.priorityHistory,
-        automation: source.automation,
-        quota: source.quota,
-        usage: source.usage,
-        probeHistory: source.probeHistory,
-      },
-      reconciliation: this.reconciliation(selected.name, selected.scope, source),
-      valuesPrinted: false,
-    };
+    const cached = await this.persistedCache(selected.name);
+    const ttlMs = (this.config.operations.upstreamSchedulingV2?.readModelCacheSeconds ?? 30) * 1000;
+    const ageMs = cached ? Date.now() - Date.parse(cached.capturedAt) : Number.POSITIVE_INFINITY;
+    const fresh = cached !== null && Number.isFinite(ageMs) && ageMs <= ttlMs;
+    if (!forceRefresh && cached && fresh) return this.withCache(cached.payload, cached.capturedAt, "hit");
+    if (!forceRefresh && cached) {
+      void this.refreshInBackground(selected.name, selected.scope, cached);
+      return this.withCache(cached.payload, cached.capturedAt, "stale");
+    }
+    const existing = this.inFlight.get(selected.name);
+    if (existing) {
+      const payload = await existing;
+      const current = this.memoryCache.get(this.cacheKey(selected.name));
+      return this.withCache(payload, current?.capturedAt ?? new Date().toISOString(), "refreshed");
+    }
+    const refresh = this.buildSnapshot(selected.name, selected.scope);
+    this.inFlight.set(selected.name, refresh);
+    try {
+      const payload = await refresh;
+      const current = this.memoryCache.get(this.cacheKey(selected.name));
+      return this.withCache(payload, current?.capturedAt ?? new Date().toISOString(), "refreshed");
+    } catch (error) {
+      if (cached) return this.withCache(cached.payload, cached.capturedAt, "stale", error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      if (this.inFlight.get(selected.name) === refresh) this.inFlight.delete(selected.name);
+    }
   }
 
   async probeHistory(scopeName?: string | null, page = 1) {

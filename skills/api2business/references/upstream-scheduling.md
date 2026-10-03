@@ -234,6 +234,10 @@
     探活是否启用均以 Claude 作用域开关为准，不把 Grok 或 Codex 数据投影到 Claude。
   - V2 的间隔和样本档位从 `scopes`、`snapshot` 回读；旧 priority automation 和
     priority plan 命令不再存在。
+  - V2 首屏读取先返回按作用域持久化的读模型缓存；缓存未过
+    `operations.upstreamSchedulingV2.readModelCacheSeconds` 时直接命中，过期时先返回陈旧
+    快照并后台刷新。冷启动或显式刷新才等待重建；重建失败保留上一份快照，不把账号、额度
+    或评分清空为零。页面通过 `cache.state` 显示命中、陈旧后台刷新或刚完成刷新。
   - 修改页面投影后必须更新静态资源并重新读取正式入口；CLI/API 事实先于截图，截图
     只用于人工核对真实页面。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；

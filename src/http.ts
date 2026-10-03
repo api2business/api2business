@@ -300,7 +300,7 @@ export function createHandler(
             return json(upstreamSchedulingV2.listScopes());
           }
           if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/snapshot") {
-            return json(await upstreamSchedulingV2.snapshot(scope));
+            return json(await upstreamSchedulingV2.snapshot(scope, request.headers.get("x-api2business-refresh") === "1"));
           }
           if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/plan") {
             return json(await upstreamSchedulingV2.plan(scope));

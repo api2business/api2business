@@ -425,6 +425,14 @@ export class OperationsService {
     await this.store.setApiCache(key, status, headers, body);
   }
 
+  async getReadModelSnapshot(key: string) {
+    return await this.store.getSnapshot(key);
+  }
+
+  async saveReadModelSnapshot(key: string, schemaVersion: string, payload: Record<string, unknown>, capturedAt: string): Promise<void> {
+    await this.store.completeSnapshot(key, schemaVersion, payload, capturedAt);
+  }
+
   async getUpstreamUsageCache(accountIds: number[]) {
     return await this.store.getUpstreamUsageCache(accountIds);
   }

@@ -25,7 +25,7 @@ const frontendNoStoreHeaders = {
 
 const frontendAssetNames = new Set([
   "app.js", "styles.css", "history-chart.js", "ledger-pages.js",
-  "upstream-quality-assets.js", "bugteam-cost.js",
+  "upstream-quality-assets.js", "bugteam-cost.js", "upstream-scheduling-v2.js",
 ]);
 const frontendRevision = createHash("sha256")
     .update(readdirSync(resolve(process.cwd(), "static"), { withFileTypes: true })
@@ -42,8 +42,8 @@ const frontendRevisionPlugin = {
     return html.replace(/((?:\/|\.\/)(?:app|styles|history-chart|ledger-pages|upstream-quality-assets|bugteam-cost)\.js|(?:\/|\.\/)styles\.css)\?v=[^"'&\s]+/gu, `$1?v=${frontendRevision}`);
   },
   transform(code: string, id: string) {
-    if (!id.endsWith(".js")) return null;
-    return code.replace(/((?:\.\/|\/)(?:history-chart|ledger-pages|upstream-quality-assets|bugteam-cost)\.js)\?v=[^"']+/gu, `$1?v=${frontendRevision}`);
+    if (!id.split("?", 1)[0].endsWith(".js")) return null;
+    return code.replace(/((?:\.\/|\/)(?:history-chart|ledger-pages|upstream-quality-assets|bugteam-cost|upstream-scheduling-v2)\.js)\?v=[^"']+/gu, `$1?v=${frontendRevision}`);
   },
 };
 

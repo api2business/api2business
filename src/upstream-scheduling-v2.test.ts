@@ -38,14 +38,18 @@ function fixture(usageRows = [{
     score: 88,
     grade: "B",
   };
+  const calls = { dispatch: 0, save: 0 };
   const dispatcher = {
-    dispatch: async () => ({
+    dispatch: async () => {
+      calls.dispatch += 1;
+      return {
       ok: true,
       status: "ready",
       recentCallLimit: 1000,
       refreshedAt: "2026-10-03T00:00:00.000Z",
       accounts: [row, claudeRow],
-    }),
+      };
+    },
   } as never;
   const operations = {
     poolQualitySummary: async (platform: string) => platform === "claude"
@@ -57,8 +61,10 @@ function fixture(usageRows = [{
     upstreamQuotaSummary: async () => ({ ok: true, history: [], walletDistribution: [] }),
     getUpstreamUsageCache: async () => usageRows,
     idleProbeHistory: async () => ({ ok: true, records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
-  } as never;
-  return { config, row, claudeRow, service: new UpstreamSchedulingV2Service(config, dispatcher, operations) };
+    getReadModelSnapshot: async () => null,
+    saveReadModelSnapshot: async () => { calls.save += 1; },
+  };
+  return { config, row, claudeRow, calls, operations, service: new UpstreamSchedulingV2Service(config, dispatcher, operations as never) };
 }
 
 describe("upstream scheduling v2", () => {
@@ -144,5 +150,33 @@ describe("upstream scheduling v2", () => {
     const plan = await service.plan("claude");
     expect(plan.apply).toEqual({ enabled: false, mutation: false, reason: "claude.features.planWrite=false" });
     expect(plan.scope).toBe("claude");
+  });
+
+  test("serves a warm V2 snapshot from the read-model cache", async () => {
+    const { service, calls } = fixture();
+    const first = await service.snapshot("codex");
+    const second = await service.snapshot("codex");
+    expect(first.cache).toMatchObject({ state: "refreshed", ttlSeconds: 30 });
+    expect(second.cache).toMatchObject({ state: "hit", ttlSeconds: 30 });
+    expect(calls.dispatch).toBe(1);
+    expect(calls.save).toBe(1);
+  });
+
+  test("deduplicates concurrent cold snapshot builds", async () => {
+    const { service, calls, operations } = fixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const original = operations.poolQualitySummary;
+    operations.poolQualitySummary = async (...args: never[]) => {
+      await gate;
+      return await original(...args);
+    };
+    const first = service.snapshot("codex");
+    const second = service.snapshot("codex");
+    release();
+    const [left, right] = await Promise.all([first, second]);
+    expect(left.scope).toBe("codex");
+    expect(right.scope).toBe("codex");
+    expect(calls.dispatch).toBe(1);
   });
 });

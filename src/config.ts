@@ -159,6 +159,7 @@ export interface UpstreamSchedulingV2Scope {
 export interface UpstreamSchedulingV2Config {
   enabled: boolean;
   defaultScope: string;
+  readModelCacheSeconds: number;
   automation: {
     intervalSeconds: number;
     recentCallLimit: number;
@@ -634,6 +635,7 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
   return {
     enabled,
     defaultScope,
+    readModelCacheSeconds: integerValue(root, "readModelCacheSeconds", path, 1, 3600),
     automation: {
       intervalSeconds: integerValue(automation, "intervalSeconds", `${path}.automation`, 5, 86400),
       recentCallLimit: integerValue(automation, "recentCallLimit", `${path}.automation`, 1, 100000),
