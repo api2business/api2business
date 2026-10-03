@@ -92,6 +92,9 @@ test("upstream management exposes queued quota and usage queries", async () => {
   expect(html).toContain('id="quota-balance-chart"');
   expect(html).toContain('API 消耗速率');
   expect(app).toContain("from './history-chart.js'");
+  expect(app).toContain('for (let index = 0; index < accountIds.length; index += 100)');
+  expect(app).toContain("quotaMonitorAccountRead('/api/upstreams/usage-cache', ids)");
+  expect(app).toContain("quotaMonitorAccountRead('/api/upstreams/quota-monitor-usage', ids)");
   expect(app).toContain("sampleApiAmountUsdPerHour");
   expect(app).toContain("rollingApiAmountUsdPerHour");
   expect(html).toContain('id="quota-cost-chart"');
