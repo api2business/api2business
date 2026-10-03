@@ -1304,6 +1304,14 @@ function renderQuotaMonitor() {
   document.querySelectorAll('[data-quota-filter]').forEach((button) => button.classList.toggle('is-active', button.dataset.quotaFilter === quotaMonitorFilter))
 }
 
+async function quotaMonitorAccountRead(path, accountIds) {
+  const chunks = []
+  for (let index = 0; index < accountIds.length; index += 100) chunks.push(accountIds.slice(index, index + 100))
+  const results = await Promise.all(chunks.map((chunk) => requestJson(`${path}?accountIds=${chunk.join(',')}`, { redirectOnUnauthorized: false })))
+  if (path.endsWith('/usage-cache')) return { results: results.flatMap((item) => item.results ?? []) }
+  return { ...results[0], rows: results.flatMap((item) => item.rows ?? []) }
+}
+
 let quotaGroupHistoryPoints = []
 let quotaHistoryResizeObserver = null
 
@@ -1419,8 +1427,8 @@ async function quotaMonitorPage() {
   }
   const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
   const [cached, usage24h, summary] = await Promise.all([
-    ids.length ? requestJson(`/api/upstreams/usage-cache?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }) : Promise.resolve({ results: [] }),
-    requestJson(`/api/upstreams/quota-monitor-usage?accountIds=${ids.join(',')}`, { redirectOnUnauthorized: false }),
+    ids.length ? quotaMonitorAccountRead('/api/upstreams/usage-cache', ids) : Promise.resolve({ results: [] }),
+    ids.length ? quotaMonitorAccountRead('/api/upstreams/quota-monitor-usage', ids) : Promise.resolve({ rows: [] }),
     requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
   ])
   const sourceTotal = Number(summary.totalRemainingCny)
