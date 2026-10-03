@@ -168,7 +168,8 @@ export class OperationsStore {
       CREATE INDEX IF NOT EXISTS api2business_oauth_runtime_samples_profile_time_idx
         ON api2business_oauth_runtime_samples(profile, sampled_at DESC);
       CREATE TABLE IF NOT EXISTS api2business_pool_quality_samples (
-        sampled_at timestamptz PRIMARY KEY,
+        sampled_at timestamptz NOT NULL,
+        platform text NOT NULL DEFAULT 'codex' CHECK (platform IN ('codex','claude')),
         raw_call_count integer NOT NULL DEFAULT 0,
         raw_success_requests integer NOT NULL DEFAULT 0,
         raw_failure_requests integer NOT NULL DEFAULT 0,
@@ -191,7 +192,14 @@ export class OperationsStore {
         effective_sample_weight numeric NOT NULL DEFAULT 0,
         sample_weighting text NOT NULL DEFAULT 'recent-call-decay-buckets',
         participation jsonb NOT NULL
+        ,PRIMARY KEY (sampled_at, platform)
       );
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS platform text NOT NULL DEFAULT 'codex';
+      ALTER TABLE api2business_pool_quality_samples
+        DROP CONSTRAINT IF EXISTS api2business_pool_quality_samples_pkey;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD CONSTRAINT api2business_pool_quality_samples_pkey PRIMARY KEY (sampled_at, platform);
       ALTER TABLE api2business_pool_quality_samples
         ALTER COLUMN observed_attempts TYPE numeric USING observed_attempts::numeric;
       ALTER TABLE api2business_pool_quality_samples
@@ -561,13 +569,13 @@ export class OperationsStore {
   async addPoolQualitySample(sample: import("./pool-quality-monitor").PoolQualitySample) {
     await this.sql`
       INSERT INTO api2business_pool_quality_samples (
-        sampled_at, raw_call_count, raw_success_requests, raw_failure_requests,
+        sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
         raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
         score, grade, observed_attempts, success_requests, failure_requests,
         failure_rate, failover_requests, failover_recovered, ttft_p95_ms,
         first_token_samples, error_attribution_total, error_attributed, error_unattributed,
         effective_sample_weight, sample_weighting, participation
-      ) VALUES (${sample.sampledAt}, ${sample.rawCallCount}, ${sample.rawSuccessRequests},
+      ) VALUES (${sample.sampledAt}, ${sample.platform}, ${sample.rawCallCount}, ${sample.rawSuccessRequests},
         ${sample.rawFailureRequests}, ${sample.rawFailoverRequests}, ${sample.rawFailoverRecovered},
         ${sample.rawFirstTokenSamples}, ${sample.score}, ${sample.grade}, ${sample.observedAttempts},
         ${sample.successRequests}, ${sample.failureRequests}, ${sample.failureRate},
@@ -576,44 +584,46 @@ export class OperationsStore {
         ${sample.errorAttribution.attributed}, ${sample.errorAttribution.unattributed},
         ${sample.effectiveSampleWeight}, ${sample.sampleWeighting},
         ${sample.participation}::jsonb)
-      ON CONFLICT (sampled_at) DO NOTHING
+      ON CONFLICT (sampled_at, platform) DO NOTHING
     `;
   }
 
-  async getPoolQualitySamples(hours: number) {
+  async getPoolQualitySamples(hours: number, platform = "codex") {
     return await this.sql`
-      SELECT sampled_at, raw_call_count, raw_success_requests, raw_failure_requests,
+      SELECT sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
         raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
         score, grade, observed_attempts, success_requests,
         failure_requests, failure_rate, failover_requests, failover_recovered,
         ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
         error_unattributed, effective_sample_weight, sample_weighting, participation
       FROM api2business_pool_quality_samples
-      WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
+      WHERE platform = ${platform}
+        AND (sampled_at >= now() - (${hours}::text || ' hours')::interval
          OR sampled_at IN (
-           SELECT sampled_at FROM api2business_pool_quality_samples
+           SELECT sampled_at FROM api2business_pool_quality_samples WHERE platform = ${platform}
            ORDER BY sampled_at DESC LIMIT 13
-         )
+         ))
       ORDER BY sampled_at
     `;
   }
 
-  async getPoolQualitySamplesByLimit(limit: number) {
+  async getPoolQualitySamplesByLimit(limit: number, platform = "codex") {
     return await this.sql`
-      SELECT sampled_at, raw_call_count, raw_success_requests, raw_failure_requests,
+      SELECT sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
         raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
         score, grade, observed_attempts, success_requests,
         failure_requests, failure_rate, failover_requests, failover_recovered,
         ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
         error_unattributed, effective_sample_weight, sample_weighting, participation
       FROM (
-        SELECT sampled_at, raw_call_count, raw_success_requests, raw_failure_requests,
+        SELECT sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
           raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
           score, grade, observed_attempts, success_requests,
           failure_requests, failure_rate, failover_requests, failover_recovered,
           ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
           error_unattributed, effective_sample_weight, sample_weighting, participation
         FROM api2business_pool_quality_samples
+        WHERE platform = ${platform}
         ORDER BY sampled_at DESC
         LIMIT ${limit}
       ) recent

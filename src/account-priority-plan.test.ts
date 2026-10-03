@@ -97,6 +97,12 @@ const config = {
   },
 } as AppConfig;
 
+(config.sub2api as AppConfig["sub2api"]).claudePriorityPlan = {
+  ...config.sub2api.priorityPlan,
+  platform: "anthropic",
+  eligibleGroupIds: [119],
+};
+
 function account(id: number, name: string, score: number, available = true, error = "") {
   return {
     accountId: id,
@@ -757,6 +763,19 @@ test("codex and grok use independent anchors and merge into one adjustment plan"
   expect((plan.changes as Array<Record<string, unknown>>).filter((row) => row.profile === "grok")).toHaveLength(2);
   expect(plan.priorities).not.toHaveProperty("10");
   expect(plan.priorities).not.toHaveProperty("11");
+});
+
+test("Claude API-key accounts participate in the shared priority plan", () => {
+  const claude = {
+    ...account(901, "https://claude.example plus", 88),
+    platform: "anthropic",
+    groupIds: [119],
+  };
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [claude] }, config);
+  const changes = plan.changes as Array<Record<string, unknown>>;
+  expect(changes).toHaveLength(1);
+  expect(changes[0]?.profile).toBe("claude");
+  expect((plan.profiles as Record<string, Record<string, unknown>>).claude.eligibleCount).toBe(1);
 });
 
 test("independent evidence score linearly lowers a low-sample account without excluding it", () => {

@@ -517,39 +517,45 @@ export class OperationsService {
   }
 
   async samplePoolQuality(): Promise<Record<string, unknown>> {
-    const sample = await collectPoolQualitySample(this.config, this.reads);
+    const sampledAt = new Date().toISOString();
     const usageRows = records(await this.store.getUpstreamUsageCache([]));
     const usageById = new Map(usageRows.map((row) => [Number(row.account_id), object(row.last_success_result ?? row.result)]));
     const valuation = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
-    sample.participation = sample.participation.map((item) => {
-      const usage = usageById.get(item.accountId);
-      const multiplier = Number(object(usage?.billingMultiplier).value);
-      const walletRate = upstreamBalanceRateByWallet(
-        normalizeUpstreamWallet(usage?.baseUrl ?? item.baseUrl),
-        valuation.defaultCnyPerApiUsd,
-        valuation.walletCnyPerApiUsd,
-      );
-      const detected = Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null;
-      return detected === null ? item : {
-        ...item,
-        costRateCnyPerApiUsd: detected,
-        costSource: "detected" as const,
-      };
-    });
-    await this.store.addPoolQualitySample(sample);
-    return { ok: true, ...sample, valuesPrinted: false };
+    const samples = [];
+    for (const platform of ["codex", "claude"] as const) {
+      const sample = await collectPoolQualitySample(this.config, this.reads, sampledAt, platform);
+      sample.participation = sample.participation.map((item) => {
+        const usage = usageById.get(item.accountId);
+        const multiplier = Number(object(usage?.billingMultiplier).value);
+        const walletRate = upstreamBalanceRateByWallet(
+          normalizeUpstreamWallet(usage?.baseUrl ?? item.baseUrl),
+          valuation.defaultCnyPerApiUsd,
+          valuation.walletCnyPerApiUsd,
+        );
+        const detected = Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null;
+        return detected === null ? item : {
+          ...item,
+          costRateCnyPerApiUsd: detected,
+          costSource: "detected" as const,
+        };
+      });
+      await this.store.addPoolQualitySample(sample);
+      samples.push(sample);
+    }
+    return { ok: true, sampledAt, profiles: samples.map((sample) => sample.platform), samples, valuesPrinted: false };
   }
 
-  async poolQualitySummary() {
+  async poolQualitySummary(platform: "codex" | "claude" = "codex") {
     const rollingWindowPoints = 100;
-    const rows = await this.store.getPoolQualitySamplesByLimit(rollingWindowPoints * 2 - 1) as Array<Record<string, unknown>>;
+    const rows = await this.store.getPoolQualitySamplesByLimit(rollingWindowPoints * 2 - 1, platform) as Array<Record<string, unknown>>;
     const history = poolQualityHistory(rows, rollingWindowPoints).slice(-rollingWindowPoints);
     const latest = rows.at(-1) ?? null;
     return {
       ok: true,
       recentCallLimit: 1000,
       rawCallCount: Number(latest?.raw_call_count ?? 0) || Number(latest?.observed_attempts ?? 0),
-      groupIds: this.config.sub2api.priorityPlan.eligibleGroupIds,
+      platform,
+      groupIds: (platform === "claude" ? (this.config.sub2api.claudePriorityPlan ?? this.config.sub2api.priorityPlan) : this.config.sub2api.priorityPlan).eligibleGroupIds,
       sampledAt: latest ? new Date(String(latest.sampled_at)).toISOString() : null,
       score: latest?.score == null ? null : Number(latest.score),
       rollingScore: history.at(-1)?.rollingScore ?? null,
@@ -590,17 +596,19 @@ export class OperationsService {
   }
 
   async poolQualityErrors(input: {
+    platform: "codex" | "claude";
     page: number;
     pageSize: number;
     filter: PoolQualityErrorFilter;
     sampledAt?: string | null;
   }) {
-    const samples = await this.store.getPoolQualitySamples(8) as Array<Record<string, unknown>>;
+    const samples = await this.store.getPoolQualitySamples(8, input.platform) as Array<Record<string, unknown>>;
     const latest = samples.at(-1);
     const sampledAt = input.sampledAt
       ?? (latest?.sampled_at ? new Date(String(latest.sampled_at)).toISOString() : new Date().toISOString());
     return await collectPoolQualityErrors(this.config, this.reads, {
       sampledAt,
+      platform: input.platform,
       page: input.page,
       pageSize: input.pageSize,
       filter: input.filter,
@@ -880,7 +888,10 @@ export class OperationsService {
         return {
           accountId: Number(accountId),
           accountName: String(row.account_name ?? accountId),
-          profile: String(row.platform ?? "").trim().toLowerCase() === "grok" ? "grok" : "codex",
+          profile: (() => {
+            const platform = String(row.platform ?? "").trim().toLowerCase();
+            return platform === "grok" ? "grok" : platform === "anthropic" ? "claude" : "codex";
+          })(),
           beforePriority,
           desiredPriority,
           change: beforePriority === desiredPriority ? "unchanged" : "update",
@@ -1378,7 +1389,7 @@ export class OperationsService {
           ...Object.keys(profileSummary),
           ...changes.map((change) => String(change.profile ?? "")).filter(Boolean),
         ]);
-        const profiles = ["codex", "grok"].filter((profile) => discoveredProfiles.has(profile));
+        const profiles = ["codex", "claude", "grok"].filter((profile) => discoveredProfiles.has(profile));
         if (profiles.length === 0) profiles.push("codex");
         const startedAt = row.execution_started_at ?? row.created_at;
         const completedAt = row.completed_at;

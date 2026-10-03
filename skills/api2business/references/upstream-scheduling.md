@@ -194,12 +194,14 @@
 - 评分样本范围必须按层级区分：
   - `/scores` 使用顶部的全局平台切换：Codex 只接收 `platform=openai` 且命中
     `sub2api.priorityPlan.eligibleGroupIds` 的 API-key 上游；Claude 只接收
-    `platform=anthropic` 的 API-key 上游；Grok 和未知平台不进入这两个视图。
-  - Claude 第一阶段只做被动评分，复用 Codex 的质量公式读取真实业务
-    `usage_logs` 与 `ops_error_logs`；不得启动主动探活、创建探针分组或写入探活记录。
-  - `/scores` 的调整记录按当前全局平台投影；优先级计划暂只对 Codex 生效，Claude 显示
-    被动评分和历史样本，不展示 Codex 的目标优先级，也不能把 `Codex + Grok` 复合标签
-    当作任一单平台页面内容。
+    `platform=anthropic` 且命中 `sub2api.claudePriorityPlan.eligibleGroupIds` 的 API-key 上游；
+    Grok 和未知平台不进入这两个视图。
+  - Claude 的质量评分与 Codex 复用同一套被动质量公式读取真实业务
+    `usage_logs` 与 `ops_error_logs`；综合质量、错误证据、账号评分和历史均按平台隔离。
+  - Claude 的主动探活能力保留为显式边界但当前不启用，不创建 Claude 探针分组，也不写入
+    Claude 探活记录；页面必须显示“未启用”，不能把 Codex 探活数据投影到 Claude。
+  - `/scores` 的调整记录和优先级计划按当前全局平台投影；自动优先级调度使用同一套计划执行
+    Codex 与 Claude，不能展示 `Codex + Grok` 复合标签。
   - 修改页面投影后必须更新静态资源版本并重新读取线上页面；旧浏览器缓存不能作为验收依据。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
     - 探活产生的 502、503、524、延迟和切号结果按正常评分规则计入；

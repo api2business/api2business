@@ -377,6 +377,8 @@ test("score table uses a global Codex and Claude profile switch", async () => {
   expect(html).toContain('data-score-profile="codex"');
   expect(html).toContain('data-score-profile="claude"');
   expect(html).toContain('score-profile-switch');
+  expect(html.indexOf('class="score-profile-switch"')).toBeLessThan(html.indexOf('class="pool-quality-head"'));
+  expect(html).not.toContain('<div class="page-actions score-head-actions"><div class="score-profile-switch"');
   expect(html).not.toContain('<div class="profile-tabs"');
   expect(app).toContain("scoreRowsForActiveProfile()");
   expect(app).toContain("platform === 'openai' ? 'codex' : platform === 'anthropic' ? 'claude' : 'unsupported'");
@@ -424,7 +426,7 @@ test("score dashboard refreshes independent cached regions without serial blocki
   const app = await frontendSource();
   expect(app).toContain("if (upstreamAssetsInFlight !== null) return await upstreamAssetsInFlight");
   expect(app).toContain("if (quotaSummaryInFlight !== null) return await quotaSummaryInFlight");
-  expect(app).toContain("if (poolQualityInFlight !== null) return await poolQualityInFlight");
+  expect(app).toContain("poolQualityInFlight !== null && poolQualityInFlightProfile === activeScoreProfile");
   expect(app).toContain("cachedPages = await Promise.all(batches.map");
   expect(app).toContain("loadUnifiedQuotaSummary(),\n        loadPoolQuality(),");
 });
@@ -621,7 +623,7 @@ test("pool quality is sampled separately above the account table with participat
   expect(html).toContain('最近 100 个采样点');
   expect(html).toContain('每点统计 1000 次调用');
   expect(html).toContain('id="pool-participation-ring"');
-  expect(source).toContain("requestJson('/api/upstreams/pool-quality')");
+  expect(source).toContain("requestJson(`/api/upstreams/pool-quality?platform=${encodeURIComponent(activeScoreProfile)}`)");
   expect(source).toContain('data.rawCallCount || data.participationAttempts || data.observedAttempts');
   expect(source).toContain('data.rawSuccessRequests ?? data.successRequests');
   expect(source).toContain('data.rawFailureRequests ?? data.failureRequests');

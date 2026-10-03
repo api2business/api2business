@@ -356,16 +356,20 @@ export function createHandler(
         return json(await operations.upstreamRechargeCandidates());
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality") {
-        return json(await operations.poolQualitySummary());
+        const platform = url.searchParams.get("platform") ?? "codex";
+        if (platform !== "codex" && platform !== "claude") return json({ ok: false, error: "platform must be codex or claude" }, 400);
+        return json(await operations.poolQualitySummary(platform));
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality/errors") {
         const page = pageNumber(url);
         const pageSize = positiveInteger(url.searchParams.get("pageSize"), 20);
         const filter = url.searchParams.get("filter") ?? "scoreable";
-        if (pageSize === null || pageSize > 100 || !["scoreable", "excluded", "all"].includes(filter)) {
+        const platform = url.searchParams.get("platform") ?? "codex";
+        if (pageSize === null || pageSize > 100 || !["scoreable", "excluded", "all"].includes(filter) || !["codex", "claude"].includes(platform)) {
           return json({ ok: false, error: "invalid pool quality error query" }, 400);
         }
         return json(await operations.poolQualityErrors({
+          platform: platform as "codex" | "claude",
           page,
           pageSize,
           filter: filter as "scoreable" | "excluded" | "all",

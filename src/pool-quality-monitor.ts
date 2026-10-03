@@ -33,6 +33,7 @@ WITH internal_probe_keys AS (
   WHERE a.deleted_at IS NULL
     AND LOWER(TRIM(COALESCE(a.type, ''))) = 'apikey'
     AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
+    AND ($4::text IS NULL OR LOWER(TRIM(COALESCE(a.platform, ''))) = CASE $4::text WHEN 'codex' THEN 'openai' WHEN 'claude' THEN 'anthropic' ELSE LOWER($4::text) END)
     AND EXISTS (
       SELECT 1 FROM account_groups ag
       WHERE ag.account_id = a.id AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
@@ -166,9 +167,9 @@ export const poolQualityErrorsSql = `${poolQualityEventsSql}, filtered_errors AS
   FROM recent_events e
   WHERE e.kind = 'error'
     AND NOT (COALESCE(e.client_status_code, e.upstream_status_code, 0) BETWEEN 200 AND 399)
-    AND ($4::text = 'all'
-      OR ($4::text = 'scoreable' AND e.scoreable = true)
-      OR ($4::text = 'excluded' AND e.scoreable = false))
+    AND ($5::text = 'all'
+      OR ($5::text = 'scoreable' AND e.scoreable = true)
+      OR ($5::text = 'excluded' AND e.scoreable = false))
 ), numbered_errors AS (
   SELECT e.*, ROW_NUMBER() OVER (ORDER BY e.created_at DESC, e.id DESC) AS row_number
   FROM filtered_errors e
@@ -198,7 +199,7 @@ SELECT
     'scoreable', scoreable,
     'exclusionReason', exclusion_reason
   ) ORDER BY created_at DESC, id DESC) FILTER (
-    WHERE row_number > $6::int AND row_number <= ($6::int + $5::int)
+    WHERE row_number > $7::int AND row_number <= ($7::int + $6::int)
   ), '[]'::jsonb) AS rows,
   COALESCE((
     SELECT JSONB_AGG(JSONB_BUILD_OBJECT('model', model, 'count', requests)
@@ -222,6 +223,7 @@ function percentile(values: number[], ratio: number): number | null {
 }
 
 export interface PoolQualitySample {
+  platform: "codex" | "claude";
   sampledAt: string;
   rawCallCount: number;
   rawSuccessRequests: number;
@@ -254,16 +256,20 @@ export async function collectPoolQualitySample(
   config: AppConfig,
   reads: Sub2ApiReadClient,
   sampledAt = new Date().toISOString(),
+  platform: "codex" | "claude" = "codex",
 ): Promise<PoolQualitySample> {
   const recentCallLimit = 1000;
-  const groupIds = [...new Set(config.sub2api.priorityPlan.eligibleGroupIds)].sort((a, b) => a - b);
+  const policy = platform === "claude"
+    ? (config.sub2api.claudePriorityPlan ?? config.sub2api.priorityPlan)
+    : config.sub2api.priorityPlan;
+  const groupIds = [...new Set(policy.eligibleGroupIds)].sort((a, b) => a - b);
   const query = await reads.query<Row>({
-    key: `pool-quality:${recentCallLimit}:${groupIds.join(",")}:${sampledAt}`,
+    key: `pool-quality:${platform}:${recentCallLimit}:${groupIds.join(",")}:${sampledAt}`,
     kind: "pool-quality-sample",
     priority: "automatic",
     cacheMode: "bypass-cache",
     sql: poolQualitySql,
-    parameters: [recentCallLimit, groupIds.join(","), sampledAt],
+    parameters: [recentCallLimit, groupIds.join(","), sampledAt, platform],
   });
   const rows = query.rows as Row[];
   const weightedRows: Row[] = rows.map((row, index): Row => ({
@@ -304,7 +310,7 @@ export async function collectPoolQualitySample(
     });
   }
   const scored = scoreRecentDatabaseRow({
-    account_id: 0, account_name: "混池 + 自用池", platform: "openai", account_type: "apikey",
+    account_id: 0, account_name: platform === "claude" ? "Claude" : "Codex", platform: platform === "claude" ? "anthropic" : "openai", account_type: "apikey",
     status: "active", schedulable: true, priority: 0, group_ids: groupIds, group_names: ["混池", "自用"],
     success_requests: weightedCount(successes), failure_requests: weightedCount(failures),
     attributed_requests: weightedDistinctCount(weightedRows.filter((row) => row.request_id)),
@@ -322,6 +328,7 @@ export async function collectPoolQualitySample(
     token_count: 0, api_amount_usd: 0,
   }, recentCallLimit, config.sub2api.poolScorePolicy);
   return {
+    platform,
     sampledAt,
     rawCallCount: rows.length,
     rawSuccessRequests: successes.length,
@@ -371,12 +378,14 @@ export async function collectPoolQualityErrors(
   reads: Sub2ApiReadClient,
   input: {
     sampledAt: string;
+    platform?: "codex" | "claude";
     page: number;
     pageSize: number;
     filter: PoolQualityErrorFilter;
   },
 ) {
   const recentCallLimit = 1000;
+  const platform = input.platform ?? "codex";
   if (!Number.isInteger(input.page) || input.page < 1) throw new Error("pool quality error page must be a positive integer");
   if (!Number.isInteger(input.pageSize) || input.pageSize < 1 || input.pageSize > 100) {
     throw new Error("pool quality error page size must be from 1 to 100");
@@ -387,15 +396,18 @@ export async function collectPoolQualityErrors(
   const sampledAtMs = Date.parse(input.sampledAt);
   if (!Number.isFinite(sampledAtMs)) throw new Error("pool quality sampledAt is invalid");
   const sampledAt = new Date(sampledAtMs).toISOString();
-  const groupIds = [...new Set(config.sub2api.priorityPlan.eligibleGroupIds)].sort((a, b) => a - b);
+  const policy = platform === "claude"
+    ? (config.sub2api.claudePriorityPlan ?? config.sub2api.priorityPlan)
+    : config.sub2api.priorityPlan;
+  const groupIds = [...new Set(policy.eligibleGroupIds)].sort((a, b) => a - b);
   const offset = (input.page - 1) * input.pageSize;
   const query = await reads.query<Row>({
-    key: JSON.stringify(["pool-quality-errors", recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize]),
+    key: JSON.stringify(["pool-quality-errors", platform, recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize]),
     kind: "pool-quality-errors",
     priority: "manual",
     cacheMode: "prefer-cache",
     sql: poolQualityErrorsSql,
-    parameters: [recentCallLimit, groupIds.join(","), sampledAt, input.filter, input.pageSize, offset],
+    parameters: [recentCallLimit, groupIds.join(","), sampledAt, platform, input.filter, input.pageSize, offset],
   });
   const result = query.rows[0] ?? {};
   const total = Number(result.total_count ?? 0);
@@ -403,6 +415,7 @@ export async function collectPoolQualityErrors(
   const modelDistribution = Array.isArray(result.model_distribution) ? result.model_distribution : [];
   return {
     ok: true,
+    platform,
     sampledAt,
     recentCallLimit,
     groupIds,

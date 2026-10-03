@@ -223,6 +223,49 @@ sub2api:
         - 用户额度不足
         - 预扣费额度失败
         - 欠费
+  claudePriorityPlan:
+    platform: anthropic
+    eligibleGroupIds: [119]
+    requiredConfidence: high
+    requireCurrentAvailable: true
+    reliabilityWeight: 60
+    latencyWeight: 25
+    costWeight: 8
+    evidenceWeight: 4
+    evidenceTargetAttempts: 50
+    evidenceTargetFirstTokenSamples: 20
+    explorationWeight: 2
+    explorationTargetAttempts: 50
+    explorationQualityPrior: 25
+    balanceWeight: 1
+    referenceScore: 92
+    pointsPerScore: 10
+    minimumChange: 5
+    normalizationTopK: 20
+    minimumPriorityUniformity: 0.25
+    minimumPriority: 100
+    maximumPriority: 300
+    fixedPriorities: {}
+    reservePolicies: {}
+    procurementAdvice:
+      enabled: false
+      minimumQualityScore: 75
+      valueWeight: 80
+      redundancyWeight: 20
+      recommendationLimit: 2
+      statusAlertLimit: 20
+      maximumRecommendationsPerSupplier: 1
+      minimumSupplierCount: 4
+      maximumSupplierShare: 0.4
+      billingErrorPatterns:
+        - insufficient account balance
+        - insufficient balance
+        - payment required
+        - account balance depleted
+        - 余额不足
+        - 用户额度不足
+        - 预扣费额度失败
+        - 欠费
   grokPriorityPlan:
     platform: grok
     eligibleGroupIds: [6]

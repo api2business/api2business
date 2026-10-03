@@ -8,7 +8,7 @@ test("pool quality uses one queued query and separates exact upstream accounts",
   const reads = {
     async query(input: { parameters: unknown[] }) {
       queries += 1;
-      expect(input.parameters).toEqual([1000, "2,3", "2026-08-03T00:00:00.000Z"]);
+      expect(input.parameters).toEqual([1000, "2,3", "2026-08-03T00:00:00.000Z", "codex"]);
       return {
         rows: [
           { id: 1, kind: "usage", request_id: "a", account_id: 10, account_name: "https://api.example.com plus 0.05", base_url: "https://api.example.com/v1", stream: true, first_token_ms: 1000, duration_ms: 2000, scoreable: false, failover_triggered: false },
@@ -70,6 +70,25 @@ test("pool quality applies the same recent-call decay buckets as account scoring
   expect(sample.participation[1]).toMatchObject({ accountId: 11, attempts: 0.5, rawAttempts: 1, ratio: 0.333333 });
 });
 
+test("pool quality uses the Claude whitelist and platform predicate", async () => {
+  let parameters: unknown[] | null = null;
+  const reads = {
+    async query(input: { parameters: unknown[] }) {
+      parameters = input.parameters;
+      return {
+        rows: [], cached: false, deduplicated: false, queueDurationMs: 0, queryDurationMs: 0,
+        totalDurationMs: 0, queryStartedAt: new Date().toISOString(), queryCompletedAt: new Date().toISOString(),
+      };
+    },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+  const config = loadConfig("config/api2business.yaml");
+  const sample = await collectPoolQualitySample(config, reads, "2026-08-03T00:00:00.000Z", "claude");
+  expect(parameters).toEqual([1000, "119", "2026-08-03T00:00:00.000Z", "claude"]);
+  expect(sample.platform).toBe("claude");
+  expect(poolQualitySql).toContain("CASE $4::text WHEN 'codex' THEN 'openai' WHEN 'claude' THEN 'anthropic'");
+});
+
 test("pool quality excludes every monitor-user key without changing account scoring", () => {
   expect(poolQualitySql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
   expect(poolQualitySql).not.toContain("k.name LIKE");
@@ -110,7 +129,7 @@ test("pool quality errors use the same bounded window and expose paginated model
   const result = await collectPoolQualityErrors(loadConfig("config/api2business.yaml"), reads, {
     sampledAt: "2026-08-05T22:12:43Z", page: 2, pageSize: 20, filter: "scoreable",
   });
-  expect(request?.parameters).toEqual([1000, "2,3", "2026-08-05T22:12:43.000Z", "scoreable", 20, 20]);
+  expect(request?.parameters).toEqual([1000, "2,3", "2026-08-05T22:12:43.000Z", "codex", "scoreable", 20, 20]);
   expect(request?.sql).toContain("PARTITION BY event.request_id");
   expect(request?.sql).toContain("requested_model");
   expect(request?.sql).toContain("requester.email AS user_email");

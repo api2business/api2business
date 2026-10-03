@@ -136,8 +136,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 模板及排序变更必须独立回读运行态，不以工作流成功代替业务恢复。
 - 池级质量调查使用 `scores pool-quality --over-api`，该查询只读。
 - 账号评分只有一条计算路径。
-- `/scores` 顶部平台切换和 Claude 被动评分边界见
-  [上游与调度](references/upstream-scheduling.md)；Claude 当前不启动主动探活。
+- `/scores` 顶部全局平台切换、Codex/Claude 的综合质量与优先级隔离，以及 Claude 探活未启用边界见
+  [上游与调度](references/upstream-scheduling.md)；切换不得只改变账号表局部视图。
 - `scores get` 只读取账号评分快照，不重新计算。
 - `scores rank --calls <N> --over-api` 先按这 N 次刷新同一份快照，再读取刚写入的快照。
 - 单账号质量评分将绑定该账号的专用探活样本纳入评分：

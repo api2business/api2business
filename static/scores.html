@@ -8,24 +8,20 @@
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>上游资产与实时成本 | Api2Business</title>
-  <link rel="stylesheet" href="/styles.css?v=score-freshness-v1" />
-  <script src="/app.js?v=platform-score-v1" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=platform-score-v2" />
+  <script src="/app.js?v=platform-score-v2" type="module"></script>
 </head>
 <body data-page="scores">
   <div data-shell></div>
   <main class="workspace">
     <header class="page-head upstream-slim-head">
-      <div><p class="eyebrow">UPSTREAM ASSETS / LIVE COST</p><h1>上游资产与实时成本</h1><p class="live-head-sample">评分、调度、额度与成本统一运营视图</p></div>
+      <div class="score-page-title"><div><p class="eyebrow">UPSTREAM ASSETS / LIVE COST</p><h1>上游资产与实时成本</h1><p class="live-head-sample">评分、调度、额度与成本统一运营视图</p></div><div class="score-profile-switch" role="tablist" aria-label="评分平台"><button class="profile-tab is-active" type="button" role="tab" aria-selected="true" data-score-profile="codex">Codex</button><button class="profile-tab" type="button" role="tab" aria-selected="false" data-score-profile="claude">Claude</button></div></div>
       <section class="pool-quality-head" aria-labelledby="pool-quality-title">
-        <header class="pool-quality-copy"><p class="eyebrow">POOL QUALITY / LAST 1,000 CALLS</p><h2 id="pool-quality-title">混池 + 自用池综合质量</h2><p id="pool-quality-state">等待读取五分钟采样</p></header>
+        <header class="pool-quality-copy"><p class="eyebrow">PLATFORM QUALITY / LAST 1,000 CALLS</p><h2 id="pool-quality-title">Codex 综合质量</h2><p id="pool-quality-state">等待读取五分钟采样</p></header>
         <div class="pool-quality-score" data-grade="insufficient"><span>综合评分</span><strong id="pool-quality-score">—</strong><small id="pool-quality-grade">证据不足</small></div>
         <dl class="pool-quality-metrics"><div><dt>成功 / 失败</dt><dd id="pool-quality-outcomes">—</dd><small id="pool-quality-failure-rate">失败率 —</small></div><div><dt>切号恢复</dt><dd id="pool-quality-failover">—</dd><small>恢复 / 触发</small></div><div><dt>TTFT P95</dt><dd id="pool-quality-ttft">—</dd><small id="pool-quality-ttft-samples">首 token 样本 —</small></div></dl>
       </section>
       <div class="page-actions score-head-actions">
-        <div class="score-profile-switch" role="tablist" aria-label="评分平台">
-          <button class="profile-tab is-active" type="button" role="tab" aria-selected="true" data-score-profile="codex">Codex</button>
-          <button class="profile-tab" type="button" role="tab" aria-selected="false" data-score-profile="claude">Claude</button>
-        </div>
         <div id="score-updated" class="refresh-clock score-head-clock">
           <span>数据新鲜度</span>
           <strong id="score-updated-time">尚无成功快照</strong>
@@ -57,7 +53,7 @@
       <div class="table-wrap"><table class="data-table external-cutoff-log-table"><thead><tr><th>时间</th><th>账号</th><th>动作</th><th>模式</th><th>操作前可调度</th><th>操作后可调度</th><th>触发方式</th><th>结果</th></tr></thead><tbody id="external-cutoff-log-body"><tr><td colspan="8" class="empty">正在读取外部切断记录</td></tr></tbody></table></div>
     </section>
     <section class="pool-quality-band" aria-label="综合质量趋势与上游参与比例">
-      <figure class="pool-quality-trend"><figcaption><span>综合评分趋势</span><small>最近 100 个采样点 · 每点统计 1000 次调用</small></figcaption><svg id="pool-quality-chart" viewBox="0 0 1000 150" role="img" aria-label="混池和自用池最近一百个采样点综合质量评分"></svg></figure>
+      <figure class="pool-quality-trend"><figcaption><span>平台综合评分趋势</span><small>当前平台最近 100 个采样点 · 每点统计 1000 次调用</small></figcaption><svg id="pool-quality-chart" viewBox="0 0 1000 150" role="img" aria-label="当前平台最近一百个采样点综合质量评分"></svg></figure>
       <figure class="pool-participation"><figcaption><span>上游参与比例</span><small>最近 1000 次调用</small></figcaption><div class="pool-participation-body"><div class="donut-stack"><div id="pool-participation-ring" class="pool-participation-ring" role="img" aria-label="各上游参与比例"><strong>—</strong><small>调用</small></div><p id="pool-participation-detail" class="donut-hover-detail">悬停查看账号详情</p></div><ol id="pool-participation-legend" class="pool-participation-legend"><li class="empty">暂无参与样本</li></ol></div></figure>
     </section>
     <section class="table-section">
@@ -91,7 +87,7 @@
       <div class="table-toolbar record-table-toolbar">
         <div>
           <h2 id="pool-error-title">错误记录</h2>
-          <p id="pool-error-state" class="section-state">正在读取综合质量错误证据…</p>
+          <p id="pool-error-state" class="section-state">正在读取当前平台错误证据…</p>
         </div>
         <div class="table-toolbar-side record-table-controls">
           <label class="select-field"><span>口径</span><select id="pool-error-filter"><option value="all" selected>全部错误</option><option value="scoreable">计分失败</option><option value="excluded">已排除</option></select></label>

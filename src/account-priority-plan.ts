@@ -38,7 +38,9 @@ type LatencyNormalization = {
   maximumTtftP95Ms: number | null;
 };
 
-function latencyBounds(config: AppConfig, profile: "codex" | "grok"): {
+type PriorityProfile = "codex" | "claude" | "grok";
+
+function latencyBounds(config: AppConfig, profile: PriorityProfile): {
   minimumTtftP95Ms: number;
   maximumTtftP95Ms: number;
 } {
@@ -242,7 +244,7 @@ function buildStableRankPriorities(
 function buildPriorityProfile(
   ranking: Record<string, unknown>,
   config: AppConfig,
-  profile: "codex" | "grok",
+  profile: PriorityProfile,
   policy: PriorityPlanPolicy,
 ): Record<string, unknown> {
   if (policy.maximumPriority < policy.minimumPriority) {
@@ -623,17 +625,25 @@ export function buildAccountPriorityPlan(
 ): Record<string, unknown> {
   const codex = buildPriorityProfile(ranking, config, "codex", config.sub2api.priorityPlan);
   const grok = buildPriorityProfile(ranking, config, "grok", config.sub2api.grokPriorityPlan);
+  const claudePolicy = config.sub2api.claudePriorityPlan ?? {
+    ...config.sub2api.priorityPlan,
+    platform: "anthropic",
+    eligibleGroupIds: [],
+  };
+  const claude = buildPriorityProfile(ranking, config, "claude", claudePolicy);
   const priorities = {
     ...(codex.priorities as Record<string, number>),
+    ...(claude.priorities as Record<string, number>),
     ...(grok.priorities as Record<string, number>),
   };
   const changes = [
     ...(codex.changes as Array<Record<string, unknown>>),
+    ...(claude.changes as Array<Record<string, unknown>>),
     ...(grok.changes as Array<Record<string, unknown>>),
   ];
   return {
     ...codex,
-    policy: { codex: config.sub2api.priorityPlan, grok: config.sub2api.grokPriorityPlan },
+    policy: { codex: config.sub2api.priorityPlan, claude: claudePolicy, grok: config.sub2api.grokPriorityPlan },
     profiles: {
       codex: {
         eligibleCount: codex.eligibleCount,
@@ -643,6 +653,15 @@ export function buildAccountPriorityPlan(
         observedAnchorScore: codex.observedAnchorScore,
         priorityReferenceScore: codex.priorityReferenceScore,
         costRange: codex.costRange,
+      },
+      claude: {
+        eligibleCount: claude.eligibleCount,
+        fixedCount: claude.fixedCount,
+        changedCount: claude.changedCount,
+        anchorScore: claude.anchorScore,
+        observedAnchorScore: claude.observedAnchorScore,
+        priorityReferenceScore: claude.priorityReferenceScore,
+        costRange: claude.costRange,
       },
       grok: {
         eligibleCount: grok.eligibleCount,
@@ -654,7 +673,7 @@ export function buildAccountPriorityPlan(
         costRange: grok.costRange,
       },
     },
-    eligibleCount: Number(codex.eligibleCount) + Number(grok.eligibleCount),
+    eligibleCount: Number(codex.eligibleCount) + Number(claude.eligibleCount) + Number(grok.eligibleCount),
     changedCount: Object.keys(priorities).length,
     priorities,
     changes,

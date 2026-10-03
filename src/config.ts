@@ -203,6 +203,7 @@ export interface AppConfig {
     };
     priorityPlan: PriorityPlanPolicy;
     grokPriorityPlan: PriorityPlanPolicy;
+    claudePriorityPlan: PriorityPlanPolicy;
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
   };
   lottery: {
@@ -868,6 +869,7 @@ export function loadConfig(path: string): AppConfig {
       })(),
       priorityPlan: readPriorityPlanPolicy(sub2api.priorityPlan, "sub2api.priorityPlan"),
       grokPriorityPlan: readPriorityPlanPolicy(sub2api.grokPriorityPlan, "sub2api.grokPriorityPlan"),
+      claudePriorityPlan: readPriorityPlanPolicy(sub2api.claudePriorityPlan, "sub2api.claudePriorityPlan"),
       adminCredentials: {
         sourceRef: stringValue(adminCredentials, "sourceRef", "sub2api.adminCredentials"),
         emailKey: stringValue(adminCredentials, "emailKey", "sub2api.adminCredentials"),

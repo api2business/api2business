@@ -156,9 +156,11 @@ let latestQuotaSummary = null
 let scoreSnapshotLoaded = false
 let upstreamAssetsLoaded = false
 let poolQualityInFlight = null
+let poolQualityInFlightProfile = null
 let poolErrorPage = 1
 const poolErrorPageSize = 20
 let poolErrorInFlight = null
+let poolErrorInFlightProfile = null
 
 let externalCutoffRows = []
 let externalCutoffPage = 1
@@ -201,6 +203,31 @@ function scoreProfile(row) {
 
 function scoreRowsForActiveProfile() {
   return scoreRows.filter((row) => scoreProfile(row) === activeScoreProfile)
+}
+
+function activeScoreProfileLabel() {
+  return activeScoreProfile === 'claude' ? 'Claude' : 'Codex'
+}
+
+function updateProfileDependentControls() {
+  const label = activeScoreProfileLabel()
+  const probeDisabled = activeScoreProfile === 'claude'
+  const rolling = $('#idle-probe-rolling')
+  if (probeDisabled) {
+    rolling.dataset.balanceStatus = '暂不可用'
+    rolling.textContent = `${label} 探活：未启用（当前只统计被动调用）`
+  }
+  const probeRefresh = $('#refresh-probe-history')
+  if (probeRefresh) {
+    probeRefresh.disabled = probeDisabled
+    probeRefresh.title = probeDisabled ? `${label} 探活未启用` : ''
+  }
+  const probeState = $('#probe-history-page-state')
+  if (probeDisabled) probeState.textContent = `${label} 探活未启用`
+  const automationState = $('#automation-state')
+  if (automationState && automationState.dataset.loaded === 'true') {
+    automationState.textContent = `${label} 使用同一套自动优先级调度配置 · ${automationState.dataset.detail ?? ''}`.replace(/ · $/u, '')
+  }
 }
 
 function gradeClass(value) {
@@ -356,6 +383,10 @@ function compareScoreRows(left, right) {
 }
 
 async function loadIdleProbeRollingUsage() {
+  if (activeScoreProfile === 'claude') {
+    updateProfileDependentControls()
+    return { enabled: false, profile: activeScoreProfile }
+  }
   const data = await requestJson('/api/operations/idle-probe/summary')
   const rolling = data.rolling24Hours ?? {}
   const monitorAccount = data.monitorAccount ?? {}
@@ -468,6 +499,7 @@ function renderScores(data) {
   renderRefreshClock()
   renderScoreRows()
   renderSupplierQualityAssets()
+  updateProfileDependentControls()
   return true
 }
 
@@ -665,8 +697,10 @@ function renderPoolQuality(data) {
   document.querySelector('.pool-quality-score').dataset.grade = grade
   $('#pool-quality-score').textContent = score === null ? '—' : number(score, 1)
   $('#pool-quality-grade').textContent = grade === 'insufficient' ? '证据不足' : `${grade} 级`
+  const profileLabel = data.platform === 'claude' ? 'Claude' : 'Codex'
+  $('#pool-quality-title').textContent = `${profileLabel} 综合质量`
   $('#pool-quality-state').textContent = data.sampledAt
-    ? `${time(data.sampledAt)} 采样 · 最近 ${number(data.recentCallLimit)} 次 · 混池 #2 + 自用 #3`
+    ? `${time(data.sampledAt)} 采样 · 最近 ${number(data.recentCallLimit)} 次 · 被动调用`
     : '尚无质量采样，等待下一轮五分钟任务'
   $('#pool-quality-outcomes').textContent = `${number(data.rawSuccessRequests ?? data.successRequests)} / ${number(data.rawFailureRequests ?? data.failureRequests)}`
   $('#pool-quality-failure-rate').textContent = `失败率 ${data.failureRate == null ? '—' : percent(data.failureRate)}`
@@ -678,7 +712,7 @@ function renderPoolQuality(data) {
       { key: 'score', className: 'chart-pool-quality', label: '当前采样' },
       { key: 'rollingScore', className: 'chart-pool-quality-rolling', label: '100 点滚动' },
     ],
-    valueFormatter: (value) => number(value, 1), unit: '质量分 / 100', ariaLabel: '混池和自用池综合质量评分', yMin: 0, yMax: 100,
+    valueFormatter: (value) => number(value, 1), unit: '质量分 / 100', ariaLabel: `${profileLabel} 最近一百个采样点综合质量评分`, yMin: 0, yMax: 100,
   })
   bindHistoryChartTooltip($('#pool-quality-chart'))
   const participation = Array.isArray(data.participation) ? data.participation : []
@@ -698,9 +732,12 @@ function renderPoolQuality(data) {
 }
 
 async function loadPoolQuality() {
-  if (poolQualityInFlight !== null) return await poolQualityInFlight
-  poolQualityInFlight = requestJson('/api/upstreams/pool-quality').then(renderPoolQuality)
-  try { return await poolQualityInFlight } finally { poolQualityInFlight = null }
+  if (poolQualityInFlight !== null && poolQualityInFlightProfile === activeScoreProfile) return await poolQualityInFlight
+  poolQualityInFlightProfile = activeScoreProfile
+  poolQualityInFlight = requestJson(`/api/upstreams/pool-quality?platform=${encodeURIComponent(activeScoreProfile)}`).then(renderPoolQuality)
+  try { return await poolQualityInFlight } finally {
+    if (poolQualityInFlightProfile === activeScoreProfile) poolQualityInFlight = null
+  }
 }
 
 function poolErrorMessage(row) {
@@ -712,7 +749,8 @@ function renderPoolQualityErrors(data) {
   const pagination = data.pagination ?? { page: 1, totalPages: 1, total: 0 }
   poolErrorPage = Number(pagination.page ?? 1)
   const filterLabel = ({ scoreable: '计分失败', excluded: '已排除', all: '全部错误' })[data.filter] ?? data.filter
-  $('#pool-error-state').textContent = `${time(data.sampledAt)} 采样 · 最近 ${number(data.recentCallLimit)} 次调用 · ${filterLabel} ${number(pagination.total)} 条`
+  const profileLabel = data.platform === 'claude' ? 'Claude' : 'Codex'
+  $('#pool-error-state').textContent = `${profileLabel} · ${time(data.sampledAt)} 采样 · 最近 ${number(data.recentCallLimit)} 次调用 · ${filterLabel} ${number(pagination.total)} 条`
   const models = Array.isArray(data.modelDistribution) ? data.modelDistribution : []
   $('#pool-error-models').textContent = models.length
     ? `模型分布：${models.map((item) => `${item.model || 'unknown'} ${number(item.count)}`).join(' · ')}`
@@ -754,19 +792,20 @@ function renderPoolQualityErrors(data) {
 }
 
 async function loadPoolQualityErrors() {
-  if (poolErrorInFlight !== null) return await poolErrorInFlight
+  if (poolErrorInFlight !== null && poolErrorInFlightProfile === activeScoreProfile) return await poolErrorInFlight
+  poolErrorInFlightProfile = activeScoreProfile
   const button = $('#refresh-pool-errors')
   const filter = $('#pool-error-filter').value
   button.disabled = true
   button.classList.add('is-loading')
   $('#pool-error-state').textContent = '正在通过单连接队列读取错误证据…'
-  poolErrorInFlight = requestJson(`/api/upstreams/pool-quality/errors?page=${poolErrorPage}&pageSize=${poolErrorPageSize}&filter=${encodeURIComponent(filter)}`, {}, 60000).then(renderPoolQualityErrors)
+  poolErrorInFlight = requestJson(`/api/upstreams/pool-quality/errors?platform=${encodeURIComponent(activeScoreProfile)}&page=${poolErrorPage}&pageSize=${poolErrorPageSize}&filter=${encodeURIComponent(filter)}`, {}, 60000).then(renderPoolQualityErrors)
   try { return await poolErrorInFlight }
   catch (error) {
     $('#pool-error-state').textContent = `错误记录读取失败：${error instanceof Error ? error.message : String(error)}`
     throw error
   } finally {
-    poolErrorInFlight = null
+    if (poolErrorInFlightProfile === activeScoreProfile) poolErrorInFlight = null
     button.disabled = false
     button.classList.remove('is-loading')
   }
@@ -1066,7 +1105,8 @@ async function scoresPage() {
       })
       renderScoreMetrics()
       renderScoreRows()
-      void loadPriorityHistory()
+      updateProfileDependentControls()
+      void Promise.allSettled([loadPoolQuality(), loadPoolQualityErrors(), loadPriorityHistory(), loadIdleProbeRollingUsage()])
     })
   })
   $('#query-scores').addEventListener('click', () => void Promise.allSettled([
@@ -1734,14 +1774,18 @@ async function loadPriorityAutomation() {
     priorityAutomationExists = false
     $('#automation-enabled').value = 'false'
     $('#automation-interval').value = '3600'
-    $('#automation-state').textContent = '尚未创建自动调整配置'
+    $('#automation-state').dataset.loaded = 'true'
+    $('#automation-state').dataset.detail = '尚未创建自动调整配置'
+    $('#automation-state').textContent = `${activeScoreProfileLabel()} · 尚未创建自动调整配置`
     return false
   }
   priorityAutomationExists = true
   $('#automation-enabled').value = String(policy.enabled)
   $('#automation-interval').value = String(policy.interval_seconds)
   $('#automation-limit').value = String(policy.recent_call_limit)
-  $('#automation-state').textContent = `下次执行：${time(policy.next_run_at)} · 更新：${time(policy.updated_at)}`
+  $('#automation-state').dataset.loaded = 'true'
+  $('#automation-state').dataset.detail = `下次执行：${time(policy.next_run_at)} · 更新：${time(policy.updated_at)}`
+  $('#automation-state').textContent = `${activeScoreProfileLabel()} 使用同一套自动优先级调度配置 · ${$('#automation-state').dataset.detail}`
   return true
 }
 
@@ -1774,7 +1818,9 @@ async function setupPriorityPanel(options) {
       body: JSON.stringify(input),
     })
     priorityAutomationExists = true
-    $('#automation-state').textContent = `配置已保存 · 下次执行：${time(result.automation.next_run_at)}`
+    $('#automation-state').dataset.loaded = 'true'
+    $('#automation-state').dataset.detail = `配置已保存 · 下次执行：${time(result.automation.next_run_at)}`
+    $('#automation-state').textContent = `${activeScoreProfileLabel()} 使用同一套自动优先级调度配置 · ${$('#automation-state').dataset.detail}`
   })
   $('#generate-plan').addEventListener('click', async () => {
     const button = $('#generate-plan')

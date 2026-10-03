@@ -579,7 +579,11 @@ export async function collectRecentCallScoresFromDatabase(
         recentCallLimit,
         String(row.platform) === "grok" ? config.sub2api.grokScorePolicy : config.sub2api.scorePolicy,
         Date.now(),
-        (String(row.platform) === "grok" ? config.sub2api.grokPriorityPlan : config.sub2api.priorityPlan).procurementAdvice.billingErrorPatterns,
+        (String(row.platform) === "grok"
+          ? config.sub2api.grokPriorityPlan
+          : String(row.platform) === "anthropic"
+            ? (config.sub2api.claudePriorityPlan ?? config.sub2api.priorityPlan)
+            : config.sub2api.priorityPlan).procurementAdvice.billingErrorPatterns,
       )));
   return {
       ok: true,
