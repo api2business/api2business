@@ -26,6 +26,27 @@ export const stableUpstreamErrorPatterns = [
   "we are currently experiencing high demand",
 ];
 
+// 业务侧余额或预扣额度不足不是上游账号质量证据。
+// 该列表同时用于账号分和池级综合分，避免不同评分入口对同一错误产生不同归因。
+export const nonScoreableBillingErrorPatterns = [
+  "insufficient_balance",
+  "insufficient account balance",
+  "insufficient balance",
+  "balance is insufficient",
+  "insufficient_quota",
+  "credit_balance_exhausted",
+  "credit balance exhausted",
+  "user balance is insufficient",
+  "user quota is insufficient",
+  "余额不足",
+  "额度不足",
+  "用户余额不足",
+  "用户额度不足",
+  "账户余额不足",
+  "账号余额不足",
+  "预扣费额度失败",
+];
+
 function sqlLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
@@ -33,6 +54,8 @@ function sqlLiteral(value: string): string {
 export const modelRoutingPatternsSql = `ARRAY[${modelRoutingPatterns.map(sqlLiteral).join(", ")}]`;
 
 export const stableUpstreamErrorPatternsSql = `ARRAY[${stableUpstreamErrorPatterns.map((pattern) => sqlLiteral(`%${pattern}%`)).join(", ")}]`;
+
+export const nonScoreableBillingErrorPatternsSql = `ARRAY[${nonScoreableBillingErrorPatterns.map((pattern) => sqlLiteral(`%${pattern}%`)).join(", ")}]`;
 
 // 流已提交后的上游 5xx 可能被网关记录为 internal；只采用明确的上游状态证据。
 // 调用方仍先排除客户输入、模型路由和账务错误。

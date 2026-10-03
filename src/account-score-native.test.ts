@@ -82,6 +82,34 @@ describe("aggregateNativeGroupScore", () => {
     expect(result.group.maxCapacity).toBe(10);
   });
 
+  test("excludes customer billing failures from account quality", () => {
+    const result = aggregateNativeGroupScore({
+      group: { id: 2, name: "pool", platform: "openai", status: "active" },
+      accounts: [{ id: 15, name: "primary 0.02", platform: "openai", status: "active", schedulable: true, priority: 1 }],
+      usage: [],
+      requestErrors: [{
+        id: 1,
+        request_id: "req-balance",
+        account_id: 15,
+        status_code: 403,
+        phase: "request",
+        type: "api_error",
+        error_body: '{"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}',
+      }],
+      systemLogs: [],
+      overview: {},
+      availability: availableOps,
+      concurrency: availableOps,
+    });
+
+    expect(result.accounts[0]).toMatchObject({
+      failureRequests: 0,
+      scoreableUpstreamErrorRequests: 0,
+      excludedNonUpstreamErrorRequests: 1,
+      excludedReasonBuckets: [{ reason: "customer-billing", count: 1 }],
+    });
+  });
+
   test("excludes luna usage, request errors, and system events from scoring", () => {
     const result = aggregateNativeGroupScore({
       group: { id: 2, name: "pool", platform: "openai", status: "active" },

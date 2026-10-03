@@ -70,6 +70,30 @@ test("pool quality applies the same recent-call decay buckets as account scoring
   expect(sample.participation[1]).toMatchObject({ accountId: 11, attempts: 0.5, rawAttempts: 1, ratio: 0.333333 });
 });
 
+test("customer billing errors remain audit rows without lowering pool quality", async () => {
+  const reads = {
+    async query() {
+      return {
+        rows: [
+          { id: 1, kind: "usage", request_id: "success", account_id: 10, account_name: "account", base_url: "https://account", stream: true, first_token_ms: 1000, duration_ms: 2000, scoreable: false, failover_triggered: false },
+          { id: 2, kind: "error", request_id: "customer-balance", account_id: null, account_name: null, base_url: "", stream: false, first_token_ms: null, duration_ms: null, scoreable: false, exclusion_reason: "customer-billing", client_status_code: 403, failover_triggered: false },
+          { id: 3, kind: "error", request_id: "upstream-failure", account_id: 10, account_name: "account", base_url: "https://account", stream: false, first_token_ms: null, duration_ms: null, scoreable: true, client_status_code: 502, failover_triggered: false },
+        ],
+        cached: false, deduplicated: false, queueDurationMs: 1, queryDurationMs: 2,
+        totalDurationMs: 3, queryStartedAt: new Date().toISOString(), queryCompletedAt: new Date().toISOString(),
+      };
+    },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+
+  const sample = await collectPoolQualitySample(loadConfig("config/api2business.example.yaml"), reads, "2026-08-03T00:00:00.000Z");
+  expect(sample.rawCallCount).toBe(3);
+  expect(sample.rawFailureRequests).toBe(1);
+  expect(sample.failureRequests).toBe(1);
+  expect(sample.observedAttempts).toBe(2);
+  expect(sample.errorAttribution).toMatchObject({ total: 2, attributed: 1, unattributed: 1 });
+});
+
 test("pool quality uses the Claude whitelist and platform predicate", async () => {
   let parameters: unknown[] | null = null;
   const reads = {
@@ -98,6 +122,8 @@ test("pool quality excludes every monitor-user key without changing account scor
   expect(poolQualitySql).toContain("o.group_id = ANY(string_to_array($2, ',')::bigint[])");
   expect(poolQualitySql).toContain("'%insufficient_balance%'");
   expect(poolQualitySql).toContain("'%balance is insufficient%'");
+  expect(poolQualitySql).toContain("COALESCE(source.business_limited, false)");
+  expect(poolQualitySql).toContain("'customer-billing'");
   expect(poolQualitySql).toContain("'%model_not_found%'");
   expect(poolQualitySql).toContain("'%model not found%'");
   expect(poolQualitySql).toContain("'%model_no_found%'");

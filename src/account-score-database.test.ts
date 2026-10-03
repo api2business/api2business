@@ -38,6 +38,8 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("AS failover_failed");
   expect(recentAccountAggregateQuery).toContain("%insufficient_balance%");
   expect(recentAccountAggregateQuery).toContain("%insufficient account balance%");
+  expect(recentAccountAggregateQuery).toContain("COALESCE(o.is_business_limited, false)");
+  expect(recentAccountAggregateQuery).toContain("%insufficient balance%");
   expect(recentAccountAggregateQuery).toContain("%model_not_found%");
   expect(recentAccountAggregateQuery).toContain("%model_no_found%");
   expect(recentAccountAggregateQuery).toContain("%moddel_no_found%");
@@ -83,6 +85,30 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(row.currentStateScoreImpact).toBe("none");
   expect(row.priority).toBe(5);
   expect(row.accountType).toBeNull();
+});
+
+test("业务额度限制事实不会成为账号质量失败", () => {
+  const row = scoreRecentDatabaseRow({
+    account_id: 9,
+    account_name: "account 0.1",
+    status: "active",
+    schedulable: true,
+    priority: 5,
+    group_ids: [2],
+    group_names: ["pool"],
+    success_requests: 100,
+    failure_requests: 0,
+    customer_error_requests: 12,
+    excluded_error_requests: 12,
+    selected_calls: 112,
+    stream_success_requests: 100,
+    first_token_samples: 100,
+    ttft_p95_ms: 5_000,
+  }, 1000, scorePolicy);
+
+  expect(row.score).toBe(100);
+  expect(row.failureRequests).toBe(0);
+  expect(row.excludedNonUpstreamErrorRequests).toBe(12);
 });
 
 test("账务额度不足样本保留审计但不参与质量评分", () => {

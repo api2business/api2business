@@ -171,6 +171,9 @@
     - 证据不足时保持未知，不把最终错误、`no available accounts` 或已提交的流式响应归因于模板漏配。
   - 数据口径：
     - `/models`、billing、failover 中间事件和其他非最终用户可见记录不作为模板匹配或评分输入；
+    - 用户余额或预扣额度不足先按 Sub2API 的 `is_business_limited` 事实及统一余额关键词归类为
+      `customer-billing`，保留在错误审计中但不计入账号失败率、切号失败率、TTFT 质量样本或池级综合分；
+      这类错误没有账号归属时不得扣到任何账号；
     - 错误聚合与诊断按错误记录的实际请求分组筛选，默认排除内部 monitor 用户和
       `api2business-probe-*` 探活流量；
     - 最终错误仍由 Sub2API 运行面产生；

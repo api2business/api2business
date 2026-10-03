@@ -7,7 +7,7 @@ import type {
 } from "./sub2api-client";
 import { Sub2ApiClient } from "./sub2api-client";
 import type { RuntimePolicyEventSource } from "./runtime-policy-events";
-import { stableUpstreamErrorPatterns } from "./scoring-error-policy";
+import { nonScoreableBillingErrorPatterns, stableUpstreamErrorPatterns } from "./scoring-error-policy";
 
 type Row = Record<string, unknown>;
 
@@ -143,6 +143,7 @@ function customerErrorAttribution(row: Sub2ApiRequestError): { scoreable: boolea
     row.upstream_error_message,
     row.upstream_error_detail,
   ].filter((value) => value !== undefined && value !== null).join(" ").toLowerCase();
+  if (nonScoreableBillingErrorPatterns.some((marker) => message.includes(marker))) return { scoreable: false, reason: "customer-billing" };
   if (message.includes("context window") || message.includes("context_length_exceeded")) return { scoreable: false, reason: "context-window" };
   if (message.includes("input must be a list")) return { scoreable: false, reason: "invalid-client-input" };
   if (message.includes("not supported by any configured account") || message.includes("no available channel for model")) return { scoreable: false, reason: "model-route" };

@@ -7,6 +7,7 @@ import { isOAuthAccount } from "./account-score-eligibility";
 import {
   attributedInternalUpstreamFailureSql,
   modelRoutingPatternsSql,
+  nonScoreableBillingErrorPatternsSql,
   stableUpstreamErrorPatternsSql,
 } from "./scoring-error-policy";
 
@@ -141,6 +142,7 @@ account_stats AS (
           u.actual_cost::numeric,
           NULL::int AS client_status_code,
           NULL::int AS upstream_status_code,
+          NULL::boolean AS business_limited,
           false AS scoreable
         FROM usage_logs u
         WHERE u.account_id = a.account_id
@@ -164,19 +166,15 @@ account_stats AS (
           0::numeric,
           o.status_code::int AS client_status_code,
           o.upstream_status_code::int AS upstream_status_code,
+          o.is_business_limited AS business_limited,
           CASE
             WHEN COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399 THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%context window%'
               OR LOWER(COALESCE(o.error_message, '')) LIKE '%context_length_exceeded%' THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%input must be a list%' THEN false
+            WHEN COALESCE(o.is_business_limited, false) THEN false
             WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
-              o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (ARRAY[
-              '%insufficient_balance%',
-              '%insufficient account balance%',
-              '%balance is insufficient%',
-              '%余额不足%',
-              '%额度不足%'
-            ]) THEN false
+              o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${nonScoreableBillingErrorPatternsSql}) THEN false
             WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
               o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${modelRoutingPatternsSql}) THEN false
             WHEN ${attributedInternalUpstreamFailureSql("o")} THEN true

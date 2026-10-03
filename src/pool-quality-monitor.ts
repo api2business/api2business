@@ -4,6 +4,7 @@ import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import {
   attributedInternalUpstreamFailureSql,
   modelRoutingPatternsSql,
+  nonScoreableBillingErrorPatternsSql,
   stableUpstreamErrorPatternsSql,
 } from "./scoring-error-policy";
 type Row = Record<string, unknown>;
@@ -46,6 +47,7 @@ WITH internal_probe_keys AS (
       COALESCE(u.requested_model, u.model, 'unknown') AS model,
       u.upstream_model, NULL::text AS inbound_endpoint, NULL::text AS upstream_endpoint,
       NULL::text AS error_phase, NULL::text AS error_type,
+      NULL::boolean AS business_limited,
       NULL::int AS client_status_code, NULL::int AS upstream_status_code,
       NULL::text AS error_message, NULL::text AS upstream_error_message,
       NULL::text AS upstream_error_detail
@@ -63,6 +65,7 @@ WITH internal_probe_keys AS (
       o.duration_ms::bigint, COALESCE(o.requested_model, o.model, 'unknown') AS model,
       o.upstream_model, o.inbound_endpoint, o.upstream_endpoint, o.error_phase, o.error_type,
       o.status_code::int AS client_status_code, o.upstream_status_code::int AS upstream_status_code,
+      o.is_business_limited AS business_limited,
       o.error_message, o.upstream_error_message, o.upstream_error_detail,
       LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
         o.upstream_error_message, o.upstream_error_detail)) AS message_text
@@ -91,13 +94,8 @@ WITH internal_probe_keys AS (
         WHEN LOWER(COALESCE(source.error_message, '')) LIKE '%context window%'
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%context_length_exceeded%'
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%input must be a list%'
-          OR source.message_text LIKE ANY (ARRAY[
-            '%insufficient_balance%',
-            '%insufficient account balance%',
-            '%balance is insufficient%',
-            '%余额不足%',
-            '%额度不足%'
-          ])
+          OR COALESCE(source.business_limited, false)
+          OR source.message_text LIKE ANY (${nonScoreableBillingErrorPatternsSql})
           OR source.message_text LIKE ANY (${modelRoutingPatternsSql}) THEN false
         WHEN ${attributedInternalUpstreamFailureSql("source")} THEN true
         WHEN LOWER(COALESCE(source.error_phase, '')) IN ('internal', 'client', 'business') THEN false
@@ -110,10 +108,8 @@ WITH internal_probe_keys AS (
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%context_length_exceeded%'
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%input must be a list%'
           THEN 'client_request'
-        WHEN source.message_text LIKE ANY (ARRAY[
-          '%insufficient_balance%', '%insufficient account balance%',
-          '%balance is insufficient%', '%余额不足%', '%额度不足%'
-        ]) THEN 'insufficient_balance'
+        WHEN COALESCE(source.business_limited, false)
+          OR source.message_text LIKE ANY (${nonScoreableBillingErrorPatternsSql}) THEN 'customer-billing'
         WHEN source.message_text LIKE ANY (${modelRoutingPatternsSql}) THEN 'model_routing'
         WHEN ${attributedInternalUpstreamFailureSql("source")} THEN NULL
         WHEN LOWER(COALESCE(source.error_phase, '')) IN ('internal', 'client', 'business')
@@ -126,7 +122,7 @@ WITH internal_probe_keys AS (
     UNION ALL
     SELECT kind, id, request_id, created_at, account_id, user_id, user_email, account_name, base_url,
       stream, first_token_ms, duration_ms, scoreable, exclusion_reason, model,
-      upstream_model, inbound_endpoint, upstream_endpoint, error_phase, error_type,
+      upstream_model, inbound_endpoint, upstream_endpoint, error_phase, error_type, business_limited,
       client_status_code, upstream_status_code, error_message,
       upstream_error_message, upstream_error_detail
     FROM error_events
