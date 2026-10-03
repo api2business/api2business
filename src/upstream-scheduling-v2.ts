@@ -190,7 +190,7 @@ export class UpstreamSchedulingV2Service {
     const mismatches = checks.filter((check) => check.status !== "matched");
     return {
       status: mismatches.length === 0 ? "matched" : "mismatch",
-      mode: "legacy-codex-read-model-to-v2-scope-projection",
+      mode: "legacy-score-read-model-to-v2-scope-projection",
       scope: scopeName,
       checkedAt: new Date().toISOString(),
       checks,

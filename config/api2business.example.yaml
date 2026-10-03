@@ -376,12 +376,12 @@ operations:
           idleProbe: false
           upstreamWrite: false
       claude:
-        enabled: false
+        enabled: true
         platform: anthropic
         eligibleGroupIds: [119]
         features:
-          scoreRead: false
-          planRead: false
+          scoreRead: true
+          planRead: true
           planWrite: false
           priorityAutomation: false
           idleProbe: false

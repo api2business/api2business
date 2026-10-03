@@ -20,6 +20,8 @@ test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   expect(script).toContain("/api/v2/upstream-scheduling/scopes");
   expect(script).toContain("/api/v2/upstream-scheduling/snapshot");
   expect(script).toContain("/api/v2/upstream-scheduling/plan");
+  expect(script).toContain("scopeRequestId");
+  expect(script).toContain("state.activeScope !== scope");
   expect(script).not.toMatch(/method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]/u);
   expect(app).toContain("upstream-scheduling-v2");
 });

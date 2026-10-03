@@ -194,10 +194,11 @@
 - 评分样本范围必须按层级区分：
   - 上游调度 V2 是独立页面和独立 `/api/v2/upstream-scheduling/*` 只读读模型；旧 `/scores`
     页面与接口保持原状，不能用 V2 页面替换旧页面。
-  - V2 首阶段只启用 `codex` 作用域；作用域的 `platform`、候选分组和
+  - V2 先支持 `codex`，再支持 `claude` 的只读评分；作用域的 `platform`、候选分组和
     `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe`、
     `upstreamWrite` 均只从 owning YAML 的 `operations.upstreamSchedulingV2.scopes.*`
-    读取，代码不得硬编码关闭或开启。
+    读取，代码不得硬编码关闭或开启。当前 Claude 只打开 `scoreRead`、`planRead`，其余
+    功能保持关闭。
   - V2 只读页面必须复用旧评分页的资产/成本、综合质量、趋势、参与比例、完整账号表、
     错误、调整、探活和自动调度状态组件；页面不能只保留简化账号表，也不能把后台读模型
     核对结果展示为页面内容。
