@@ -132,6 +132,8 @@
       - 不使用宽泛的 `context window`、`context_length_exceeded` 或
         `maximum context length`，避免把请求本身确定性超长误判为账号故障。
     - `502` 的过载、容量、限流、余额故障以及未开始输出前的流断开统一使用不超过 3 分钟的短冷却；
+      Claude 的 `upstream access forbidden` 明确表示上游权限或账号状态拒绝，使用 10 分钟冷却，
+      不与普通瞬态 `502` 混用。
     - 具体切号效果以 Sub2API 当前原生匹配语义和真实回读为准。
   - 切号处理决策：
     - 先用 `errors diagnose` 读取精确请求链，需要详情时再用 `errors inspect`。
@@ -141,7 +143,7 @@
     - 只有响应提交前未发生切号，且证据证明运行态缺少对应状态码或关键词时，才增强模板。
     - 模板增强只作用于 API-key 上游。
     - 先按文末「配置生效」确认持有规则的进程已加载新声明，再同步。
-    - 声明变更用 `upstreams template --confirm --over-api` 覆盖全部 OpenAI/Anthropic API-key 上游；Grok 保持不套模板。
+    - 声明变更用 `upstreams template --confirm --over-api` 覆盖目标 OpenAI/Anthropic API-key 上游；Grok 保持不套模板。只改 Claude 时必须先按 `platform=anthropic` 和 owning 分组筛出账号，再传 `--accounts`，不得把 Codex 或 Grok 混入。
     - 只给新账号套用现有模板时，加上 `--accounts <id>`，不重写全池。
     - 回读原 workflow 的 `verifiedCount`、`failedCount` 和 `misalignedCount`。
     - `verifiedCount` 只证明执行进程自校验。
@@ -197,8 +199,8 @@
   - V2 先支持 `codex`，再支持 `claude` 的只读评分；作用域的 `platform`、候选分组和
     `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe`、
     `upstreamWrite` 均只从 owning YAML 的 `operations.upstreamSchedulingV2.scopes.*`
-    读取，代码不得硬编码关闭或开启。当前 Claude 只打开 `scoreRead`、`planRead`，其余
-    功能保持关闭。
+    读取，代码不得硬编码关闭或开启。当前 Claude 打开 `scoreRead`、`planRead`，
+    `planWrite`、`priorityAutomation`、`idleProbe`、`upstreamWrite` 仍保持关闭。
   - V2 只读页面必须复用旧评分页的资产/成本、综合质量、趋势、参与比例、完整账号表、
     错误、调整、探活和自动调度状态组件；页面不能只保留简化账号表，也不能把后台读模型
     核对结果展示为页面内容。
@@ -215,9 +217,11 @@
     `usage_logs` 与 `ops_error_logs`；综合质量、错误证据、账号评分和历史均按平台隔离。
   - Claude 的主动探活能力保留为显式边界但当前不启用，不创建 Claude 探针分组，也不写入
     Claude 探活记录；页面必须显示“未启用”，不能把 Codex 探活数据投影到 Claude。
-  - `/scores` 的调整记录和优先级计划按当前全局平台投影；自动优先级调度受
-    `operations.writePolicy.enabled` 控制，当前 owning YAML 关闭；Claude 另受
-    `operations.writePolicy.claudeEnabled` 控制，关闭时只读，不能展示 `Codex + Grok` 复合标签。
+  - `/scores` 的调整记录和优先级计划按当前全局平台投影；周期自动优先级调度受
+    `operations.writePolicy.enabled` 控制，当前 owning YAML 关闭。Claude 的一次性优先级写入
+    还受 `operations.writePolicy.claudeEnabled` 控制；它只用于先生成、核对并确认 Claude
+    专属手工计划，不能绕过作用域筛选，也不会打开周期任务。关闭时 Claude 只读，不能展示
+    `Codex + Grok` 复合标签。
   - 修改页面投影后必须更新静态资源版本并重新读取线上页面；旧浏览器缓存不能作为验收依据。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
     - 探活产生的 502、503、524、延迟和切号结果按正常评分规则计入；

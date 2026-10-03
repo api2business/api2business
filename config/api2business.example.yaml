@@ -359,7 +359,7 @@ records:
 operations:
   writePolicy:
     enabled: false
-    claudeEnabled: false
+    claudeEnabled: true
   upstreamSchedulingV2:
     enabled: true
     defaultScope: codex

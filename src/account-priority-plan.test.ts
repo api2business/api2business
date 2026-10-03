@@ -159,6 +159,36 @@ test("OAuth accounts are excluded from scoring-derived priority changes", () => 
   expect(plan.priorities).not.toHaveProperty("3");
 });
 
+test("Claude priority planning isolates Anthropic group 119 and preserves the ranked candidate", () => {
+  const claude = {
+    ...account(11, "https://claude.example ccmax 0.8", 91),
+    platform: "anthropic",
+    groupIds: [119],
+    priority: 250,
+  };
+  const claudeTail = {
+    ...account(13, "https://claude-tail.example ccmax 0.8", 80),
+    platform: "anthropic",
+    groupIds: [119],
+    priority: 100,
+  };
+  const codex = account(12, "https://codex.example pro 0.1", 99);
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [claude, claudeTail, codex] }, config);
+  const claudeChanges = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.profile === "claude");
+
+  expect(plan.profiles).toMatchObject({
+    claude: { eligibleCount: 2, changedCount: 1, readOnly: false },
+    codex: { eligibleCount: 1 },
+  });
+  expect(claudeChanges).toHaveLength(2);
+  expect(claudeChanges.map((row) => row.accountId).sort()).toEqual([11, 13]);
+  expect(claudeChanges.find((row) => row.accountId === 11)).toMatchObject({ rank: 1, change: "noop", desiredPriority: 250 });
+  expect(claudeChanges.find((row) => row.accountId === 13)).toMatchObject({ rank: 2, change: "update", desiredPriority: 276 });
+  expect(plan.priorities).toMatchObject({ "13": 276 });
+  expect(plan.priorities).not.toHaveProperty("12");
+});
+
 test("Codex economic ranking keeps the highest-cost quality leader below better-value accounts", () => {
   const weightedConfig = structuredClone(config);
   weightedConfig.sub2api.priorityPlan.reliabilityWeight = 45;

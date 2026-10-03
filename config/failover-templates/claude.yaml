@@ -9,6 +9,8 @@ rules:
   - rate limit exceeded
   - too many pending requests
   - selected model is at capacity
+  - api is at capacity
+  - the api is at capacity
   durationMinutes: 3
   description: Claude 上游限流、并发或模型容量暂时不足
 - errorCode: 403
@@ -23,6 +25,13 @@ rules:
   - invalid_api_key
   durationMinutes: 10
   description: Claude 上游余额不足或 API key 失效
+- errorCode: 502
+  keywords:
+  - upstream access forbidden
+  - upstream access forbidden, please contact administrator
+  - access forbidden, please contact administrator
+  durationMinutes: 10
+  description: Claude 上游权限拒绝或供应商账号不可用，延长冷却避免重复打到同一账号
 - errorCode: 502
   keywords:
   - upstream_error
