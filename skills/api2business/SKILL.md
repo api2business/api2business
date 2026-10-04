@@ -140,6 +140,10 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   自动探活必须先完成同作用域的手动探活核验，再打开
   `features.idleProbe`。V2 是唯一调度运行面；旧全局页面、工作流、写入 API、CLI 命令和
   配置字段已经删除，配置加载会拒绝这些退役字段，禁止兼容复活。
+- 作用域自动探活周期配置在
+  `operations.upstreamSchedulingV2.scopes.<scope>.idleProbeIntervalSeconds`；未声明时才
+  回退到 `sub2api.idleProbe.intervalSeconds`，具体生效与工作流替换规则见
+  `references/upstream-scheduling.md`。
 - 充值候选使用 `upstreams recharge-candidates --over-api`。
 - 欠费、低余额和查询超时的判定见 `references/upstream-scheduling.md`。
 - 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api`；同一规范化 `base_url` 是共享钱包，只记账一次并统一恢复该站点全部 API-key 账号。
