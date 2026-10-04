@@ -66,6 +66,12 @@ export interface SecretRef {
   sourceKey: string;
 }
 
+export interface NewApiCredentialRef {
+  baseUrl: string;
+  username: SecretRef;
+  password: SecretRef;
+}
+
 export interface EnvSecretRef {
   envKey: string;
 }
@@ -192,6 +198,7 @@ export interface AppConfig {
     baseUrl: string;
     requestTimeoutMs: number;
     pageSize: number;
+    newApiCredentials: NewApiCredentialRef[];
     scoreDatabase: SecretRef & {
       statementTimeoutMs: number;
       queueTimeoutMs: number;
@@ -671,6 +678,33 @@ export function loadConfig(path: string): AppConfig {
   const bugTeamCustomerPassword = object(bugTeam.customerPassword, "bugTeam.customerPassword");
   const bugTeamMonitor = object(bugTeam.monitor, "bugTeam.monitor");
   const adminCredentials = object(sub2api.adminCredentials, "sub2api.adminCredentials");
+  const newApiCredentials = (() => {
+    const raw = sub2api.newApiCredentials;
+    if (raw === undefined) return [];
+    if (!Array.isArray(raw)) throw new Error("sub2api.newApiCredentials must be an array");
+    return raw.map((item, index): NewApiCredentialRef => {
+      const path = `sub2api.newApiCredentials[${index}]`;
+      const value = object(item, path);
+      const baseUrl = stringValue(value, "baseUrl", path).replace(/\/$/u, "");
+      const parsed = new URL(baseUrl);
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash) {
+        throw new Error(`${path}.baseUrl must be an HTTPS URL without credentials, query, or fragment`);
+      }
+      const username = object(value.username, `${path}.username`);
+      const password = object(value.password, `${path}.password`);
+      return {
+        baseUrl,
+        username: {
+          sourceRef: stringValue(username, "sourceRef", `${path}.username`),
+          sourceKey: stringValue(username, "sourceKey", `${path}.username`),
+        },
+        password: {
+          sourceRef: stringValue(password, "sourceRef", `${path}.password`),
+          sourceKey: stringValue(password, "sourceKey", `${path}.password`),
+        },
+      };
+    });
+  })();
   const scoreDatabase = object(sub2api.scoreDatabase, "sub2api.scoreDatabase");
   const lottery = object(raw.lottery, "lottery");
   const dailyGrant = object(lottery.dailyGrant, "lottery.dailyGrant");
@@ -893,6 +927,7 @@ export function loadConfig(path: string): AppConfig {
       baseUrl: stringValue(sub2api, "baseUrl", "sub2api").replace(/\/$/u, ""),
       requestTimeoutMs: integerValue(sub2api, "requestTimeoutMs", "sub2api", 1),
       pageSize: integerValue(sub2api, "pageSize", "sub2api", 1, 100),
+      newApiCredentials,
       scoreDatabase: {
         sourceRef: stringValue(scoreDatabase, "sourceRef", "sub2api.scoreDatabase"),
         sourceKey: stringValue(scoreDatabase, "sourceKey", "sub2api.scoreDatabase"),

@@ -106,6 +106,43 @@ test("does not misreport a finite New API key quota as account balance", async (
   expect(result.billingMultiplier.scope).toBe("user-group");
 });
 
+test("reads New API account balance with username/password login", async () => {
+  const requests: string[] = [];
+  const loginTarget = { ...target, newApiCredentials: { username: "user@example.com", password: "secret" } };
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    requests.push(`${init?.method ?? "GET"} ${url}`);
+    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/api/user/login/encryption-key")) {
+      return new Response(JSON.stringify({ success: true, data: { enabled: false } }));
+    }
+    if (url.endsWith("/api/user/login")) {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, string>;
+      expect(body.username).toBe("user@example.com");
+      expect(body.password).toBe("secret");
+      return new Response(JSON.stringify({ success: true, data: { access_token: "login-token" } }));
+    }
+    if (url.endsWith("/api/status")) {
+      return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
+    }
+    if (url.endsWith("/api/user/self")) {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer login-token");
+      return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
+    }
+    if (url.endsWith("/api/usage/token/") || url.endsWith("/api/log/token")) {
+      return new Response(JSON.stringify({ success: false }), { status: 401 });
+    }
+    return new Response(JSON.stringify({ data: {} }));
+  }) as typeof fetch;
+
+  const result = await queryUpstreamUsage(loginTarget, { timeoutMs: 100, days: 7 });
+  expect(result.provider).toBe("new-api");
+  expect(result.quota).toEqual({ limit: (14_654_923 + 455_248_028) / 500_000, used: 455_248_028 / 500_000, remaining: 14_654_923 / 500_000, unlimited: false, unit: "USD" });
+  expect(result.warning).toContain("账号密码登录");
+  expect(requests).toContain("POST https://api.example.com/api/user/login");
+  expect(requests).toContain("GET https://api.example.com/api/user/self");
+});
+
 test("falls back to a positive New API group ratio when the user ratio is zero", async () => {
   globalThis.fetch = (async (input) => {
     const url = String(input);

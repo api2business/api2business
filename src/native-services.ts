@@ -28,12 +28,20 @@ function composeRun(config: AppConfig, action: string, component?: NativeService
     mkdirSync(resolve(envPath, ".."), { recursive: true, mode: 0o700 });
     const lines = Object.entries(config.runtime.native.env).map(([key, ref]) => `${key}=${readSecret(config, ref).replace(/\\/gu, "\\\\").replace(/\n/gu, "\\n")}`);
     lines.push(`${config.temporal.addressEnv}=${config.runtime.native.temporalAddress}`);
+    // Keep the configured host Secret root available at the same absolute path
+    // inside Compose containers so YAML SecretRef values remain authoritative.
+    lines.push(`API2BUSINESS_SECRET_ROOT=${config.runtime.secretsRoot}`);
     writeFileSync(envPath, `${lines.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
     chmodSync(envPath, 0o600);
   }
   const args = composeArgs(config, action, component);
   if (action === "logs") args.push("--tail", String(tail));
-  const result = spawnSync("docker", args, { cwd: config.rootDirectory, encoding: "utf8", timeout: 120_000 });
+  const result = spawnSync("docker", args, {
+    cwd: config.rootDirectory,
+    encoding: "utf8",
+    timeout: 120_000,
+    env: { ...process.env, API2BUSINESS_SECRET_ROOT: config.runtime.secretsRoot },
+  });
   if (result.status !== 0) throw new Error((result.stderr || result.stdout || `docker compose ${action} failed`).trim());
   if (action === "ps") return { ok: true, component: component ?? "all", action, output: result.stdout.trim(), mutation: false, valuesPrinted: false };
   return { ok: true, component: component ?? "all", action, output: result.stdout.trim(), mutation: action === "up" || action === "stop" || action === "down", valuesPrinted: false };

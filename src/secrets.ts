@@ -32,3 +32,20 @@ export function readSub2ApiCredentials(config: AppConfig): { email: string; pass
     password: readSecret(config, { sourceRef, sourceKey: config.sub2api.adminCredentials.passwordKey }),
   };
 }
+
+function credentialBaseUrl(value: string): string {
+  return value.trim().replace(/\/$/u, "").replace(/\/v1$/u, "");
+}
+
+export function readNewApiCredentials(config: AppConfig): Map<string, { username: string; password: string }> {
+  const credentials = new Map<string, { username: string; password: string }>();
+  for (const ref of config.sub2api.newApiCredentials ?? []) {
+    const baseUrl = credentialBaseUrl(ref.baseUrl);
+    if (credentials.has(baseUrl)) throw new Error(`duplicate sub2api.newApiCredentials baseUrl: ${baseUrl}`);
+    credentials.set(baseUrl, {
+      username: readSecret(config, ref.username),
+      password: readSecret(config, ref.password),
+    });
+  }
+  return credentials;
+}

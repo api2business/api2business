@@ -1,8 +1,11 @@
+import { publicEncrypt, constants as cryptoConstants } from "node:crypto";
+
 export interface UpstreamUsageTarget {
   id: number;
   name: string;
   baseUrl: string;
   apiKey: string;
+  newApiCredentials?: { username: string; password: string };
   status: string;
   schedulable: boolean;
   apiAmountUsdTotal?: number;
@@ -110,6 +113,107 @@ async function requestJson(target: UpstreamUsageTarget, path: string, timeoutMs:
     catch { payload = { error: `上游返回非 JSON 响应（HTTP ${response.status}）` }; }
   }
   return { status: response.status, payload };
+}
+
+async function requestJsonWithToken(target: UpstreamUsageTarget, path: string, timeoutMs: number, token: string): Promise<{
+  status: number;
+  payload: unknown;
+}> {
+  const controlBaseUrl = target.baseUrl.replace(/\/$/u, "").replace(/\/v1$/u, "");
+  const response = await fetch(`${controlBaseUrl}${path}`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: "application/json",
+      "user-agent": "Api2Business-Upstream-Usage/1.0",
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const text = await response.text();
+  let payload: unknown = null;
+  if (text.trim()) {
+    try { payload = JSON.parse(text) as unknown; }
+    catch { payload = { error: `上游返回非 JSON 响应（HTTP ${response.status}）` }; }
+  }
+  return { status: response.status, payload };
+}
+
+function encryptedNewApiPassword(password: string, publicKey: string): string {
+  return publicEncrypt({
+    key: publicKey,
+    padding: cryptoConstants.RSA_PKCS1_OAEP_PADDING,
+    oaepHash: "sha256",
+  }, Buffer.from(password, "utf8")).toString("base64");
+}
+
+async function loginNewApi(target: UpstreamUsageTarget, timeoutMs: number): Promise<string> {
+  const credentials = target.newApiCredentials;
+  if (!credentials) throw new Error("New API login credentials are not configured");
+  const controlBaseUrl = target.baseUrl.replace(/\/$/u, "").replace(/\/v1$/u, "");
+  const keyResponse = await fetch(`${controlBaseUrl}/api/user/login/encryption-key`, {
+    headers: { accept: "application/json", "user-agent": "Api2Business-Upstream-Usage/1.0" },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const keyText = await keyResponse.text();
+  let keyPayload: Row | null = null;
+  try { keyPayload = row(JSON.parse(keyText)); } catch { /* handled below */ }
+  const keyData = newApiData(keyPayload);
+  let body: Record<string, string>;
+  if (keyResponse.ok && keyData?.enabled === true) {
+    const keyId = typeof keyData.kid === "string" ? keyData.kid : "";
+    const publicKey = typeof keyData.public_key === "string" ? keyData.public_key : "";
+    if (!keyId || !publicKey) throw new Error(`New API login encryption key unavailable (HTTP ${keyResponse.status})`);
+    body = {
+      username: credentials.username,
+      password_encrypted: encryptedNewApiPassword(credentials.password, publicKey),
+      encryption_key_id: keyId,
+    };
+  } else {
+    body = { username: credentials.username, password: credentials.password };
+  }
+  const response = await fetch(`${controlBaseUrl}/api/user/login`, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "user-agent": "Api2Business-Upstream-Usage/1.0",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const text = await response.text();
+  let payload: Row | null = null;
+  try { payload = row(JSON.parse(text)); } catch { /* handled below */ }
+  const loginData = newApiData(payload);
+  const token = typeof loginData?.access_token === "string" ? loginData.access_token : "";
+  if (!response.ok || !token) throw new Error(`New API login failed: HTTP ${response.status}`);
+  return token;
+}
+
+function rawNewApiQuotaToUsd(value: number | null, status: Row | null): number | null {
+  if (value === null) return null;
+  const quotaPerUnit = firstNumber(status, ["quota_per_unit"]);
+  if (quotaPerUnit === null || quotaPerUnit <= 0) return null;
+  const displayType = String(status?.quota_display_type ?? "USD").toUpperCase();
+  if (displayType === "TOKENS") return null;
+  const usd = value / quotaPerUnit;
+  if (displayType === "CNY") {
+    const exchangeRate = firstNumber(status, ["usd_exchange_rate"]);
+    return exchangeRate !== null && exchangeRate > 0 ? usd * exchangeRate : null;
+  }
+  return usd;
+}
+
+function parseNewApiAccountQuota(payload: unknown, status: Row | null): {
+  limit: number | null;
+  used: number | null;
+  remaining: number | null;
+} | null {
+  const data = newApiData(payload);
+  if (!data || data.quota === undefined && data.used_quota === undefined) return null;
+  const remaining = rawNewApiQuotaToUsd(firstNumber(data, ["quota"]), status);
+  const used = rawNewApiQuotaToUsd(firstNumber(data, ["used_quota"]), status);
+  if (remaining === null && used === null) return null;
+  return { limit: remaining !== null && used !== null ? remaining + used : null, used, remaining };
 }
 
 function emptyResult(target: UpstreamUsageTarget, startedAt: number, days: number): UpstreamUsageResult {
@@ -300,11 +404,29 @@ export async function queryUpstreamUsage(
     failures.push(`Sub2API /v1/usage ${safeError(error)}`);
   }
 
+  let accountQuota: { limit: number | null; used: number | null; remaining: number | null } | null = null;
+  if (target.newApiCredentials) {
+    try {
+      const loginToken = await loginNewApi(target, options.timeoutMs);
+      const statusResponse = await requestJsonWithToken(target, "/api/status", options.timeoutMs, loginToken);
+      const status = statusResponse.status >= 200 && statusResponse.status < 300 ? newApiData(statusResponse.payload) : null;
+      const selfResponse = await requestJsonWithToken(target, "/api/user/self", options.timeoutMs, loginToken);
+      if (selfResponse.status >= 200 && selfResponse.status < 300) {
+        accountQuota = parseNewApiAccountQuota(selfResponse.payload, status);
+        if (!accountQuota) failures.push("New API 登录成功但 /api/user/self 未返回可换算额度");
+      } else {
+        failures.push(`New API 登录成功但 /api/user/self HTTP ${selfResponse.status}`);
+      }
+    } catch (error) {
+      failures.push(`New API 账号密码登录 ${safeError(error)}`);
+    }
+  }
+
   try {
     const quotaResponse = await requestJson(target, "/api/usage/token/", options.timeoutMs);
     const quota = newApiData(quotaResponse.payload);
-    if (quotaResponse.status >= 200 && quotaResponse.status < 300 && quota
-      && (quota.total_available !== undefined || quota.unlimited_quota !== undefined)) {
+    if (accountQuota || (quotaResponse.status >= 200 && quotaResponse.status < 300 && quota
+      && (quota.total_available !== undefined || quota.unlimited_quota !== undefined))) {
       const result = emptyResult(target, startedAt, options.days);
       result.ok = true;
       result.provider = "new-api";
@@ -316,46 +438,45 @@ export async function queryUpstreamUsage(
         // The token endpoint remains useful when older New API forks do not expose status.
       }
       const quotaPerUnit = firstNumber(status, ["quota_per_unit"]);
-      const unlimited = typeof quota.unlimited_quota === "boolean" ? quota.unlimited_quota : null;
+      const unlimited = typeof quota?.unlimited_quota === "boolean" ? quota.unlimited_quota : null;
       const rawLimit = firstNumber(quota, ["total_granted"]);
       const tokenLimitUsd = quotaPerUnit !== null && quotaPerUnit > 0 && rawLimit !== null
         ? rawLimit / quotaPerUnit : null;
-      result.quota = {
-        limit: null,
-        used: null,
-        remaining: null,
-        unlimited,
-        unit: null,
-      };
-      try {
-        const [subscriptionResponse, billingResponse] = await Promise.all([
-          requestJson(target, "/dashboard/billing/subscription", options.timeoutMs),
-          requestJson(target, "/dashboard/billing/usage", options.timeoutMs),
-        ]);
-        const subscription = row(subscriptionResponse.payload);
-        const billing = row(billingResponse.payload);
-        const displayedLimit = firstNumber(subscription, ["hard_limit_usd", "system_hard_limit_usd"]);
-        const displayedUsedCents = firstNumber(billing, ["total_usage"]);
-        const limitUsd = displayedQuotaToUsd(displayedLimit, status);
-        const usedUsd = displayedQuotaToUsd(displayedUsedCents === null ? null : displayedUsedCents / 100, status);
-        const accountLevelEvidence = limitUsd !== null && limitUsd < 100_000_000
-          && (unlimited === true || (tokenLimitUsd !== null && Math.abs(limitUsd - tokenLimitUsd) > 0.000001));
-        if (subscriptionResponse.status >= 200 && subscriptionResponse.status < 300
-          && billingResponse.status >= 200 && billingResponse.status < 300
-          && accountLevelEvidence && usedUsd !== null) {
-          result.quota = {
-            limit: limitUsd,
-            used: usedUsd,
-            remaining: Math.max(0, limitUsd - usedUsd),
-            unlimited,
-            unit: "USD",
-          };
-          result.warning = "New API 余额取自经账号级证据确认的 billing 接口";
-        } else {
-          result.warning = "New API 只返回 API Key 配额；缺少可证明账号钱包余额的 Dashboard/PAT 凭据";
+      result.quota = accountQuota
+        ? { ...accountQuota, unlimited: false, unit: "USD" }
+        : { limit: null, used: null, remaining: null, unlimited, unit: null };
+      if (accountQuota) result.warning = "New API 余额取自账号密码登录后的 /api/user/self";
+      if (!accountQuota) {
+        try {
+          const [subscriptionResponse, billingResponse] = await Promise.all([
+            requestJson(target, "/dashboard/billing/subscription", options.timeoutMs),
+            requestJson(target, "/dashboard/billing/usage", options.timeoutMs),
+          ]);
+          const subscription = row(subscriptionResponse.payload);
+          const billing = row(billingResponse.payload);
+          const displayedLimit = firstNumber(subscription, ["hard_limit_usd", "system_hard_limit_usd"]);
+          const displayedUsedCents = firstNumber(billing, ["total_usage"]);
+          const limitUsd = displayedQuotaToUsd(displayedLimit, status);
+          const usedUsd = displayedQuotaToUsd(displayedUsedCents === null ? null : displayedUsedCents / 100, status);
+          const accountLevelEvidence = limitUsd !== null && limitUsd < 100_000_000
+            && (unlimited === true || (tokenLimitUsd !== null && Math.abs(limitUsd - tokenLimitUsd) > 0.000001));
+          if (subscriptionResponse.status >= 200 && subscriptionResponse.status < 300
+            && billingResponse.status >= 200 && billingResponse.status < 300
+            && accountLevelEvidence && usedUsd !== null) {
+            result.quota = {
+              limit: limitUsd,
+              used: usedUsd,
+              remaining: Math.max(0, limitUsd - usedUsd),
+              unlimited,
+              unit: "USD",
+            };
+            result.warning = "New API 余额取自经账号级证据确认的 billing 接口";
+          } else {
+            result.warning = "New API 只返回 API Key 配额；缺少可证明账号钱包余额的 Dashboard/PAT 凭据";
+          }
+        } catch (error) {
+          result.warning = `New API 账号级 billing 查询失败：${safeError(error)}`;
         }
-      } catch (error) {
-        result.warning = `New API 账号级 billing 查询失败：${safeError(error)}`;
       }
       try {
         const logsResponse = await requestJson(target, "/api/log/token", options.timeoutMs);

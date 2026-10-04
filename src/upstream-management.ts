@@ -22,6 +22,7 @@ import {
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
 import { providerActualCostUsd, upstreamCostBasisSql } from "./upstream-cost-sql";
+import { readNewApiCredentials } from "./secrets";
 
 type Row = Record<string, unknown>;
 
@@ -994,6 +995,7 @@ export class UpstreamManagementService {
 
   async usage(accountIds: number[]): Promise<Record<string, unknown>> {
     const settings = this.config.operations.upstreamManagement;
+    const newApiCredentials = readNewApiCredentials(this.config);
     const query = await this.reads.query<Row>({
       key: `upstream-usage-targets:${accountIds.length ? accountIds.join(",") : "all"}`,
       kind: "upstream-usage-targets",
@@ -1034,6 +1036,7 @@ export class UpstreamManagementService {
       name: String(item.name ?? ""),
       baseUrl: normalizeBaseUrl(String(item.base_url ?? "")),
       apiKey: String(item.api_key ?? ""),
+      newApiCredentials: newApiCredentials.get(normalizeBaseUrl(String(item.base_url ?? ""))),
       status: String(item.status ?? "unknown"),
       schedulable: item.schedulable === true,
       apiAmountUsdTotal: Number(item.account_api_amount_usd_total ?? 0),

@@ -114,6 +114,9 @@ sub2api:
   baseUrl: https://api.example.com/api/v1
   requestTimeoutMs: 20000
   pageSize: 100
+  # Optional NewAPI account logins used only for read-only account balance checks.
+  # Values are resolved from runtime.secretSourcePaths; never put credentials here.
+  newApiCredentials: []
   scoreDatabase:
     sourceRef: secrets/sub2api.env
     sourceKey: DATABASE_URL
