@@ -233,6 +233,9 @@
     分别保留，不把工作流 `running` 当作业务成功。
   - V2 页面复用既有质量、趋势、参与比例、账号、错误、调整、探活和调度组件；
     后台对账结果只作为 CLI/API 证据，不投影成页面事实。
+  - 作用域深链统一使用 `/upstream-scheduling-v2?scope=<scope-name>`；例如
+    `?scope=codex`、`?scope=claude`、`?scope=grok`。首次打开、切换、浏览器前进后退和
+    刷新都以 URL 中的作用域为准，未知或已停用作用域回退到 owning YAML 的默认作用域。
   - Codex、Claude 和 Grok 是平等作用域。每个作用域的平台、分组、成本、评分、优先级、
     自动调度和探活是否启用均以该作用域开关为准，不把其他作用域数据互相投影。
   - Grok 作用域使用 `platform: grok` 和 `sub2api.grokPriorityPlan.eligibleGroupIds`，

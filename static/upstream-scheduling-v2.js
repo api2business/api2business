@@ -16,6 +16,17 @@ function money(value) { const parsed = Number(value); return Number.isFinite(par
 function usd(value) { const parsed = Number(value); return Number.isFinite(parsed) ? `$${number(parsed, 3)}` : '—' }
 function time(value) { if (!value) return '—'; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : '—' }
 function scopeLabel(scope) { return scope === 'claude' ? 'Claude' : scope === 'codex' ? 'Codex' : String(scope ?? '') }
+function enabledScope(scope) { return state.scopes.find((item) => item.enabled && item.name === scope)?.name ?? null }
+function scopeFromLocation(fallback) { return enabledScope(new URLSearchParams(location.search).get('scope')) ?? fallback }
+function updateScopeDeepLink(scope, navigation = 'replace') {
+  if (!scope || typeof history?.[`${navigation}State`] !== 'function') return
+  const url = new URL(location.href)
+  url.searchParams.set('scope', scope)
+  const next = `${url.pathname}${url.search}${url.hash}`
+  const current = `${location.pathname}${location.search}${location.hash}`
+  if (next !== current) history[`${navigation}State`]({ scope }, '', next)
+}
+function resetScopePaging() { state.accountPage = 1; state.errorPage = 1; state.historyPage = 1; state.probePage = 1 }
 
 async function requestJson(path, options = {}) {
   const controller = new AbortController()
@@ -31,7 +42,7 @@ async function requestJson(path, options = {}) {
 function renderScopeSwitch() {
   const target = $('#v2-scope-switch'); if (!target) return
   target.innerHTML = state.scopes.length ? state.scopes.map((scope) => `<button class="profile-tab${scope.name === state.activeScope ? ' is-active' : ''}" type="button" role="tab" aria-selected="${scope.name === state.activeScope}" data-v2-scope="${escapeHtml(scope.name)}"${scope.enabled ? '' : ' disabled'}>${escapeHtml(scopeLabel(scope.name))}${scope.enabled ? '' : '（待启用）'}</button>`).join('') : '<span class="section-state">没有启用的作用域</span>'
-  target.querySelectorAll('[data-v2-scope]').forEach((button) => button.addEventListener('click', () => { if (!button.disabled) { state.activeScope = button.dataset.v2Scope; state.accountPage = 1; state.errorPage = 1; state.historyPage = 1; renderScopeSwitch(); void loadScope() } }))
+  target.querySelectorAll('[data-v2-scope]').forEach((button) => button.addEventListener('click', () => { if (!button.disabled && button.dataset.v2Scope && button.dataset.v2Scope !== state.activeScope) { state.activeScope = button.dataset.v2Scope; resetScopePaging(); updateScopeDeepLink(state.activeScope, 'push'); renderScopeSwitch(); void loadScope() } }))
 }
 
 function renderQuality(quality, scope) {
@@ -162,4 +173,4 @@ async function loadPlan() { if (!state.activeScope || state.snapshot?.features?.
 
 function bindControls() { $('#v2-refresh').addEventListener('click', () => void loadScope(true)); $('#v2-generate-plan').addEventListener('click', () => void loadPlan()); $('#v2-filter-apply').addEventListener('click', () => { state.filter = $('#v2-account-filter').value; state.accountPage = 1; renderAccounts() }); $('#v2-account-filter').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('#v2-filter-apply').click() }); $('#v2-account-prev').addEventListener('click', () => { state.accountPage -= 1; renderAccounts() }); $('#v2-account-next').addEventListener('click', () => { state.accountPage += 1; renderAccounts() }); $('#v2-history-prev').addEventListener('click', () => { state.historyPage -= 1; renderHistory(state.snapshot?.data?.priorityHistory ?? []) }); $('#v2-history-next').addEventListener('click', () => { state.historyPage += 1; renderHistory(state.snapshot?.data?.priorityHistory ?? []) }) }
 
-export async function upstreamSchedulingV2Page() { bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = Array.isArray(data.scopes) ? data.scopes : []; state.activeScope = typeof data.defaultScope === 'string' ? data.defaultScope : state.scopes.find((scope) => scope.enabled)?.name ?? null; renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
+export async function upstreamSchedulingV2Page() { bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); window.addEventListener('popstate', () => { const fallback = state.scopes.find((scope) => scope.enabled)?.name ?? null; const next = scopeFromLocation(fallback); if (!next || next === state.activeScope) return; state.activeScope = next; resetScopePaging(); renderScopeSwitch(); void loadScope() }); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = Array.isArray(data.scopes) ? data.scopes : []; const fallback = typeof data.defaultScope === 'string' ? data.defaultScope : state.scopes.find((scope) => scope.enabled)?.name ?? null; state.activeScope = scopeFromLocation(fallback); updateScopeDeepLink(state.activeScope); renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
