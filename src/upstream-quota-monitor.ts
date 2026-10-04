@@ -39,7 +39,7 @@ export function carryForwardFailedQuotaBalances(
     const accountId = Number(row.account_id ?? row.accountId);
     if (!Number.isSafeInteger(accountId) || accountId <= 0) continue;
     const result = object(row.last_success_result);
-    const wallet = normalizeUpstreamWallet(result.baseUrl);
+    const wallet = normalizeUpstreamWallet(result.walletKey ?? result.baseUrl);
     const quota = object(result.quota);
     const remaining = finite(quota.remaining);
     if (wallet && result.ok === true && String(quota.unit ?? "").toUpperCase() === "USD" && remaining !== null && remaining >= 0) {
@@ -165,7 +165,7 @@ export function buildQuotaSamples(
 ): UpstreamQuotaSample[] {
   const wallets = new Map<string, UpstreamQuotaSample>();
   for (const result of results) {
-    const walletKey = normalizeUpstreamWallet(result.baseUrl);
+    const walletKey = normalizeUpstreamWallet(result.walletKey ?? result.baseUrl);
     const accountId = Number(result.accountId);
     if (!walletKey || !Number.isSafeInteger(accountId) || accountId <= 0) continue;
     const quota = object(result.quota);

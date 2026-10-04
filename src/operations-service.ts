@@ -73,6 +73,7 @@ import type { ProbeIsolationService } from "./probe-isolation";
 import { UpstreamBenchmarkService } from "./upstream-benchmark";
 import { collectRechargeCandidates } from "./upstream-recharge-candidates";
 import { collectCooldownDiagnosisFromDatabase } from "./cooldown-diagnose-database";
+import { configuredWalletKey, usageWalletKey } from "./upstream-wallet";
 // @ts-expect-error Shared browser/server module is JavaScript by design.
 import { quotaMemberships } from "../static/quota-grouping.js";
 
@@ -91,11 +92,14 @@ function records(value: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
-export function latestSuccessfulUsageByWallet(rows: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
+export function latestSuccessfulUsageByWallet(
+  rows: Array<Record<string, unknown>>,
+  refs: import("./config").NewApiCredentialRef[] = [],
+): Map<string, Record<string, unknown>> {
   const selected = new Map<string, { result: Record<string, unknown>; queriedAt: number }>();
   for (const row of rows) {
     const result = object(row.last_success_result ?? row.result);
-    const wallet = normalizeUpstreamWallet(result.baseUrl);
+    const wallet = usageWalletKey(result, refs);
     const rawRemaining = object(result.quota).remaining;
     const remaining = rawRemaining === null || rawRemaining === undefined ? Number.NaN : Number(rawRemaining);
     const unit = String(object(result.quota).unit ?? "");
@@ -614,7 +618,7 @@ export class OperationsService {
         const usage = usageById.get(item.accountId);
         const multiplier = Number(object(usage?.billingMultiplier).value);
         const walletRate = upstreamBalanceRateByWallet(
-          normalizeUpstreamWallet(usage?.baseUrl ?? item.baseUrl),
+          configuredWalletKey(usage?.walletKey ?? usage?.baseUrl ?? item.baseUrl, this.config.sub2api.newApiCredentials),
           valuation.defaultCnyPerApiUsd,
           valuation.walletCnyPerApiUsd,
         );
@@ -815,12 +819,12 @@ export class OperationsService {
       ...yamlUpstreamEntries,
     ];
     const usageRows = await this.store.getUpstreamUsageCache([]) as Array<Record<string, unknown>>;
-    const usageByWallet = latestSuccessfulUsageByWallet(usageRows);
+    const usageByWallet = latestSuccessfulUsageByWallet(usageRows, this.config.sub2api.newApiCredentials);
     const rechargeByWallet = new Map<string, number>();
     const walletRemaining = new Map<string, number>();
     const missingWallets = new Set<string>();
     for (const entry of upstreamEntries) {
-      const baseUrl = normalizeUpstreamWallet(entry.baseUrl ?? entry.accountName);
+      const baseUrl = configuredWalletKey(entry.baseUrl ?? entry.accountName, this.config.sub2api.newApiCredentials);
       const usage = usageByWallet.get(baseUrl);
       rechargeByWallet.set(baseUrl, (rechargeByWallet.get(baseUrl) ?? 0) + entry.amountCny);
       const rawRemaining = object(usage?.quota).remaining;
@@ -954,7 +958,7 @@ export class OperationsService {
       const quota = object(usage.quota);
       const remaining = quota.unit === "USD" ? Number(quota.remaining) : Number.NaN;
       const walletRate = upstreamBalanceRateByWallet(
-        normalizeUpstreamWallet(usage.baseUrl ?? row.accountName),
+        configuredWalletKey(usage.walletKey ?? usage.baseUrl ?? row.accountName, this.config.sub2api.newApiCredentials),
         valuation.defaultCnyPerApiUsd,
         valuation.walletCnyPerApiUsd,
       );

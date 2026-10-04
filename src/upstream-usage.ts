@@ -1,4 +1,5 @@
 import { publicEncrypt, constants as cryptoConstants } from "node:crypto";
+import { normalizeUpstreamWallet } from "./upstream-valuation";
 
 export interface UpstreamUsageTarget {
   id: number;
@@ -6,6 +7,7 @@ export interface UpstreamUsageTarget {
   baseUrl: string;
   apiKey: string;
   newApiCredentials?: { username: string; password: string };
+  walletKey?: string;
   status: string;
   schedulable: boolean;
   apiAmountUsdTotal?: number;
@@ -15,6 +17,7 @@ export interface UpstreamUsageResult {
   accountId: number;
   accountName: string;
   baseUrl: string;
+  walletKey: string;
   status: string;
   schedulable: boolean;
   apiAmountUsdTotal: number;
@@ -221,6 +224,7 @@ function emptyResult(target: UpstreamUsageTarget, startedAt: number, days: numbe
     accountId: target.id,
     accountName: target.name,
     baseUrl: target.baseUrl,
+    walletKey: target.walletKey ?? normalizeUpstreamWallet(target.baseUrl),
     status: target.status,
     schedulable: target.schedulable,
     apiAmountUsdTotal: finite(target.apiAmountUsdTotal) ?? 0,

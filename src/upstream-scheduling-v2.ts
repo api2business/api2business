@@ -3,10 +3,10 @@ import type { ApplicationDispatcher } from "./dispatcher";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
 import type { OperationsService } from "./operations-service";
 import {
-  normalizeUpstreamWallet,
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
+import { configuredWalletKey, usageWalletKey } from "./upstream-wallet";
 
 type Row = Record<string, unknown>;
 
@@ -58,7 +58,7 @@ function enrichAccountCostEvidence(
     const multiplier = Number(object(usage?.billingMultiplier).value);
     const detected = Number.isFinite(multiplier) && multiplier > 0 && usage
       ? multiplier * upstreamBalanceRateByWallet(
-        normalizeUpstreamWallet(usage.baseUrl ?? account.accountName),
+        configuredWalletKey(usage.walletKey ?? usage.baseUrl ?? account.accountName, config.sub2api.newApiCredentials),
         valuation.defaultCnyPerApiUsd,
         valuation.walletCnyPerApiUsd,
       )
@@ -86,34 +86,47 @@ function enrichAccountCostEvidence(
   });
 }
 
-function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[]) {
+function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], refs: import("./config").NewApiCredentialRef[]) {
   const cachedByAccount = new Map<number, {
     result: Row;
     cachedAt: string | null;
     status: "cached" | "unlimited" | "unavailable";
   }>();
+  const cachedByWallet = new Map<string, {
+    result: Row;
+    cachedAt: string | null;
+    timestamp: number;
+  }>();
   for (const row of records(usageRows)) {
     const accountId = Number(row.account_id ?? row.accountId);
     if (!Number.isSafeInteger(accountId) || accountId <= 0) continue;
     const result = cachedUsageResult(row);
+    const walletKey = usageWalletKey(result, refs);
     const quota = object(result.quota);
     const remaining = Number(quota.remaining);
     const hasQuota = result.ok === true
       && String(quota.unit ?? "").toUpperCase() === "USD"
       && quota.remaining !== null && quota.remaining !== undefined
       && Number.isFinite(remaining);
-    const status = hasQuota
+    const status: "cached" | "unlimited" | "unavailable" = hasQuota
       ? "cached"
       : result.ok === true && quota.unlimited === true
         ? "unlimited"
         : "unavailable";
-    cachedByAccount.set(accountId, {
+    const cached = {
       result,
       status,
       cachedAt: row.last_success_at == null
         ? row.queried_at == null ? null : String(row.queried_at)
         : String(row.last_success_at),
-    });
+      walletKey,
+    };
+    cachedByAccount.set(accountId, cached);
+    if (status === "cached" && walletKey) {
+      const timestamp = Date.parse(cached.cachedAt ?? String(result.queriedAt ?? "")) || 0;
+      const previous = cachedByWallet.get(walletKey);
+      if (!previous || timestamp >= previous.timestamp) cachedByWallet.set(walletKey, { result, cachedAt: cached.cachedAt, timestamp });
+    }
   }
   const missingAccountIds: number[] = [];
   const unavailableAccountIds: number[] = [];
@@ -122,7 +135,12 @@ function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[]) {
   const enriched: Row[] = accounts.map((account) => {
     const accountId = Number(account.accountId);
     const cached = cachedByAccount.get(accountId);
-    if (!cached) {
+    const walletKey = configuredWalletKey(cached?.result.walletKey ?? cached?.result.baseUrl ?? account.accountName, refs);
+    const shared = walletKey ? cachedByWallet.get(walletKey) : undefined;
+    const effective = shared
+      ? { result: shared.result, status: "cached" as const, cachedAt: shared.cachedAt }
+      : cached;
+    if (!effective) {
       if (Number.isSafeInteger(accountId) && accountId > 0) missingAccountIds.push(accountId);
       return {
         ...account,
@@ -131,21 +149,21 @@ function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[]) {
         quotaCacheStatus: "missing",
       };
     }
-    const quota = object(cached.result.quota);
-    if (cached.status === "cached") numericAccountCount += 1;
-    if (cached.status === "unlimited") unlimitedAccountCount += 1;
-    if (cached.status === "unavailable") unavailableAccountIds.push(accountId);
+    const quota = object(effective.result.quota);
+    if (effective.status === "cached") numericAccountCount += 1;
+    if (effective.status === "unlimited") unlimitedAccountCount += 1;
+    if (effective.status === "unavailable") unavailableAccountIds.push(accountId);
     return {
       ...account,
       quota: {
         limit: quota.limit ?? null,
         used: quota.used ?? null,
-        remaining: cached.status === "cached" ? Number(quota.remaining) : null,
+        remaining: effective.status === "cached" ? Number(quota.remaining) : null,
         unlimited: quota.unlimited ?? null,
         unit: quota.unit == null ? null : String(quota.unit),
       },
-      quotaCacheAt: cached.cachedAt,
-      quotaCacheStatus: cached.status,
+      quotaCacheAt: effective.cachedAt,
+      quotaCacheStatus: effective.status,
     };
   });
   return {
@@ -352,13 +370,13 @@ export class UpstreamSchedulingV2Service {
       this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all" }),
       this.operations.priorityHistory(),
       this.operations.upstreamQuotaSummary(accountIds),
-      accountIds.length ? this.operations.getUpstreamUsageCache(accountIds) : Promise.resolve([]),
+      accountIds.length ? this.operations.getUpstreamUsageCache([]) : Promise.resolve([]),
       scope.features.idleProbe
         ? this.operations.idleProbeHistory(1, 10, scopeName)
         : Promise.resolve({ records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
     ]);
     const costAccounts = enrichAccountCostEvidence(accounts, usageRows, this.config);
-    const quotaProjection = enrichAccountsWithQuotaCache(costAccounts, usageRows);
+    const quotaProjection = enrichAccountsWithQuotaCache(costAccounts, usageRows, this.config.sub2api.newApiCredentials);
     return {
       scoreSnapshot,
       accounts: quotaProjection.accounts,

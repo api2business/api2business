@@ -23,6 +23,7 @@ import {
 } from "./upstream-valuation";
 import { providerActualCostUsd, upstreamCostBasisSql } from "./upstream-cost-sql";
 import { readNewApiCredentials } from "./secrets";
+import { configuredWalletKey } from "./upstream-wallet";
 
 type Row = Record<string, unknown>;
 
@@ -57,6 +58,7 @@ export interface UpstreamAccount {
   id: number;
   name: string;
   baseUrl: string;
+  walletKey: string;
   suffix: string | null;
   rateCnyPerApiUsd: number | null;
   keyPrefix: string | null;
@@ -330,6 +332,7 @@ function rowToAccount(row: Row, totals: Map<number, number>, entries: UpstreamRe
     id,
     name: String(row.name ?? ""),
     baseUrl,
+    walletKey: normalizeUpstreamWallet(baseUrl),
     suffix: parsed?.suffix ?? null,
     rateCnyPerApiUsd: parsed?.rateCnyPerApiUsd ?? null,
     keyPrefix: row.key_prefix ? String(row.key_prefix) : null,
@@ -905,7 +908,10 @@ export class UpstreamManagementService {
     const availableTotal = Number(query.rows[0]?.available_count ?? 0);
     const entries = this.readLedger();
     const totals = rechargeTotalsByAccount(entries);
-    const accounts = query.rows.map((row) => rowToAccount(row, totals, entries));
+    const accounts = query.rows.map((row) => ({
+      ...rowToAccount(row, totals, entries),
+      walletKey: configuredWalletKey(row.base_url, this.config.sub2api.newApiCredentials),
+    }));
     return {
       ok: true,
       page,
@@ -1037,6 +1043,8 @@ export class UpstreamManagementService {
       baseUrl: normalizeBaseUrl(String(item.base_url ?? "")),
       apiKey: String(item.api_key ?? ""),
       newApiCredentials: newApiCredentials.get(normalizeBaseUrl(String(item.base_url ?? ""))),
+      walletKey: newApiCredentials.get(normalizeBaseUrl(String(item.base_url ?? "")))?.walletKey
+        ?? normalizeUpstreamWallet(String(item.base_url ?? "")),
       status: String(item.status ?? "unknown"),
       schedulable: item.schedulable === true,
       apiAmountUsdTotal: Number(item.account_api_amount_usd_total ?? 0),
@@ -1116,7 +1124,7 @@ export class UpstreamManagementService {
         retained.push({ accountId: result.accountId, reason: "unparseable-account-suffix" });
         continue;
       }
-      const wallet = normalizeUpstreamWallet(result.baseUrl);
+      const wallet = normalizeUpstreamWallet(result.walletKey ?? result.baseUrl);
       const walletRate = upstreamBalanceRateByWallet(wallet, policy.defaultCnyPerApiUsd, policy.walletCnyPerApiUsd);
       const detectedRate = Number(formatRate(multiplier * walletRate));
       result.billingMultiplier.previousManualRateCnyPerApiUsd = parsed.rateCnyPerApiUsd;

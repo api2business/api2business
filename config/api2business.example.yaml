@@ -116,6 +116,8 @@ sub2api:
   pageSize: 100
   # Optional NewAPI account logins used only for read-only account balance checks.
   # Values are resolved from runtime.secretSourcePaths; never put credentials here.
+  # Multiple API hosts for one provider wallet may repeat the same secret refs
+  # and set one shared walletKey so every account receives the same balance.
   newApiCredentials: []
   scoreDatabase:
     sourceRef: secrets/sub2api.env

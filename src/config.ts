@@ -68,6 +68,7 @@ export interface SecretRef {
 
 export interface NewApiCredentialRef {
   baseUrl: string;
+  walletKey?: string;
   username: SecretRef;
   password: SecretRef;
 }
@@ -690,10 +691,20 @@ export function loadConfig(path: string): AppConfig {
       if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash) {
         throw new Error(`${path}.baseUrl must be an HTTPS URL without credentials, query, or fragment`);
       }
+      const walletKey = value.walletKey === undefined
+        ? undefined
+        : stringValue(value, "walletKey", path).replace(/\/$/u, "");
+      if (walletKey !== undefined) {
+        const walletUrl = new URL(walletKey);
+        if (walletUrl.protocol !== "https:" || walletUrl.username || walletUrl.password || walletUrl.search || walletUrl.hash) {
+          throw new Error(`${path}.walletKey must be an HTTPS URL without credentials, query, or fragment`);
+        }
+      }
       const username = object(value.username, `${path}.username`);
       const password = object(value.password, `${path}.password`);
       return {
         baseUrl,
+        walletKey,
         username: {
           sourceRef: stringValue(username, "sourceRef", `${path}.username`),
           sourceKey: stringValue(username, "sourceKey", `${path}.username`),

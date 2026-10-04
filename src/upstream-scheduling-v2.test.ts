@@ -201,6 +201,43 @@ describe("upstream scheduling v2", () => {
     });
   });
 
+  test("shares the latest finite balance across aliases and scopes of one wallet", async () => {
+    const { service } = fixture([
+      {
+        account_id: 101,
+        last_success_at: "2026-10-03T00:03:00.000Z",
+        last_success_result: {
+          ok: true,
+          baseUrl: "https://cf.example.test/v1",
+          walletKey: "https://wallet.example.test",
+          quota: { unit: "USD", remaining: 8.5, limit: 20, used: 11.5, unlimited: false },
+        },
+      },
+      {
+        account_id: 202,
+        last_success_at: "2026-10-03T00:02:00.000Z",
+        last_success_result: {
+          ok: true,
+          baseUrl: "https://wallet.example.test",
+          walletKey: "https://wallet.example.test",
+          quota: { unit: null, remaining: null, unlimited: true },
+        },
+      },
+    ]);
+    const snapshot = await service.snapshot("claude");
+    expect(snapshot.data.accounts[0]).toMatchObject({
+      quota: { unit: "USD", remaining: 8.5, limit: 20, used: 11.5, unlimited: false },
+      quotaCacheStatus: "cached",
+      quotaCacheAt: "2026-10-03T00:03:00.000Z",
+    });
+    expect(snapshot.data.quotaCoverage).toMatchObject({
+      numericAccountCount: 1,
+      unlimitedAccountCount: 0,
+      missingAccountIds: [],
+      complete: true,
+    });
+  });
+
   test("keeps Claude plans non-mutating", async () => {
     const { service } = fixture();
     const plan = await service.plan("claude");

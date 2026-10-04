@@ -34,6 +34,7 @@ import {
 const staticRoot = resolve(import.meta.dir, "../static");
 
 const persistentSnapshotApiPaths = [
+  /^\/api\/upstreams(?:\/|$)/u,
   /^\/api\/upstreams\/pool-quality(?:\/|$)/u,
   /^\/api\/upstreams\/(?:quota-summary|quota-monitor-snapshot|usage-cache|quota-monitor-usage|recharge-candidates)$/u,
   /^\/api\/oauth\/runtime-summary$/u,
@@ -361,7 +362,7 @@ export function createHandler(
         const rows = await operations.getUpstreamUsageCache(accountIds) as Array<Record<string, unknown>>;
         return json({
           ok: true,
-          results: rows.map((row) => row.result),
+          results: rows.map((row) => row.last_success_result ?? row.result),
           cachedAt: rows.map((row) => row.queried_at),
           lastSuccessfulResults: rows.map((row) => row.last_success_result),
           lastSuccessfulAt: rows.map((row) => row.last_success_at),

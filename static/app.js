@@ -526,7 +526,7 @@ async function quotaMonitorPage() {
   const stateById = new Map((usage24h.rows ?? []).map((row) => [Number(row.accountId), row]))
   const wallets = new Map()
   for (const account of accounts) {
-    const wallet = quotaWallet(account.baseUrl)
+    const wallet = quotaWallet(account.walletKey ?? account.baseUrl)
     if (!wallet) continue
     const current = wallets.get(wallet) ?? { wallet, accounts: [], groupRows: [], usagePoints: [], consumed24h: 0, consumption: { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 } }
     current.accounts.push(account)
