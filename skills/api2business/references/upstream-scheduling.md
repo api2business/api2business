@@ -3,6 +3,8 @@
 - 本文是 Api2Business 上游、评分、探活、切号和作用域调度的唯一详细权威。
 - Api2Business `SKILL.md`、UniDesk `unidesk-sub2api` 入口和项目规格只保留路由摘要，
   不复制本文的算法、开关或终态判定。
+- 余额、共享钱包别名、额度缓存和失败保留的唯一详细口径见
+  [额度监控](quota-monitoring.md)；本文只引用其结果，不重新定义余额来源。
 - 创建、分组、切号和配置生效在本文前半。
 - 稳定性观察见下文「稳定性观察与用户报错」。
 - 评分、容量与冷却见下文「评分、容量与冷却联动评估」。
@@ -72,10 +74,13 @@
     - 隔离若暂时并入这些分组，计划可能在收回默认分组之前写下优先级。
     - 账号离开全部 eligible 分组后，该计划不再改写它，最后一次写入会保留。
     - 用户未要求调整优先级时，不把该值改回创建时的占位优先级。
-  - 同一规范化钱包的多 Key 充值只提交一次 `upstreams recharge --base-url <https-url>`。
+- 同一充值 `base_url` 的多 Key 充值只提交一次 `upstreams recharge --base-url <https-url>`；
   - CLI 自动分页解析该站点全部 API-key 账号，并选择一个账本锚点。
   - 钱包账号列表只用于恢复范围，不重复记账。
-- 同一规范化 `base_url` 视为同一充值钱包；规范化只去除末尾 `/`，不按账号平台区分，因此 Codex 与 Grok 账号均属于同一恢复范围。
+- 余额读取的跨 host 钱包身份与 `walletKey` 规则见 [额度监控](quota-monitoring.md)。
+- 同一规范化 `base_url` 视为同一充值钱包；充值恢复只按该地址选择账号，不因余额读取的
+  `walletKey` 别名扩大写入范围。Codex、Claude 与 Grok 的余额可以共享，但账号恢复和
+  充值写入仍必须按充值地址与显式账号范围执行。
 - 充值完成后，批量恢复该规范化 URL 下所有状态异常或不可调度的账号，写入 `status=active` 和 `schedulable=true`，再排队回读验证可以立即参与调度。
 - 充值恢复使用一次 Sub2API 原生 `/admin/accounts/bulk-update`，禁止逐账号调用状态和可调度接口；充值记账保持幂等，写后只做必要的排队回读。
 - 充值 mutation 仍然是 fire-and-forget；CLI 提交后只做一次有界的 workflow/status 与钱包账号快照读取，不等待 worker 完成。
@@ -283,12 +288,15 @@
 - 账号额度来源：
   - V2 账号余额只读取额度监控已经持久化的 `api2business_upstream_usage_cache`，与额度
     监控页面使用同一缓存口径，不为补齐 V2 快照再次请求供应商额度接口。
+  - 同钱包别名、最新成功有限余额投影、失败保留和旧接口一致性统一见
+    [额度监控](quota-monitoring.md)；本节只规定 V2 不得绕过该缓存。
   - 快照返回 `quotaCoverage`，包含账号总数、缓存行覆盖数、数值余额数、已知不限额数、
     不可用账号 ID、缺失账号 ID、`cacheRowsComplete` 和数值 `complete`；
     `complete=false` 时页面必须显示缺失或不可用范围，不能把未知额度当作零或最低优先级。
     账号行的 `quotaCacheStatus` 明确区分 `cached`、`unlimited`、`unavailable` 和 `missing`，
     不允许用短横线掩盖缓存状态。
-  - 共享钱包汇总仍读取额度监控的持久化汇总；账号级余额和钱包级余额不得互相替代。
+  - 钱包汇总仍读取额度监控的持久化汇总；共享余额可以投影到账号行用于展示，但账号级
+    用量、成本、状态和质量证据不能被钱包级余额替代。
 - Claude `Upstream access forbidden` 的切号边界：
   - `config/failover-templates/claude.yaml` 已按 Anthropic 平台配置精确的 `502` 状态码与
     `upstream access forbidden` 关键词，且运行时已回读到全部 Claude API-key 账号。

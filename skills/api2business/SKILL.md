@@ -148,7 +148,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   `references/upstream-scheduling.md`。
 - 充值候选使用 `upstreams recharge-candidates --over-api`。
 - 欠费、低余额和查询超时的判定见 `references/upstream-scheduling.md`。
-- 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api`；同一规范化 `base_url` 是共享钱包，只记账一次并统一恢复该站点全部 API-key 账号。
+- 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api`；
+  同一充值地址只记账一次并恢复该地址账号。余额读取的跨 host `walletKey`、缓存和失败
+  保留见 [额度监控](references/quota-monitoring.md)。
 - 充值确认后 CLI 立即返回异步 workflow ID，并做一次非阻塞只读状态与账号快照核验；最终一致性使用 `upstreams recharge-status --id <workflow-id> --over-api`。
 - 核验状态为 `pending`、`snapshot_mismatch` 或 `unavailable` 时，只表示作业未完成或读模型暂未追上，不代表充值失败；必须继续查询原 workflow。
 - 充值请求超时重试时必须复用相同的 `--idempotency-key`，禁止生成新 key 重复提交同一笔充值。
@@ -163,7 +165,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `--groups` 整表替换全部分组，并重写切号模板。
   - 已启用探活账号的私有分组必须列入；隔离后的收回顺序只见
     `references/upstream-scheduling.md`。
-- 多个同钱包 API Key 只对实际充值动作记一笔充值；创建、模板和探活隔离作业按账号 ID 幂等回读。
+- 多个同充值地址 API Key 只对实际充值动作记一笔充值；创建、模板和探活隔离作业按账号
+  ID 幂等回读。余额共享钱包不扩大写入范围。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
 - 手工收入明细使用 `cash ledger --period YYYY-MM --over-api`，汇总使用 `profit daily`。
 - BugTeam 客户 API 使用 `bugteam` CLI 命令组，配置中的 `bugTeam.customerToken`、`customerAccount`、`customerPassword` 只能引用仓库外 Secret：

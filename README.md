@@ -141,6 +141,15 @@ chmod 600 /path/to/secrets/*.env
 bun run deploy:validate
 ```
 
+## 权威文档
+
+- 上游、评分、探活、切号和作用域调度：
+  [上游与调度](skills/api2business/references/upstream-scheduling.md)。
+- 余额、共享钱包别名、缓存刷新和失败保留：
+  [额度监控](skills/api2business/references/quota-monitoring.md)。
+- 运行面和写入边界：
+  [Runtime 控制规格](docs/specs/runtime-control.md)。
+
 ## 开发检查
 
 ```bash

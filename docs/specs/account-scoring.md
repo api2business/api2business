@@ -12,7 +12,8 @@
   [上游与调度](../../skills/api2business/references/upstream-scheduling.md)。
 - 缺少单个账号成本时，只要同一候选集合存在有效成本，就使用候选集合算术平均值并标记
   imputed-average；只有整组没有成本证据时才进入保守尾部。
-- 额度和评分读取失败时保留上一份成功快照，不能把未知余额或未知评分写成零分或最低
-  优先级；缓存与刷新口径见
-  [额度监控](../../skills/api2business/references/quota-monitoring.md)。
+- 额度读取失败时保留上一份成功快照，不能把未知余额写成零分或最低优先级；共享钱包
+  别名、跨作用域投影和缓存刷新唯一见
+  [额度监控](../../skills/api2business/references/quota-monitoring.md)。评分缺失仍按本规格
+  的评分权威处理，不能用余额缓存替代评分证据。
 - 优先级自动调度必须按作用域功能开关独立运行，计划生成、写入和回读分开验收。

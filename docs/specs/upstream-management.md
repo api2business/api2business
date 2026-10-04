@@ -14,9 +14,9 @@
   Claude 模板分文件维护，Grok 不套用 Codex 或 Claude 模板。
 - 探活必须先完成同作用域的手动核验，再由 owning YAML 的
   features.idleProbe 打开自动探活；探活记录、普通请求记录和轮次终态缺一不可。
-- 同一钱包的多个 API Key 共享充值账本，但账号级余额、钱包级余额、成本和质量样本不能
-  互相替代；额度监控缓存是账号余额的唯一来源，见
-  [额度监控](../../skills/api2business/references/quota-monitoring.md)。
+- 共享钱包别名、账号余额投影、失败保留和额度缓存的唯一口径见
+  [额度监控](../../skills/api2business/references/quota-monitoring.md)；本规格只要求
+  充值账本、账号成本和质量样本保持各自边界，不把共享余额重复计入这些数据面。
 - 充值、模板、分组、探活隔离和优先级写入都必须先展示计划，再确认、执行和回读；
   HTTP 受理、工作流运行中或页面成功提示不能替代终态。
 - API Key、Token 和其他 Secret 不进入日志、响应、账本、URL 或命令参数；只保留 presence、
