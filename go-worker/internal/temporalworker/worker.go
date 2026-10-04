@@ -130,6 +130,10 @@ func v2IdleProbeWorkflowID(base, scope string) string {
 	return fmt.Sprintf("%s-upstream-scheduling-v2-%s-idle-probe-v5", base, scope)
 }
 
+func v2ModelSyncWorkflowID(base, scope string) string {
+	return fmt.Sprintf("%s-upstream-scheduling-v2-%s-model-sync-v1", base, scope)
+}
+
 // 只终止已退役的历史 execution，不注册或恢复其工作流类型。
 func retireReplacedSchedulingWorkflows(c client.Client, cfg Config) error {
 	base := cfg.ScoreScheduleWorkflowID
@@ -242,6 +246,32 @@ func ensureSchedules(c client.Client, cfg Config) error {
 			return err
 		}
 	}
+	activeModelSyncScopes := make(map[string]struct{}, len(cfg.V2ModelSyncScopes))
+	for _, scope := range cfg.V2ModelSyncScopes {
+		activeModelSyncScopes[scope] = struct{}{}
+	}
+	for _, scope := range cfg.V2ScopeNames {
+		if _, active := activeModelSyncScopes[scope]; active {
+			continue
+		}
+		if err := terminateIfRunning(c, cfg.Namespace, v2ModelSyncWorkflowID(base, scope), "upstream model sync automation disabled by scope configuration"); err != nil {
+			return err
+		}
+	}
+	for _, scope := range cfg.V2ModelSyncScopes {
+		intervalSeconds := cfg.V2ModelSyncIntervalSeconds
+		if intervalSeconds < 60 {
+			intervalSeconds = 60
+		}
+		if err := startWorkflow(c, scheduleOptions(v2ModelSyncWorkflowID(base, scope), cfg.TaskQueue), "upstreamSchedulingV2ModelSyncScheduleWorkflow", ScheduleInput{
+			IntervalMS:                  intervalSeconds * 1000,
+			ActivityStartToCloseTimeout: cfg.ActivityTimeout,
+			MaximumAttempts:             1,
+			Scope:                       scope,
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -328,6 +358,7 @@ func Run(ctx context.Context, cfg Config) error {
 	w.RegisterWorkflowWithOptions(UpstreamSchedulingV2IdleProbeScheduleWorkflow, workflow.RegisterOptions{Name: "upstreamSchedulingV2IdleProbeScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(BugTeamCostScheduleWorkflow, workflow.RegisterOptions{Name: "bugTeamCostScheduleWorkflow"})
 	w.RegisterWorkflowWithOptions(UpstreamSchedulingV2PriorityAutomationScheduleWorkflow, workflow.RegisterOptions{Name: "upstreamSchedulingV2PriorityAutomationScheduleWorkflow"})
+	w.RegisterWorkflowWithOptions(UpstreamSchedulingV2ModelSyncScheduleWorkflow, workflow.RegisterOptions{Name: "upstreamSchedulingV2ModelSyncScheduleWorkflow"})
 	activityTimeout, parseErr := time.ParseDuration(cfg.ActivityTimeout)
 	if parseErr != nil || activityTimeout <= 0 {
 		activityTimeout = 15 * time.Minute

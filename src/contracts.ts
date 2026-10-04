@@ -26,7 +26,8 @@ export type AppCommand =
   | { kind: "account.import"; jobId: string }
   | { kind: "account.lifecycle.detect"; jobId: string }
   | { kind: "account.lifecycle.settle"; jobId: string; candidateIds: number[] }
-  | { kind: "priority.automation.v2.run"; scope: string; recentCallLimit: number };
+  | { kind: "priority.automation.v2.run"; scope: string; recentCallLimit: number }
+  | { kind: "upstream.model-sync.v2.run"; scope: string };
 
 export interface OperationRequest {
   operationId: string;
@@ -46,6 +47,11 @@ export interface ScheduledUpstreamQuotaInput extends WorkflowOptions {
   roundTimeoutMs: number;
 }
 export interface ScheduledBugTeamCostInput extends WorkflowOptions {
+  intervalMs: number;
+}
+
+export interface ScheduledUpstreamModelSyncInput extends WorkflowOptions {
+  scope: string;
   intervalMs: number;
 }
 
@@ -70,5 +76,6 @@ export function usesWorkflow(command: AppCommand): boolean {
     || command.kind === "account.import"
     || command.kind === "account.lifecycle.detect"
     || command.kind === "account.lifecycle.settle"
-    || command.kind === "priority.automation.v2.run";
+    || command.kind === "priority.automation.v2.run"
+    || command.kind === "upstream.model-sync.v2.run";
 }

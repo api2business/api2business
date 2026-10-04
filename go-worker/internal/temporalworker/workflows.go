@@ -263,3 +263,25 @@ func UpstreamSchedulingV2PriorityAutomationScheduleWorkflow(ctx workflow.Context
 	}
 	return workflow.NewContinueAsNewError(ctx, UpstreamSchedulingV2PriorityAutomationScheduleWorkflow, input)
 }
+
+func UpstreamSchedulingV2ModelSyncScheduleWorkflow(ctx workflow.Context, input ScheduleInput) error {
+	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions(input.ActivityStartToCloseTimeout, 1))
+	if input.Scope == "" {
+		return fmt.Errorf("V2 model sync requires scope")
+	}
+	intervalMS := input.IntervalMS
+	if intervalMS < minimumScopedAutomationIntervalMilliseconds {
+		intervalMS = minimumScopedAutomationIntervalMilliseconds
+	}
+	for iteration := 0; iteration < 5000; iteration++ {
+		request := OperationRequest{
+			OperationID: fmt.Sprintf("%s:model-sync-v2:%s:%d", workflow.GetInfo(ctx).WorkflowExecution.RunID, input.Scope, iteration),
+			Command:     map[string]any{"kind": "upstream.model-sync.v2.run", "scope": input.Scope},
+		}
+		_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, nil)
+		if err := workflow.Sleep(ctx, time.Duration(intervalMS)*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return workflow.NewContinueAsNewError(ctx, UpstreamSchedulingV2ModelSyncScheduleWorkflow, input)
+}

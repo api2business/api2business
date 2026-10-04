@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
-import type { AppConfig } from "./config";
+import type { AppConfig, UpstreamSchedulingV2Scope } from "./config";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
 import { collectErrorAggregateFromDatabase } from "./error-aggregate-database";
@@ -296,6 +296,144 @@ export class OperationsService {
         durationMs: Number(row.duration_ms),
         errorSummary: row.error_summary,
       })),
+      pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+      valuesPrinted: false,
+    };
+  }
+
+  private modelSyncScope(scopeName: string): { scope: UpstreamSchedulingV2Scope; config: NonNullable<AppConfig["operations"]["upstreamSchedulingV2"]> } {
+    const scheduling = this.config.operations.upstreamSchedulingV2;
+    if (!scheduling?.enabled) throw new Error("上游调度 V2 未启用");
+    const scope = scheduling.scopes[scopeName];
+    if (!scope?.enabled) throw new Error(`作用域不可用：${scopeName}`);
+    return { scope, config: scheduling };
+  }
+
+  async modelSyncPlan(scopeName = "codex", explicitAccountIds: number[] = []) {
+    const { scope, config } = this.modelSyncScope(scopeName);
+    const ranking = await collectRecentCallScoresFromDatabase(
+      this.config,
+      config.automation.recentCallLimit,
+      this.reads,
+      null,
+      null,
+      "manual",
+    );
+    const eligible = records(ranking.accounts)
+      .filter((row) => String(row.platform ?? "").toLowerCase() === scope.platform)
+      .filter((row) => {
+        const ids = Array.isArray(row.groupIds) ? row.groupIds.map(Number) : [];
+        return ids.some((id) => scope.eligibleGroupIds.includes(id));
+      })
+      .map((row) => ({ id: Number(row.accountId), name: String(row.accountName ?? row.accountId), priority: Number(row.priority) }))
+      .filter((row) => Number.isSafeInteger(row.id) && row.id > 0)
+      .sort((a, b) => (Number.isFinite(a.priority) ? a.priority : Number.MAX_SAFE_INTEGER) - (Number.isFinite(b.priority) ? b.priority : Number.MAX_SAFE_INTEGER) || a.id - b.id);
+    const eligibleIds = new Set(eligible.map((row) => row.id));
+    const requested = [...new Set(explicitAccountIds.map(Number))];
+    if (requested.some((id) => !Number.isSafeInteger(id) || !eligibleIds.has(id))) throw new Error("指定账号不属于目标作用域");
+    const cursor = await this.store.latestModelSyncCursor(scopeName);
+    const start = requested.length > 0 ? 0 : Math.max(0, eligible.findIndex((row) => row.id === cursor) + 1);
+    const rotated = eligible.length === 0 ? [] : [...eligible.slice(start), ...eligible.slice(0, start)];
+    const selected = (requested.length > 0 ? eligible.filter((row) => requested.includes(row.id)) : rotated).slice(0, config.modelSync.batchSize);
+    return {
+      ok: true,
+      scope: scopeName,
+      platform: scope.platform,
+      automaticEnabled: scope.features.modelSyncAutomation,
+      batchSize: config.modelSync.batchSize,
+      intervalSeconds: config.modelSync.intervalSeconds,
+      cursorBefore: cursor,
+      cursorAfter: selected.length ? selected[selected.length - 1]!.id : cursor,
+      eligibleCount: eligible.length,
+      selected: selected.map(({ id, name, priority }) => ({ accountId: id, accountName: name, priority: Number.isFinite(priority) ? priority : null })),
+      valuesPrinted: false,
+    };
+  }
+
+  async runModelSync(scopeName = "codex", triggerType: "manual" | "automatic" = "manual", explicitAccountIds: number[] = []) {
+    const { scope, config } = this.modelSyncScope(scopeName);
+    if (triggerType === "automatic" && !scope.features.modelSyncAutomation) {
+      return { ok: true, skipped: true, scope: scopeName, reason: "scope model sync automation is disabled", valuesPrinted: false };
+    }
+    if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
+    const plan = await this.modelSyncPlan(scopeName, explicitAccountIds);
+    const started = Date.now();
+    const operationId = `v2-model-sync:${scopeName}:${crypto.randomUUID()}`;
+    const roundId = await this.store.createModelSyncRound({
+      operationId, scope: scopeName, platform: scope.platform, triggerType,
+      startedAt: new Date(started).toISOString(), batchSize: config.modelSync.batchSize,
+      accountIds: plan.selected.map((row) => ({ id: Number(row.accountId), name: String(row.accountName) })),
+      cursorBefore: plan.cursorBefore,
+    });
+    let attemptedCount = 0;
+    let succeededCount = 0;
+    let failedCount = 0;
+    let changedAccountCount = 0;
+    let changedModelCount = 0;
+    const errors: string[] = [];
+    for (const account of plan.selected) {
+      const accountId = Number(account.accountId);
+      attemptedCount += 1;
+      await this.store.updateModelSyncAccount({ roundId, accountId, status: "running" });
+      try {
+        const result = await this.runtime.syncUpstreamModels([accountId], this.config.operations.upstreamManagement.mutationTimeoutMs);
+        const row = records(result.results)[0] ?? {};
+        const modelCountBefore = Number(row.modelCountBefore ?? 0);
+        const modelCount = Number(row.modelCount ?? row.persistedModelCount ?? 0);
+        const changed = Number(row.changedModelCount ?? modelCount);
+        succeededCount += 1;
+        changedAccountCount += changed > 0 ? 1 : 0;
+        changedModelCount += Number.isFinite(changed) ? Math.max(0, changed) : 0;
+        await this.store.updateModelSyncAccount({ roundId, accountId, status: "succeeded", modelCountBefore, modelCountAfter: modelCount, changedModelCount: Number.isFinite(changed) ? Math.max(0, changed) : 0 });
+      } catch (error) {
+        failedCount += 1;
+        const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+        errors.push(`${accountId}: ${message}`);
+        await this.store.updateModelSyncAccount({ roundId, accountId, status: "failed", errorSummary: message });
+      }
+    }
+    const status = failedCount === 0 ? "succeeded" : succeededCount === 0 ? "failed" : "partial";
+    await this.store.finishModelSyncRound({
+      id: roundId, status, attemptedCount, succeededCount, failedCount,
+      changedAccountCount, changedModelCount, cursorAfter: plan.cursorAfter,
+      errorSummary: errors.length ? errors.join("; ").slice(0, 1000) : null,
+      durationMs: Date.now() - started,
+    });
+    return { ok: failedCount === 0, scope: scopeName, roundId, operationId, status, selected: plan.selected, attemptedCount, succeededCount, failedCount, changedAccountCount, changedModelCount, errors, valuesPrinted: false };
+  }
+
+  async modelSyncHistory(page = 1, pageSize = 10, scopeName = "codex") {
+    if (!Number.isInteger(page) || page < 1) throw new Error("model sync history page must be positive");
+    const rows = await this.store.modelSyncHistoryPage(pageSize, (page - 1) * pageSize, scopeName) as Array<Record<string, unknown>>;
+    const total = Number(rows[0]?.total_count ?? 0);
+    const recordsOut = await Promise.all(rows.map(async (row) => ({
+      roundId: row.id,
+      operationId: row.operation_id,
+      scope: row.scope,
+      platform: row.platform,
+      triggerType: row.trigger_type,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      status: row.status,
+      batchSize: Number(row.batch_size),
+      selectedCount: Number(row.selected_count),
+      attemptedCount: Number(row.attempted_count),
+      succeededCount: Number(row.succeeded_count),
+      failedCount: Number(row.failed_count),
+      changedAccountCount: Number(row.changed_account_count),
+      changedModelCount: Number(row.changed_model_count),
+      durationMs: row.duration_ms == null ? null : Number(row.duration_ms),
+      errorSummary: row.error_summary,
+      accounts: await this.store.modelSyncRoundAccounts(String(row.id)),
+    })));
+    const scheduling = this.config.operations.upstreamSchedulingV2;
+    return {
+      ok: true,
+      scope: scopeName,
+      automaticEnabled: scheduling?.scopes[scopeName]?.features.modelSyncAutomation === true,
+      batchSize: scheduling?.modelSync.batchSize ?? 10,
+      intervalSeconds: scheduling?.modelSync.intervalSeconds ?? 600,
+      records: recordsOut,
       pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
       valuesPrinted: false,
     };

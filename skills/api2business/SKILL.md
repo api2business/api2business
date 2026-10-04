@@ -222,6 +222,12 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   禁止用单账号 `PUT /admin/accounts/:id` 写回；该接口的不完整凭据对象会丢弃非敏感的
   `base_url` 等字段。读取、写回和失败语义唯一见
   [上游与调度](references/upstream-scheduling.md)。
+- V2 作用域模型同步使用以下 CLI：
+  - `upstream-scheduling-v2 model-sync plan --scope <codex|claude|grok> --over-api` 只读生成下一批计划；
+  - `upstream-scheduling-v2 model-sync run --scope <scope> [--accounts <id,...>] --confirm --over-api` 执行手动批次；
+  - `upstream-scheduling-v2 model-sync history --scope <scope> --over-api` 查询轮次和账号明细。
+  - 自动批次上限和间隔由 `operations.upstreamSchedulingV2.modelSync` 配置；自动开关只认各作用域的 `features.modelSyncAutomation`，每批最多 10 个，上一批完成后开始计时。
+- V2 模型同步保留父轮次和账号明细记录；单账号上游错误只标记该账号，不能阻断同批其他账号，也不能把失败账号改写成成功。
 - 评分与产出分母继续使用 `total_cost`。
 - 额度监控的供应商实际支出、余额缓存、缺失处理和首屏测量唯一见
   [额度监控](references/quota-monitoring.md)。

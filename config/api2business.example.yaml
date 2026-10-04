@@ -379,6 +379,9 @@ operations:
     automation:
       intervalSeconds: 600
       recentCallLimit: 1000
+    modelSync:
+      batchSize: 10
+      intervalSeconds: 600
     scopes:
       codex:
         enabled: true
@@ -392,6 +395,7 @@ operations:
           priorityAutomation: false
           idleProbe: false
           upstreamWrite: false
+          modelSyncAutomation: false
       claude:
         enabled: true
         platform: anthropic
@@ -404,6 +408,7 @@ operations:
           priorityAutomation: false
           idleProbe: false
           upstreamWrite: false
+          modelSyncAutomation: false
       grok:
         enabled: true
         platform: grok
@@ -416,6 +421,7 @@ operations:
           priorityAutomation: false
           idleProbe: false
           upstreamWrite: false
+          modelSyncAutomation: false
   databaseUrlEnv: API2BUSINESS_DATABASE_URL
   ledgerYamlPath: /var/lib/api2business/sub2api-pool.yaml
   accountImportLedgerPath: /var/lib/api2business/ledger/account-import-costs.jsonl

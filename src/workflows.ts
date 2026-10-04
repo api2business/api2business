@@ -1,5 +1,5 @@
 import { condition, continueAsNew, defineSignal, log, proxyActivities, setHandler, sleep, workflowInfo } from "@temporalio/workflow";
-import type { AppCommand, OperationRequest, ScheduledBugTeamCostInput, ScheduledScoreRefreshInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
+import type { AppCommand, OperationRequest, ScheduledBugTeamCostInput, ScheduledScoreRefreshInput, ScheduledUpstreamModelSyncInput, ScheduledUpstreamQuotaInput, WorkflowOptions } from "./contracts";
 
 export interface Activities {
   executeOperation(request: OperationRequest): Promise<unknown>;
@@ -116,4 +116,28 @@ export async function bugTeamCostScheduleWorkflow(input: ScheduledBugTeamCostInp
     await sleep(Math.max(1, input.intervalMs - (Date.now() - roundStartedAt)));
   }
   await continueAsNew<typeof bugTeamCostScheduleWorkflow>(input);
+}
+
+export async function upstreamModelSyncScheduleWorkflow(input: ScheduledUpstreamModelSyncInput): Promise<void> {
+  const activity = proxyActivities<Activities>({
+    startToCloseTimeout: input.activityStartToCloseTimeout,
+    scheduleToCloseTimeout: input.activityStartToCloseTimeout,
+    retry: { maximumAttempts: input.maximumAttempts },
+  });
+  for (let iteration = 0; iteration < 500; iteration += 1) {
+    try {
+      await activity.executeOperation({
+        operationId: `${workflowInfo().runId}:upstream-model-sync:${input.scope}:${iteration}`,
+        command: { kind: "upstream.model-sync.v2.run", scope: input.scope },
+      });
+    } catch (error) {
+      log.warn("upstream model sync deferred to next round", {
+        scope: input.scope,
+        iteration,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    await sleep(input.intervalMs);
+  }
+  await continueAsNew<typeof upstreamModelSyncScheduleWorkflow>(input);
 }

@@ -44,6 +44,19 @@
   - 每个账号先完成读取，再独立执行一次 bulk merge；空模型、读取失败或写入失败立即停止该账号，
     不清空旧映射，也不扩展到其他账号；
   - 完成后用单账号原生读取核对 `base_url`、key 存在状态、平台和映射；不得用整组截图代替回读。
+- V2 模型同步按作用域独立运行：
+  - 只读计划、手动执行和历史分别使用
+    `GET /api/v2/upstream-scheduling/model-sync/plan`、
+    `POST /api/v2/upstream-scheduling/model-sync/run` 和
+    `GET /api/v2/upstream-scheduling/model-sync`；CLI 对应
+    `upstream-scheduling-v2 model-sync plan|run|history`。
+  - `operations.upstreamSchedulingV2.modelSync.batchSize` 限制每批账号数，
+    `intervalSeconds` 从上一批完成后开始计时；自动执行只认目标作用域的
+    `features.modelSyncAutomation`，不读取或修改其他作用域开关。
+  - 每批写入一个轮次主记录和每账号明细。单账号读取、同步或核对失败只记录该账号，
+    继续处理同批其他账号；轮次以 `succeeded`、`partial` 或 `failed` 反映真实结果。
+  - 选择游标和批次结果都按作用域持久化，手动单账号试点必须先用 `plan` 核对，
+    再带 `--confirm` 执行；自动批次不得绕过同一原生单账号安全边界。
 - 新增上游的收口顺序：
   - 创建命令带上全部已解析的业务分组。
   - 创建作业完成后，用稳定账号 ID 回读倍率。

@@ -226,6 +226,7 @@ function help(): Record<string, unknown> {
       "backend check",
       "scores get|pool-quality|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "upstream-scheduling-v2 scopes|snapshot|plan [--scope codex] --over-api (read-only; Codex phase first)",
+      "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api",
       "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
@@ -1027,7 +1028,17 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (action === "scopes") return await client.upstreamSchedulingV2Scopes();
     if (action === "snapshot") return await client.upstreamSchedulingV2Snapshot(parsed.scope);
     if (action === "plan") return await client.upstreamSchedulingV2Plan(parsed.scope);
-    throw new Error("upstream-scheduling-v2 requires scopes, snapshot, or plan");
+    if (action === "model-sync") {
+      const subcommand = parsed.command[2] ?? "plan";
+      const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
+      if (subcommand === "plan") return await client.upstreamSchedulingV2ModelSyncPlan(parsed.scope, accountIds);
+      if (subcommand === "history") return await client.upstreamSchedulingV2ModelSyncHistory(parsed.scope, parsed.page ?? 1);
+      if (subcommand === "run") {
+        if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-scheduling-v2-model-sync", scope: parsed.scope ?? "codex", accountIds, hint: "add --confirm to execute" };
+        return await client.upstreamSchedulingV2ModelSyncRun(parsed.scope, accountIds);
+      }
+    }
+    throw new Error("upstream-scheduling-v2 requires scopes, snapshot, plan, or model-sync plan|run|history");
   }
   if (group === "scores" && action === "get") return await client.scores();
   if (group === "scores" && action === "pool-quality") return await client.poolQuality();

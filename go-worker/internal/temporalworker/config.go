@@ -21,7 +21,9 @@ type Config struct {
 	SubmissionTimeout                                           time.Duration
 	MaximumAttempts, QuotaIntervalSeconds, QuotaTimeoutSeconds  int
 	V2AutomationIntervalSeconds, V2AutomationRecentCallLimit    int
+	V2ModelSyncBatchSize, V2ModelSyncIntervalSeconds            int
 	V2ScopeNames, V2PriorityAutomationScopes, V2IdleProbeScopes []string
+	V2ModelSyncScopes                                           []string
 	V2IdleProbeIntervals                                        map[string]int
 	AutomaticRefreshEnabled                                     bool
 	IdleProbeIntervalSeconds, IdleProbeTimeoutSeconds           int
@@ -49,13 +51,18 @@ type fileConfig struct {
 				IntervalSeconds int `yaml:"intervalSeconds"`
 				RecentCallLimit int `yaml:"recentCallLimit"`
 			} `yaml:"automation"`
+			ModelSync struct {
+				BatchSize       int `yaml:"batchSize"`
+				IntervalSeconds int `yaml:"intervalSeconds"`
+			} `yaml:"modelSync"`
 			Scopes map[string]struct {
 				Enabled                  bool   `yaml:"enabled"`
 				Platform                 string `yaml:"platform"`
 				IdleProbeIntervalSeconds int    `yaml:"idleProbeIntervalSeconds"`
 				Features                 struct {
-					PriorityAutomation bool `yaml:"priorityAutomation"`
-					IdleProbe          bool `yaml:"idleProbe"`
+					PriorityAutomation  bool `yaml:"priorityAutomation"`
+					IdleProbe           bool `yaml:"idleProbe"`
+					ModelSyncAutomation bool `yaml:"modelSyncAutomation"`
 				} `yaml:"features"`
 			} `yaml:"scopes"`
 		} `yaml:"upstreamSchedulingV2"`
@@ -157,7 +164,7 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 	if host == "" || host == "0.0.0.0" {
 		host = "127.0.0.1"
 	}
-	var v2ScopeNames, v2PriorityAutomationScopes, v2IdleProbeScopes []string
+	var v2ScopeNames, v2PriorityAutomationScopes, v2IdleProbeScopes, v2ModelSyncScopes []string
 	v2IdleProbeIntervals := make(map[string]int)
 	for name, scope := range raw.Operations.UpstreamSchedulingV2.Scopes {
 		v2ScopeNames = append(v2ScopeNames, name)
@@ -179,10 +186,14 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 			if scope.Features.IdleProbe && (scope.Platform == "openai" || scope.Platform == "anthropic" || scope.Platform == "grok") {
 				v2IdleProbeScopes = append(v2IdleProbeScopes, name)
 			}
+			if scope.Features.ModelSyncAutomation && (scope.Platform == "openai" || scope.Platform == "anthropic" || scope.Platform == "grok") {
+				v2ModelSyncScopes = append(v2ModelSyncScopes, name)
+			}
 		}
 	}
 	sort.Strings(v2PriorityAutomationScopes)
 	sort.Strings(v2IdleProbeScopes)
+	sort.Strings(v2ModelSyncScopes)
 	sort.Strings(v2ScopeNames)
 	return Config{
 		Address: address, Namespace: raw.Temporal.Namespace, TaskQueue: target.TemporalTaskQueue,
@@ -197,10 +208,13 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 		QuotaTimeoutSeconds:         raw.Operations.UpstreamManagement.QuotaSampleTimeoutSeconds,
 		V2AutomationIntervalSeconds: raw.Operations.UpstreamSchedulingV2.Automation.IntervalSeconds,
 		V2AutomationRecentCallLimit: raw.Operations.UpstreamSchedulingV2.Automation.RecentCallLimit,
+		V2ModelSyncBatchSize:        raw.Operations.UpstreamSchedulingV2.ModelSync.BatchSize,
+		V2ModelSyncIntervalSeconds:  raw.Operations.UpstreamSchedulingV2.ModelSync.IntervalSeconds,
 		V2PriorityAutomationScopes:  v2PriorityAutomationScopes,
 		V2IdleProbeScopes:           v2IdleProbeScopes,
 		V2IdleProbeIntervals:        v2IdleProbeIntervals,
 		V2ScopeNames:                v2ScopeNames,
+		V2ModelSyncScopes:           v2ModelSyncScopes,
 		IdleProbeIntervalSeconds:    raw.Sub2API.IdleProbe.IntervalSeconds,
 		IdleProbeTimeoutSeconds:     raw.Sub2API.IdleProbe.RoundTimeoutSeconds,
 		BugTeamCostMonitorEnabled:   raw.BugTeam.Monitor.Enabled, BugTeamCostIntervalSeconds: raw.BugTeam.Monitor.SampleIntervalSeconds,

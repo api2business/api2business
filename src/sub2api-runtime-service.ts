@@ -124,6 +124,7 @@ export class Sub2ApiRuntimeService {
       const beforeCredentials = record(before?.credentials) ?? {};
       const beforeStableCredentials = { ...beforeCredentials };
       delete beforeStableCredentials.model_mapping;
+      const beforeMapping = record(beforeCredentials.model_mapping) ?? {};
       const result = await this.client.mutate<Record<string, unknown>>(
         "POST", `/admin/accounts/${accountId}/models/sync-upstream`, undefined, undefined, timeoutMs,
       );
@@ -169,10 +170,15 @@ export class Sub2ApiRuntimeService {
         throw new Error(`upstream model mapping verification failed for account ${accountId}: ${missingModels.join(", ")}`);
       }
 
+      const changedModelCount = [...new Set([...Object.keys(beforeMapping), ...Object.keys(persistedMapping)])]
+        .filter((model) => String(beforeMapping[model] ?? "") !== String(persistedMapping[model] ?? "")).length;
+
       results.push({
         accountId,
+        modelCountBefore: Object.keys(beforeMapping).length,
         modelCount: models.length,
         models,
+        changedModelCount,
         persisted: true,
         writeMode: "native-bulk-merge",
         persistedModelCount: Object.keys(persistedMapping).length,

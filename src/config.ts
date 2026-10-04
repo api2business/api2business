@@ -155,6 +155,7 @@ export interface UpstreamSchedulingV2Features {
   priorityAutomation: boolean;
   idleProbe: boolean;
   upstreamWrite: boolean;
+  modelSyncAutomation: boolean;
 }
 
 export interface UpstreamSchedulingV2Scope {
@@ -172,6 +173,10 @@ export interface UpstreamSchedulingV2Config {
   automation: {
     intervalSeconds: number;
     recentCallLimit: number;
+  };
+  modelSync: {
+    batchSize: number;
+    intervalSeconds: number;
   };
   scopes: Record<string, UpstreamSchedulingV2Scope>;
 }
@@ -638,6 +643,7 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
         priorityAutomation: booleanValue(features, "priorityAutomation", `${scopePath}.features`),
         idleProbe: booleanValue(features, "idleProbe", `${scopePath}.features`),
         upstreamWrite: booleanValue(features, "upstreamWrite", `${scopePath}.features`),
+        modelSyncAutomation: booleanValue(features, "modelSyncAutomation", `${scopePath}.features`),
       },
     };
   }
@@ -656,6 +662,10 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
     automation: {
       intervalSeconds: integerValue(automation, "intervalSeconds", `${path}.automation`, 5, 86400),
       recentCallLimit: integerValue(automation, "recentCallLimit", `${path}.automation`, 1, 100000),
+    },
+    modelSync: {
+      batchSize: integerValue(object(root.modelSync, `${path}.modelSync`), "batchSize", `${path}.modelSync`, 1, 10),
+      intervalSeconds: integerValue(object(root.modelSync, `${path}.modelSync`), "intervalSeconds", `${path}.modelSync`, 60, 86400),
     },
     scopes,
   };

@@ -298,6 +298,10 @@ const schedule = temporalGateway
   };
 const quotaSchedule = temporalGateway ? await temporalGateway.ensureUpstreamQuotaSchedule() : { started: false, workflowId: null };
 const bugTeamCostSchedule = temporalGateway ? await temporalGateway.ensureBugTeamCostSchedule() : { started: false, workflowId: null };
+const modelSyncSchedules = temporalGateway && config.operations.upstreamSchedulingV2?.enabled
+  ? Object.keys(config.operations.upstreamSchedulingV2.scopes).map(async (scope) => await temporalGateway!.ensureUpstreamModelSyncSchedule(scope))
+  : [];
+const upstreamModelSyncSchedules = modelSyncSchedules.length ? await Promise.all(modelSyncSchedules) : [];
 let state: "ready" | "stopping" = "ready";
 
 const health = Bun.serve({
@@ -320,6 +324,7 @@ const health = Bun.serve({
       schedule,
       quotaSchedule,
       bugTeamCostSchedule,
+      upstreamModelSyncSchedules,
     }, { status: ok ? 200 : 503 });
   },
 });
@@ -335,6 +340,7 @@ console.log(JSON.stringify({
   schedule,
   quotaSchedule,
   bugTeamCostSchedule,
+  upstreamModelSyncSchedules,
   valuesPrinted: false,
 }));
 

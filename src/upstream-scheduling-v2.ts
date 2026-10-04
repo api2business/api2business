@@ -294,6 +294,7 @@ export class UpstreamSchedulingV2Service {
         quota: source.quota,
         usage: source.usage,
         probeHistory: source.probeHistory,
+        modelSyncHistory: source.modelSyncHistory,
       },
       reconciliation: this.reconciliation(scopeName, scope, source),
       valuesPrinted: false,
@@ -352,6 +353,21 @@ export class UpstreamSchedulingV2Service {
     };
   }
 
+  async modelSyncPlan(scopeName?: string | null, accountIds: number[] = []) {
+    const selected = this.scope(scopeName).name;
+    return await this.operations.modelSyncPlan(selected, accountIds);
+  }
+
+  async modelSyncRun(scopeName?: string | null, accountIds: number[] = []) {
+    const selected = this.scope(scopeName).name;
+    return await this.operations.runModelSync(selected, "manual", accountIds);
+  }
+
+  async modelSyncHistory(scopeName?: string | null, page = 1) {
+    const selected = this.scope(scopeName).name;
+    return await this.operations.modelSyncHistory(page, 10, selected);
+  }
+
   private async source(scopeName: string, scope: UpstreamSchedulingV2Scope) {
     if (!scope.features.scoreRead) {
       throw new UpstreamSchedulingV2Error(409, "feature_disabled", `${scopeName}.features.scoreRead=false`);
@@ -365,7 +381,7 @@ export class UpstreamSchedulingV2Service {
         ? "claude"
         : "grok";
     const accountIds = accounts.map((row) => Number(row.accountId));
-    const [poolQuality, errors, priorityHistory, quota, usageRows, probeHistory] = await Promise.all([
+    const [poolQuality, errors, priorityHistory, quota, usageRows, probeHistory, modelSyncHistory] = await Promise.all([
       this.operations.poolQualitySummary(qualityProfile),
       this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all" }),
       this.operations.priorityHistory(),
@@ -374,6 +390,9 @@ export class UpstreamSchedulingV2Service {
       scope.features.idleProbe
         ? this.operations.idleProbeHistory(1, 10, scopeName)
         : Promise.resolve({ records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
+      typeof this.operations.modelSyncHistory === "function"
+        ? this.operations.modelSyncHistory(1, 10, scopeName)
+        : Promise.resolve({ ok: true, scope: scopeName, automaticEnabled: false, batchSize: this.configuration().modelSync.batchSize, intervalSeconds: this.configuration().modelSync.intervalSeconds, records: [], pagination: { page: 1, totalPages: 1, total: 0 }, valuesPrinted: false }),
     ]);
     const costAccounts = enrichAccountCostEvidence(accounts, usageRows, this.config);
     const quotaProjection = enrichAccountsWithQuotaCache(costAccounts, usageRows, this.config.sub2api.newApiCredentials);
@@ -391,9 +410,17 @@ export class UpstreamSchedulingV2Service {
         owner: "upstream-scheduling-v2",
         scope: scopeName,
       },
+      modelSync: {
+        enabled: scope.features.modelSyncAutomation,
+        batch_size: this.configuration().modelSync.batchSize,
+        interval_seconds: this.configuration().modelSync.intervalSeconds,
+        owner: "upstream-scheduling-v2",
+        scope: scopeName,
+      },
       quota,
       usage: records(usageRows).map(cachedUsageResult).filter((row) => Object.keys(row).length > 0),
       probeHistory,
+      modelSyncHistory,
     };
   }
 

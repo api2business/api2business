@@ -87,6 +87,9 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
     if (command.kind === "priority.automation.v2.run") {
       return await services.operations.runV2AutomaticPriorityPlan(command.scope, command.recentCallLimit);
     }
+    if (command.kind === "upstream.model-sync.v2.run") {
+      return await services.operations.runModelSync(command.scope, "automatic");
+    }
     if (command.kind === "account.import") {
       const job = await services.imports.runWorker(command.jobId);
       let postImportOAuthSample: Record<string, unknown> | null = null;

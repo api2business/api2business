@@ -64,6 +64,23 @@ export class AdminHttpClient {
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
     return this.request(`/api/v2/upstream-scheduling/plan${query}`, {}, 60000);
   }
+  upstreamSchedulingV2ModelSyncPlan(scope?: string | null, accountIds: number[] = []): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams();
+    if (scope) query.set("scope", scope);
+    if (accountIds.length) query.set("accountIds", accountIds.join(","));
+    return this.request(`/api/v2/upstream-scheduling/model-sync/plan?${query}`, {}, 60000);
+  }
+  upstreamSchedulingV2ModelSyncRun(scope?: string | null, accountIds: number[] = []): Promise<Record<string, unknown>> {
+    const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    return this.request(`/api/v2/upstream-scheduling/model-sync/run${query}`, {
+      method: "POST", body: JSON.stringify({ accountIds }),
+    }, 120000);
+  }
+  upstreamSchedulingV2ModelSyncHistory(scope?: string | null, page = 1): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ page: String(page) });
+    if (scope) query.set("scope", scope);
+    return this.request(`/api/v2/upstream-scheduling/model-sync?${query}`);
+  }
   poolQuality(): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/pool-quality", {}, 60000);
   }

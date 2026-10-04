@@ -303,6 +303,45 @@ export class OperationsStore {
         ON api2business_upstream_benchmark_events (run_id, sequence);
       CREATE INDEX IF NOT EXISTS api2business_idle_probe_rounds_started_at_idx
         ON api2business_idle_probe_rounds(started_at DESC);
+      CREATE TABLE IF NOT EXISTS api2business_upstream_model_sync_rounds (
+        id uuid PRIMARY KEY,
+        operation_id text NOT NULL UNIQUE,
+        scope text NOT NULL,
+        platform text NOT NULL,
+        trigger_type text NOT NULL CHECK (trigger_type IN ('manual','automatic')),
+        started_at timestamptz NOT NULL,
+        completed_at timestamptz,
+        status text NOT NULL CHECK (status IN ('planned','running','succeeded','partial','failed','skipped')),
+        batch_size integer NOT NULL,
+        selected_count integer NOT NULL DEFAULT 0,
+        attempted_count integer NOT NULL DEFAULT 0,
+        succeeded_count integer NOT NULL DEFAULT 0,
+        failed_count integer NOT NULL DEFAULT 0,
+        changed_account_count integer NOT NULL DEFAULT 0,
+        changed_model_count integer NOT NULL DEFAULT 0,
+        cursor_before integer,
+        cursor_after integer,
+        duration_ms integer,
+        error_summary text,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS api2business_upstream_model_sync_rounds_scope_started_idx
+        ON api2business_upstream_model_sync_rounds(scope, started_at DESC);
+      CREATE TABLE IF NOT EXISTS api2business_upstream_model_sync_accounts (
+        id bigserial PRIMARY KEY,
+        round_id uuid NOT NULL REFERENCES api2business_upstream_model_sync_rounds(id) ON DELETE CASCADE,
+        account_id bigint NOT NULL,
+        account_name text NOT NULL,
+        status text NOT NULL CHECK (status IN ('planned','running','succeeded','failed')),
+        model_count_before integer,
+        model_count_after integer,
+        changed_model_count integer NOT NULL DEFAULT 0,
+        error_summary text,
+        started_at timestamptz,
+        completed_at timestamptz
+      );
+      CREATE INDEX IF NOT EXISTS api2business_upstream_model_sync_accounts_round_idx
+        ON api2business_upstream_model_sync_accounts(round_id, id);
       CREATE INDEX IF NOT EXISTS api2business_cash_entries_occurred_on_idx
         ON api2business_cash_entries(occurred_on DESC, created_at DESC);
       CREATE INDEX IF NOT EXISTS api2business_operation_audit_created_at_idx
@@ -737,6 +776,114 @@ export class OperationsStore {
       WHERE scope=${scope}
       ORDER BY started_at DESC, id DESC
       LIMIT ${limit} OFFSET ${offset}
+    `;
+  }
+
+  async createModelSyncRound(input: {
+    operationId: string;
+    scope: string;
+    platform: string;
+    triggerType: "manual" | "automatic";
+    startedAt: string;
+    batchSize: number;
+    accountIds: Array<{ id: number; name: string }>;
+    cursorBefore: number | null;
+  }) {
+    const id = crypto.randomUUID();
+    await this.sql.begin(async (tx) => {
+      await tx`
+        INSERT INTO api2business_upstream_model_sync_rounds
+          (id, operation_id, scope, platform, trigger_type, started_at, status, batch_size,
+           selected_count, cursor_before)
+        VALUES (${id}, ${input.operationId}, ${input.scope}, ${input.platform}, ${input.triggerType},
+          ${input.startedAt}, 'running', ${input.batchSize}, ${input.accountIds.length}, ${input.cursorBefore})
+      `;
+      for (const account of input.accountIds) {
+        await tx`
+          INSERT INTO api2business_upstream_model_sync_accounts
+            (round_id, account_id, account_name, status)
+          VALUES (${id}, ${account.id}, ${account.name.slice(0, 500)}, 'planned')
+        `;
+      }
+    });
+    return id;
+  }
+
+  async finishModelSyncRound(input: {
+    id: string;
+    status: "succeeded" | "partial" | "failed" | "skipped";
+    attemptedCount: number;
+    succeededCount: number;
+    failedCount: number;
+    changedAccountCount: number;
+    changedModelCount: number;
+    cursorAfter: number | null;
+    errorSummary: string | null;
+    durationMs: number;
+  }) {
+    await this.sql`
+      UPDATE api2business_upstream_model_sync_rounds
+      SET completed_at=now(), status=${input.status}, attempted_count=${input.attemptedCount},
+        succeeded_count=${input.succeededCount}, failed_count=${input.failedCount},
+        changed_account_count=${input.changedAccountCount}, changed_model_count=${input.changedModelCount},
+        cursor_after=${input.cursorAfter}, error_summary=${input.errorSummary}, duration_ms=${input.durationMs}
+      WHERE id=${input.id}
+    `;
+  }
+
+  async updateModelSyncAccount(input: {
+    roundId: string;
+    accountId: number;
+    status: "running" | "succeeded" | "failed";
+    modelCountBefore?: number | null;
+    modelCountAfter?: number | null;
+    changedModelCount?: number;
+    errorSummary?: string | null;
+  }) {
+    await this.sql`
+      UPDATE api2business_upstream_model_sync_accounts
+      SET status=${input.status},
+        model_count_before=COALESCE(${input.modelCountBefore ?? null}, model_count_before),
+        model_count_after=COALESCE(${input.modelCountAfter ?? null}, model_count_after),
+        changed_model_count=COALESCE(${input.changedModelCount ?? null}, changed_model_count),
+        error_summary=${input.errorSummary ?? null},
+        started_at=COALESCE(started_at, now()),
+        completed_at=CASE WHEN ${input.status} IN ('succeeded','failed') THEN now() ELSE completed_at END
+      WHERE round_id=${input.roundId} AND account_id=${input.accountId}
+    `;
+  }
+
+  async modelSyncHistoryPage(limit: number, offset: number, scope: string) {
+    return await this.sql`
+      SELECT id, operation_id, scope, platform, trigger_type, started_at, completed_at, status,
+        batch_size, selected_count, attempted_count, succeeded_count, failed_count,
+        changed_account_count, changed_model_count, cursor_before, cursor_after,
+        duration_ms, error_summary, COUNT(*) OVER()::int AS total_count
+      FROM api2business_upstream_model_sync_rounds
+      WHERE scope=${scope}
+      ORDER BY started_at DESC, id DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+  }
+
+  async latestModelSyncCursor(scope: string): Promise<number | null> {
+    const [row] = await this.sql`
+      SELECT cursor_after
+      FROM api2business_upstream_model_sync_rounds
+      WHERE scope=${scope} AND status IN ('succeeded','partial','failed')
+      ORDER BY completed_at DESC NULLS LAST, started_at DESC, id DESC
+      LIMIT 1
+    `;
+    return row?.cursor_after == null ? null : Number(row.cursor_after);
+  }
+
+  async modelSyncRoundAccounts(roundId: string) {
+    return await this.sql`
+      SELECT account_id, account_name, status, model_count_before, model_count_after,
+        changed_model_count, error_summary, started_at, completed_at
+      FROM api2business_upstream_model_sync_accounts
+      WHERE round_id=${roundId}
+      ORDER BY id ASC
     `;
   }
 

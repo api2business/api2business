@@ -5,7 +5,7 @@ import { sampleTimeDisplay } from './sample-time.js'
 import { bindTableSortHeaders, sortTableRows, updateTableSortHeaders } from './table-sort.js?v=table-sort-v1'
 
 const $ = (selector) => document.querySelector(selector)
-const state = { scopes: [], activeScope: null, snapshot: null, accounts: [], accountPage: 1, errorPage: 1, historyPage: 1, probePage: 1, filter: '', scopeRequestId: 0, accountSort: { key: 'score', direction: 'desc' }, errorSort: { key: 'createdAt', direction: 'desc' }, historySort: { key: 'started_at', direction: 'desc' }, probeSort: { key: 'startedAt', direction: 'desc' } }
+const state = { scopes: [], activeScope: null, snapshot: null, accounts: [], accountPage: 1, errorPage: 1, historyPage: 1, probePage: 1, filter: '', scopeRequestId: 0, accountSort: { key: 'score', direction: 'desc' }, errorSort: { key: 'createdAt', direction: 'desc' }, historySort: { key: 'started_at', direction: 'desc' }, probeSort: { key: 'startedAt', direction: 'desc' }, modelSyncSort: { key: 'startedAt', direction: 'desc' } }
 const accountPageSize = 10
 const errorPageSize = 20
 const historyPageSize = 10
@@ -169,6 +169,18 @@ function renderProbeHistory(history = {}) {
   $('#v2-probe-next').disabled = state.probePage >= Number(pagination.totalPages ?? 1)
 }
 
+function renderModelSync(history = {}) {
+  const rows = Array.isArray(history.records) ? history.records : []
+  const sorted = sortTableRows(rows, state.modelSyncSort, (row, key) => ({ startedAt: row.startedAt, triggerType: row.triggerType, status: row.status, accounts: (row.accounts ?? []).map((item) => item.account_name ?? item.accountId).join('、'), counts: row.succeededCount, changedAccountCount: row.changedAccountCount, changedModelCount: row.changedModelCount, completedAt: row.completedAt, durationMs: row.durationMs })[key], (a, b) => String(a.startedAt ?? '').localeCompare(String(b.startedAt ?? '')))
+  $('#v2-model-sync-body').innerHTML = sorted.length ? sorted.map((row) => {
+    const accounts = Array.isArray(row.accounts) ? row.accounts : []
+    const accountText = accounts.map((item) => `${item.account_name ?? `#${item.account_id}`}（${item.status === 'succeeded' ? '成功' : item.status === 'failed' ? '失败' : item.status}）`).join('、') || '—'
+    return `<tr><td>${escapeHtml(time(row.startedAt))}</td><td>${row.triggerType === 'automatic' ? '自动' : '手动'}</td><td>${escapeHtml(row.status ?? '—')}</td><td title="${escapeHtml(accountText)}">${number(row.selectedCount)} 个<small>${escapeHtml(accountText)}</small></td><td>${number(row.succeededCount)} / ${number(row.failedCount)}</td><td>${number(row.changedAccountCount)}</td><td>${number(row.changedModelCount)}</td><td>${escapeHtml(time(row.completedAt))}</td><td>${row.durationMs == null ? '—' : `${number(Number(row.durationMs) / 1000, 1)} 秒`}</td></tr>`
+  }).join('') : '<tr><td colspan="9" class="empty">当前作用域暂无模型同步记录</td></tr>'
+  updateTableSortHeaders($('#v2-model-sync-table'), state.modelSyncSort)
+  $('#v2-model-sync-state').textContent = `${scopeLabel(state.activeScope)} · 自动同步${history.automaticEnabled === true ? '已开启' : '关闭'} · 批次 ${number(history.batchSize ?? 10)} · 间隔 ${number(history.intervalSeconds ?? 600)} 秒`
+}
+
 async function loadProbeHistory(page) {
   const scope = state.activeScope
   const data = await requestJson(`/api/v2/upstream-scheduling/probe-history?scope=${encodeURIComponent(scope)}&page=${page}`)
@@ -197,6 +209,7 @@ function renderSnapshot(data) {
   renderErrors(data.data?.errors ?? {})
   renderHistory(data.data?.priorityHistory ?? [])
   renderProbeHistory(data.data?.probeHistory ?? {})
+  renderModelSync(data.data?.modelSyncHistory ?? {})
   performance.mark(`upstream-scheduling-v2:${data.scope}:rendered`)
 }
 
@@ -213,6 +226,7 @@ function bindControls() {
   bindTableSortHeaders($('#v2-error-table'), () => state.errorSort, (next) => { state.errorSort = next; renderErrors(state.snapshot?.data?.errors ?? {}) })
   bindTableSortHeaders($('#v2-history-table'), () => state.historySort, (next) => { state.historySort = next; state.historyPage = 1; renderHistory(state.snapshot?.data?.priorityHistory ?? []) })
   bindTableSortHeaders($('#v2-probe-table'), () => state.probeSort, (next) => { state.probeSort = next; renderProbeHistory(state.snapshot?.data?.probeHistory ?? {}) })
+  bindTableSortHeaders($('#v2-model-sync-table'), () => state.modelSyncSort, (next) => { state.modelSyncSort = next; renderModelSync(state.snapshot?.data?.modelSyncHistory ?? {}) })
 }
 
 export async function upstreamSchedulingV2Page() { bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); window.addEventListener('popstate', () => { const fallback = state.scopes.find((scope) => scope.enabled)?.name ?? null; const next = scopeFromLocation(fallback); if (!next || next === state.activeScope) return; state.activeScope = next; resetScopePaging(); renderScopeSwitch(); void loadScope() }); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = Array.isArray(data.scopes) ? data.scopes : []; const fallback = typeof data.defaultScope === 'string' ? data.defaultScope : state.scopes.find((scope) => scope.enabled)?.name ?? null; state.activeScope = scopeFromLocation(fallback); updateScopeDeepLink(state.activeScope); renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }

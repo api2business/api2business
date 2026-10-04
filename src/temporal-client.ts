@@ -225,6 +225,37 @@ export class TemporalGateway {
     }
   }
 
+  async ensureUpstreamModelSyncSchedule(scopeName: string): Promise<{ started: boolean; workflowId: string; enabled: boolean }> {
+    const scope = this.config.operations.upstreamSchedulingV2?.scopes[scopeName];
+    const workflowId = `${this.runtime.scoreScheduleWorkflowId}-upstream-model-sync-${scopeName}-v1`;
+    if (!scope?.enabled || scope.features.modelSyncAutomation !== true) {
+      try {
+        const handle = this.client.workflow.getHandle(workflowId);
+        const description = await handle.describe();
+        if (description.status.name === "RUNNING") await handle.terminate("V2 upstream model sync disabled by configuration");
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "WorkflowNotFoundError")) throw error;
+      }
+      return { started: false, workflowId, enabled: false };
+    }
+    try {
+      await this.client.workflow.start("upstreamModelSyncScheduleWorkflow", {
+        taskQueue: this.runtime.taskQueue,
+        workflowId,
+        args: [{
+          scope: scopeName,
+          intervalMs: this.config.operations.upstreamSchedulingV2!.modelSync.intervalSeconds * 1000,
+          activityStartToCloseTimeout: this.config.temporal.activityStartToCloseTimeout,
+          maximumAttempts: 1,
+        }],
+      });
+      return { started: true, workflowId, enabled: true };
+    } catch (error) {
+      if (error instanceof Error && error.name === "WorkflowExecutionAlreadyStartedError") return { started: false, workflowId, enabled: true };
+      throw error;
+    }
+  }
+
   async ensureBugTeamCostSchedule(): Promise<{ started: boolean; workflowId: string }> {
     const workflowId = `${this.runtime.scoreScheduleWorkflowId}-bugteam-cost-v1`;
     if (!this.config.bugTeam.monitor.enabled) {

@@ -311,6 +311,19 @@ export function createHandler(
           if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/probe-history") {
             return json(await upstreamSchedulingV2.probeHistory(scope, pageNumber(url)));
           }
+          if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/model-sync") {
+            return json(await upstreamSchedulingV2.modelSyncHistory(scope, pageNumber(url)));
+          }
+          if (request.method === "GET" && url.pathname === "/api/v2/upstream-scheduling/model-sync/plan") {
+            const selector = url.searchParams.get("accountIds");
+            const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
+            return json(await upstreamSchedulingV2.modelSyncPlan(scope, accountIds));
+          }
+          if (request.method === "POST" && url.pathname === "/api/v2/upstream-scheduling/model-sync/run") {
+            const input = await body(request);
+            const accountIds = Array.isArray(input.accountIds) && input.accountIds.length > 0 ? normalizeAccountIds(input.accountIds) : [];
+            return json(await upstreamSchedulingV2.modelSyncRun(scope, accountIds), 202);
+          }
           return json({ ok: false, error: "not found" }, 404);
         } catch (error) {
           if (error instanceof UpstreamSchedulingV2Error) {
