@@ -192,18 +192,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `--group` 按错误记录的实际请求分组筛选；
   - 默认排除内部 monitor 用户和 `api2business-probe-*` 探活流量；
   - 返回 `groupFilterBasis=request-group` 与 `probeNoiseExcluded=true` 供调用方核对口径。
-- 页面普通读取只返回已有缓存，刷新先写缓存再读回：
-  - 普通 GET 只读 `api2business_api_cache`，不重新计算；
-  - 显式刷新请求携带 `x-api2business-refresh: 1`，先重算并写入该缓存，再读出刚写入的响应；
-  - 排队 SQL 的普通读取只返回未过期缓存；
-  - 显式刷新或缓存不存在时先查询并写入读取缓存，再返回这份缓存；
-  - 不把查询结果直接返回给调用方；
-  - 读取不先返回旧缓存，再在后台刷新；
-  - 快照型 API 不叠加第二份通用 HTTP 响应缓存；
-  - 评分表账号余额读取 `usage-cache` 快照，按评分账号 ID 查询，不依赖上游列表 HTTP 缓存是否命中；
-  - API 与 Worker 按稳定快照键共享成功载荷；
-  - 快照成功后原子替换，失败保留上一份成功快照；
-  - 账号评分快照另由 worker 每 5 分钟刷新，进程重启后仍读取持久化快照。
+- 页面普通读取、V2 读模型缓存、额度缓存和刷新终态分别见
+  [上游与调度](references/upstream-scheduling.md) 与
+  [额度监控](references/quota-monitoring.md)；本技能不复制第二套缓存状态机。
+- 读取失败保留上一份成功快照；未知余额、未知评分和缺失成本必须保留其状态，不能
+  静默写成零值或最低优先级。
 - Sub2API 业务查询统一通过 Api2Business 排队 broker 读取 NC01 本地专用库；
   CLI、Web、worker 和人工脚本不得直连旧 PK01 数据库。
 - 账号级代理默认策略：OAuth 导入、Plus/Team 账号和 API-key 上游默认直连，不绑定
@@ -219,10 +212,10 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api`；
   - 评测只复用持久化探活专用 API Key，不读取供应商原始 Key，也不轮换探活 Key。
 - 评分与产出分母继续使用 `total_cost`。
-- 额度监控的供应商实际支出按逐条销售倍率折回后乘实时有效倍率，唯一公式和缺失处理见
+- 额度监控的供应商实际支出、余额缓存、缺失处理和首屏测量唯一见
   [额度监控](references/quota-monitoring.md)。
-- 额度监控的状态、可用比例、钱包合并、刷新轮询和截图验收口径见 [额度监控](references/quota-monitoring.md)，不得在页面或其他文档另建第二套口径。
-- 首屏性能测量使用 `upstreams quota-monitor measure --mode snapshot|source --rounds N --over-api`；`snapshot` 测缓存读模型，`source` 对照页面依赖链，输出只含耗时摘要，不展开账号或 Secret。
+- 首屏性能测量使用 `upstreams quota-monitor measure --mode snapshot|source --rounds N --over-api`；
+  `snapshot` 测缓存读模型，`source` 对照页面依赖链，输出只含耗时摘要，不展开账号或 Secret。
 
 ## 验收
 
