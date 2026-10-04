@@ -14,6 +14,10 @@ test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   expect(html).toContain('id="v2-error-body"');
   expect(html).toContain('id="v2-history-body"');
   expect(html).toContain('id="v2-probe-body"');
+  expect(html).toContain('id="v2-account-table"');
+  expect(html).toContain('data-sort-key="score"');
+  expect(html).toContain('data-sort-key="priority"');
+  expect(html).toContain('id="v2-plan-table"');
   expect(html).toContain('id="v2-automation-state"');
   expect(html).not.toContain("对账");
   expect(script).not.toContain("对账");
@@ -29,6 +33,8 @@ test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   expect(script).toContain("不限额");
   expect(script).toContain("sampleTimeDisplay");
   expect(script).toContain("次采样");
+  expect(script).toContain("bindTableSortHeaders");
+  expect(script).toContain("sortTableRows");
   expect(script).not.toMatch(/method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]/u);
   expect(app).toContain("upstream-scheduling-v2");
 });

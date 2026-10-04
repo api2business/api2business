@@ -263,6 +263,7 @@ export function createHandler(
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/sample-time.js") return await staticFile("sample-time.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/quota-availability.js") return await staticFile("quota-availability.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/quota-grouping.js") return await staticFile("quota-grouping.js", "text/javascript; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/table-sort.js") return await staticFile("table-sort.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/api2business-icon.svg") {
         return await staticFile("api2business-icon.svg", "image/svg+xml");
       }

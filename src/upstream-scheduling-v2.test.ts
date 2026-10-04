@@ -43,8 +43,8 @@ function fixture(usageRows = [{
     accountId: 303,
     accountName: "grok-a",
     platform: "grok",
-    groupIds: [6],
-    groupNames: ["Grok"],
+    groupIds: [62],
+    groupNames: ["【稳定·企业级】Grok"],
     score: 86,
     grade: "B",
   };
@@ -65,7 +65,7 @@ function fixture(usageRows = [{
     poolQualitySummary: async (platform: string) => platform === "claude"
       ? ({ ok: true, platform: "claude", groupIds: [119], score: 88, grade: "B" })
       : platform === "grok"
-        ? ({ ok: true, platform: "grok", groupIds: [6, 62], score: 86, grade: "B" })
+        ? ({ ok: true, platform: "grok", groupIds: [62], score: 86, grade: "B" })
         : ({ ok: true, platform: "codex", groupIds: [2, 3], score: 91, grade: "A" }),
     poolQualityErrors: async () => ({ ok: true, total: 0, rows: [] }),
     priorityHistory: async () => ({ ok: true, records: [] }),
@@ -171,7 +171,7 @@ describe("upstream scheduling v2", () => {
     expect(snapshot.platform).toBe("grok");
     expect(snapshot.data.accounts).toHaveLength(1);
     expect(snapshot.data.accounts[0]).toMatchObject(grokRow);
-    expect(snapshot.data.poolQuality).toMatchObject({ platform: "grok", groupIds: [6, 62] });
+    expect(snapshot.data.poolQuality).toMatchObject({ platform: "grok", groupIds: [62] });
     expect(snapshot.data.probeHistory.records).toHaveLength(0);
     expect(snapshot.readOnly).toBeTrue();
     const plan = await service.plan("grok");

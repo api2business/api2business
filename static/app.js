@@ -1,6 +1,7 @@
 import { quotaAccountAvailable, quotaAvailabilityTotals } from './quota-availability.js'
 import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=quota-monitor-v18'
 import { quotaGroup, quotaMemberships } from './quota-grouping.js'
+import { bindTableSortHeaders, sortTableRows, updateTableSortHeaders } from './table-sort.js?v=table-sort-v1'
 
 const page = document.body.dataset.page
 export const $ = (selector) => document.querySelector(selector)
@@ -370,12 +371,7 @@ function renderQuotaMonitor() {
   const grouped = Object.fromEntries(groups.map((group) => [group, quotaMonitorRows.filter((row) => quotaMemberships(row).has(group))]))
   const cards = $('#quota-group-cards'); if (cards) cards.innerHTML = groups.map((group) => quotaPieMarkup(group, grouped[group])).join('')
   const filteredRows = quotaMonitorFilter === 'all' ? quotaMonitorRows : quotaMonitorRows.filter((row) => quotaMemberships(row).has(quotaMonitorFilter))
-  const sorted = filteredRows.slice().sort((a, b) => {
-    const read = (row) => quotaMonitorSort.key.startsWith('consumption.') ? row.consumption[quotaMonitorSort.key.slice('consumption.'.length)] : row[quotaMonitorSort.key]
-    const av = read(a); const bv = read(b)
-    const result = typeof av === 'string' ? String(av).localeCompare(String(bv)) : (Number(av ?? -Infinity) - Number(bv ?? -Infinity))
-    return (quotaMonitorSort.direction === 'asc' ? result : -result) || Number(a.accountId) - Number(b.accountId)
-  })
+  const sorted = sortTableRows(filteredRows, quotaMonitorSort, (row, key) => key.startsWith('consumption.') ? row.consumption[key.slice('consumption.'.length)] : row[key], (a, b) => Number(a.accountId) - Number(b.accountId))
   const totalPages = Math.max(1, Math.ceil(sorted.length / quotaMonitorPageSize)); quotaMonitorPageNumber = Math.min(quotaMonitorPageNumber, totalPages)
   const pageRows = sorted.slice((quotaMonitorPageNumber - 1) * quotaMonitorPageSize, quotaMonitorPageNumber * quotaMonitorPageSize)
   const body = $('#quota-monitor-body'); if (body) body.innerHTML = pageRows.length ? pageRows.map((row) => `<tr><td><strong>${escapeHtml(row.name)}</strong><small>${number(row.accountCount)} 个账号 · ${escapeHtml(row.wallet)}</small></td><td>${quotaDisplay(row.remaining)}</td><td>${quotaDisplay(row.consumed24h)}</td><td>${quotaDisplay(row.consumption['codex-mix'])}</td><td>${quotaDisplay(row.consumption['no-degrade'])}</td><td>${quotaDisplay(row.consumption.claude)}</td><td>${quotaDisplay(row.consumption.grok)}</td><td>${escapeHtml(row.groups.join('、') || '—')}</td></tr>`).join('') : '<tr><td colspan="8" class="empty">暂无额度缓存数据</td></tr>'
@@ -383,7 +379,7 @@ function renderQuotaMonitor() {
   const consumptionLabel = $('#quota-monitor-consumption-label'); if (consumptionLabel) consumptionLabel.textContent = `${quotaRangeLabel(quotaMonitorRange)}消耗`
   const pageLabel = $('#quota-monitor-page'); if (pageLabel) pageLabel.textContent = `${quotaMonitorPageNumber} / ${totalPages} · ${number(sorted.length)} 条`
   $('#quota-monitor-prev')?.toggleAttribute('disabled', quotaMonitorPageNumber <= 1); $('#quota-monitor-next')?.toggleAttribute('disabled', quotaMonitorPageNumber >= totalPages)
-  document.querySelectorAll('[data-quota-sort]').forEach((header) => { header.setAttribute('aria-sort', header.dataset.quotaSort === quotaMonitorSort.key ? (quotaMonitorSort.direction === 'asc' ? 'ascending' : 'descending') : 'none') })
+  updateTableSortHeaders(document, quotaMonitorSort)
   document.querySelectorAll('[data-quota-filter]').forEach((button) => button.classList.toggle('is-active', button.dataset.quotaFilter === quotaMonitorFilter))
 }
 
@@ -467,7 +463,7 @@ async function quotaMonitorPage() {
   }
   if (!$('#quota-monitor-refresh')?.dataset.bound) {
     $('#quota-monitor-refresh').dataset.bound = '1'
-    document.querySelectorAll('[data-quota-sort]').forEach((header) => header.addEventListener('click', () => { const key = header.dataset.quotaSort; if (quotaMonitorSort.key === key) quotaMonitorSort.direction = quotaMonitorSort.direction === 'asc' ? 'desc' : 'asc'; else { quotaMonitorSort = { key, direction: 'desc' } }; renderQuotaMonitor() }))
+    bindTableSortHeaders(document, () => quotaMonitorSort, (next) => { quotaMonitorSort = next; renderQuotaMonitor() })
     $('#quota-monitor-prev')?.addEventListener('click', () => { quotaMonitorPageNumber = Math.max(1, quotaMonitorPageNumber - 1); renderQuotaMonitor() })
     $('#quota-monitor-next')?.addEventListener('click', () => { quotaMonitorPageNumber += 1; renderQuotaMonitor() })
     const setQuotaBusy = (busy, mode = '') => {
@@ -890,7 +886,7 @@ async function boot() {
   if (page === 'login') return await loginPage()
   await shell()
   if (page === 'upstream-scheduling-v2') {
-    const v2 = await import('./upstream-scheduling-v2.js?v=v2-scope-deep-links-1')
+    const v2 = await import('./upstream-scheduling-v2.js?v=v2-table-sort-1')
     return await v2.upstreamSchedulingV2Page()
   }
   if (page === 'quota-monitor') return await quotaMonitorPage()
