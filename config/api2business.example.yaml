@@ -165,6 +165,7 @@ sub2api:
     model: gpt-5.6-terra
     platformModels:
       openai: [gpt-5.6-terra, gpt-5.6-sol]
+      anthropic: [claude-sonnet-4-6]
       grok: [grok-4.5]
     reasoningEffort: low
     candidateLimit: 10
