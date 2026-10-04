@@ -244,6 +244,9 @@
     只允许实时分组「【稳定·企业级】Grok」；「【不稳定·限时3折】grok-4.5(全都映射到
     grok-4.5)」不得进入 Grok 作用域、池质量或优先级计划。分组 ID 只从 owning YAML
     维护，不能在页面或 CLI 里另建映射。
+    `grokPriorityPlan.forceNormalizedTopK: true` 让 Grok 优先级计划每次按 YAML 的
+    `minimumPriority` 起始，使用规范化 top-k 值重排，避免旧优先级锚点把首位抬高；top-k
+    内的值保持严格递增，超出 top-k 的账号仍落在 `maximumPriority` 尾部。
     可以独立打开 `features.priorityAutomation`；Grok 不启用探活时必须保持
     `features.idleProbe: false`，其快照和池质量读取不创建探活记录。
   - V2 的间隔和样本档位从 `scopes`、`snapshot` 回读；旧 priority automation 和

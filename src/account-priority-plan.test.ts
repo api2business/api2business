@@ -197,6 +197,25 @@ test("Claude priority planning isolates Anthropic group 119 and preserves the ra
   expect(appliedPlan.priorities).toEqual({});
 });
 
+test("Grok can force a canonical top-k distribution that starts at the configured minimum", () => {
+  const grokConfig = structuredClone(config);
+  grokConfig.sub2api.grokPriorityPlan.forceNormalizedTopK = true;
+  const rows = [
+    { ...account(101, "https://grok-a.example grok 0.06", 95), platform: "grok", groupIds: [6], priority: 111 },
+    { ...account(102, "https://grok-b.example grok 0.09", 90), platform: "grok", groupIds: [6], priority: 121 },
+    { ...account(103, "https://grok-c.example grok 0.1", 85), platform: "grok", groupIds: [6], priority: 132 },
+    { ...account(104, "https://grok-d.example grok 0.12", 80), platform: "grok", groupIds: [6], priority: 217 },
+  ];
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, grokConfig);
+  const changes = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.profile === "grok");
+
+  expect(changes.map((row) => row.desiredPriority)).toEqual([100, 111, 121, 132]);
+  expect(changes.every((row) => row.priorityRebalanced === true)).toBeTrue();
+  expect(new Set(changes.map((row) => row.desiredPriority)).size).toBe(changes.length);
+  expect(plan.priorities).toMatchObject({ "101": 100, "102": 111, "103": 121, "104": 132 });
+});
+
 test("missing Claude account cost uses the eligible-candidate average instead of the tail priority", () => {
   const knownCheap = {
     ...account(21, "https://claude-cheap.example ccmax 0.1", 90),

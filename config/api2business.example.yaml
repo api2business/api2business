@@ -198,6 +198,7 @@ sub2api:
     pointsPerScore: 10
     minimumChange: 5
     normalizationTopK: 20
+    forceNormalizedTopK: false
     minimumPriorityUniformity: 0.25
     minimumPriority: 100
     maximumPriority: 300
@@ -241,6 +242,7 @@ sub2api:
     pointsPerScore: 10
     minimumChange: 5
     normalizationTopK: 20
+    forceNormalizedTopK: false
     minimumPriorityUniformity: 0.25
     minimumPriority: 100
     maximumPriority: 300
@@ -284,6 +286,7 @@ sub2api:
     pointsPerScore: 8
     minimumChange: 5
     normalizationTopK: 20
+    forceNormalizedTopK: true
     minimumPriorityUniformity: 0.25
     minimumPriority: 100
     maximumPriority: 300

@@ -170,6 +170,14 @@ function buildStableRankPriorities(
   });
   if (topCount === 0) return { priorities: normalized, rebalanced: false, uniformity: 1 };
 
+  if (policy.forceNormalizedTopK === true) {
+    const top = normalized.slice(0, topCount);
+    const gaps = top.slice(1).map((priority, index) => priority - top[index]);
+    const uniformity = gaps.length === 0 ? 1 : Math.min(...gaps) / Math.max(...gaps);
+    const rebalanced = ranked.some(({ row }, index) => number(row.priority) !== normalized[index]);
+    return { priorities: normalized, rebalanced, uniformity };
+  }
+
   const candidates = ranked.slice(0, topCount).map(({ row }, index) => {
     const priority = number(row.priority);
     const minimumAtIndex = policy.minimumPriority + index;
