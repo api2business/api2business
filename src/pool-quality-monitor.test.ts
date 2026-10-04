@@ -127,7 +127,7 @@ test("pool quality uses the Grok whitelist and platform predicate", async () => 
   } as unknown as Sub2ApiReadClient;
   const config = loadConfig("config/api2business.yaml");
   const sample = await collectPoolQualitySample(config, reads, "2026-08-03T00:00:00.000Z", "grok");
-  expect(parameters).toEqual([1000, "6", "2026-08-03T00:00:00.000Z", "grok"]);
+  expect(parameters).toEqual([1000, "6,62", "2026-08-03T00:00:00.000Z", "grok"]);
   expect(sample.platform).toBe("grok");
   expect(poolQualitySql).toContain("CASE $4::text WHEN 'codex' THEN 'openai' WHEN 'claude' THEN 'anthropic'");
 });
