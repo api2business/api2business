@@ -127,7 +127,7 @@ func v2PriorityAutomationWorkflowID(base, scope string) string {
 }
 
 func v2IdleProbeWorkflowID(base, scope string) string {
-	return fmt.Sprintf("%s-upstream-scheduling-v2-%s-idle-probe-v4", base, scope)
+	return fmt.Sprintf("%s-upstream-scheduling-v2-%s-idle-probe-v5", base, scope)
 }
 
 // 只终止已退役的历史 execution，不注册或恢复其工作流类型。
@@ -144,6 +144,9 @@ func retireReplacedSchedulingWorkflows(c client.Client, cfg Config) error {
 				fmt.Sprintf("-upstream-scheduling-v2-%s-priority-automation-v%d", scope, version),
 				fmt.Sprintf("-upstream-scheduling-v2-%s-idle-probe-v%d", scope, version))
 		}
+	}
+	for _, scope := range cfg.V2ScopeNames {
+		suffixes = append(suffixes, fmt.Sprintf("-upstream-scheduling-v2-%s-idle-probe-v4", scope))
 	}
 	for _, suffix := range suffixes {
 		if err := terminateIfRunning(c, cfg.Namespace, base+suffix, "replaced by scoped upstream scheduling V2 workflows"); err != nil {
@@ -191,8 +194,12 @@ func ensureSchedules(c client.Client, cfg Config) error {
 	if len(cfg.V2IdleProbeScopes) > 0 {
 		for _, scope := range cfg.V2IdleProbeScopes {
 			workflowID := v2IdleProbeWorkflowID(base, scope)
+			intervalSeconds := cfg.IdleProbeIntervalSeconds
+			if configured, ok := cfg.V2IdleProbeIntervals[scope]; ok && configured > 0 {
+				intervalSeconds = configured
+			}
 			if err := startWorkflow(c, scheduleOptions(workflowID, cfg.TaskQueue), "upstreamSchedulingV2IdleProbeScheduleWorkflow", ScheduleInput{
-				IntervalMS:                  cfg.IdleProbeIntervalSeconds * 1000,
+				IntervalMS:                  intervalSeconds * 1000,
 				RoundTimeoutMS:              cfg.IdleProbeTimeoutSeconds * 1000,
 				ActivityStartToCloseTimeout: cfg.ActivityTimeout,
 				MaximumAttempts:             1,

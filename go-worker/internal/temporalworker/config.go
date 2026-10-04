@@ -22,6 +22,7 @@ type Config struct {
 	MaximumAttempts, QuotaIntervalSeconds, QuotaTimeoutSeconds  int
 	V2AutomationIntervalSeconds, V2AutomationRecentCallLimit    int
 	V2ScopeNames, V2PriorityAutomationScopes, V2IdleProbeScopes []string
+	V2IdleProbeIntervals                                        map[string]int
 	AutomaticRefreshEnabled                                     bool
 	IdleProbeIntervalSeconds, IdleProbeTimeoutSeconds           int
 	BugTeamCostMonitorEnabled                                   bool
@@ -49,9 +50,10 @@ type fileConfig struct {
 				RecentCallLimit int `yaml:"recentCallLimit"`
 			} `yaml:"automation"`
 			Scopes map[string]struct {
-				Enabled  bool   `yaml:"enabled"`
-				Platform string `yaml:"platform"`
-				Features struct {
+				Enabled                  bool   `yaml:"enabled"`
+				Platform                 string `yaml:"platform"`
+				IdleProbeIntervalSeconds int    `yaml:"idleProbeIntervalSeconds"`
+				Features                 struct {
 					PriorityAutomation bool `yaml:"priorityAutomation"`
 					IdleProbe          bool `yaml:"idleProbe"`
 				} `yaml:"features"`
@@ -156,8 +158,17 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 		host = "127.0.0.1"
 	}
 	var v2ScopeNames, v2PriorityAutomationScopes, v2IdleProbeScopes []string
+	v2IdleProbeIntervals := make(map[string]int)
 	for name, scope := range raw.Operations.UpstreamSchedulingV2.Scopes {
 		v2ScopeNames = append(v2ScopeNames, name)
+		intervalSeconds := scope.IdleProbeIntervalSeconds
+		if intervalSeconds <= 0 {
+			intervalSeconds = raw.Sub2API.IdleProbe.IntervalSeconds
+		}
+		if intervalSeconds <= 0 {
+			return Config{}, fmt.Errorf("idle probe interval for scope %s must be positive", name)
+		}
+		v2IdleProbeIntervals[name] = intervalSeconds
 		if raw.Operations.UpstreamSchedulingV2.Enabled {
 			if !scope.Enabled {
 				continue
@@ -188,6 +199,7 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 		V2AutomationRecentCallLimit: raw.Operations.UpstreamSchedulingV2.Automation.RecentCallLimit,
 		V2PriorityAutomationScopes:  v2PriorityAutomationScopes,
 		V2IdleProbeScopes:           v2IdleProbeScopes,
+		V2IdleProbeIntervals:        v2IdleProbeIntervals,
 		V2ScopeNames:                v2ScopeNames,
 		IdleProbeIntervalSeconds:    raw.Sub2API.IdleProbe.IntervalSeconds,
 		IdleProbeTimeoutSeconds:     raw.Sub2API.IdleProbe.RoundTimeoutSeconds,

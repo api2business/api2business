@@ -221,6 +221,9 @@
   - V2 工作流按作用域独立运行。每个作用域的
     `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和
     `upstreamWrite` 都只从 owning YAML 读取，代码不得替代开关。
+  - 自动探活周期使用 `operations.upstreamSchedulingV2.scopes.<scope>.idleProbeIntervalSeconds`；
+    未声明时回退到 `sub2api.idleProbe.intervalSeconds`。因此调整单一平台周期时，必须保留
+    其他作用域的显式值，避免改变全局默认。
   - `priorityAutomation` 是独立的周期优先级写入功能；它不等价于
     `planWrite`。周期写入仍须同时满足 `operations.writePolicy.enabled`，并按平台
     使用相应的写入开关。

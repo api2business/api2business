@@ -378,6 +378,7 @@ operations:
         enabled: true
         platform: openai
         eligibleGroupIds: [2, 3]
+        idleProbeIntervalSeconds: 60
         features:
           scoreRead: true
           planRead: true
@@ -389,6 +390,7 @@ operations:
         enabled: true
         platform: anthropic
         eligibleGroupIds: [119]
+        idleProbeIntervalSeconds: 300
         features:
           scoreRead: true
           planRead: true
@@ -400,6 +402,7 @@ operations:
         enabled: true
         platform: grok
         eligibleGroupIds: [62]
+        idleProbeIntervalSeconds: 60
         features:
           scoreRead: true
           planRead: true

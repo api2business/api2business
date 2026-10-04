@@ -30,7 +30,7 @@ operations:
     automation: { intervalSeconds: 120, recentCallLimit: 1000 }
     scopes:
       codex: { enabled: true, platform: openai, features: { priorityAutomation: true, idleProbe: true } }
-      claude: { enabled: true, platform: anthropic, features: { priorityAutomation: true, idleProbe: true } }
+      claude: { enabled: true, platform: anthropic, idleProbeIntervalSeconds: 300, features: { priorityAutomation: true, idleProbe: true } }
       grok: { enabled: true, platform: grok, features: { priorityAutomation: true, idleProbe: true } }
   upstreamManagement: { quotaSampleIntervalSeconds: 300, quotaSampleTimeoutSeconds: 240 }
 temporal:
@@ -68,6 +68,9 @@ runtime:
 	}
 	if strings.Join(cfg.V2IdleProbeScopes, ",") != "claude,codex,grok" {
 		t.Fatalf("expected Claude, Codex and Grok idle probe scopes, got %#v", cfg.V2IdleProbeScopes)
+	}
+	if cfg.V2IdleProbeIntervals["codex"] != 60 || cfg.V2IdleProbeIntervals["claude"] != 300 || cfg.V2IdleProbeIntervals["grok"] != 60 {
+		t.Fatalf("unexpected scoped idle probe intervals: %#v", cfg.V2IdleProbeIntervals)
 	}
 }
 

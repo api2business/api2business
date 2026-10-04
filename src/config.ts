@@ -154,6 +154,7 @@ export interface UpstreamSchedulingV2Scope {
   enabled: boolean;
   platform: "openai" | "anthropic" | "grok";
   eligibleGroupIds: number[];
+  idleProbeIntervalSeconds?: number;
   features: UpstreamSchedulingV2Features;
 }
 
@@ -619,6 +620,9 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
       enabled: booleanValue(scope, "enabled", scopePath),
       platform: platform as UpstreamSchedulingV2Scope["platform"],
       eligibleGroupIds: [...new Set(eligibleGroupIds)].sort((a, b) => a - b),
+      ...(scope.idleProbeIntervalSeconds === undefined
+        ? {}
+        : { idleProbeIntervalSeconds: integerValue(scope, "idleProbeIntervalSeconds", scopePath, 10, 3600) }),
       features: {
         scoreRead: booleanValue(features, "scoreRead", `${scopePath}.features`),
         planRead: booleanValue(features, "planRead", `${scopePath}.features`),
