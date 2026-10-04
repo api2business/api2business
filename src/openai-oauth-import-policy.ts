@@ -40,7 +40,7 @@ export function modelMappingForOpenAIOAuthAccount(
   const credentials = record(account.credentials) ?? {};
   const explicit = record(credentials.model_mapping);
   if (hasExplicitModelMapping(explicit)) {
-    return Object.fromEntries(Object.entries(explicit!).filter(([, value]) => typeof value === "string" && value.trim() !== ""));
+    return Object.fromEntries(Object.entries(explicit!).filter(([, value]) => typeof value === "string" && value.trim() !== "").map(([key, value]) => [key, String(value)]));
   }
   return disableLunaByDefault ? defaultOpenAIOAuthModelMapping() : null;
 }

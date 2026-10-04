@@ -10,7 +10,7 @@ test("低余额候选严格使用人民币小于阈值，并展开共享 wallet 
     { wallet_key: "https://unknown.example", sampled_at: "2026-08-09T00:05:00Z", probe_ok: false, remaining_cny: 1, account_id: 15, account_cost_inputs: [] },
   ], 10, 24);
   expect(rows.map((row) => row.account_id).sort()).toEqual([11, 12, 13]);
-  expect(rows.every((row) => row.balance_cny < 10 && row.lookbackHours === 24)).toBe(true);
+  expect(rows.every((row) => Number(row.balance_cny) < 10 && row.lookbackHours === 24)).toBe(true);
 });
 
 test("充值候选历史 SQL 保留欠费前窗口和业务错误排除口径", () => {

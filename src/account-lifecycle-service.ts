@@ -467,7 +467,11 @@ export class AccountLifecycleService {
       }
       const gross = current.reduce((sum, row) => sum + number(row.costCny), 0);
       const apiAmountUsd = current.reduce((sum, row) => sum + number(row.apiAmountUsd), 0);
-      const accounting = job.settlement?.accounting ?? recordLifecycleSettlement(this.config.operations.accountLifecycleLedgerPath, {
+      const accounting: { mutation: boolean; entry?: unknown } = job.settlement?.accounting
+        && typeof job.settlement.accounting === "object"
+        && "mutation" in job.settlement.accounting
+        ? job.settlement.accounting as { mutation: boolean; entry?: unknown }
+        : recordLifecycleSettlement(this.config.operations.accountLifecycleLedgerPath, {
         acquisitionDay: job.settings.day, planType: job.settings.planType, accountIds: expectedIds,
         accountCount: expectedIds.length, grossAcquisitionCostCny: Math.round(gross * 100) / 100,
         requestCount: current.reduce((sum, row) => sum + number(row.requestCount), 0),
@@ -475,7 +479,7 @@ export class AccountLifecycleService {
         apiAmountUsd: Math.round(apiAmountUsd * 1e8) / 1e8,
         grossCnyPerApiUsd: apiAmountUsd > 0 ? Math.round((gross / apiAmountUsd) * 1e6) / 1e6 : null,
         detectionJobId: job.id, detectionFingerprint: job.fingerprint!,
-      });
+        });
       this.log(job, "accounting", accounting.mutation ? "recorded" : "skipped", `批次结算已记账 ${expectedIds.length} 个账号`);
       await this.persistWorkerJob(job, includeCandidates);
       let deletion: Row | null = null;

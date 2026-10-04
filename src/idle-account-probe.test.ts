@@ -21,7 +21,7 @@ const config = {
     },
     priorityPlan: { platform: "openai", eligibleGroupIds: [2, 3] },
   },
-} as AppConfig;
+} as unknown as AppConfig;
 
 function reads(rows: Array<Record<string, unknown>>): Sub2ApiReadClient {
   return {

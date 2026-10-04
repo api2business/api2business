@@ -592,8 +592,8 @@ export function createHandler(
           priority: input.priority,
           capacity: input.capacity,
           groupIds: input.groupIds,
-          platform: typeof input.platform === "string" ? input.platform as "openai" | "grok" | "anthropic" : undefined,
-          poolMode: typeof input.poolMode === "boolean" ? input.poolMode : undefined,
+          platform: typeof input.platform === "string" ? input.platform as "openai" | "grok" | "anthropic" : "openai",
+          poolMode: typeof input.poolMode === "boolean" ? input.poolMode : false,
           operationId: typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
           description: typeof input.description === "string" ? input.description : undefined,
         }), 202);

@@ -70,7 +70,7 @@ test("failed settlement resumes only the persisted remaining account IDs", async
     settlement: { remainingAccountIds: [2] }, error: "timeout",
   };
   const service = new AccountLifecycleService({} as AppConfig, {} as Sub2ApiReadClient, {
-    submit: async (command) => { submitted.push(command); return { workflowId: "resume-1", runId: "run-1", state: "submitted" }; },
+    submit: async (command: unknown) => { submitted.push(command); return { workflowId: "resume-1", runId: "run-1", state: "submitted" }; },
   } as never);
   (service as unknown as { jobs: Map<string, unknown> }).jobs.set(job.id, job);
   const result = await service.settle(job.id);

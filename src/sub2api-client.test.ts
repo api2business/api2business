@@ -26,7 +26,7 @@ test("Sub2API authentication and the requested operation share one timeout budge
       sub2api: { baseUrl: "https://api.example.test/api/v1", requestTimeoutMs: 100 },
     } as AppConfig;
     const client = new Sub2ApiClient(config, { email: "test@example.test", password: "test-password" });
-    expect(await client.request("/admin/accounts/1")).toEqual({ ok: true });
+    expect(await client.request<{ ok: boolean }>("/admin/accounts/1")).toEqual({ ok: true });
     expect(timeouts).toEqual([100, 40]);
   } finally {
     globalThis.fetch = originalFetch;

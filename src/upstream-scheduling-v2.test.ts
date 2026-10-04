@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { loadConfig } from "./config";
 import { UpstreamSchedulingV2Service } from "./upstream-scheduling-v2";
 
-function fixture(usageRows = [{
+function fixture(usageRows: unknown[] = [{
   account_id: 101,
   last_success_at: "2026-10-03T00:01:00.000Z",
   last_success_result: { ok: true, quota: { unit: "USD", remaining: 12.5, limit: 20, used: 7.5, unlimited: false } },
@@ -273,10 +273,11 @@ describe("upstream scheduling v2", () => {
     const { service, calls, operations } = fixture();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    const original = operations.poolQualitySummary;
-    operations.poolQualitySummary = async (...args: never[]) => {
+    const operationHarness = operations as unknown as { poolQualitySummary: (platform: string) => Promise<unknown> };
+    const original = operationHarness.poolQualitySummary;
+    operationHarness.poolQualitySummary = async (platform: string) => {
       await gate;
-      return await original(...args);
+      return await original(platform);
     };
     const first = service.snapshot("codex");
     const second = service.snapshot("codex");

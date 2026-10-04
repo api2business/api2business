@@ -10,6 +10,45 @@ import { configuredWalletKey, usageWalletKey } from "./upstream-wallet";
 
 type Row = Record<string, unknown>;
 
+interface V2SnapshotData {
+  refreshedAt: string | null;
+  recentCallLimit: number;
+  status: string;
+  accounts: Row[];
+  quotaCoverage: Row;
+  poolQuality: Row;
+  errors: Row;
+  priorityHistory: Row[];
+  automation: Row;
+  quota: Row;
+  usage: Row[];
+  probeHistory: Row;
+  modelSyncHistory: Row;
+}
+
+interface V2Reconciliation {
+  status: string;
+  mode: string;
+  scope: string;
+  checkedAt: string;
+  checks: Array<Record<string, unknown> & { name: string; status: string }>;
+  mismatchCount: number;
+}
+
+interface V2SnapshotPayload {
+  ok: true;
+  version: "v2";
+  phase: string;
+  scope: string;
+  platform: string;
+  eligibleGroupIds: number[];
+  features: UpstreamSchedulingV2Scope["features"];
+  readOnly: boolean;
+  data: V2SnapshotData;
+  reconciliation: V2Reconciliation;
+  valuesPrinted: false;
+}
+
 const readModelSchemaVersion = "upstream-scheduling-v2-read-model-v1";
 
 function records(value: unknown): Row[] {
@@ -205,10 +244,10 @@ export class UpstreamSchedulingV2Error extends Error {
 
 export class UpstreamSchedulingV2Service {
   private readonly memoryCache = new Map<string, {
-    payload: Row;
+    payload: V2SnapshotPayload;
     capturedAt: string;
   }>();
-  private readonly inFlight = new Map<string, Promise<Row>>();
+  private readonly inFlight = new Map<string, Promise<V2SnapshotPayload>>();
 
   constructor(
     private readonly config: AppConfig,
@@ -250,16 +289,16 @@ export class UpstreamSchedulingV2Service {
     };
   }
 
-  private withCache(payload: Row, capturedAt: string, state: "hit" | "stale" | "refreshed", error: string | null = null): Row {
+  private withCache(payload: V2SnapshotPayload, capturedAt: string, state: "hit" | "stale" | "refreshed", error: string | null = null): V2SnapshotPayload & { cache: Row } {
     return { ...payload, cache: this.cacheMetadata(capturedAt, state, error) };
   }
 
-  private async persistedCache(scopeName: string): Promise<{ payload: Row; capturedAt: string } | null> {
+  private async persistedCache(scopeName: string): Promise<{ payload: V2SnapshotPayload; capturedAt: string } | null> {
     const key = this.cacheKey(scopeName);
     const memory = this.memoryCache.get(key);
     if (memory) return memory;
     const row = await this.operations.getReadModelSnapshot(key);
-    const payload = object(row?.payload);
+    const payload = object(row?.payload) as unknown as V2SnapshotPayload;
     if (row?.schema_version !== readModelSchemaVersion || Object.keys(payload).length === 0) return null;
     const capturedAt = row?.captured_at == null ? "" : String(row.captured_at);
     if (!capturedAt) return null;
@@ -268,9 +307,9 @@ export class UpstreamSchedulingV2Service {
     return cached;
   }
 
-  private async buildSnapshot(scopeName: string, scope: UpstreamSchedulingV2Scope): Promise<Row> {
+  private async buildSnapshot(scopeName: string, scope: UpstreamSchedulingV2Scope): Promise<V2SnapshotPayload> {
     const source = await this.source(scopeName, scope);
-    const payload: Row = {
+    const payload: V2SnapshotPayload = {
       ok: true,
       version: "v2",
       phase: scopeName === "codex" ? "codex-reconciliation" : "scope-read",
@@ -282,9 +321,9 @@ export class UpstreamSchedulingV2Service {
         && scope.features.priorityAutomation !== true
         && scope.features.upstreamWrite !== true,
       data: {
-        refreshedAt: source.scoreSnapshot.refreshedAt ?? null,
-        recentCallLimit: source.scoreSnapshot.recentCallLimit ?? this.config.monitor.recentCallLimit,
-        status: source.scoreSnapshot.status ?? "unavailable",
+        refreshedAt: source.scoreSnapshot.refreshedAt == null ? null : String(source.scoreSnapshot.refreshedAt),
+        recentCallLimit: Number(source.scoreSnapshot.recentCallLimit ?? this.config.monitor.recentCallLimit),
+        status: source.scoreSnapshot.status == null ? "unavailable" : String(source.scoreSnapshot.status),
         accounts: source.accounts,
         quotaCoverage: source.quotaCoverage,
         poolQuality: source.poolQuality,
@@ -300,7 +339,7 @@ export class UpstreamSchedulingV2Service {
       valuesPrinted: false,
     };
     const capturedAt = new Date().toISOString();
-    await this.operations.saveReadModelSnapshot(this.cacheKey(scopeName), readModelSchemaVersion, payload, capturedAt).catch((error) => {
+    await this.operations.saveReadModelSnapshot(this.cacheKey(scopeName), readModelSchemaVersion, payload as unknown as Record<string, unknown>, capturedAt).catch((error) => {
       console.error(JSON.stringify({
         ok: false,
         component: "upstream-scheduling-v2-cache",
@@ -314,7 +353,7 @@ export class UpstreamSchedulingV2Service {
     return payload;
   }
 
-  private async refreshInBackground(scopeName: string, scope: UpstreamSchedulingV2Scope, cached: { payload: Row; capturedAt: string }): Promise<void> {
+  private async refreshInBackground(scopeName: string, scope: UpstreamSchedulingV2Scope, cached: { payload: V2SnapshotPayload; capturedAt: string }): Promise<void> {
     if (this.inFlight.has(scopeName)) return;
     const refresh = this.buildSnapshot(scopeName, scope).catch((error) => {
       this.memoryCache.set(this.cacheKey(scopeName), cached);
@@ -368,7 +407,20 @@ export class UpstreamSchedulingV2Service {
     return await this.operations.modelSyncHistory(page, 10, selected);
   }
 
-  private async source(scopeName: string, scope: UpstreamSchedulingV2Scope) {
+  private async source(scopeName: string, scope: UpstreamSchedulingV2Scope): Promise<{
+    scoreSnapshot: Row;
+    accounts: Row[];
+    quotaCoverage: Row;
+    poolQuality: Row;
+    errors: Row;
+    priorityHistory: Row[];
+    quota: Row;
+    usage: Row[];
+    probeHistory: Row;
+    modelSyncHistory: Row;
+    automation: Row;
+    modelSync: Row;
+  }> {
     if (!scope.features.scoreRead) {
       throw new UpstreamSchedulingV2Error(409, "feature_disabled", `${scopeName}.features.scoreRead=false`);
     }
@@ -381,7 +433,7 @@ export class UpstreamSchedulingV2Service {
         ? "claude"
         : "grok";
     const accountIds = accounts.map((row) => Number(row.accountId));
-    const [poolQuality, errors, priorityHistory, quota, usageRows, probeHistory, modelSyncHistory] = await Promise.all([
+    const [poolQualityRaw, errorsRaw, priorityHistoryRaw, quotaRaw, usageRows, probeHistoryRaw, modelSyncHistoryRaw] = await Promise.all([
       this.operations.poolQualitySummary(qualityProfile),
       this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all" }),
       this.operations.priorityHistory(),
@@ -394,6 +446,12 @@ export class UpstreamSchedulingV2Service {
         ? this.operations.modelSyncHistory(1, 10, scopeName)
         : Promise.resolve({ ok: true, scope: scopeName, automaticEnabled: false, batchSize: this.configuration().modelSync.batchSize, intervalSeconds: this.configuration().modelSync.intervalSeconds, records: [], pagination: { page: 1, totalPages: 1, total: 0 }, valuesPrinted: false }),
     ]);
+    const poolQuality = object(poolQualityRaw);
+    const errors = object(errorsRaw);
+    const priorityHistory = object(priorityHistoryRaw);
+    const quota = object(quotaRaw);
+    const probeHistory = object(probeHistoryRaw);
+    const modelSyncHistory = object(modelSyncHistoryRaw);
     const costAccounts = enrichAccountCostEvidence(accounts, usageRows, this.config);
     const quotaProjection = enrichAccountsWithQuotaCache(costAccounts, usageRows, this.config.sub2api.newApiCredentials);
     return {
@@ -428,7 +486,7 @@ export class UpstreamSchedulingV2Service {
     scopeName: string,
     scope: UpstreamSchedulingV2Scope,
     source: Awaited<ReturnType<UpstreamSchedulingV2Service["source"]>>,
-  ) {
+  ): V2Reconciliation {
     const oldAccounts = records(source.scoreSnapshot.accounts).filter((row) => accountBelongsToScope(row, scope));
     const v2Accounts = source.accounts;
     const oldKeys = oldAccounts.map(rowKey).sort();
@@ -491,7 +549,7 @@ export class UpstreamSchedulingV2Service {
     };
   }
 
-  async snapshot(scopeName?: string | null, forceRefresh = false) {
+  async snapshot(scopeName?: string | null, forceRefresh = false): Promise<V2SnapshotPayload & { cache: Row }> {
     const selected = this.scope(scopeName);
     const cached = await this.persistedCache(selected.name);
     const ttlMs = (this.config.operations.upstreamSchedulingV2?.readModelCacheSeconds ?? 30) * 1000;

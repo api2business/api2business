@@ -206,7 +206,7 @@ export function buildQuotaSamples(
         || candidate.walletApiAmountUsdTotal === undefined
         ? null
         : current.walletApiAmountUsdTotal + candidate.walletApiAmountUsdTotal;
-      current.accountCostInputs = [...(current.accountCostInputs ?? []), ...candidate.accountCostInputs];
+      current.accountCostInputs = [...(current.accountCostInputs ?? []), ...(candidate.accountCostInputs ?? [])];
       if (current.remainingCny === null && candidate.remainingCny !== null) {
         current.accountId = candidate.accountId;
         current.remainingUsd = candidate.remainingUsd;

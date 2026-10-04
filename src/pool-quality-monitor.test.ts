@@ -95,7 +95,7 @@ test("customer billing errors remain audit rows without lowering pool quality", 
 });
 
 test("pool quality uses the Claude whitelist and platform predicate", async () => {
-  let parameters: unknown[] | null = null;
+  let parameters: unknown[] = [];
   const reads = {
     async query(input: { parameters: unknown[] }) {
       parameters = input.parameters;
@@ -114,7 +114,7 @@ test("pool quality uses the Claude whitelist and platform predicate", async () =
 });
 
 test("pool quality uses the Grok whitelist and platform predicate", async () => {
-  let parameters: unknown[] | null = null;
+  let parameters: unknown[] = [];
   const reads = {
     async query(input: { parameters: unknown[] }) {
       parameters = input.parameters;
@@ -159,7 +159,7 @@ test("pool quality excludes every monitor-user key without changing account scor
 });
 
 test("pool quality errors use the same bounded window and expose paginated model evidence", async () => {
-  let request: { parameters: unknown[]; sql: string } | null = null;
+  let request: { parameters: unknown[]; sql: string } = { parameters: [], sql: "" };
   const reads = {
     async query(input: { parameters: unknown[]; sql: string }) {
       request = input;

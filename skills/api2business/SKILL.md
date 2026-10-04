@@ -200,6 +200,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 页面普通读取、V2 读模型缓存、额度缓存和刷新终态分别见
   [上游与调度](references/upstream-scheduling.md) 与
   [额度监控](references/quota-monitoring.md)；本技能不复制第二套缓存状态机。
+- 任务收口必须同时执行 `bun run check` 和 `bun test`；运行时测试通过不能替代严格
+  TypeScript 检查。类型修复应补充真实返回类型、可选字段默认值和测试夹具注解，不得通过
+  关闭 `strict`、排除测试或静默断言来掩盖错误。
+- 提交前使用 `git diff --check`、配置校验和部署校验；未归属的并行工作区文件不得加入提交，
+  只有完成语义合并并通过对应验证后才清理。
 - 读取失败保留上一份成功快照；未知余额、未知评分和缺失成本必须保留其状态，不能
   静默写成零值或最低优先级。
 - Sub2API 业务查询统一通过 Api2Business 排队 broker 读取 NC01 本地专用库；

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { collectUserRanking, userRankingQuery } from "./user-ranking-database";
 
 test("loads usage, balance and today's recharge through one queued query", async () => {
-  let request: Record<string, unknown> | null = null;
+  let request: Record<string, unknown> = {};
   const reads = {
     query: async (input: Record<string, unknown>) => {
       request = input;

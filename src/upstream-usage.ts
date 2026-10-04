@@ -8,8 +8,8 @@ export interface UpstreamUsageTarget {
   apiKey: string;
   newApiCredentials?: { username: string; password: string };
   walletKey?: string;
-  status: string;
-  schedulable: boolean;
+  status?: string;
+  schedulable?: boolean;
   apiAmountUsdTotal?: number;
 }
 
@@ -251,8 +251,8 @@ function emptyResult(target: UpstreamUsageTarget, startedAt: number, days: numbe
     accountName: target.name,
     baseUrl: target.baseUrl,
     walletKey: target.walletKey ?? normalizeUpstreamWallet(target.baseUrl),
-    status: target.status,
-    schedulable: target.schedulable,
+    status: target.status ?? "unknown",
+    schedulable: target.schedulable ?? false,
     apiAmountUsdTotal: finite(target.apiAmountUsdTotal) ?? 0,
     ok: false,
     provider: "unknown",

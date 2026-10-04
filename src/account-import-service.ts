@@ -447,8 +447,11 @@ export class AccountImportService {
       this.log(job, stage, state, text.replace(/^.*?PROGRESS\s+/u, ""));
       await this.persistWorkerJob(job);
     };
-    for await (const chunk of stream) {
-      pending += decoder.decode(chunk, { stream: true });
+    const reader = stream.getReader();
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      pending += decoder.decode(next.value, { stream: true });
       const lines = pending.split(/\r?\n/u);
       pending = lines.pop() ?? "";
       for (const line of lines) await consume(line);

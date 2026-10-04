@@ -41,6 +41,7 @@ export interface UpstreamManagementErrorDetails {
   partial?: boolean;
   accountId?: number;
   accounting?: Record<string, unknown>;
+  availableOAuthCount?: number;
 }
 
 export class UpstreamManagementError extends Error {
@@ -96,7 +97,7 @@ export interface UpstreamCreateInput {
 
 export type UpstreamWorkerOperation =
   | { action: "create"; input: UpstreamCreateInput }
-  | { action: "update"; input: { id: number; suffix?: string; rateCnyPerApiUsd?: number } }
+  | { action: "update"; input: { id: number; suffix?: string; rateCnyPerApiUsd?: number; groupIds?: number[] } }
   | { action: "recharge"; input: { id: number; amountCny: number; operationId: string; description?: string } }
   | { action: "recover"; input: { accountIds: number[] } }
   | { action: "isolation"; input: { accountIds: number[] } }
@@ -963,7 +964,23 @@ export class UpstreamManagementService {
         GROUP BY a.id, g.name ORDER BY a.id, g.name`,
       parameters: ids.length ? [ids.join(",")] : [],
     });
-    const rows = query.rows.map((row) => {
+    type UsageRow = {
+      accountId: number;
+      status: string;
+      schedulable: boolean;
+      tempUnschedulableUntil: string | null;
+      rateLimitResetAt: string | null;
+      overloadUntil: string | null;
+      expiresAt: string | null;
+      autoPauseOnExpired: boolean;
+      groupName: string;
+      apiAmountUsd: number | null;
+      actualDivSaleUsd: number;
+      saleRateMissingCount: number;
+      usageBuckets: Row[];
+      requestCount: number;
+    };
+    const rows: UsageRow[] = query.rows.map((row) => {
       let usageBuckets: Row[] = [];
       if (Array.isArray(row.usage_buckets)) usageBuckets = row.usage_buckets as Row[];
       else if (typeof row.usage_buckets === 'string') {
@@ -972,7 +989,7 @@ export class UpstreamManagementService {
           if (Array.isArray(parsed)) usageBuckets = parsed as Row[];
         } catch { /* malformed optional bucket data stays empty */ }
       }
-      return { accountId: Number(row.account_id), status: String(row.status ?? ''), schedulable: row.schedulable === true, tempUnschedulableUntil: row.temp_unschedulable_until == null ? null : String(row.temp_unschedulable_until), rateLimitResetAt: row.rate_limit_reset_at == null ? null : String(row.rate_limit_reset_at), overloadUntil: row.overload_until == null ? null : String(row.overload_until), expiresAt: row.expires_at == null ? null : String(row.expires_at), autoPauseOnExpired: row.auto_pause_on_expired === true, groupName: String(row.group_name || ''), apiAmountUsd: Number(row.api_amount_usd || 0), actualDivSaleUsd: Number(row.actual_div_sale_usd || 0), saleRateMissingCount: Number(row.sale_rate_missing_count || 0), usageBuckets, requestCount: Number(row.request_count || 0) };
+      return { accountId: Number(row.account_id), status: String(row.status ?? ''), schedulable: row.schedulable === true, tempUnschedulableUntil: row.temp_unschedulable_until == null ? null : String(row.temp_unschedulable_until), rateLimitResetAt: row.rate_limit_reset_at == null ? null : String(row.rate_limit_reset_at), overloadUntil: row.overload_until == null ? null : String(row.overload_until), expiresAt: row.expires_at == null ? null : String(row.expires_at), autoPauseOnExpired: row.auto_pause_on_expired === true, groupName: String(row.group_name || ''), apiAmountUsd: Number.isFinite(Number(row.api_amount_usd)) ? Number(row.api_amount_usd) : null, actualDivSaleUsd: Number(row.actual_div_sale_usd || 0), saleRateMissingCount: Number(row.sale_rate_missing_count || 0), usageBuckets, requestCount: Number(row.request_count || 0) };
     });
     // Sub2API actual_cost 可能已包含下游售卖倍率；用实时有效倍率折回供应商实际成本。
     // 一个账号可能按组聚合成多行，只把账号级实际成本落到一个业务组，避免重复计入。
@@ -993,7 +1010,7 @@ export class UpstreamManagementService {
       const usageBuckets = sourceBuckets.map((bucket) => ({
         sampledAt: String(bucket.sampledAt ?? ''), groupName: String(bucket.groupName ?? ''),
         apiAmountUsd: providerActualCostUsd(Number(bucket.apiAmountUsd), rate), requestCount: Number(bucket.requestCount ?? 0),
-      })).filter((bucket) => bucket.apiAmountUsd !== null && bucket.sampledAt);
+      })).filter((bucket): bucket is { sampledAt: string; groupName: string; apiAmountUsd: number; requestCount: number } => bucket.apiAmountUsd !== null && bucket.sampledAt !== "");
       for (const row of accountRows) { row.apiAmountUsd = row === target ? actual : null; row.usageBuckets = row === target ? usageBuckets : []; }
     }
     return { ok: true, windowHours: 24, rows, databaseQueries: query.cached ? 0 : 1, queueDurationMs: query.queueDurationMs, queryDurationMs: query.queryDurationMs };

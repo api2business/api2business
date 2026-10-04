@@ -34,7 +34,7 @@ test("purchase worker resumes an existing order without creating a second order"
     get: async () => ({ id: "import-1", state: "succeeded", logs: [], settings: { planType: "team" } }),
   };
   const temporal = { submit: async () => ({ ok: true, workflowId: "workflow-1", runId: "run-1", state: "submitted" }) };
-  const service = new BugTeamPurchaseImportService(config(), temporal as never, {
+  const service: BugTeamPurchaseImportService = new BugTeamPurchaseImportService(config(), temporal as never, {
     get: async (id) => service.workerGet(id),
     patch: async (id, patch) => { service.applyWorkerPatch(id, patch); },
   }, client as never, imports as never);
@@ -60,7 +60,7 @@ test("purchase refuses to fall back when the cheapest shelf cannot satisfy the w
     ] }),
   };
   const temporal = { submit: async () => ({ ok: true, workflowId: "workflow-2", runId: "run-2", state: "submitted" }) };
-  const service = new BugTeamPurchaseImportService(config(), temporal as never, {
+  const service: BugTeamPurchaseImportService = new BugTeamPurchaseImportService(config(), temporal as never, {
     get: async (id) => service.workerGet(id),
     patch: async (id, patch) => { service.applyWorkerPatch(id, patch); },
   }, client as never, {

@@ -7,8 +7,8 @@ const costInputs = (apiAmountUsdTotal: number, costRateCnyPerApiUsd: number, acc
 
 test("keeps shared wallet balance while scoping output and cost inputs to selected accounts", () => {
   const samples = [
-    { walletKey: "wallet", accountId: 1, sampledAt: "2026-08-02T00:00:00Z", schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 10, cnyPerUsd: 1, remainingCny: 10, apiAmountUsdTotal: 10, accountCostInputs: costInputs(4, 0.1, 1) },
-    { walletKey: "wallet", accountId: 2, sampledAt: "2026-08-02T00:00:00Z", schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 10, cnyPerUsd: 1, remainingCny: 10, apiAmountUsdTotal: 10, accountCostInputs: costInputs(6, 0.2, 2) },
+    { walletKey: "wallet", accountId: 1, sampledAt: "2026-08-02T00:00:00Z", sourceQueriedAt: null, schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 10, cnyPerUsd: 1, remainingCny: 10, apiAmountUsdTotal: 10, accountCostInputs: costInputs(4, 0.1, 1) },
+    { walletKey: "wallet", accountId: 2, sampledAt: "2026-08-02T00:00:00Z", sourceQueriedAt: null, schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 10, cnyPerUsd: 1, remainingCny: 10, apiAmountUsdTotal: 10, accountCostInputs: costInputs(6, 0.2, 2) },
   ];
   const selected = quotaSamplesForAccounts(samples, [1], ["wallet"]);
   expect(selected).toHaveLength(2);

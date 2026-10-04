@@ -483,6 +483,7 @@ export class OperationsService {
       if (context) {
         await this.store.addIdleProbeRound({
           operationId: context.operationId,
+          scope: context.scope ?? "codex",
           triggerType: context.triggerType,
           startedAt: startedAt.toISOString(),
           completedAt: new Date().toISOString(),
@@ -526,9 +527,24 @@ export class OperationsService {
       selectedHours,
     ) as Array<Record<string, unknown>>;
     const numberOrNull = (value: unknown) => value === null || value === undefined ? null : Number(value);
-    const history = rows.map((row) => ({
-      sampledAt: row.sampled_at,
-      status: row.status,
+    type BugTeamHistoryPoint = {
+      sampledAt: string;
+      status: string;
+      available: number | null;
+      unitPriceCny: number | null;
+      minimumUnitPriceCny: number | null;
+      maximumUnitPriceCny: number | null;
+      minimumRemainingSeconds: number | null;
+      maximumRemainingSeconds: number | null;
+      expectedCostCnyPerApiUsd: number | null;
+      minimumExpectedCostCnyPerApiUsd: number | null;
+      maximumExpectedCostCnyPerApiUsd: number | null;
+      fillRateApiUsdPerHour: number | null;
+      error: string | null;
+    };
+    const history: BugTeamHistoryPoint[] = rows.map((row) => ({
+      sampledAt: String(row.sampled_at ?? ""),
+      status: String(row.status ?? ""),
       available: numberOrNull(row.available),
       unitPriceCny: numberOrNull(row.unit_price_cny),
       minimumUnitPriceCny: numberOrNull(row.minimum_unit_price_cny),
@@ -539,10 +555,10 @@ export class OperationsService {
       minimumExpectedCostCnyPerApiUsd: numberOrNull(row.minimum_expected_cost_cny_per_api_usd),
       maximumExpectedCostCnyPerApiUsd: numberOrNull(row.maximum_expected_cost_cny_per_api_usd),
       fillRateApiUsdPerHour: numberOrNull(row.fill_rate_api_usd_per_hour),
-      error: row.error_summary ?? null,
+      error: row.error_summary == null ? null : String(row.error_summary),
     }));
-    const latest = history.findLast((sample) => sample.status !== "error") ?? null;
-    const lastFailure = history.findLast((sample) => sample.status === "error") ?? null;
+    const latest = [...history].reverse().find((sample) => sample.status !== "error") ?? null;
+    const lastFailure = [...history].reverse().find((sample) => sample.status === "error") ?? null;
     return {
       ok: true,
       product: this.config.bugTeam.monitor.product,
@@ -649,7 +665,7 @@ export class OperationsService {
     const displayHours = 8;
     const calculationWindowHours = 1;
     const rows = await this.store.getUpstreamQuotaSamples(displayHours + calculationWindowHours) as Array<Record<string, unknown>>;
-    let samples = rows.map((row) => ({
+    let samples: import("./upstream-quota-monitor").UpstreamQuotaSample[] = rows.map((row) => ({
       sampledAt: new Date(String(row.sampled_at)).toISOString(), walletKey: normalizeUpstreamWallet(row.wallet_key), accountId: Number(row.account_id),
       schedulable: row.schedulable === true, status: String(row.status), provider: String(row.provider),
       probeOk: row.probe_ok === true, remainingUsd: row.remaining_usd == null ? null : Number(row.remaining_usd),
@@ -710,9 +726,10 @@ export class OperationsService {
       const point: Record<HistoryKey, number> & { sampledAt: string } = { sampledAt, codexMix: 0, noDegrade: 0, claude: 0, grok: 0 };
       for (const row of samples.filter((item) => item.sampledAt === sampledAt && item.remainingCny !== null)) {
         const walletAccounts = accountsByWallet.get(row.walletKey) ?? [];
-        const groups = new Set<HistoryKey>(walletAccounts.flatMap((meta) => [...quotaMemberships({ groupNames: meta.names, platform: meta.platform, baseUrl: meta.walletKey })].map((group) => ({
+        const groupLabels: Record<string, HistoryKey> = {
           "codex-mix": "codexMix", "no-degrade": "noDegrade", claude: "claude", grok: "grok",
-        }[group] as HistoryKey))));
+        };
+        const groups = new Set<HistoryKey>(walletAccounts.flatMap((meta) => [...quotaMemberships({ groupNames: meta.names, platform: meta.platform, baseUrl: meta.walletKey })].map((group: unknown) => groupLabels[String(group)]).filter((group): group is HistoryKey => Boolean(group))));
         if (!groups.size) groups.add("codexMix");
         for (const key of groups) point[key] = Number(point[key]) + Math.max(0, row.remainingCny ?? 0);
       }

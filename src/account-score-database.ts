@@ -602,7 +602,6 @@ export async function collectRecentCallScoresFromDatabase(
     collectedAt: new Date().toISOString(),
     deduplicated: query.deduplicated,
     cached: query.cached,
-    failoverIntermediateEventsExcluded: true,
     accounts,
   };
 }

@@ -104,7 +104,7 @@ const config = {
   eligibleGroupIds: [119],
 };
 
-function account(id: number, name: string, score: number, available = true, error = "") {
+function account(id: number, name: string, score: number, available = true, error = ""): Record<string, any> {
   return {
     accountId: id,
     accountName: name,

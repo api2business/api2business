@@ -22,7 +22,7 @@ export function mergeAccountScores(rows: Row[]): Row[] {
     grouped.set(key, [...(grouped.get(key) ?? []), row]);
   }
 
-  return [...grouped.values()].map((accountRows) => {
+  return [...grouped.values()].map((accountRows): Row => {
     const representative = accountRows[0]!;
     const groupIds = [...new Set(accountRows.flatMap((row) => groupValues(row, "groupIds", "groupId"))
       .filter((value) => value !== null && value !== undefined))];

@@ -13,7 +13,7 @@ afterEach(() => { globalThis.fetch = originalFetch; });
 
 test("queries Sub2API usage from the control origin and parses quota", async () => {
   const requests: string[] = [];
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     requests.push(url);
     if (url.endsWith("/v1/sub2api/billing")) {
@@ -54,7 +54,7 @@ test("queries Sub2API usage from the control origin and parses quota", async () 
 });
 
 test("rejects a zero Sub2API billing multiplier as missing evidence", async () => {
-  globalThis.fetch = (async (input) => new Response(JSON.stringify(String(input).endsWith("/v1/sub2api/billing") ? {
+  globalThis.fetch = (async (input: RequestInfo | URL) => new Response(JSON.stringify(String(input).endsWith("/v1/sub2api/billing") ? {
     object: "sub2api.key_billing",
     schema_version: 1,
     effective_rate_multiplier: 0,
@@ -70,7 +70,7 @@ test("rejects a zero Sub2API billing multiplier as missing evidence", async () =
 
 test("does not misreport a finite New API key quota as account balance", async () => {
   const requests: string[] = [];
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     requests.push(url);
     if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
@@ -145,7 +145,7 @@ test("reads New API account balance with username/password login", async () => {
 
 test("deduplicates New API wallet login across concurrent account aliases", async () => {
   let loginCount = 0;
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
     if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
@@ -170,7 +170,7 @@ test("deduplicates New API wallet login across concurrent account aliases", asyn
 });
 
 test("falls back to a positive New API group ratio when the user ratio is zero", async () => {
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
     if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({
@@ -188,7 +188,7 @@ test("falls back to a positive New API group ratio when the user ratio is zero",
 });
 
 test("keeps the New API billing multiplier unknown when all observed ratios are zero", async () => {
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
     if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({
@@ -206,7 +206,7 @@ test("keeps the New API billing multiplier unknown when all observed ratios are 
 
 test("does not treat a fieldless unrestricted response as usage data", async () => {
   const requests: string[] = [];
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     requests.push(url);
     if (url.endsWith("/v1/usage?days=30")) return new Response(JSON.stringify({ mode: "unrestricted" }));
@@ -225,7 +225,7 @@ test("does not treat a fieldless unrestricted response as usage data", async () 
 });
 
 test("queries account billing for an unlimited New API token", async () => {
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/v1/usage?days=30")) return new Response("not found", { status: 404 });
     if (url.endsWith("/api/usage/token/")) {
@@ -249,7 +249,7 @@ test("queries account billing for an unlimited New API token", async () => {
 });
 
 test("parses current Sub2API unrestricted wallet and nested total usage", async () => {
-  globalThis.fetch = (async (input) => new Response(JSON.stringify(String(input).endsWith("/v1/sub2api/billing") ? {} : {
+  globalThis.fetch = (async (input: RequestInfo | URL) => new Response(JSON.stringify(String(input).endsWith("/v1/sub2api/billing") ? {} : {
     mode: "unrestricted",
     planName: "钱包余额",
     remaining: 88.5,
@@ -268,7 +268,7 @@ test("parses current Sub2API unrestricted wallet and nested total usage", async 
 });
 
 test("parses current Sub2API subscription windows", async () => {
-  globalThis.fetch = (async (input) => new Response(JSON.stringify(String(input).endsWith("/v1/sub2api/billing") ? {} : {
+  globalThis.fetch = (async (input: RequestInfo | URL) => new Response(JSON.stringify(String(input).endsWith("/v1/sub2api/billing") ? {} : {
     mode: "unrestricted",
     remaining: 70,
     unit: "USD",

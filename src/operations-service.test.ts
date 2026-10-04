@@ -94,7 +94,7 @@ test("automatic priority plans follow per-scope feature switches", () => {
         },
       },
     },
-  } as AppConfig;
+  } as unknown as AppConfig;
 
   expect(filterAutomaticPriorityPlan(plan, config)).toMatchObject({
     priorities: { "1": 101 },
@@ -138,7 +138,7 @@ test("V2 automatic priority plans persist only the requested scope", async () =>
       automationSafety,
       priorityWrite: { batchSize: 3 },
     },
-  } as AppConfig;
+  } as unknown as AppConfig;
   const service = new OperationsService(config, store, unusedReads);
   service.v2PriorityState = async () => ({
     queryDurationMs: 10,
