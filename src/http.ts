@@ -390,7 +390,7 @@ export function createHandler(
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality") {
         const platform = url.searchParams.get("platform") ?? "codex";
-        if (platform !== "codex" && platform !== "claude") return json({ ok: false, error: "platform must be codex or claude" }, 400);
+        if (platform !== "codex" && platform !== "claude" && platform !== "grok") return json({ ok: false, error: "platform must be codex, claude, or grok" }, 400);
         return json(await operations.poolQualitySummary(platform));
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality/errors") {
@@ -398,11 +398,11 @@ export function createHandler(
         const pageSize = positiveInteger(url.searchParams.get("pageSize"), 20);
         const filter = url.searchParams.get("filter") ?? "scoreable";
         const platform = url.searchParams.get("platform") ?? "codex";
-        if (pageSize === null || pageSize > 100 || !["scoreable", "excluded", "all"].includes(filter) || !["codex", "claude"].includes(platform)) {
+        if (pageSize === null || pageSize > 100 || !["scoreable", "excluded", "all"].includes(filter) || !["codex", "claude", "grok"].includes(platform)) {
           return json({ ok: false, error: "invalid pool quality error query" }, 400);
         }
         return json(await operations.poolQualityErrors({
-          platform: platform as "codex" | "claude",
+          platform: platform as "codex" | "claude" | "grok",
           page,
           pageSize,
           filter: filter as "scoreable" | "excluded" | "all",

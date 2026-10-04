@@ -296,10 +296,7 @@ export class UpstreamSchedulingV2Service {
       ? "codex"
       : scope.platform === "anthropic"
         ? "claude"
-        : null;
-    if (!qualityProfile) {
-      throw new UpstreamSchedulingV2Error(409, "platform_unsupported", `V2 暂不支持平台：${scope.platform}`);
-    }
+        : "grok";
     const accountIds = accounts.map((row) => Number(row.accountId));
     const [poolQuality, errors, priorityHistory, quota, usageRows, probeHistory] = await Promise.all([
       this.operations.poolQualitySummary(qualityProfile),

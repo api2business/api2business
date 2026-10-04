@@ -604,7 +604,7 @@ export class OperationsService {
     const usageById = new Map(usageRows.map((row) => [Number(row.account_id), object(row.last_success_result ?? row.result)]));
     const valuation = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
     const samples = [];
-    for (const platform of ["codex", "claude"] as const) {
+    for (const platform of ["codex", "claude", "grok"] as const) {
       const sample = await collectPoolQualitySample(this.config, this.reads, sampledAt, platform);
       sample.participation = sample.participation.map((item) => {
         const usage = usageById.get(item.accountId);
@@ -627,7 +627,7 @@ export class OperationsService {
     return { ok: true, sampledAt, profiles: samples.map((sample) => sample.platform), samples, valuesPrinted: false };
   }
 
-  async poolQualitySummary(platform: "codex" | "claude" = "codex") {
+  async poolQualitySummary(platform: "codex" | "claude" | "grok" = "codex") {
     const rollingWindowPoints = 100;
     const rows = await this.store.getPoolQualitySamplesByLimit(rollingWindowPoints * 2 - 1, platform) as Array<Record<string, unknown>>;
     const history = poolQualityHistory(rows, rollingWindowPoints).slice(-rollingWindowPoints);
@@ -637,7 +637,11 @@ export class OperationsService {
       recentCallLimit: 1000,
       rawCallCount: Number(latest?.raw_call_count ?? 0) || Number(latest?.observed_attempts ?? 0),
       platform,
-      groupIds: (platform === "claude" ? (this.config.sub2api.claudePriorityPlan ?? this.config.sub2api.priorityPlan) : this.config.sub2api.priorityPlan).eligibleGroupIds,
+      groupIds: (platform === "claude"
+        ? (this.config.sub2api.claudePriorityPlan ?? this.config.sub2api.priorityPlan)
+        : platform === "grok"
+          ? this.config.sub2api.grokPriorityPlan
+          : this.config.sub2api.priorityPlan).eligibleGroupIds,
       sampledAt: latest ? new Date(String(latest.sampled_at)).toISOString() : null,
       score: latest?.score == null ? null : Number(latest.score),
       rollingScore: history.at(-1)?.rollingScore ?? null,
@@ -678,7 +682,7 @@ export class OperationsService {
   }
 
   async poolQualityErrors(input: {
-    platform: "codex" | "claude";
+    platform: "codex" | "claude" | "grok";
     page: number;
     pageSize: number;
     filter: PoolQualityErrorFilter;

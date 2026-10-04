@@ -389,6 +389,17 @@ operations:
           priorityAutomation: false
           idleProbe: false
           upstreamWrite: false
+      grok:
+        enabled: true
+        platform: grok
+        eligibleGroupIds: [6]
+        features:
+          scoreRead: true
+          planRead: true
+          planWrite: false
+          priorityAutomation: false
+          idleProbe: false
+          upstreamWrite: false
   databaseUrlEnv: API2BUSINESS_DATABASE_URL
   ledgerYamlPath: /var/lib/api2business/sub2api-pool.yaml
   accountImportLedgerPath: /var/lib/api2business/ledger/account-import-costs.jsonl

@@ -136,7 +136,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   需要刷新时使用 `scores rank --calls <N> --over-api`。
 - V2 使用 `upstream-scheduling-v2 scopes|snapshot|plan --over-api`；作用域的
   `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和
-  `upstreamWrite` 只认 owning YAML。自动探活必须先完成同作用域的手动探活核验，再打开
+  `upstreamWrite` 只认 owning YAML；Codex、Claude、Grok 使用同一套平等作用域接口。
+  自动探活必须先完成同作用域的手动探活核验，再打开
   `features.idleProbe`。V2 是唯一调度运行面；旧全局页面、工作流、写入 API、CLI 命令和
   配置字段已经删除，配置加载会拒绝这些退役字段，禁止兼容复活。
 - 充值候选使用 `upstreams recharge-candidates --over-api`。

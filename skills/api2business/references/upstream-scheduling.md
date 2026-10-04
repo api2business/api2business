@@ -233,8 +233,11 @@
     分别保留，不把工作流 `running` 当作业务成功。
   - V2 页面复用既有质量、趋势、参与比例、账号、错误、调整、探活和调度组件；
     后台对账结果只作为 CLI/API 证据，不投影成页面事实。
-  - Claude 和 Codex 是平等作用域。Claude 的平台、分组、成本、评分、优先级和
-    探活是否启用均以 Claude 作用域开关为准，不把 Grok 或 Codex 数据投影到 Claude。
+  - Codex、Claude 和 Grok 是平等作用域。每个作用域的平台、分组、成本、评分、优先级、
+    自动调度和探活是否启用均以该作用域开关为准，不把其他作用域数据互相投影。
+  - Grok 作用域使用 `platform: grok` 和 `sub2api.grokPriorityPlan.eligibleGroupIds`，
+    可以独立打开 `features.priorityAutomation`；Grok 不启用探活时必须保持
+    `features.idleProbe: false`，其快照和池质量读取不创建探活记录。
   - V2 的间隔和样本档位从 `scopes`、`snapshot` 回读；旧 priority automation 和
     priority plan 命令不再存在。
   - V2 首屏读取先返回按作用域持久化的读模型缓存；缓存未过

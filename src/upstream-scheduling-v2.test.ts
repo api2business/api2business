@@ -38,6 +38,16 @@ function fixture(usageRows = [{
     score: 88,
     grade: "B",
   };
+  const grokRow = {
+    ...row,
+    accountId: 303,
+    accountName: "grok-a",
+    platform: "grok",
+    groupIds: [6],
+    groupNames: ["Grok"],
+    score: 86,
+    grade: "B",
+  };
   const calls = { dispatch: 0, save: 0 };
   const dispatcher = {
     dispatch: async () => {
@@ -47,14 +57,16 @@ function fixture(usageRows = [{
       status: "ready",
       recentCallLimit: 1000,
       refreshedAt: "2026-10-03T00:00:00.000Z",
-      accounts: [row, claudeRow],
+        accounts: [row, claudeRow, grokRow],
       };
     },
   } as never;
   const operations = {
     poolQualitySummary: async (platform: string) => platform === "claude"
       ? ({ ok: true, platform: "claude", groupIds: [119], score: 88, grade: "B" })
-      : ({ ok: true, platform: "codex", groupIds: [2, 3], score: 91, grade: "A" }),
+      : platform === "grok"
+        ? ({ ok: true, platform: "grok", groupIds: [6], score: 86, grade: "B" })
+        : ({ ok: true, platform: "codex", groupIds: [2, 3], score: 91, grade: "A" }),
     poolQualityErrors: async () => ({ ok: true, total: 0, rows: [] }),
     priorityHistory: async () => ({ ok: true, records: [] }),
     getPriorityAutomation: async () => ({ ok: true, automation: { enabled: false } }),
@@ -64,7 +76,7 @@ function fixture(usageRows = [{
     getReadModelSnapshot: async () => null,
     saveReadModelSnapshot: async () => { calls.save += 1; },
   };
-  return { config, row, claudeRow, calls, operations, service: new UpstreamSchedulingV2Service(config, dispatcher, operations as never) };
+  return { config, row, claudeRow, grokRow, calls, operations, service: new UpstreamSchedulingV2Service(config, dispatcher, operations as never) };
 }
 
 describe("upstream scheduling v2", () => {
@@ -150,6 +162,20 @@ describe("upstream scheduling v2", () => {
     const plan = await service.plan("claude");
     expect(plan.apply).toEqual({ enabled: false, mutation: false, reason: "claude.features.planWrite=false" });
     expect(plan.scope).toBe("claude");
+  });
+
+  test("projects Grok as an independent scope without probe history", async () => {
+    const { service, grokRow } = fixture();
+    const snapshot = await service.snapshot("grok");
+    expect(snapshot.scope).toBe("grok");
+    expect(snapshot.platform).toBe("grok");
+    expect(snapshot.data.accounts).toHaveLength(1);
+    expect(snapshot.data.accounts[0]).toMatchObject(grokRow);
+    expect(snapshot.data.poolQuality).toMatchObject({ platform: "grok", groupIds: [6] });
+    expect(snapshot.data.probeHistory.records).toHaveLength(0);
+    expect(snapshot.readOnly).toBeTrue();
+    const plan = await service.plan("grok");
+    expect(plan.apply).toEqual({ enabled: false, mutation: false, reason: "grok.features.planWrite=false" });
   });
 
   test("serves a warm V2 snapshot from the read-model cache", async () => {

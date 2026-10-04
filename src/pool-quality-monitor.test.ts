@@ -113,6 +113,25 @@ test("pool quality uses the Claude whitelist and platform predicate", async () =
   expect(poolQualitySql).toContain("CASE $4::text WHEN 'codex' THEN 'openai' WHEN 'claude' THEN 'anthropic'");
 });
 
+test("pool quality uses the Grok whitelist and platform predicate", async () => {
+  let parameters: unknown[] | null = null;
+  const reads = {
+    async query(input: { parameters: unknown[] }) {
+      parameters = input.parameters;
+      return {
+        rows: [], cached: false, deduplicated: false, queueDurationMs: 0, queryDurationMs: 0,
+        totalDurationMs: 0, queryStartedAt: new Date().toISOString(), queryCompletedAt: new Date().toISOString(),
+      };
+    },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+  const config = loadConfig("config/api2business.yaml");
+  const sample = await collectPoolQualitySample(config, reads, "2026-08-03T00:00:00.000Z", "grok");
+  expect(parameters).toEqual([1000, "6", "2026-08-03T00:00:00.000Z", "grok"]);
+  expect(sample.platform).toBe("grok");
+  expect(poolQualitySql).toContain("CASE $4::text WHEN 'codex' THEN 'openai' WHEN 'claude' THEN 'anthropic'");
+});
+
 test("pool quality excludes every monitor-user key without changing account scoring", () => {
   expect(poolQualitySql).toContain("owner.email = 'monitor-user@sub2api.platform-infra.local'");
   expect(poolQualitySql).not.toContain("k.name LIKE");
