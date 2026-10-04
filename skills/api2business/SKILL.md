@@ -132,6 +132,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   [上游与调度](references/upstream-scheduling.md)。
 - 该参考同时定义 API-key 切号模板的平台边界、成本补齐、评分分层和 V2 迁移；本技能只
   保留入口和命令，不复制第二套算法或状态机。
+- TTFT 只认非空 `first_token_ms`；探活必须使用流式 Responses，存在一个有效首 Token
+  样本即可计算并参与评分，没有有效样本时才使用 prior；完整口径见上述参考。
 - 池级质量调查使用 `scores pool-quality --over-api`，账号评分快照使用 `scores get`，
   需要刷新时使用 `scores rank --calls <N> --over-api`。
 - V2 使用 `upstream-scheduling-v2 scopes|snapshot|plan --over-api`；作用域的

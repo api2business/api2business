@@ -425,6 +425,8 @@
 
 - 新增或调整作用域时先核对 owning YAML 的独立功能开关，再检查 V2 状态、业务记录和
   作用域范围；禁止通过旧全局状态推断当前作用域。
+- TTFT 采样使用流式 Responses；评分只把非空 `first_token_ms` 视为首 Token 证据，至少
+  一个有效样本即可计算 P95 并参与延迟分，没有证据才回退 YAML prior。
 - 手动探活先验证 HTTP 结果、模型白名单、`ordinaryLogRecorded` 和轮次汇总，成功后才
   打开该作用域的 `features.idleProbe`。
 - 探活模型从作用域平台白名单动态选择；Codex/OpenAI 固定按 Terra 后 Sol，Grok 和其他
@@ -442,6 +444,9 @@
 
 ### 失败或误判模式
 
+- 非流式探活只能产生 duration，不能产生 `first_token_ms`；评分再叠加 `stream` 或固定最小
+  样本门禁会把已有首 Token 证据误判为缺失。修复时先改采样请求，再让 `first_token_ms`
+  成为聚合唯一证据，并保留无证据时的 prior 语义。
 - 不用旧数据库里的 `combined` 或历史标签推断当前作用域；作用域由 YAML、平台和分组共同决定。
 - 不把 Temporal 工作流 `running`、传输层 200、作业创建成功或截图文件存在当作业务成功；
   必须等待探活轮次终态、写后回读和账号范围核验。
