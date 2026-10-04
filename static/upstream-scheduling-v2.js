@@ -92,6 +92,17 @@ function renderQuota(summary = {}, accounts = [], usage = []) {
 }
 
 function filteredAccounts() { const needle = state.filter.trim().toLowerCase(); return state.accounts.filter((row) => !needle || [row.accountName, row.accountId, row.currentStatus, row.status, row.groupName, ...(row.groupNames ?? [])].join(' ').toLowerCase().includes(needle)) }
+function accountCost(row) {
+  const detected = Number(row.detectedCostRateCnyPerApiUsd)
+  if (Number.isFinite(detected) && detected > 0) return detected
+  const configured = Number(row.usage?.costRateCnyPerApiUsd)
+  return Number.isFinite(configured) && configured > 0 ? configured : null
+}
+function accountCostSource(row) {
+  if (row.costSource === 'detected' || (Number.isFinite(Number(row.detectedCostRateCnyPerApiUsd)) && Number(row.detectedCostRateCnyPerApiUsd) > 0)) return '探测'
+  if (row.costSource === 'manual' || (Number.isFinite(Number(row.usage?.costRateCnyPerApiUsd)) && Number(row.usage?.costRateCnyPerApiUsd) > 0)) return '手工'
+  return '成本未知'
+}
 function accountSortValue(row, key) {
   return ({
     accountName: row.accountName ?? row.accountId,
@@ -99,7 +110,7 @@ function accountSortValue(row, key) {
     score: row.score,
     priority: row.priority,
     balance: row.quota?.remaining,
-    cost: row.usage?.costRateCnyPerApiUsd,
+    cost: accountCost(row),
     output: row.usage?.apiAmountUsd,
     sample: row.latestSampleAt,
     failure: row.failureRate,
@@ -124,7 +135,10 @@ function renderAccounts() {
       : row.quotaCacheStatus === 'unlimited'
         ? `额度缓存 · 不限额 · ${escapeHtml(quotaSample.label)}`
         : row.quotaCacheStatus === 'unavailable' ? '额度缓存不可用' : '额度缓存缺失'
-    return `<tr><td><strong>${escapeHtml(row.accountName ?? row.accountId)}</strong><small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td>${row.usage?.costRateCnyPerApiUsd == null ? '—' : `¥${number(row.usage.costRateCnyPerApiUsd, 4)}/刀`}</td><td>${usd(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td><td>${percent(row.failureRate)}<small>${number(attempts)} 次尝试</small></td><td>${row.ttftP95Ms == null ? '—' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`}</td><td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
+    const cost = accountCost(row)
+    const costSource = accountCostSource(row)
+    const costTitle = row.costProbe?.source ? `${costSource} · ${row.costProbe.source}` : costSource
+    return `<tr><td><strong>${escapeHtml(row.accountName ?? row.accountId)}</strong><small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td title="${escapeHtml(costTitle)}">${cost == null ? '—' : `¥${number(cost, 4)}/刀`}<small>${escapeHtml(costSource)}</small></td><td>${usd(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td><td>${percent(row.failureRate)}<small>${number(attempts)} 次尝试</small></td><td>${row.ttftP95Ms == null ? '—' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`}</td><td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
   }).join('') : '<tr><td colspan="13" class="empty">当前作用域没有评分账号</td></tr>'
   updateTableSortHeaders($('#v2-account-table'), state.accountSort)
   $('#v2-account-page').textContent = rows.length ? `${state.accountPage} / ${pages} · 共 ${number(rows.length)} 条` : '0 条'; $('#v2-account-prev').disabled = state.accountPage <= 1; $('#v2-account-next').disabled = state.accountPage >= pages

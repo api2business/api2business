@@ -2,6 +2,11 @@ import type { AppConfig, UpstreamSchedulingV2Scope } from "./config";
 import type { ApplicationDispatcher } from "./dispatcher";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
 import type { OperationsService } from "./operations-service";
+import {
+  normalizeUpstreamWallet,
+  readUpstreamValuationPolicy,
+  upstreamBalanceRateByWallet,
+} from "./upstream-valuation";
 
 type Row = Record<string, unknown>;
 
@@ -35,6 +40,50 @@ function rowKey(row: Row): string {
 
 function cachedUsageResult(row: Row): Row {
   return object(row.last_success_result ?? row.result);
+}
+
+function enrichAccountCostEvidence(
+  accounts: Row[],
+  usageRows: unknown[],
+  config: AppConfig,
+): Row[] {
+  const valuation = readUpstreamValuationPolicy(config.operations.ledgerYamlPath);
+  const usageByAccount = new Map<number, Row>();
+  for (const row of records(usageRows)) {
+    const accountId = Number(row.account_id ?? row.accountId);
+    if (Number.isSafeInteger(accountId) && accountId > 0) usageByAccount.set(accountId, cachedUsageResult(row));
+  }
+  return accounts.map((account) => {
+    const usage = usageByAccount.get(Number(account.accountId));
+    const multiplier = Number(object(usage?.billingMultiplier).value);
+    const detected = Number.isFinite(multiplier) && multiplier > 0 && usage
+      ? multiplier * upstreamBalanceRateByWallet(
+        normalizeUpstreamWallet(usage.baseUrl ?? account.accountName),
+        valuation.defaultCnyPerApiUsd,
+        valuation.walletCnyPerApiUsd,
+      )
+      : null;
+    const configured = typeof object(account.usage).costRateCnyPerApiUsd === "number"
+      && Number.isFinite(Number(object(account.usage).costRateCnyPerApiUsd))
+      && Number(object(account.usage).costRateCnyPerApiUsd) > 0
+      ? Number(object(account.usage).costRateCnyPerApiUsd)
+      : null;
+    const effective = detected ?? configured;
+    const billingMultiplier = object(usage?.billingMultiplier);
+    return {
+      ...account,
+      configuredCostRateCnyPerApiUsd: configured,
+      detectedCostRateCnyPerApiUsd: detected,
+      effectiveCostRateCnyPerApiUsd: effective,
+      costSource: detected !== null ? "detected" : configured !== null ? "manual" : null,
+      costProbe: detected === null ? null : {
+        source: billingMultiplier.source == null ? "unknown" : String(billingMultiplier.source),
+        scope: billingMultiplier.scope == null ? null : String(billingMultiplier.scope),
+        observedAt: billingMultiplier.observedAt == null ? null : String(billingMultiplier.observedAt),
+        queriedAt: usage?.queriedAt == null ? null : String(usage.queriedAt),
+      },
+    };
+  });
 }
 
 function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[]) {
@@ -308,7 +357,8 @@ export class UpstreamSchedulingV2Service {
         ? this.operations.idleProbeHistory(1, 10, scopeName)
         : Promise.resolve({ records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
     ]);
-    const quotaProjection = enrichAccountsWithQuotaCache(accounts, usageRows);
+    const costAccounts = enrichAccountCostEvidence(accounts, usageRows, this.config);
+    const quotaProjection = enrichAccountsWithQuotaCache(costAccounts, usageRows);
     return {
       scoreSnapshot,
       accounts: quotaProjection.accounts,

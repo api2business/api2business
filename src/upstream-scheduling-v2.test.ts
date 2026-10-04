@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { loadConfig } from "./config";
 import { UpstreamSchedulingV2Service } from "./upstream-scheduling-v2";
 
@@ -8,6 +11,8 @@ function fixture(usageRows = [{
   last_success_result: { ok: true, quota: { unit: "USD", remaining: 12.5, limit: 20, used: 7.5, unlimited: false } },
 }]) {
   const config = loadConfig("config/api2business.example.yaml");
+  config.operations.ledgerYamlPath = join(mkdtempSync(join(tmpdir(), "api2business-v2-")), "ledger.yaml");
+  writeFileSync(config.operations.ledgerYamlPath, "profit:\n  upstreamBalanceCnyPerApiUsd: 1\n", { mode: 0o600 });
   const row = {
     accountId: 101,
     accountName: "codex-a",
@@ -101,6 +106,33 @@ describe("upstream scheduling v2", () => {
     expect(snapshot.reconciliation.status).toBe("matched");
     expect(snapshot.reconciliation.checks.find((check) => check.name === "write-boundary")?.status).toBe("matched");
     expect(snapshot.readOnly).toBeTrue();
+  });
+
+  test("prefers cached upstream probe cost and exposes its source", async () => {
+    const { service } = fixture([{
+      account_id: 101,
+      last_success_at: "2026-10-03T00:01:00.000Z",
+      last_success_result: {
+        ok: true,
+        baseUrl: "https://example.test",
+        queriedAt: "2026-10-03T00:00:59.000Z",
+        quota: { unit: "USD", remaining: 12.5 },
+        billingMultiplier: {
+          value: 0.35,
+          source: "sub2api-live",
+          scope: "effective",
+          observedAt: "2026-10-03T00:00:58.000Z",
+        },
+      },
+    }]);
+    const snapshot = await service.snapshot("codex");
+    expect(snapshot.data.accounts[0]).toMatchObject({
+      configuredCostRateCnyPerApiUsd: 0.2,
+      detectedCostRateCnyPerApiUsd: 0.35,
+      effectiveCostRateCnyPerApiUsd: 0.35,
+      costSource: "detected",
+      costProbe: { source: "sub2api-live", scope: "effective" },
+    });
   });
 
   test("generates a plan without enabling apply", async () => {
