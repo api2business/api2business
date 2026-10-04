@@ -216,6 +216,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 进度与日志：`upstreams benchmark-status --id <benchmark-run-id> --over-api`；
   - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api`；
   - 评测只复用持久化探活专用 API Key，不读取供应商原始 Key，也不轮换探活 Key。
+- 上游模型同步使用 `upstreams models sync --accounts <id-or-range,...> --confirm --over-api`；
+  CLI 先读取各账号上游 `/v1/models`，再仅写回 `credentials.model_mapping`，保留原凭据，最后回读校验。
 - 评分与产出分母继续使用 `total_cost`。
 - 额度监控的供应商实际支出、余额缓存、缺失处理和首屏测量唯一见
   [额度监控](references/quota-monitoring.md)。

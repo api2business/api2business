@@ -116,10 +116,46 @@ export class Sub2ApiRuntimeService {
       const result = await this.client.mutate<Record<string, unknown>>(
         "POST", `/admin/accounts/${accountId}/models/sync-upstream`, undefined, undefined, timeoutMs,
       );
-      const models = Array.isArray(result.models) ? result.models : [];
-      results.push({ accountId, modelCount: models.length, models });
+      const models = [...new Set(
+        (Array.isArray(result.models) ? result.models : [])
+          .filter((model): model is string => typeof model === "string")
+          .map((model) => model.trim())
+          .filter(Boolean),
+      )].sort((left, right) => left.localeCompare(right));
+      if (models.length === 0) {
+        throw new Error(`upstream model sync returned no models for account ${accountId}`);
+      }
+
+      // Sub2API's sync-upstream endpoint is a read operation despite its name:
+      // it fetches the live list but does not persist model_mapping. Write only
+      // the non-sensitive mapping field; the native PUT path merges it with the
+      // existing credentials and preserves API keys/tokens.
+      const modelMapping = Object.fromEntries(models.map((model) => [model, model]));
+      await this.client.mutate(
+        "PUT", `/admin/accounts/${accountId}`,
+        { credentials: { model_mapping: modelMapping } }, undefined, timeoutMs,
+      );
+
+      // Read back the redacted account representation. model_mapping is a
+      // non-sensitive credential field and is returned by the admin DTO, so a
+      // missing key is observable without exposing the upstream credential.
+      const persisted = await this.client.getAccount(accountId, timeoutMs);
+      const persistedCredentials = record(persisted?.credentials) ?? {};
+      const persistedMapping = record(persistedCredentials.model_mapping) ?? {};
+      const missingModels = models.filter((model) => persistedMapping[model] !== model);
+      if (missingModels.length > 0) {
+        throw new Error(`upstream model mapping verification failed for account ${accountId}: ${missingModels.join(", ")}`);
+      }
+
+      results.push({
+        accountId,
+        modelCount: models.length,
+        models,
+        persisted: true,
+        persistedModelCount: Object.keys(persistedMapping).length,
+      });
     }
-    return { ok: true, accountIds: ids, results, valuesPrinted: true };
+    return { ok: true, accountIds: ids, results, persisted: true, valuesPrinted: true };
   }
 
   async importAccounts(input: {
