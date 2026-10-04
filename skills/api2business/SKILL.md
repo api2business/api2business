@@ -217,7 +217,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api`；
   - 评测只复用持久化探活专用 API Key，不读取供应商原始 Key，也不轮换探活 Key。
 - 上游模型同步使用 `upstreams models sync --accounts <id-or-range,...> --confirm --over-api`；
-  CLI 先读取各账号上游 `/v1/models`，再仅写回 `credentials.model_mapping`，保留原凭据，最后回读校验。
+  CLI 先读取各账号上游 `/v1/models`，再通过 Sub2API 原生
+  `POST /admin/accounts/bulk-update` 只合并 `credentials.model_mapping`。
+  禁止用单账号 `PUT /admin/accounts/:id` 写回；该接口的不完整凭据对象会丢弃非敏感的
+  `base_url` 等字段。读取、写回和失败语义唯一见
+  [上游与调度](references/upstream-scheduling.md)。
 - 评分与产出分母继续使用 `total_cost`。
 - 额度监控的供应商实际支出、余额缓存、缺失处理和首屏测量唯一见
   [额度监控](references/quota-monitoring.md)。

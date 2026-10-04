@@ -2,20 +2,19 @@ import { expect, test } from "bun:test";
 import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { Sub2ApiClient } from "./sub2api-client";
 
-test("syncs upstream models, persists model_mapping, and verifies the redacted account", async () => {
+test("syncs upstream models through native bulk merge without replacing account credentials", async () => {
   const calls: Array<{ method: string; path: string; body?: Record<string, unknown> }> = [];
+  let mapping: Record<string, string> = {};
   const client = {
     mutate: async (method: string, path: string, body?: Record<string, unknown>) => {
       calls.push({ method, path, body });
       if (path.endsWith("/models/sync-upstream")) {
         return { models: ["claude-sonnet-5", " claude-haiku-4-5-20251001 ", "claude-sonnet-5"] };
       }
-      return { ok: true };
+      mapping = ((body?.credentials as Record<string, unknown>).model_mapping ?? {}) as Record<string, string>;
+      return { success: 1, failed: 0, success_ids: [1520] };
     },
-    getAccount: async () => ({ credentials: { model_mapping: {
-      "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
-      "claude-sonnet-5": "claude-sonnet-5",
-    } } }),
+    getAccount: async () => ({ credentials: { base_url: "https://hyueapi.com", pool_mode: false, model_mapping: mapping }, credentials_status: { has_api_key: true } }),
   } as unknown as Sub2ApiClient;
 
   const runtime = new Sub2ApiRuntimeService(client);
@@ -23,14 +22,17 @@ test("syncs upstream models, persists model_mapping, and verifies the redacted a
 
   expect(calls.map(({ method, path }) => ({ method, path }))).toEqual([
     { method: "POST", path: "/admin/accounts/1520/models/sync-upstream" },
-    { method: "PUT", path: "/admin/accounts/1520" },
+    { method: "POST", path: "/admin/accounts/bulk-update" },
   ]);
-  expect(calls[1]?.body).toEqual({ credentials: { model_mapping: {
-    "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
-    "claude-sonnet-5": "claude-sonnet-5",
-  } } });
-  expect(output).toEqual(expect.objectContaining({ ok: true, persisted: true }));
-  expect(output.results).toEqual([expect.objectContaining({ accountId: 1520, modelCount: 2, persisted: true })]);
+  expect(calls[1]?.body).toEqual({
+    account_ids: [1520],
+    credentials: { model_mapping: {
+      "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
+      "claude-sonnet-5": "claude-sonnet-5",
+    } },
+  });
+  expect(output).toEqual(expect.objectContaining({ ok: true, persisted: true, writeMode: "native-bulk-merge" }));
+  expect(output.results).toEqual([expect.objectContaining({ accountId: 1520, modelCount: 2, persisted: true, writeMode: "native-bulk-merge", persistedModelCount: 2 })]);
 });
 
 test("imports Grok OAuth through native batch create and preserves Grok fields", async () => {

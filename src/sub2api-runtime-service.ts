@@ -43,6 +43,13 @@ function record(value: unknown): Row | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const item = record(value);
+  if (item) return `{${Object.keys(item).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(item[key])}`).join(",")}}`;
+  return JSON.stringify(value) ?? "null";
+}
+
 function positiveInteger(value: unknown): number | null {
   const number = Number(value);
   return Number.isSafeInteger(number) && number > 0 ? number : null;
@@ -113,6 +120,10 @@ export class Sub2ApiRuntimeService {
     }
     const results: Array<Record<string, unknown>> = [];
     for (const accountId of ids) {
+      const before = await this.client.getAccount(accountId, timeoutMs);
+      const beforeCredentials = record(before?.credentials) ?? {};
+      const beforeStableCredentials = { ...beforeCredentials };
+      delete beforeStableCredentials.model_mapping;
       const result = await this.client.mutate<Record<string, unknown>>(
         "POST", `/admin/accounts/${accountId}/models/sync-upstream`, undefined, undefined, timeoutMs,
       );
@@ -126,22 +137,33 @@ export class Sub2ApiRuntimeService {
         throw new Error(`upstream model sync returned no models for account ${accountId}`);
       }
 
-      // Sub2API's sync-upstream endpoint is a read operation despite its name:
-      // it fetches the live list but does not persist model_mapping. Write only
-      // the non-sensitive mapping field; the native PUT path merges it with the
-      // existing credentials and preserves API keys/tokens.
-      const modelMapping = Object.fromEntries(models.map((model) => [model, model]));
-      await this.client.mutate(
-        "PUT", `/admin/accounts/${accountId}`,
-        { credentials: { model_mapping: modelMapping } }, undefined, timeoutMs,
+      // The native single-account PUT treats credentials as a partial merge only
+      // for sensitive keys. Non-sensitive keys such as base_url would be dropped.
+      // Native bulk-update uses JSONB top-level merge, so sending only
+      // model_mapping changes exactly that field and preserves every other
+      // credential and account column.
+      const bulkResult = await this.client.mutate<Record<string, unknown>>(
+        "POST", "/admin/accounts/bulk-update",
+        { account_ids: [accountId], credentials: { model_mapping: Object.fromEntries(models.map((model) => [model, model])) } },
+        undefined, timeoutMs,
       );
+      const failed = Number(bulkResult.failed ?? 0);
+      const successIds = Array.isArray(bulkResult.success_ids)
+        ? bulkResult.success_ids.map(Number).filter(Number.isSafeInteger)
+        : [];
+      const success = Number(bulkResult.success ?? (successIds.includes(accountId) ? 1 : 0));
+      if (failed > 0 || (successIds.length > 0 ? !successIds.includes(accountId) : success < 1)) {
+        throw new Error(`upstream model mapping update failed for account ${accountId}`);
+      }
 
-      // Read back the redacted account representation. model_mapping is a
-      // non-sensitive credential field and is returned by the admin DTO, so a
-      // missing key is observable without exposing the upstream credential.
-      const persisted = await this.client.getAccount(accountId, timeoutMs);
-      const persistedCredentials = record(persisted?.credentials) ?? {};
-      const persistedMapping = record(persistedCredentials.model_mapping) ?? {};
+      const after = await this.client.getAccount(accountId, timeoutMs);
+      const afterCredentials = record(after?.credentials) ?? {};
+      const afterStableCredentials = { ...afterCredentials };
+      delete afterStableCredentials.model_mapping;
+      if (canonicalJson(beforeStableCredentials) !== canonicalJson(afterStableCredentials)) {
+        throw new Error(`upstream model mapping update changed non-mapping credentials for account ${accountId}`);
+      }
+      const persistedMapping = record(afterCredentials.model_mapping) ?? {};
       const missingModels = models.filter((model) => persistedMapping[model] !== model);
       if (missingModels.length > 0) {
         throw new Error(`upstream model mapping verification failed for account ${accountId}: ${missingModels.join(", ")}`);
@@ -152,10 +174,11 @@ export class Sub2ApiRuntimeService {
         modelCount: models.length,
         models,
         persisted: true,
+        writeMode: "native-bulk-merge",
         persistedModelCount: Object.keys(persistedMapping).length,
       });
     }
-    return { ok: true, accountIds: ids, results, persisted: true, valuesPrinted: true };
+    return { ok: true, accountIds: ids, results, persisted: true, writeMode: "native-bulk-merge", valuesPrinted: true };
   }
 
   async importAccounts(input: {

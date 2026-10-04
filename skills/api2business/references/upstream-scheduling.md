@@ -33,6 +33,17 @@
   - 已启用探活作用域已有持久化且 ready 的私有绑定直接复用，恢复任务不得重复创建或完整
     校验探活资源；
   - URL、后缀、分组、Proxy、并发和探活绑定均已对齐的恢复请求走幂等快速返回，不重复 mutation、探测或缓存写入；
+- 上游模型同步的写入边界：
+  - `POST /admin/accounts/:id/models/sync-upstream` 只读取该账号上游的 `/v1/models`，本身不持久化映射；
+  - 读取成功后，只能调用 Sub2API 原生 `POST /admin/accounts/bulk-update`，提交
+    `{account_ids:[id], credentials:{model_mapping:<同名映射>}}`；
+  - `bulk-update` 通过 JSONB 顶层合并，只替换 `model_mapping`，保留 `base_url`、API key/token、
+    header、池模式及其他账号列；
+  - 禁止用 `PUT /admin/accounts/:id` 提交不完整 credentials。该路径只对敏感键做保留，
+    会删除未随请求提交的非敏感字段，曾导致自定义上游 `base_url` 回退到平台默认地址；
+  - 每个账号先完成读取，再独立执行一次 bulk merge；空模型、读取失败或写入失败立即停止该账号，
+    不清空旧映射，也不扩展到其他账号；
+  - 完成后用单账号原生读取核对 `base_url`、key 存在状态、平台和映射；不得用整组截图代替回读。
 - 新增上游的收口顺序：
   - 创建命令带上全部已解析的业务分组。
   - 创建作业完成后，用稳定账号 ID 回读倍率。
