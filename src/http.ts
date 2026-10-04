@@ -21,6 +21,7 @@ import {
 import { parseAlipayRevenueWindow } from "./alipay-revenue-database";
 import { parseCompletedProfitDay } from "./daily-profit-facts";
 import { normalizeExternalAccountCosts } from "./account-import-economics";
+import { projectSharedWalletUsageRows } from "./upstream-wallet";
 import { createHash } from "node:crypto";
 import {
   apiKeyAuthorized,
@@ -360,11 +361,12 @@ export function createHandler(
         const selector = url.searchParams.get("accountIds");
         const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
         const rows = await operations.getUpstreamUsageCache(accountIds) as Array<Record<string, unknown>>;
+        const projected = projectSharedWalletUsageRows(rows, config.sub2api.newApiCredentials);
         return json({
           ok: true,
-          results: rows.map((row) => row.last_success_result ?? row.result),
+          results: projected.results,
           cachedAt: rows.map((row) => row.queried_at),
-          lastSuccessfulResults: rows.map((row) => row.last_success_result),
+          lastSuccessfulResults: projected.lastSuccessfulResults,
           lastSuccessfulAt: rows.map((row) => row.last_success_at),
         });
       }

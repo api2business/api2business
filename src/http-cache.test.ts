@@ -41,8 +41,8 @@ test("persistent snapshot APIs bypass the generic response cache", () => {
   }
 });
 
-test("ordinary API reads keep the generic response cache", () => {
-  expect(isApiResponseCacheable(get("/api/upstreams"))).toBeTrue();
+test("ordinary API reads keep the generic response cache while upstream reads stay live", () => {
+  expect(isApiResponseCacheable(get("/api/upstreams"))).toBeFalse();
   expect(isApiResponseCacheable(get("/api/operations/ledger"))).toBeTrue();
   expect(isApiResponseCacheable(get("/api/ranking"))).toBeTrue();
 });
