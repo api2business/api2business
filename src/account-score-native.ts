@@ -234,7 +234,9 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
   const accountRows = input.accounts.map((account): Row => {
     const usages = usageByAccount.get(account.id) ?? [];
     const streams = usages.filter((row) => row.stream);
-    const ttft = streams.flatMap((row) => row.first_token_ms === null ? [] : [row.first_token_ms]);
+    // first_token_ms is the authoritative sample marker. Keep it even when
+    // an older adapter omitted the stream flag on the usage row.
+    const ttft = usages.flatMap((row) => row.first_token_ms === null ? [] : [row.first_token_ms]);
     const durations = usages.flatMap((row) => row.duration_ms === null ? [] : [row.duration_ms]);
     const scoreable = scoreableByAccount.get(account.id) ?? new Set<string>();
     const failed = new Set([...(failover.get(account.id) ?? []), ...(forward.get(account.id) ?? []), ...scoreable]);
@@ -244,7 +246,7 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
     const failureRate = attempts > 0 ? Math.round(failureRequests / attempts * 1_000_000) / 1_000_000 : null;
     const ttftP95Ms = percentile(ttft, 0.95);
     const reliability = failureRate === null ? null : Math.round(60 * (1 - Math.min(Math.max(failureRate, 0), 0.2) / 0.2) * 100) / 100;
-    const latencyObserved = ttft.length >= 5 && ttftP95Ms !== null;
+    const latencyObserved = ttft.length > 0 && ttftP95Ms !== null;
     const latency = !latencyObserved
       ? 6.25
       : Math.round(25 * (1 - Math.min(Math.max(ttftP95Ms - 10_000, 0), 170_000) / 170_000) * 100) / 100;
@@ -255,6 +257,8 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
     const availability = currentlyAvailable ? 15 : account.status === "active" ? 8 : 0;
     const availableWeight = (reliability === null ? 0 : 60) + 25 + 15;
     const score = attempts > 0 ? Math.round(((reliability ?? 0) + (latency ?? 0) + availability) / availableWeight * 1_000) / 10 : null;
+    // scoreComparable remains an evidence-quality label; TTFT itself is
+    // already included above when at least one sample exists.
     const comparable = attempts >= 10 && ttft.length >= 5;
     const accountGrade = grade(score);
     const failoverIds = failover.get(account.id) ?? new Set<string>();
@@ -276,7 +280,7 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
       ...(failureRate !== null && failureRate >= 0.1 ? ["failure-rate>=10%"] : failureRate !== null && failureRate >= 0.03 ? ["failure-rate>=3%"] : []),
       ...(failoverIds.size > 0 ? ["upstream-failover-triggered"] : []),
       ...(!currentlyAvailable ? ["currently-unavailable"] : []),
-      ...(ttft.length < 5 ? ["ttft-evidence-insufficient"] : []),
+      ...(ttft.length === 0 ? ["ttft-evidence-insufficient"] : []),
       ...(attempts < 10 ? ["request-evidence-insufficient"] : []),
     ];
     return {
@@ -299,7 +303,7 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
       failureRate,
       streamSuccessRequests: streams.length,
       firstTokenSamples: ttft.length,
-      firstTokenCoverage: streams.length > 0 ? Math.round(ttft.length / streams.length * 1_000_000) / 1_000_000 : null,
+      firstTokenCoverage: usages.length > 0 ? Math.round(ttft.length / usages.length * 1_000_000) / 1_000_000 : null,
       ttftP50Ms: percentile(ttft, 0.5),
       ttftP95Ms,
       ttftP99Ms: percentile(ttft, 0.99),

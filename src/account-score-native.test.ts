@@ -82,6 +82,29 @@ describe("aggregateNativeGroupScore", () => {
     expect(result.group.maxCapacity).toBe(10);
   });
 
+  test("uses a first-token sample even when an older usage adapter omitted stream", () => {
+    const result = aggregateNativeGroupScore({
+      group: { id: 2, name: "pool", platform: "openai", status: "active" },
+      accounts: [{ id: 15, name: "legacy-adapter", platform: "openai", status: "active", schedulable: true, priority: 1 }],
+      usage: [{
+        id: 1, account_id: 15, group_id: 2, model: "gpt-test", stream: false,
+        input_tokens: 10, output_tokens: 5, actual_cost: 0.1, duration_ms: 9000,
+        first_token_ms: 4000, created_at: "2026-07-17T09:00:00Z",
+      }],
+      requestErrors: [],
+      systemLogs: [],
+      overview: {},
+      availability: availableOps,
+      concurrency: availableOps,
+    });
+
+    expect(result.accounts[0]).toMatchObject({
+      firstTokenSamples: 1,
+      ttftP95Ms: 4000,
+      scoreComponents: { latencyEvidence: "observed" },
+    });
+  });
+
   test("excludes customer billing failures from account quality", () => {
     const result = aggregateNativeGroupScore({
       group: { id: 2, name: "pool", platform: "openai", status: "active" },

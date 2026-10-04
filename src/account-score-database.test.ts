@@ -27,6 +27,8 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.name = $3::text");
   expect(recentAccountAggregateQuery).toContain("AND e.kind = 'usage'");
+  expect(recentAccountAggregateQuery).toContain("e.kind = 'usage' AND e.first_token_ms IS NOT NULL");
+  expect(recentAccountAggregateQuery).not.toContain("e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL");
   expect(recentAccountAggregateQuery).toContain("e.client_status_code >= 400");
   expect(recentAccountAggregateQuery).toContain("o.status_code::int AS client_status_code");
   expect(recentAccountAggregateQuery).toContain("o.upstream_status_code::int AS upstream_status_code");
@@ -215,6 +217,27 @@ test("missing TTFT uses the configured prior instead of removing latency from th
   });
   expect(failed).toMatchObject({ grade: "E", confidence: "low", scoreComparable: false });
   expect(Number(failed.score)).toBeLessThan(60);
+});
+
+test("one valid TTFT sample is observed immediately instead of waiting for five", () => {
+  const row = scoreRecentDatabaseRow({
+    account_id: 43,
+    account_name: "one-ttft-sample 0.08",
+    status: "active",
+    schedulable: true,
+    priority: 1,
+    group_ids: [2],
+    group_names: ["pool"],
+    success_requests: 1,
+    failure_requests: 0,
+    stream_success_requests: 0,
+    first_token_samples: 1,
+    ttft_p95_ms: 12_000,
+    selected_calls: 1,
+  }, 1000, scorePolicy);
+
+  expect(row.ttftP95Ms).toBe(12_000);
+  expect(row.scoreComponents).toMatchObject({ latencyEvidence: "observed", latencyPriorScore: null });
 });
 
 test("database score always projects failover and recovered request counts", () => {

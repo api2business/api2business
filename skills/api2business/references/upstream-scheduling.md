@@ -186,7 +186,9 @@
   - 各输入先归一化到 `0–100`，成本 `C` 是线性扣分；
   - 禁止置信度乘总分、池分与账号分相乘、动态质量反馈和新增硬门槛。
 - `R` 与 `L` 分别由 `reliabilityWeight`、`latencyWeight` 调度：
-  - TTFT 样本不足时，`L` 使用 YAML `ttftPriorScore`，完整保留延迟权重与分母；输出 `latencyEvidence=prior`，不得因缺失 TTFT 虚高；
+  - TTFT 以 usage/error 记录中的非空 `first_token_ms` 为唯一证据；只要存在至少一个有效样本，就计算并输出 TTFT P95，不能被 `stream` 标志或固定最小样本数再次拦截；
+  - 没有任何有效 `first_token_ms` 时，`L` 才使用 YAML `ttftPriorScore`，完整保留延迟权重与分母并输出 `latencyEvidence=prior`；
+  - Api2Business 探活请求统一使用流式 Responses；非流式请求只能产生 duration 样本，不能声称产生 TTFT；
   - 优先级计划对已观测的 `ttftP95Ms` 单独采用线性负向扣分：按对应评分策略配置的
     `ttftFullScoreMs` 至 `ttftZeroScoreMs` 绝对边界计算，低于最低边界扣 `0` 分，
     高于最高边界扣 `100` 分，中间值按比例扣分；不让单个异常慢账号改变整批基准；

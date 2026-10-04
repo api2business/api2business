@@ -99,12 +99,12 @@ account_stats AS (
     ), 0)::numeric AS customer_error_requests,
     COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'error' AND NOT e.scoreable), 0)::numeric AS excluded_error_requests,
     COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage' AND e.stream), 0)::numeric AS stream_success_requests,
-    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL), 0)::numeric AS first_token_samples,
+    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage' AND e.first_token_ms IS NOT NULL), 0)::numeric AS first_token_samples,
     ARRAY_AGG(e.first_token_ms ORDER BY e.first_token_ms)
-      FILTER (WHERE e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL) AS ttft_values,
+      FILTER (WHERE e.kind = 'usage' AND e.first_token_ms IS NOT NULL) AS ttft_values,
     ARRAY_AGG(e.sample_weight ORDER BY e.first_token_ms)
-      FILTER (WHERE e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL) AS ttft_weights,
-    MAX(e.first_token_ms) FILTER (WHERE e.kind = 'usage' AND e.stream) AS ttft_max_ms,
+      FILTER (WHERE e.kind = 'usage' AND e.first_token_ms IS NOT NULL) AS ttft_weights,
+    MAX(e.first_token_ms) FILTER (WHERE e.kind = 'usage' AND e.first_token_ms IS NOT NULL) AS ttft_max_ms,
     ARRAY_AGG(e.duration_ms ORDER BY e.duration_ms)
       FILTER (WHERE e.kind = 'usage' AND e.duration_ms IS NOT NULL) AS duration_values,
     ARRAY_AGG(e.sample_weight ORDER BY e.duration_ms)
@@ -375,7 +375,9 @@ export function scoreRecentDatabaseRow(
   const durationP95Ms = weightedPercentile(row.duration_values, row.duration_weights, 0.95) ?? percentile(row.duration_p95_ms);
   const reliability = effectiveFailureRate === null ? null : Math.round(policy.reliabilityWeight * (1 - Math.min(Math.max(effectiveFailureRate, 0), policy.failureZeroScoreRate) / policy.failureZeroScoreRate) * 100) / 100;
   const failover = effectiveFailoverRate === null ? null : Math.round(policy.failoverWeight * (1 - Math.min(Math.max(effectiveFailoverRate, 0), policy.failoverZeroScoreRate) / policy.failoverZeroScoreRate) * 100) / 100;
-  const latencyObserved = firstTokenSamples >= 5 && ttftP95Ms !== null;
+  // first_token_ms is already the authoritative evidence marker. Do not
+  // discard a valid sample just because the pool has fewer than five yet.
+  const latencyObserved = firstTokenSamples > 0 && ttftP95Ms !== null;
   const latencyPercent = !latencyObserved
     ? policy.ttftPriorScore
     : 100 * (1 - Math.min(

@@ -238,8 +238,10 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     expect(JSON.parse(requestBody)).toMatchObject({
       model: "gpt-5.6-terra",
       reasoning: { effort: "low" },
-      stream: false,
+      stream: true,
     });
+    expect(requestBody).toContain('"stream":true');
+    expect(requestBody).not.toContain('"stream":false');
   } finally {
     globalThis.fetch = originalFetch;
   }

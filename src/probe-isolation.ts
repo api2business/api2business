@@ -433,7 +433,7 @@ export class ProbeIsolationService {
       response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}/responses`, {
         method: "POST",
         headers: {
-          accept: "application/json",
+          accept: "text/event-stream",
           "content-type": "application/json",
           authorization: `Bearer ${ensured.record.apiKey}`,
         },
@@ -442,7 +442,10 @@ export class ProbeIsolationService {
           input: "health probe",
           reasoning: { effort: reasoningEffort },
           max_output_tokens: 1,
-          stream: false,
+          // TTFT is emitted by Sub2API only for streaming responses. Keep
+          // the probe body streaming so every successful probe contributes
+          // a first-token sample to every platform scope.
+          stream: true,
         }),
         signal: AbortSignal.timeout(Math.min(timeoutMs, this.remainingTimeout(deadline) ?? timeoutMs)),
       });
