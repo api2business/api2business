@@ -30,6 +30,7 @@ operations:
     automation: { intervalSeconds: 120, recentCallLimit: 1000 }
     scopes:
       codex: { enabled: true, platform: openai, features: { priorityAutomation: true, idleProbe: true } }
+      grok: { enabled: true, platform: grok, features: { priorityAutomation: true, idleProbe: true } }
   upstreamManagement: { quotaSampleIntervalSeconds: 300, quotaSampleTimeoutSeconds: 240 }
 temporal:
   addressEnv: TEMPORAL_ADDRESS
@@ -63,6 +64,9 @@ runtime:
 	}
 	if !cfg.AutomaticRefreshEnabled || cfg.V2AutomationIntervalSeconds != 120 || cfg.V2AutomationRecentCallLimit != 1000 {
 		t.Fatalf("missing periodic worker config: %#v", cfg)
+	}
+	if strings.Join(cfg.V2IdleProbeScopes, ",") != "codex,grok" {
+		t.Fatalf("expected Codex and Grok idle probe scopes, got %#v", cfg.V2IdleProbeScopes)
 	}
 }
 

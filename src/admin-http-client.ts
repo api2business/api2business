@@ -73,26 +73,30 @@ export class AdminHttpClient {
       body: JSON.stringify({ recentCallLimit, accountSelector, groupSelector }),
     }, 60000);
   }
-  idleProbePlan(accountIds: number[]): Promise<Record<string, unknown>> {
-    const query = accountIds.length > 0 ? `?accountIds=${encodeURIComponent(accountIds.join(","))}` : "";
-    return this.request(`/api/operations/idle-probe${query}`);
+  idleProbePlan(accountIds: number[], scope?: string | null): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams();
+    if (accountIds.length > 0) query.set("accountIds", accountIds.join(","));
+    if (scope) query.set("scope", scope);
+    return this.request(`/api/operations/idle-probe${query.toString() ? `?${query}` : ""}`);
   }
-  idleProbeHistory(page: number): Promise<Record<string, unknown>> {
-    return this.request(`/api/operations/idle-probe/history?page=${page}`);
+  idleProbeHistory(page: number, scope?: string | null): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ page: String(page) });
+    if (scope) query.set("scope", scope);
+    return this.request(`/api/operations/idle-probe/history?${query}`);
   }
   idleProbeCoverage(windowMinutes: number): Promise<Record<string, unknown>> {
     return this.request(`/api/operations/idle-probe/coverage?windowMinutes=${windowMinutes}`);
   }
-  idleProbeRun(accountIds: number[], rounds: number): Promise<Record<string, unknown>> {
+  idleProbeRun(accountIds: number[], rounds: number, scope?: string | null): Promise<Record<string, unknown>> {
     return this.request("/api/operations/idle-probe", {
       method: "POST",
-      body: JSON.stringify({ accountIds, rounds }),
+      body: JSON.stringify({ accountIds, rounds, ...(scope ? { scope } : {}) }),
     });
   }
-  idleProbeReconcile(accountIds: number[]): Promise<Record<string, unknown>> {
+  idleProbeReconcile(accountIds: number[], scope?: string | null): Promise<Record<string, unknown>> {
     return this.request("/api/operations/idle-probe/reconcile", {
       method: "POST",
-      body: JSON.stringify({ accountIds }),
+      body: JSON.stringify({ accountIds, ...(scope ? { scope } : {}) }),
     });
   }
   ranking(): Promise<Record<string, unknown>> { return this.request("/api/ranking"); }

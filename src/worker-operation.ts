@@ -83,7 +83,7 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
       triggerType: operation.operationId.includes(":idle-probe:") ? "automatic" : "manual",
       scope: command.scope,
     });
-    if (command.kind === "account.idle-probe.reconcile") return await services.operations.reconcileIdleProbe(command.accountIds);
+    if (command.kind === "account.idle-probe.reconcile") return await services.operations.reconcileIdleProbe(command.accountIds, command.scope);
     if (command.kind === "priority.automation.v2.run") {
       return await services.operations.runV2AutomaticPriorityPlan(command.scope, command.recentCallLimit);
     }

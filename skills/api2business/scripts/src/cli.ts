@@ -255,11 +255,11 @@ function help(): Record<string, unknown> {
       "accounts oauth-economics [--profile codex|grok] [--over-api]",
       "accounts oauth-runtime [--profile codex|grok] [--over-api]",
       "accounts oauth-runtime-sample --over-api",
-      "accounts idle-probe plan [--accounts <id-or-range,...>] --over-api",
-      "accounts idle-probe history [--page N] --over-api",
+      "accounts idle-probe plan [--accounts <id-or-range,...>] [--scope codex|grok] --over-api",
+      "accounts idle-probe history [--scope codex|grok] [--page N] --over-api",
       "accounts idle-probe coverage [--window-minutes N] --over-api",
-      "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--confirm] --over-api",
-      "accounts idle-probe run [--accounts <id-or-range,...>] [--rounds 1..10] [--confirm] --over-api",
+      "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--scope codex|grok] [--confirm] --over-api",
+      "accounts idle-probe run [--accounts <id-or-range,...>] [--scope codex|grok] [--rounds 1..10] [--confirm] --over-api",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
       "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] [--selection dead|all] [--unit-cost-cny CNY] --over-api",
       "accounts lifecycle retire status --id <plan-id> --over-api",
@@ -909,8 +909,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "accounts" && action === "idle-probe") {
     const verb = parsed.command[2];
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
-    if (verb === "plan") return await client.idleProbePlan(accountIds);
-    if (verb === "history") return await client.idleProbeHistory(parsed.page ?? 1);
+    if (verb === "plan") return await client.idleProbePlan(accountIds, parsed.scope);
+    if (verb === "history") return await client.idleProbeHistory(parsed.page ?? 1, parsed.scope);
     if (verb === "coverage") return await client.idleProbeCoverage(parsed.windowMinutes ?? 20);
     if (verb === "reconcile") {
       if (!parsed.confirm) return {
@@ -918,9 +918,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
         mutation: false,
         action: "account-idle-probe-reconcile",
         accountIds,
+        scope: parsed.scope ?? null,
         hint: "add --confirm to execute",
       };
-      return await client.idleProbeReconcile(accountIds);
+      return await client.idleProbeReconcile(accountIds, parsed.scope);
     }
     if (verb === "run") {
       const rounds = parsed.rounds ?? 1;
@@ -931,9 +932,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
         action: "account-idle-probe",
         accountIds,
         rounds,
+        scope: parsed.scope ?? null,
         hint: "add --confirm to execute",
       };
-      return await client.idleProbeRun(accountIds, rounds);
+      return await client.idleProbeRun(accountIds, rounds, parsed.scope);
     }
     throw new Error("accounts idle-probe requires plan, history, reconcile, or run");
   }

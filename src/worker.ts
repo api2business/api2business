@@ -163,7 +163,7 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     });
   }
   if (command.kind === "account.idle-probe.reconcile") {
-    return await operations.reconcileIdleProbe(command.accountIds);
+    return await operations.reconcileIdleProbe(command.accountIds, command.scope);
   }
   if (command.kind === "priority.automation.v2.run") {
     return await operations.runV2AutomaticPriorityPlan(command.scope, command.recentCallLimit);

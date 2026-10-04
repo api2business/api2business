@@ -162,6 +162,19 @@ test("probe isolation creates one private internal-ID group and redacts every se
   expect(state.keyCreates[0]).not.toHaveProperty("custom_key");
 });
 
+test("probe isolation creates a Grok private group without adding Codex groups", async () => {
+  const { rootDirectory, state, service } = fixture();
+  state.account = { id: 42, platform: "grok", type: "apikey", group_ids: [62] };
+
+  await service.ensure(42, { platform: "grok", eligibleGroupIds: [62] });
+
+  expect(state.groupCreates[0]).toEqual(expect.objectContaining({ platform: "grok" }));
+  expect(state.accountUpdates).toEqual([expect.objectContaining({ group_ids: [51, 62] })]);
+  expect(state.requestTimeouts.some(({ path }) => path.includes("platform=grok"))).toBe(true);
+  const secret = JSON.parse(readFileSync(join(rootDirectory, ".state/idle-probe/probe-keys.json"), "utf8")) as { records: Record<string, Row> };
+  expect(secret.records["42"]).toMatchObject({ platform: "grok", ready: true });
+});
+
 test("concurrent ensure calls are idempotent and keep the target as the only group member", async () => {
   const { state, service } = fixture();
   const results = await Promise.all([service.ensure(42), service.ensure(42)]);

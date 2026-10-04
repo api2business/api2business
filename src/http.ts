@@ -40,7 +40,7 @@ const persistentSnapshotApiPaths = [
   /^\/api\/bugteam\/cost-monitor$/u,
   /^\/api\/admin\/errors(?:\/|$)/u,
   /^\/api\/operations\/priority-(?:automation|history|state)$/u,
-  /^\/api\/operations\/idle-probe\/(?:history|summary|coverage)$/u,
+  /^\/api\/operations\/idle-probe(?:\/|$)/u,
   /^\/api\/v2\/upstream-scheduling\//u,
 ];
 
@@ -811,7 +811,7 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe") {
         const selector = url.searchParams.get("accountIds");
         const accountIds = selector ? normalizeAccountIds(selector.split(",")) : [];
-        return json(await operations.idleProbePlan(accountIds));
+        return json(await operations.idleProbePlan(accountIds, url.searchParams.get("scope") ?? undefined));
       }
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/summary") {
         return json({ ok: true, ...await operations.idleProbeSummary() });
@@ -822,7 +822,7 @@ export function createHandler(
         return json(await operations.idleProbeCoverage(windowMinutes));
       }
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/history") {
-        return json(await operations.idleProbeHistory(pageNumber(url), 10));
+        return json(await operations.idleProbeHistory(pageNumber(url), 10, url.searchParams.get("scope") ?? "codex"));
       }
       if (request.method === "POST" && url.pathname === "/api/operations/idle-probe") {
         const input = await body(request);
@@ -833,14 +833,16 @@ export function createHandler(
         if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10) {
           return json({ ok: false, error: "rounds must be an integer from 1 to 10" }, 400);
         }
-        return json(await dispatcher.submit({ kind: "account.idle-probe.run", accountIds, rounds }), 202);
+        const scope = typeof input.scope === "string" && input.scope.trim() ? input.scope.trim() : undefined;
+        return json(await dispatcher.submit({ kind: "account.idle-probe.run", accountIds, rounds, scope }), 202);
       }
       if (request.method === "POST" && url.pathname === "/api/operations/idle-probe/reconcile") {
         const input = await body(request);
         const accountIds = Array.isArray(input.accountIds) && input.accountIds.length > 0
           ? normalizeAccountIds(input.accountIds)
           : [];
-        return json(await dispatcher.submit({ kind: "account.idle-probe.reconcile", accountIds }), 202);
+        const scope = typeof input.scope === "string" && input.scope.trim() ? input.scope.trim() : undefined;
+        return json(await dispatcher.submit({ kind: "account.idle-probe.reconcile", accountIds, scope }), 202);
       }
       if (request.method === "GET" && url.pathname === "/api/ranking") return json({ ok: true, ranking: await dispatcher.dispatch({ kind: "ranking.get" }) });
       if (request.method === "GET" && url.pathname === "/api/lottery") return json(await dispatcher.dispatch({ kind: "lottery.publicState" }));

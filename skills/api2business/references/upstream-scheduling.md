@@ -229,8 +229,10 @@
   - 启用自动探活前，先用同一作用域显式执行一次手动探活，并核对 HTTP 结果、
     `ordinaryLogRecorded` 和探活轮次记录；手动成功后才打开该作用域的 `idleProbe`。
   - 探活候选必须按作用域平台和分组查询，模型白名单动态选择
-    `gpt-5.6-terra`、`gpt-5.6-sol`，前者优先；探活失败、未就绪和普通记录缺失
-    分别保留，不把工作流 `running` 当作业务成功。
+    `sub2api.idleProbe.platformModels` 中的候选；Codex 默认按 `gpt-5.6-terra`、
+    `gpt-5.6-sol` 顺序，Grok 使用 owning YAML 声明的 Grok 模型。探活失败、未就绪和
+    普通记录缺失分别保留，不把工作流 `running` 当作业务成功。探针私有分组的平台、
+    基础业务分组和候选账号必须来自同一作用域，Grok 不得绑定 Codex 分组。
   - V2 页面复用既有质量、趋势、参与比例、账号、错误、调整、探活和调度组件；
     后台对账结果只作为 CLI/API 证据，不投影成页面事实。
   - V2 账号、错误、调整、探活和只读计划表格统一复用共享排序组件；点击表头或使用键盘
@@ -248,7 +250,9 @@
     `minimumPriority` 起始，使用规范化 top-k 值重排，避免旧优先级锚点把首位抬高；top-k
     内的值保持严格递增，超出 top-k 的账号仍落在 `maximumPriority` 尾部。
     可以独立打开 `features.priorityAutomation`；Grok 不启用探活时必须保持
-    `features.idleProbe: false`，其快照和池质量读取不创建探活记录。
+    `features.idleProbe: false`，其快照和池质量读取不创建探活记录。手动核验 Grok 时使用
+    `accounts idle-probe plan|reconcile|run --scope grok --over-api`；确认普通请求记录、
+    `ordinaryLogRecorded` 和轮次记录成功后，才把 Grok 作用域开关改为 `true`。
   - V2 的间隔和样本档位从 `scopes`、`snapshot` 回读；旧 priority automation 和
     priority plan 命令不再存在。
   - V2 首屏读取先返回按作用域持久化的读模型缓存；缓存未过

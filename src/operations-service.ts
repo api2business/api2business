@@ -250,12 +250,12 @@ export class OperationsService {
     };
   }
 
-  async idleProbePlan(accountIds: number[] = []) {
-    return await this.idleProbe.plan(accountIds, "manual");
+  async idleProbePlan(accountIds: number[] = [], scopeName?: string) {
+    return await this.idleProbe.plan(accountIds, "manual", scopeName);
   }
 
-  async reconcileIdleProbe(accountIds: number[] = []) {
-    return await this.idleProbe.reconcile(accountIds);
+  async reconcileIdleProbe(accountIds: number[] = [], scopeName?: string) {
+    return await this.idleProbe.reconcile(accountIds, scopeName);
   }
 
   async idleProbeRollingUsage() {
@@ -270,10 +270,10 @@ export class OperationsService {
     return await this.idleProbe.coverage(windowMinutes, "manual");
   }
 
-  async idleProbeHistory(page = 1, pageSize = 10) {
+  async idleProbeHistory(page = 1, pageSize = 10, scopeName = "codex") {
     if (!Number.isInteger(page) || page < 1) throw new Error("idle probe history page must be a positive integer");
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new Error("idle probe history page size must be from 1 to 100");
-    const rows = await this.store.idleProbeHistoryPage(pageSize, (page - 1) * pageSize) as Array<Record<string, unknown>>;
+    const rows = await this.store.idleProbeHistoryPage(pageSize, (page - 1) * pageSize, scopeName) as Array<Record<string, unknown>>;
     const total = Number(rows[0]?.total_count ?? 0);
     return {
       ok: true,
@@ -315,13 +315,17 @@ export class OperationsService {
       if (context) {
         const failed = Number(result.failed ?? 0);
         const attempted = Number(result.attempted ?? 0);
+        const unready = Array.isArray(result.unreadyAccountIds) ? result.unreadyAccountIds.length : 0;
         const skipped = result.skipped === true;
         await this.store.addIdleProbeRound({
           operationId: context.operationId,
+          scope: context.scope ?? "codex",
           triggerType: context.triggerType,
           startedAt: startedAt.toISOString(),
           completedAt: new Date().toISOString(),
-          status: skipped ? "skipped" : failed === 0 && result.ok === true ? "succeeded" : attempted > failed ? "partial" : "failed",
+          status: skipped ? "skipped" : unready > 0 || failed > 0
+            ? attempted > failed ? "partial" : "failed"
+            : result.ok === true ? "succeeded" : "failed",
           plannedCount: Number(result.planned ?? 0),
           readyCount: Number(result.ready ?? 0),
           attemptedCount: attempted,

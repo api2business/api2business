@@ -54,7 +54,7 @@ test("idle probe selects only normal schedulable API-key accounts", async () => 
   expect(plan.candidates).toEqual([{
     accountId: 369, accountName: "upstream plus 0.05", platform: "openai", priority: 300,
     status: "active", schedulable: true, hadRuntimeBlock: false, availableSampleCount: 4,
-    groupIds: [2, 3, 51],
+    groupIds: [2, 3, 51], probeModel: "gpt-5.6-terra",
   }]);
 });
 

@@ -243,6 +243,7 @@ export class OperationsStore {
       CREATE TABLE IF NOT EXISTS api2business_idle_probe_rounds (
         id uuid PRIMARY KEY,
         operation_id text NOT NULL UNIQUE,
+        scope text NOT NULL DEFAULT 'codex',
         trigger_type text NOT NULL CHECK (trigger_type IN ('manual','automatic')),
         started_at timestamptz NOT NULL,
         completed_at timestamptz NOT NULL,
@@ -256,6 +257,18 @@ export class OperationsStore {
         duration_ms integer NOT NULL,
         error_summary text
       );
+      ALTER TABLE api2business_idle_probe_rounds
+        ADD COLUMN IF NOT EXISTS scope text NOT NULL DEFAULT 'codex';
+      UPDATE api2business_idle_probe_rounds
+      SET status = 'failed',
+          error_summary = COALESCE(error_summary, '探活计划存在未就绪账号')
+      WHERE status = 'succeeded'
+        AND planned_count > 0
+        AND ready_count = 0
+        AND attempted_count = 0
+        AND unready_count > 0;
+      CREATE INDEX IF NOT EXISTS api2business_idle_probe_rounds_scope_started_at_idx
+        ON api2business_idle_probe_rounds(scope, started_at DESC);
       CREATE TABLE IF NOT EXISTS api2business_upstream_benchmark_runs (
         id uuid PRIMARY KEY,
         account_id bigint NOT NULL,
@@ -687,6 +700,7 @@ export class OperationsStore {
 
   async addIdleProbeRound(input: {
     operationId: string;
+    scope: string;
     triggerType: "manual" | "automatic";
     startedAt: string;
     completedAt: string;
@@ -702,10 +716,10 @@ export class OperationsStore {
   }) {
     await this.sql`
       INSERT INTO api2business_idle_probe_rounds (
-        id, operation_id, trigger_type, started_at, completed_at, status,
+        id, operation_id, scope, trigger_type, started_at, completed_at, status,
         planned_count, ready_count, attempted_count, succeeded_count,
         failed_count, unready_count, duration_ms, error_summary
-      ) VALUES (${crypto.randomUUID()}, ${input.operationId}, ${input.triggerType},
+      ) VALUES (${crypto.randomUUID()}, ${input.operationId}, ${input.scope}, ${input.triggerType},
         ${input.startedAt}, ${input.completedAt}, ${input.status}, ${input.plannedCount},
         ${input.readyCount}, ${input.attemptedCount}, ${input.succeededCount},
         ${input.failedCount}, ${input.unreadyCount}, ${input.durationMs}, ${input.errorSummary})
@@ -713,13 +727,14 @@ export class OperationsStore {
     `;
   }
 
-  async idleProbeHistoryPage(limit: number, offset: number) {
+  async idleProbeHistoryPage(limit: number, offset: number, scope = "codex") {
     return await this.sql`
       SELECT operation_id, trigger_type, started_at, completed_at, status,
         planned_count, ready_count, attempted_count, succeeded_count,
         failed_count, unready_count, duration_ms, error_summary,
         COUNT(*) OVER()::int AS total_count
       FROM api2business_idle_probe_rounds
+      WHERE scope=${scope}
       ORDER BY started_at DESC, id DESC
       LIMIT ${limit} OFFSET ${offset}
     `;

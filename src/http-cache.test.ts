@@ -35,6 +35,7 @@ test("persistent snapshot APIs bypass the generic response cache", () => {
     "/api/operations/priority-history",
     "/api/operations/idle-probe/history?page=1",
     "/api/operations/idle-probe/summary",
+    "/api/operations/idle-probe?scope=grok",
   ]) {
     expect(isApiResponseCacheable(get(pathname))).toBeFalse();
   }

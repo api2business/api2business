@@ -10,6 +10,7 @@ type Row = Record<string, unknown>;
 interface ProbeKeyRecord {
   accountId: number;
   groupId: number;
+  platform?: string;
   userId: number;
   email: string;
   password: string;
@@ -92,6 +93,11 @@ export interface ProbeIsolationBinding {
   keyCreated: boolean;
 }
 
+export interface ProbeIsolationScope {
+  platform: "openai" | "anthropic" | "grok";
+  eligibleGroupIds: number[];
+}
+
 interface ProbeIsolationRecordResult {
   binding: ProbeIsolationBinding;
   record: ProbeKeyRecord;
@@ -153,11 +159,11 @@ export class ProbeIsolationService {
     return deadline ?? Date.now() + this.config.operations.upstreamManagement.mutationTimeoutMs;
   }
 
-  private async findOrCreateGroup(accountId: number, deadline?: number): Promise<number> {
+  private async findOrCreateGroup(accountId: number, scope: ProbeIsolationScope, deadline?: number): Promise<number> {
     const isolation = this.config.sub2api.idleProbe.isolation;
     const name = `${isolation.groupNamePrefix}${accountId}`;
     const listed = await this.admin.request<Paginated<Row>>(
-      `/admin/groups?platform=openai&search=${encodeURIComponent(name)}&page=1&page_size=100`,
+      `/admin/groups?platform=${encodeURIComponent(scope.platform)}&search=${encodeURIComponent(name)}&page=1&page_size=100`,
       {},
       true,
       this.remainingTimeout(deadline),
@@ -167,7 +173,7 @@ export class ProbeIsolationService {
     const groupId = existingId ?? id((await this.admin.mutate<Row>("POST", "/admin/groups", {
       name,
       description: "Api2Business 上游账号探活私有分组",
-      platform: "openai",
+      platform: scope.platform,
       rate_multiplier: isolation.groupRateMultiplier,
       is_exclusive: true,
       subscription_type: "standard",
@@ -267,12 +273,12 @@ export class ProbeIsolationService {
     };
   }
 
-  private async ensureAccountBinding(accountId: number, groupId: number, deadline?: number): Promise<void> {
+  private async ensureAccountBinding(accountId: number, groupId: number, scope: ProbeIsolationScope, deadline?: number): Promise<void> {
     const account = row(await this.admin.getAccount(accountId, this.remainingTimeout(deadline)));
     const currentGroupIds = accountGroupIds(account);
     const desiredGroupIds = [...new Set([
       ...currentGroupIds,
-      ...this.config.operations.upstreamManagement.groupIds,
+      ...scope.eligibleGroupIds,
       groupId,
     ])].sort((left, right) => left - right);
     if (desiredGroupIds.some((desiredGroupId) => !currentGroupIds.includes(desiredGroupId))) {
@@ -285,18 +291,31 @@ export class ProbeIsolationService {
     const verifiedGroupIds = accountGroupIds(verifiedAccount);
     const missingGroupIds = desiredGroupIds.filter((desiredGroupId) => !verifiedGroupIds.includes(desiredGroupId));
     if (missingGroupIds.length > 0) throw new Error(`账号 ${accountId} 未绑定目标分组 ${missingGroupIds.join(",")}`);
-    const members = await this.admin.listGroupAccounts(groupId, "openai", this.remainingTimeout(deadline));
+    const members = await this.admin.listGroupAccounts(groupId, scope.platform, this.remainingTimeout(deadline));
     const memberIds = accountIds(members as unknown as Row[]);
     if (memberIds.some((memberId) => memberId !== accountId)) {
       throw new Error(`探活私有分组 ${groupId} 存在其他账号成员，拒绝继续使用`);
     }
   }
 
-  private async ensureRecord(accountId: number, file: ProbeKeyFile, deadline?: number): Promise<ProbeIsolationRecordResult> {
+  private async ensureRecord(accountId: number, scope: ProbeIsolationScope, file: ProbeKeyFile, deadline?: number): Promise<ProbeIsolationRecordResult> {
     let existing = file.records[String(accountId)];
+    if (existing?.platform && existing.platform !== scope.platform) {
+      throw new Error(`账号 ${accountId} 已绑定 ${existing.platform} 探活隔离凭据，不能复用到 ${scope.platform}`);
+    }
+    if (existing && !existing.platform && scope.platform !== "openai") {
+      // 早期 Grok 记录可能在凭据已就绪后遗漏平台字段。先以 Sub2API
+      // 原生账号平台回读确认，再补写字段；平台不匹配时仍拒绝复用。
+      const account = row(await this.admin.getAccount(accountId, this.stageDeadline(deadline)));
+      if (String(account.platform ?? "") !== scope.platform) {
+        throw new Error(`账号 ${accountId} 的旧探活隔离凭据未记录平台，不能直接复用到 ${scope.platform}`);
+      }
+      existing.platform = scope.platform;
+      this.writeFile(file);
+    }
     let groupId: number;
     try {
-      groupId = await this.findOrCreateGroup(accountId, this.stageDeadline(deadline));
+      groupId = await this.findOrCreateGroup(accountId, scope, this.stageDeadline(deadline));
     } catch (error) {
       throw new Error(`探活隔离分组阶段失败：${errorMessage(error)}`);
     }
@@ -304,6 +323,7 @@ export class ProbeIsolationService {
       existing = {
         accountId,
         groupId,
+        platform: scope.platform,
         userId: 0,
         email: `api2business-probe-${accountId}@sub2api.platform-infra.local`,
         password: generatedSecret("Api2BusinessProbe-"),
@@ -317,24 +337,25 @@ export class ProbeIsolationService {
         throw new Error(`探活隔离 Secret 持久化阶段失败：${errorMessage(error)}`);
       }
     }
+    existing.platform = scope.platform;
     let key: { record: ProbeKeyRecord; keyCreated: boolean };
     try {
       key = await this.ensureUserAndKey(accountId, groupId, existing, file, this.stageDeadline(deadline));
     } catch (error) {
       throw new Error(`探活隔离专用凭据阶段失败：${errorMessage(error)}`);
     }
-    file.records[String(accountId)] = key.record;
+    file.records[String(accountId)] = { ...key.record, platform: scope.platform };
     try {
       this.writeFile(file);
     } catch (error) {
       throw new Error(`探活隔离 Secret 持久化阶段失败：${errorMessage(error)}`);
     }
     try {
-      await this.ensureAccountBinding(accountId, groupId, this.stageDeadline(deadline));
+      await this.ensureAccountBinding(accountId, groupId, scope, this.stageDeadline(deadline));
     } catch (error) {
       throw new Error(`探活隔离账号绑定阶段失败：${errorMessage(error)}`);
     }
-    const completed = { ...key.record, ready: true, policyVersion: POLICY_VERSION };
+    const completed = { ...key.record, platform: scope.platform, ready: true, policyVersion: POLICY_VERSION };
     file.records[String(accountId)] = completed;
     try {
       this.writeFile(file);
@@ -344,15 +365,20 @@ export class ProbeIsolationService {
     return { binding: { accountId, groupId, keyCreated: key.keyCreated }, record: completed };
   }
 
-  async ensure(accountId: number): Promise<ProbeIsolationBinding> {
+  async ensure(accountId: number, scope: ProbeIsolationScope = {
+    platform: "openai",
+    eligibleGroupIds: this.config.operations.upstreamManagement.groupIds,
+  }): Promise<ProbeIsolationBinding> {
     if (!this.config.sub2api.idleProbe.isolation.enabled) throw new Error("探活隔离策略未启用");
     if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error("探活账号 ID 无效");
-    return await this.inLock(async () => (await this.ensureRecord(accountId, this.readFile())).binding);
+    return await this.inLock(async () => (await this.ensureRecord(accountId, scope, this.readFile())).binding);
   }
 
-  get(accountId: number): ProbeIsolationBinding | null {
+  get(accountId: number, scope?: ProbeIsolationScope): ProbeIsolationBinding | null {
     const record = this.readFile().records[String(accountId)];
     if (!record || !readyRecord(record)) return null;
+    if (scope && ((record.platform && record.platform !== scope.platform)
+      || (!record.platform && scope.platform !== "openai"))) return null;
     return { accountId, groupId: record.groupId, keyCreated: false };
   }
 

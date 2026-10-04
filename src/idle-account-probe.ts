@@ -1,7 +1,7 @@
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
-import type { ProbeIsolationService } from "./probe-isolation";
+import type { ProbeIsolationScope, ProbeIsolationService } from "./probe-isolation";
 
 const idleProbeCandidatesSql = `
 SELECT a.id::int AS account_id, a.name AS account_name, a.platform, a.priority::int AS priority,
@@ -96,14 +96,18 @@ export interface IdleProbeCandidate {
   probeModel?: string | null;
 }
 
-const preferredProbeModels = ["gpt-5.6-terra", "gpt-5.6-sol"] as const;
+const defaultProbeModels = ["gpt-5.6-terra", "gpt-5.6-sol"] as const;
 
-export function selectIdleProbeModel(modelNames: unknown, fallbackModel: string): string | null {
+export function selectIdleProbeModel(
+  modelNames: unknown,
+  fallbackModel: string,
+  preferredModels: readonly string[] = defaultProbeModels,
+): string | null {
   const names = Array.isArray(modelNames)
     ? modelNames.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
     : [];
   if (names.length === 0) return fallbackModel;
-  return preferredProbeModels.find((model) => names.includes(model)) ?? null;
+  return preferredModels.find((model) => names.includes(model.toLowerCase())) ?? null;
 }
 
 function numericIds(value: unknown): number[] {
@@ -225,12 +229,15 @@ export class IdleAccountProbeService {
       throw new Error(`idle probe scope is unavailable: ${scopeName}`);
     }
     const groupIds = scope?.eligibleGroupIds ?? this.config.sub2api.priorityPlan.eligibleGroupIds;
+    const probePlatform = scope?.platform ?? this.config.sub2api.priorityPlan.platform;
+    const platformModels = policy.platformModels?.[probePlatform] ?? [];
+    const defaultProbeModel = platformModels[0] ?? policy.model;
     const result = await this.reads.query<Record<string, unknown>>({
       key: JSON.stringify(["accounts.idle-probe.plan", scopeName ?? null, explicit, policy.idleSeconds, policy.candidateLimit]),
       kind: "accounts.idle-probe.plan",
       sql: idleProbeCandidatesSql,
       parameters: [
-        scope?.platform ?? this.config.sub2api.priorityPlan.platform,
+        probePlatform,
         groupIds.join(","),
         policy.idleSeconds,
         explicit.length > 0 ? explicit.length : policy.candidateLimit,
@@ -255,16 +262,18 @@ export class IdleAccountProbeService {
         || row.temp_unschedulable_until != null,
       availableSampleCount: Number(row.available_sample_count ?? 0),
       groupIds: numericIds(row.group_ids),
-      ...((Array.isArray(row.model_mapping_keys) && row.model_mapping_keys.length > 0)
-        ? { probeModel: selectIdleProbeModel(row.model_mapping_keys, policy.model) }
-        : {}),
+        probeModel: selectIdleProbeModel(
+          row.model_mapping_keys,
+          policy.platformModels?.[String(row.platform)]?.[0] ?? policy.model,
+          policy.platformModels?.[String(row.platform)] ?? [],
+        ),
       } satisfies IdleProbeCandidate));
     const includeRollingUsage = priority !== "automatic";
     const rolling24Hours = includeRollingUsage ? await this.rollingUsage(priority) : null;
     return {
       ok: true,
       mutation: false,
-      model: policy.model,
+      model: defaultProbeModel,
       idleSeconds: policy.idleSeconds,
       candidateLimit: policy.candidateLimit,
       candidates,
@@ -363,12 +372,16 @@ export class IdleAccountProbeService {
     };
   }
 
-  async reconcile(accountIds: number[] = []): Promise<Record<string, unknown>> {
+  async reconcile(accountIds: number[] = [], scopeName?: string): Promise<Record<string, unknown>> {
     if (!this.isolation) throw new Error("idle probe reconciliation requires isolated probe API key");
-    const plan = await this.plan(accountIds, "automatic");
+    const scope = scopeName ? this.config.operations.upstreamSchedulingV2?.scopes[scopeName] : undefined;
+    const isolationScope: ProbeIsolationScope | undefined = scope
+      ? { platform: scope.platform, eligibleGroupIds: scope.eligibleGroupIds }
+      : undefined;
+    const plan = await this.plan(accountIds, "automatic", scopeName);
     const candidates = (plan.candidates as IdleProbeCandidate[])
       .filter((candidate) => {
-        const binding = this.isolation!.get(candidate.accountId);
+        const binding = this.isolation!.get(candidate.accountId, isolationScope);
         return binding === null || !candidate.groupIds.includes(binding.groupId);
       })
       .slice(0, accountIds.length > 0
@@ -377,7 +390,7 @@ export class IdleAccountProbeService {
     const results: Array<Record<string, unknown>> = [];
     for (const candidate of candidates) {
       try {
-        const binding = await this.isolation.ensure(candidate.accountId);
+        const binding = await this.isolation.ensure(candidate.accountId, isolationScope);
         results.push({
           accountId: candidate.accountId,
           ok: true,
@@ -410,6 +423,11 @@ export class IdleAccountProbeService {
     this.running = true;
     const startedAt = Date.now();
     const policy = this.config.sub2api.idleProbe;
+    const scope = scopeName ? this.config.operations.upstreamSchedulingV2?.scopes[scopeName] : undefined;
+    const defaultProbeModel = policy.platformModels?.[scope?.platform ?? this.config.sub2api.priorityPlan.platform]?.[0] ?? policy.model;
+    const isolationScope: ProbeIsolationScope | undefined = scope
+      ? { platform: scope.platform, eligibleGroupIds: scope.eligibleGroupIds }
+      : undefined;
     const results: Array<Record<string, unknown>> = [];
     let planned = 0;
     let ready = 0;
@@ -433,13 +451,13 @@ export class IdleAccountProbeService {
             return true;
           })
           .filter((candidate) => {
-            const binding = this.isolation!.get(candidate.accountId);
+            const binding = this.isolation!.get(candidate.accountId, isolationScope);
             return binding !== null && candidate.groupIds.includes(binding.groupId);
           });
         planned += plannedCandidates.length;
         ready += candidates.length;
         for (const candidate of plannedCandidates) {
-          const binding = this.isolation!.get(candidate.accountId);
+          const binding = this.isolation!.get(candidate.accountId, isolationScope);
           if (binding === null || !candidate.groupIds.includes(binding.groupId)) {
             unreadyAccountIds.add(candidate.accountId);
           }
@@ -492,7 +510,7 @@ export class IdleAccountProbeService {
       return {
         ok: failed === 0,
         skipped: false,
-        model: policy.model,
+        model: defaultProbeModel,
         rounds,
         attempted: succeeded + failed,
         succeeded,

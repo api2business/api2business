@@ -22,7 +22,7 @@ export type AppCommand =
   | { kind: "oauth.runtime.sample" }
   | { kind: "upstream.benchmark"; benchmarkRunId: string; accountId: number; model: string }
   | { kind: "account.idle-probe.run"; accountIds: number[]; rounds: number; scope?: string }
-  | { kind: "account.idle-probe.reconcile"; accountIds: number[] }
+  | { kind: "account.idle-probe.reconcile"; accountIds: number[]; scope?: string }
   | { kind: "account.import"; jobId: string }
   | { kind: "account.lifecycle.detect"; jobId: string }
   | { kind: "account.lifecycle.settle"; jobId: string; candidateIds: number[] }

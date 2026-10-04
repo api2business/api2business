@@ -210,6 +210,7 @@ export interface AppConfig {
       intervalSeconds: number;
       idleSeconds: number;
       model: string;
+      platformModels?: Record<string, string[]>;
       reasoningEffort: "low" | "medium" | "high";
       candidateLimit: number;
       concurrency: number;
@@ -919,6 +920,16 @@ export function loadConfig(path: string): AppConfig {
           intervalSeconds: integerValue(idleProbe, "intervalSeconds", "sub2api.idleProbe", 10, 3600),
           idleSeconds: integerValue(idleProbe, "idleSeconds", "sub2api.idleProbe", 10, 86400),
           model: stringValue(idleProbe, "model", "sub2api.idleProbe"),
+          platformModels: (() => {
+            const raw = idleProbe.platformModels;
+            if (raw === undefined) return {};
+            const value = object(raw, "sub2api.idleProbe.platformModels");
+            return Object.fromEntries(Object.entries(value).map(([platform, models]) => {
+              const modelList = strings({ models } as ObjectValue, "models", `sub2api.idleProbe.platformModels.${platform}`);
+              if (modelList.length === 0) throw new Error(`sub2api.idleProbe.platformModels.${platform} must not be empty`);
+              return [platform, modelList];
+            }));
+          })(),
           reasoningEffort: reasoningEffort as "low" | "medium" | "high",
           candidateLimit: integerValue(idleProbe, "candidateLimit", "sub2api.idleProbe", 1, 100),
           concurrency: integerValue(idleProbe, "concurrency", "sub2api.idleProbe", 1, 1000),
