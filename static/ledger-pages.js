@@ -906,7 +906,7 @@ export async function upstreamsPage() {
         { key: 'sampleRealtimeCostCnyPerApiUsd', className: 'chart-cost', label: '当前采样' },
         { key: 'realtimeCostCnyPerApiUsd', className: 'chart-rolling-cost', label: '一小时滚动' },
       ],
-      valueFormatter: (value) => `¥${number(value, 4)}`, unit: '人民币 / API 美元', ariaLabel: '上游当前采样与一小时滚动实时成本', yMax: 0.3,
+      valueFormatter: (value) => `¥${number(value, 4)}`, unit: '人民币 / API 美元', ariaLabel: '上游当前采样与一小时滚动实时成本',
     })
     bindHistoryChartTooltip($('#quota-balance-chart'))
     bindHistoryChartTooltip($('#quota-cost-chart'))

@@ -34,6 +34,7 @@ test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   expect(script).toContain("不限额");
   expect(script).toContain("sampleTimeDisplay");
   expect(script).toContain("次采样");
+  expect(script).not.toContain("yMax: 0.3");
   expect(script).toContain("bindTableSortHeaders");
   expect(script).toContain("sortTableRows");
   expect(script).not.toMatch(/method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]/u);

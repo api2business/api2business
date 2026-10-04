@@ -87,7 +87,7 @@ function renderQuota(summary = {}, accounts = [], usage = []) {
   $('#v2-quota-quality-estimated-hours').textContent = availabilityDuration(quality.estimatedGoodAvailableHours)
   $('#v2-quota-quality-balance').textContent = `评分 >80 · 优质余额 ${money(quality.goodBalanceCny)} · ${number(quality.scoredWallets)} 个已评分`
   $('#v2-quota-balance-chart').innerHTML = historyChartMarkup(points, { series: [{ key: 'sampleApiAmountUsdPerHour', className: 'chart-sample-speed', label: '当前采样' }, { key: 'rollingApiAmountUsdPerHour', className: 'chart-rolling-speed', label: '一小时滚动' }], valueFormatter: (value) => usd(value), unit: 'API 美元 / 小时', ariaLabel: '作用域上游最近八小时消耗速率', yMin: 0 })
-  $('#v2-quota-cost-chart').innerHTML = historyChartMarkup(points, { series: [{ key: 'sampleRealtimeCostCnyPerApiUsd', className: 'chart-cost', label: '当前采样' }, { key: 'realtimeCostCnyPerApiUsd', className: 'chart-rolling-cost', label: '一小时滚动' }], valueFormatter: (value) => `¥${number(value, 4)}`, unit: '人民币 / API 美元', ariaLabel: '作用域上游实时成本', yMax: 0.3 })
+  $('#v2-quota-cost-chart').innerHTML = historyChartMarkup(points, { series: [{ key: 'sampleRealtimeCostCnyPerApiUsd', className: 'chart-cost', label: '当前采样' }, { key: 'realtimeCostCnyPerApiUsd', className: 'chart-rolling-cost', label: '一小时滚动' }], valueFormatter: (value) => `¥${number(value, 4)}`, unit: '人民币 / API 美元', ariaLabel: '作用域上游实时成本' })
   bindHistoryChartTooltip($('#v2-quota-balance-chart')); bindHistoryChartTooltip($('#v2-quota-cost-chart'))
 }
 
