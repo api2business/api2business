@@ -1,3 +1,4 @@
+import { measureQuotaMonitor } from './quota-monitor-measure';
 import { AdminHttpClient } from "../../../../src/admin-http-client";
 import { readFileSync } from "node:fs";
 import { mergeAccountScores } from "../../../../src/account-score-aggregation";
@@ -268,6 +269,7 @@ function help(): Record<string, unknown> {
       "upstreams models sync --accounts <id-or-range,...> [--confirm] --over-api",
       "upstreams usage-cache [--accounts <id-or-range,...>] --over-api",
       "upstreams quota-summary --over-api",
+      "upstreams quota-monitor snapshot|measure [--mode source|snapshot --rounds N] --over-api",
       "upstreams recharge-candidates [--json] --over-api",
       "upstreams benchmark [--id <account-id> --model <id> --confirm] --over-api",
       "upstreams benchmark-status --id <benchmark-run-id> --over-api",
@@ -672,6 +674,11 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     }
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     return await client.upstreamUsageCacheRead(accountIds);
+  }
+  if (group === "upstreams" && action === "quota-monitor") {
+    if (parsed.command[2] === "snapshot") return await client.quotaMonitorSnapshot();
+    if (parsed.command[2] === "measure") return await measureQuotaMonitor(client, parsed.mode ?? "snapshot", parsed.rounds ?? 1);
+    throw new Error("upstreams quota-monitor requires snapshot or measure");
   }
   if (group === "upstreams" && action === "quota-summary") return await client.upstreamQuotaSummary();
   if (group === "upstreams" && action === "recharge-candidates") return await client.upstreamRechargeCandidates();

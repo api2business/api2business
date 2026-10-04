@@ -217,6 +217,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 额度监控的供应商实际支出按逐条销售倍率折回后乘实时有效倍率，唯一公式和缺失处理见
   [额度监控](references/quota-monitoring.md)。
 - 额度监控的状态、可用比例、钱包合并、刷新轮询和截图验收口径见 [额度监控](references/quota-monitoring.md)，不得在页面或其他文档另建第二套口径。
+- 首屏性能测量使用 `upstreams quota-monitor measure --mode snapshot|source --rounds N --over-api`；`snapshot` 测缓存读模型，`source` 对照页面依赖链，输出只含耗时摘要，不展开账号或 Secret。
 
 ## 验收
 

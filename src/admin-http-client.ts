@@ -172,6 +172,10 @@ export class AdminHttpClient {
     const query = accountIds.length ? `?accountIds=${encodeURIComponent(accountIds.join(","))}` : "";
     return this.request(`/api/upstreams/usage-cache${query}`);
   }
+  quotaMonitorSnapshot(): Promise<Record<string, unknown>> { return this.request("/api/upstreams/quota-monitor-snapshot", {}, 60000); }
+  quotaMonitorUsage(accountIds: number[]): Promise<Record<string, unknown>> {
+    return this.request(`/api/upstreams/quota-monitor-usage?accountIds=${accountIds.join(",")}`, {}, 60000);
+  }
   upstreamQuotaSummary(): Promise<Record<string, unknown>> { return this.request("/api/upstreams/quota-summary"); }
   upstreamRechargeCandidates(): Promise<Record<string, unknown>> { return this.request("/api/upstreams/recharge-candidates"); }
   oauthRuntimeSummary(profile: "codex" | "grok"): Promise<Record<string, unknown>> {

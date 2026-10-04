@@ -876,7 +876,7 @@ export class UpstreamManagementService {
       key: `upstreams:${page}:${normalizedSearch.toLowerCase()}`,
       kind: "upstreams-page",
       priority: "manual",
-      cacheMode: "bypass-cache",
+      cacheMode: "prefer-cache",
       sql: `${accountSelect}
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
@@ -928,7 +928,7 @@ export class UpstreamManagementService {
       key: `upstreams.quota-monitor-usage:${ids.join(",") || "all"}`,
       kind: "upstreams.quota-monitor-usage",
       priority: "manual",
-      cacheMode: "bypass-cache",
+      cacheMode: "prefer-cache",
       sql: `
         SELECT a.id AS account_id, a.status, COALESCE(a.schedulable, false) AS schedulable,
           a.temp_unschedulable_until, a.rate_limit_reset_at, a.overload_until,

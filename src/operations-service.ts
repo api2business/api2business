@@ -180,6 +180,8 @@ export class OperationsService {
   private readonly idleProbe: IdleAccountProbeService;
   private readonly upstreamBenchmark: UpstreamBenchmarkService;
   private readonly bugTeamCostMonitor: BugTeamCostMonitor;
+  private quotaSummaryCache: { payload: Record<string, unknown>; capturedAt: string } | null = null;
+  private quotaSummaryInFlight: Promise<Record<string, unknown>> | null = null;
 
   constructor(
     private readonly config: AppConfig,
@@ -473,7 +475,31 @@ export class OperationsService {
     await this.store.setUpstreamUsageCache(results, samples, apiAmountUsdTotal);
   }
 
-  async upstreamQuotaSummary(accountIds?: number[]) {
+  async upstreamQuotaSummary(accountIds?: number[], bypassCache = false): Promise<Record<string, unknown>> {
+    // 额度监控首屏只读持久化摘要；首次或显式刷新之外不重复扫描历史样本和分组。
+    // 账号筛选仍需独立计算，避免把筛选结果污染全局摘要缓存。
+    if (accountIds === undefined && !bypassCache) {
+      const ttlMs = (this.config.operations.upstreamSchedulingV2?.readModelCacheSeconds ?? 30) * 1000;
+      const memory = this.quotaSummaryCache;
+      if (memory && Date.now() - Date.parse(memory.capturedAt) <= ttlMs) return { ...memory.payload, cache: { state: "hit", capturedAt: memory.capturedAt, ageMs: Date.now() - Date.parse(memory.capturedAt), ttlSeconds: ttlMs / 1000, valuesPrinted: false } };
+      if (this.quotaSummaryInFlight) return await this.quotaSummaryInFlight;
+      const persisted = await this.getReadModelSnapshot("quota-monitor-summary-v1");
+      if (persisted?.schema_version === "quota-monitor-summary-v1" && persisted.captured_at && persisted.payload) {
+        const cachedAt = String(persisted.captured_at);
+        const payload = object(persisted.payload);
+        this.quotaSummaryCache = { payload, capturedAt: cachedAt };
+        if (Date.now() - Date.parse(cachedAt) <= ttlMs) return { ...payload, cache: { state: "hit", capturedAt: cachedAt, ageMs: Date.now() - Date.parse(cachedAt), ttlSeconds: ttlMs / 1000, valuesPrinted: false } };
+      }
+      const build = (async () => {
+        const payload = await this.upstreamQuotaSummary(accountIds, true);
+        const capturedAt = new Date().toISOString();
+        this.quotaSummaryCache = { payload, capturedAt };
+        await this.store.completeSnapshot("quota-monitor-summary-v1", "quota-monitor-summary-v1", payload, capturedAt).catch(() => undefined);
+        return { ...payload, cache: { state: "refreshed", capturedAt, ageMs: 0, ttlSeconds: ttlMs / 1000, valuesPrinted: false } };
+      })();
+      this.quotaSummaryInFlight = build;
+      try { return await build; } finally { if (this.quotaSummaryInFlight === build) this.quotaSummaryInFlight = null; }
+    }
     const displayHours = 8;
     const calculationWindowHours = 1;
     const rows = await this.store.getUpstreamQuotaSamples(displayHours + calculationWindowHours) as Array<Record<string, unknown>>;
