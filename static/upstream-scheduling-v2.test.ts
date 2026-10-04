@@ -17,13 +17,14 @@ test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   expect(html).toContain('id="v2-account-table"');
   expect(html).toContain('data-sort-key="score"');
   expect(html).toContain('data-sort-key="priority"');
-  expect(html).toContain('id="v2-plan-table"');
+  expect(html).not.toContain('id="v2-plan-table"');
+  expect(html).not.toContain('只读优先级计划');
   expect(html).toContain('id="v2-automation-state"');
   expect(html).not.toContain("对账");
   expect(script).not.toContain("对账");
   expect(script).toContain("/api/v2/upstream-scheduling/scopes");
   expect(script).toContain("/api/v2/upstream-scheduling/snapshot");
-  expect(script).toContain("/api/v2/upstream-scheduling/plan");
+  expect(script).not.toContain("/api/v2/upstream-scheduling/plan");
   expect(script).toContain("scopeRequestId");
   expect(script).toContain("state.activeScope !== scope");
   expect(script).toContain("new URLSearchParams(location.search)");

@@ -353,7 +353,7 @@ export class UpstreamSchedulingV2Service {
       this.operations.priorityHistory(),
       this.operations.upstreamQuotaSummary(accountIds),
       accountIds.length ? this.operations.getUpstreamUsageCache(accountIds) : Promise.resolve([]),
-      qualityProfile === "codex" || qualityProfile === "grok"
+      scope.features.idleProbe
         ? this.operations.idleProbeHistory(1, 10, scopeName)
         : Promise.resolve({ records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
     ]);
@@ -479,7 +479,7 @@ export class UpstreamSchedulingV2Service {
 
   async probeHistory(scopeName?: string | null, page = 1) {
     const selected = this.scope(scopeName);
-    if (selected.scope.platform !== "openai" && selected.scope.platform !== "grok") {
+    if (selected.scope.features.idleProbe !== true) {
       return { ok: true, scope: selected.name, records: [], pagination: { page: 1, totalPages: 1, total: 0 } };
     }
     return { ...await this.operations.idleProbeHistory(page, 10, selected.name), scope: selected.name };

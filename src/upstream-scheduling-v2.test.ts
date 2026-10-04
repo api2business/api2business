@@ -77,7 +77,9 @@ function fixture(usageRows = [{
     getPriorityAutomation: async () => ({ ok: true, automation: { enabled: false } }),
     upstreamQuotaSummary: async () => ({ ok: true, history: [], walletDistribution: [] }),
     getUpstreamUsageCache: async () => usageRows,
-    idleProbeHistory: async () => ({ ok: true, records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
+    idleProbeHistory: async (_page: number, _pageSize: number, scope: string) => scope === "claude"
+      ? ({ ok: true, records: [{ operationId: "claude-round-1", status: "succeeded" }], pagination: { page: 1, totalPages: 1, total: 1 } })
+      : ({ ok: true, records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
     getReadModelSnapshot: async () => null,
     saveReadModelSnapshot: async () => { calls.save += 1; },
   };
@@ -165,6 +167,16 @@ describe("upstream scheduling v2", () => {
       priorityAutomation: false,
       idleProbe: false,
       upstreamWrite: false,
+    });
+  });
+
+  test("projects Claude idle-probe history when the scope feature is enabled", async () => {
+    const { service, config } = fixture();
+    config.operations.upstreamSchedulingV2!.scopes.claude.features.idleProbe = true;
+    const snapshot = await service.snapshot("claude");
+    expect(snapshot.data.probeHistory).toMatchObject({
+      records: [{ operationId: "claude-round-1", status: "succeeded" }],
+      pagination: { total: 1 },
     });
   });
 

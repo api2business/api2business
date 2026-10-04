@@ -43,6 +43,8 @@ rules:
 - errorCode: 503
   keywords:
   - local_capacity_exhausted
+  - no available accounts
+  - no healthy account
   - service temporarily unavailable
   - temporarily unavailable
   - upstream service temporarily unavailable
@@ -61,3 +63,9 @@ rules:
   - 'status code: 521'
   durationMinutes: 3
   description: Claude 上游 Cloudflare origin 不可达
+- errorCode: 520
+  keywords:
+  - 'error code: 520'
+  - 'status code: 520'
+  durationMinutes: 3
+  description: Claude 上游 Cloudflare 未分类瞬态错误

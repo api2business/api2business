@@ -166,9 +166,11 @@
     - 比较时按对象键排序。
     - 未排序的字符串相等，或未经过加载器的 camelCase YAML，都会造成假性不一致。
     - 回读只取关键词是否存在，不查询 `api_key`，也不取出整份凭据。
-    - 模板已命中但候选耗尽不做模板增强；应继续调查候选账号状态、模型支持、额度和调度容量，
-      不通过新增关键词或扩大匹配范围掩盖候选池不足。
-    - 证据不足时保持未知，不把最终错误、`no available accounts` 或已提交的流式响应归因于模板漏配。
+    - `no available accounts` 必须先按错误阶段区分：`phase=routing` 且没有账号 ID 是全局
+      选号失败，不走账号模板；`phase=upstream` 且已有账号 ID 时，表示该上游返回了同名错误，
+      可以在对应平台模板的匹配状态码下短暂冷却当前账号并继续切号。
+    - 模板已命中但全局候选仍耗尽时，应继续调查候选账号状态、模型支持、额度和调度容量，
+      不通过扩大匹配范围掩盖候选池不足。证据不足时保持未知，也不把已提交的流式响应归因于模板漏配。
   - 数据口径：
     - `/models`、billing、failover 中间事件和其他非最终用户可见记录不作为模板匹配或评分输入；
     - 用户余额或预扣额度不足先按 Sub2API 的 `is_business_limited` 事实及统一余额关键词归类为
@@ -244,7 +246,7 @@
     才能标记成功；HTTP 受理或工作流 `running` 不能单独完成验收。
   - V2 页面复用既有质量、趋势、参与比例、账号、错误、调整、探活和调度组件；
     后台对账结果只作为 CLI/API 证据，不投影成页面事实。
-  - V2 账号、错误、调整、探活和只读计划表格统一复用共享排序组件；点击表头或使用键盘
+  - V2 账号、错误、调整和探活表格统一复用共享排序组件；点击表头或使用键盘
     Enter/空格切换升降序，缺失值固定排在末尾，筛选和分页在当前作用域内保持排序结果。
   - 作用域深链统一使用 `/upstream-scheduling-v2?scope=<scope-name>`；例如
     `?scope=codex`、`?scope=claude`、`?scope=grok`。首次打开、切换、浏览器前进后退和
@@ -258,10 +260,10 @@
     `grokPriorityPlan.forceNormalizedTopK: true` 让 Grok 优先级计划每次按 YAML 的
     `minimumPriority` 起始，使用规范化 top-k 值重排，避免旧优先级锚点把首位抬高；top-k
     内的值保持严格递增，超出 top-k 的账号仍落在 `maximumPriority` 尾部。
-    可以独立打开 `features.priorityAutomation`；Grok 不启用探活时必须保持
-    `features.idleProbe: false`，其快照和池质量读取不创建探活记录。手动核验 Grok 时使用
-    `accounts idle-probe plan|reconcile|run --scope grok --over-api`；确认普通请求记录、
-    `ordinaryLogRecorded` 和轮次记录成功后，才把 Grok 作用域开关改为 `true`。
+    可以独立打开 `features.priorityAutomation` 和 `features.idleProbe`；关闭探活的作用域
+    快照和池质量读取不创建探活记录。手动核验任一作用域时使用
+    `accounts idle-probe plan|reconcile|run --scope <codex|claude|grok> --over-api`；确认
+    普通请求记录、`ordinaryLogRecorded` 和轮次记录成功后，才打开对应作用域的探活开关。
   - V2 的间隔和样本档位从 `scopes`、`snapshot` 回读；旧 priority automation 和
     priority plan 命令不再存在。
   - V2 首屏读取先返回按作用域持久化的读模型缓存；缓存未过

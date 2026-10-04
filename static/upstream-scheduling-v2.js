@@ -5,7 +5,7 @@ import { sampleTimeDisplay } from './sample-time.js'
 import { bindTableSortHeaders, sortTableRows, updateTableSortHeaders } from './table-sort.js?v=table-sort-v1'
 
 const $ = (selector) => document.querySelector(selector)
-const state = { scopes: [], activeScope: null, snapshot: null, accounts: [], accountPage: 1, errorPage: 1, historyPage: 1, probePage: 1, filter: '', scopeRequestId: 0, accountSort: { key: 'score', direction: 'desc' }, errorSort: { key: 'createdAt', direction: 'desc' }, historySort: { key: 'started_at', direction: 'desc' }, probeSort: { key: 'startedAt', direction: 'desc' }, planSort: { key: 'score', direction: 'desc' }, planRows: [] }
+const state = { scopes: [], activeScope: null, snapshot: null, accounts: [], accountPage: 1, errorPage: 1, historyPage: 1, probePage: 1, filter: '', scopeRequestId: 0, accountSort: { key: 'score', direction: 'desc' }, errorSort: { key: 'createdAt', direction: 'desc' }, historySort: { key: 'started_at', direction: 'desc' }, probeSort: { key: 'startedAt', direction: 'desc' } }
 const accountPageSize = 10
 const errorPageSize = 20
 const historyPageSize = 10
@@ -155,8 +155,6 @@ function renderHistory(records) {
   const rows = sortTableRows(Array.isArray(records) ? records : [], state.historySort, (row, key) => ({ pool: state.activeScope, started_at: row.started_at, trigger: row.trigger_type, status: row.status, operator: row.created_by, sample: row.recent_call_limit, changed: (row.profile_changed_counts ?? {})[state.activeScope] ?? row.profile_changed_counts?.codex ?? 0, completed_at: row.completed_at, duration: row.duration_ms })[key], (a, b) => String(a.started_at ?? '').localeCompare(String(b.started_at ?? ''))); const pages = Math.max(1, Math.ceil(rows.length / historyPageSize)); state.historyPage = Math.min(Math.max(state.historyPage, 1), pages); const visible = rows.slice((state.historyPage - 1) * historyPageSize, state.historyPage * historyPageSize); $('#v2-history-body').innerHTML = visible.length ? visible.map((row) => { const counts = row.profile_changed_counts ?? {}; const changed = counts[state.activeScope] ?? counts.codex ?? 0; return `<tr><td><b>${escapeHtml(scopeLabel(state.activeScope))}</b><small>${number(changed)} 项</small></td><td>${escapeHtml(time(row.started_at))}</td><td>${row.trigger_type === 'automatic' ? '自动' : '手动'}</td><td>${escapeHtml(row.status ?? '—')}</td><td>${escapeHtml(row.created_by ?? '—')}</td><td>${number(row.recent_call_limit)}</td><td>${number(changed)}</td><td>${escapeHtml(time(row.completed_at))}</td><td>${row.duration_ms == null ? '—' : `${number(Number(row.duration_ms) / 1000, 1)} 秒`}</td></tr>` }).join('') : '<tr><td colspan="9" class="empty">暂无作用域调整记录</td></tr>'; updateTableSortHeaders($('#v2-history-table'), state.historySort); $('#v2-history-page').textContent = rows.length ? `${state.historyPage} / ${pages} · 共 ${number(rows.length)} 条` : '0 条'; $('#v2-history-prev').disabled = state.historyPage <= 1; $('#v2-history-next').disabled = state.historyPage >= pages
 }
 
-function renderPlan(changes = state.planRows) { state.planRows = Array.isArray(changes) ? changes : []; const rows = sortTableRows(state.planRows, state.planSort, (row, key) => ({ accountName: row.accountName ?? row.accountId, score: row.score, before: row.beforePriority, desired: row.desiredPriority, evidence: row.observedAttempts, change: row.change })[key], (a, b) => Number(a.accountId) - Number(b.accountId)); $('#v2-plan-body').innerHTML = rows.length ? rows.map((row) => `<tr><td><strong>${escapeHtml(row.accountName ?? row.accountId)}</strong><small>#${escapeHtml(row.accountId)}</small></td><td>${row.score == null ? '—' : Number(row.score).toFixed(1)}</td><td>${number(row.beforePriority)}</td><td>${number(row.desiredPriority)}</td><td>${escapeHtml(row.confidence ?? '—')} · ${number(row.observedAttempts)} 次</td><td>${escapeHtml(row.change ?? 'noop')}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">当前没有建议调整</td></tr>'; updateTableSortHeaders($('#v2-plan-table'), state.planSort) }
-
 function renderScopeFeatures(features = {}, automation) { const write = features.planWrite === true || features.priorityAutomation === true || features.upstreamWrite === true; $('#v2-write-state').textContent = write ? '写入受控' : '写入关闭'; $('#v2-write-state').dataset.state = write ? 'warning' : 'success'; $('#v2-automation-enabled').value = String(features.priorityAutomation === true); $('#v2-automation-plan').value = String(features.planWrite === true); $('#v2-automation-interval').value = automation?.interval_seconds == null ? '' : String(automation.interval_seconds); $('#v2-automation-state').textContent = `自动优先级调度：${features.priorityAutomation === true ? '作用域已开启' : '作用域关闭'} · 探活：${features.idleProbe === true ? '作用域已开启' : '作用域关闭'} · 上游写入：${features.upstreamWrite === true ? '作用域已开启' : '作用域关闭'}` }
 
 function renderProbeHistory(history = {}) {
@@ -192,7 +190,6 @@ function renderSnapshot(data) {
   const cacheLabel = cacheState === 'hit' ? '缓存命中' : cacheState === 'stale' ? '陈旧缓存 · 后台刷新' : '刚完成刷新'
   $('#v2-data-detail').textContent = `${number(state.accounts.length)} 个账号 · ${cacheLabel}`
   $('#v2-account-state-detail').textContent = `${number(state.accounts.length)} 个账号 · 最近样本 ${number(data.data?.recentCallLimit)} · 额度缓存 ${number(quotaCoverage.cachedAccountCount)} / ${number(quotaCoverage.accountCount)} · 数值 ${number(quotaCoverage.numericAccountCount)} · 不限额 ${number(quotaCoverage.unlimitedAccountCount)} · 不可用 ${number(unavailableCount)} · 缺失 ${number(missingCount)}${quotaCoverage.cacheRowsComplete ? ' · 缓存覆盖完整' : ''}`
-  $('#v2-plan-state').textContent = data.features?.planRead === true ? `允许生成只读 plan · 手动执行${data.features?.planWrite === true ? '开启' : '关闭'} · 自动优先级${data.features?.priorityAutomation === true ? '开启' : '关闭'}` : '当前作用域未启用 plan 读取'
   renderScopeFeatures(data.features, data.data?.automation)
   renderQuality(quality, data.scope)
   renderQuota(data.data?.quota, state.accounts, data.data?.usage ?? [])
@@ -200,17 +197,12 @@ function renderSnapshot(data) {
   renderErrors(data.data?.errors ?? {})
   renderHistory(data.data?.priorityHistory ?? [])
   renderProbeHistory(data.data?.probeHistory ?? {})
-  state.planRows = []
-  renderPlan([])
   performance.mark(`upstream-scheduling-v2:${data.scope}:rendered`)
 }
 
 async function loadScope(forceRefresh = false) { if (!state.activeScope) return; const scope = state.activeScope; const requestId = ++state.scopeRequestId; $('#v2-data-state').textContent = forceRefresh ? '刷新中' : '读取中'; try { const data = await requestJson(`/api/v2/upstream-scheduling/snapshot?scope=${encodeURIComponent(scope)}`, { refresh: forceRefresh }); if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; renderSnapshot(data) } catch (error) { if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
-async function loadPlan() { if (!state.activeScope || state.snapshot?.features?.planRead !== true) return; const button = $('#v2-generate-plan'); button.disabled = true; try { const data = await requestJson(`/api/v2/upstream-scheduling/plan?scope=${encodeURIComponent(state.activeScope)}`); renderPlan(data.changes ?? []); $('#v2-plan-state').textContent = `已生成 ${number(data.changedCount)} 项建议；执行开关：${data.apply?.enabled === true ? '开启' : '关闭'}，本页只读` } catch (error) { $('#v2-plan-state').textContent = `plan 读取失败：${error instanceof Error ? error.message : String(error)}` } finally { button.disabled = false } }
-
 function bindControls() {
   $('#v2-refresh').addEventListener('click', () => void loadScope(true))
-  $('#v2-generate-plan').addEventListener('click', () => void loadPlan())
   $('#v2-filter-apply').addEventListener('click', () => { state.filter = $('#v2-account-filter').value; state.accountPage = 1; renderAccounts() })
   $('#v2-account-filter').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('#v2-filter-apply').click() })
   $('#v2-account-prev').addEventListener('click', () => { state.accountPage -= 1; renderAccounts() })
@@ -221,7 +213,6 @@ function bindControls() {
   bindTableSortHeaders($('#v2-error-table'), () => state.errorSort, (next) => { state.errorSort = next; renderErrors(state.snapshot?.data?.errors ?? {}) })
   bindTableSortHeaders($('#v2-history-table'), () => state.historySort, (next) => { state.historySort = next; state.historyPage = 1; renderHistory(state.snapshot?.data?.priorityHistory ?? []) })
   bindTableSortHeaders($('#v2-probe-table'), () => state.probeSort, (next) => { state.probeSort = next; renderProbeHistory(state.snapshot?.data?.probeHistory ?? {}) })
-  bindTableSortHeaders($('#v2-plan-table'), () => state.planSort, (next) => { state.planSort = next; renderPlan() })
 }
 
 export async function upstreamSchedulingV2Page() { bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); window.addEventListener('popstate', () => { const fallback = state.scopes.find((scope) => scope.enabled)?.name ?? null; const next = scopeFromLocation(fallback); if (!next || next === state.activeScope) return; state.activeScope = next; resetScopePaging(); renderScopeSwitch(); void loadScope() }); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = Array.isArray(data.scopes) ? data.scopes : []; const fallback = typeof data.defaultScope === 'string' ? data.defaultScope : state.scopes.find((scope) => scope.enabled)?.name ?? null; state.activeScope = scopeFromLocation(fallback); updateScopeDeepLink(state.activeScope); renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
