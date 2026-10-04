@@ -32,6 +32,19 @@ test("V2 account table renders quota cache coverage", async () => {
   expect(html).toContain('id="v2-account-body"');
 });
 
+test("V2 displays quota and output values as RMB", async () => {
+  const source = await read("./upstream-scheduling-v2.js");
+  const html = await read("./upstream-scheduling-v2.html");
+  expect(source).toContain("function cny(value)");
+  expect(source).toContain("row.quota?.remaining == null ? '—' : cny(row.quota.remaining)");
+  expect(source).toContain("cny(row.usage?.apiAmountUsd)");
+  expect(source).toContain("unit: '人民币 / 小时'");
+  expect(source).not.toContain("usd(");
+  expect(html).toContain("人民币 / 小时");
+  expect(html).toContain("人民币 / 刀");
+  expect(html).not.toContain("API 美元");
+});
+
 test("retired scheduling commands are absent from the CLI", async () => {
   const cli = await read("../skills/api2business/scripts/src/cli.ts");
   expect(cli).toContain("upstream-scheduling-v2 scopes|snapshot|plan");

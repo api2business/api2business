@@ -8,8 +8,8 @@
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>上游调度 V2 | Api2Business</title>
-  <link rel="stylesheet" href="/styles.css?v=v2-table-sort-1" />
-  <script src="/app.js?v=v2-table-sort-1" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=v2-cny-1" />
+  <script src="/app.js?v=v2-cny-1" type="module"></script>
 </head>
 <body data-page="upstream-scheduling-v2">
   <div data-shell></div>
@@ -38,7 +38,7 @@
         <div class="donut-stack"><div class="quota-ring supplier-quality-ring" id="v2-supplier-quality-ring" role="img" aria-label="按余额加权的供应商质量分布"><strong>—</strong><small>优质余额</small></div><p id="v2-supplier-quality-detail" class="donut-hover-detail">悬停查看供应商评分</p></div>
         <p class="supplier-quality-scale" aria-label="供应商质量颜色说明"><span data-band="good">优质 &gt;80</span><span data-band="mid">一般 60–80</span><span data-band="risk">不良（含未知）</span></p>
       </div>
-      <dl class="quota-monitor-values"><div class="quota-rate-metric"><dt>当前采样速率</dt><dd id="v2-quota-sample-speed">—</dd><small>API 美元 / 小时</small></div><div class="quota-rate-metric"><dt>一小时滚动速率</dt><dd id="v2-quota-rolling-speed">—</dd><small>API 美元 / 小时</small></div><div class="quota-cost-metric"><dt>当前采样成本</dt><dd id="v2-quota-sample-cost">—</dd><small>探测费率优先 · 人民币 / API 美元</small></div><div class="quota-cost-metric"><dt>一小时滚动成本</dt><dd id="v2-quota-realtime-cost">—</dd><small>探测费率优先 · 人民币 / API 美元</small></div><div><dt>总剩余额度</dt><dd id="v2-quota-total">—</dd></div><div><dt>可调度剩余额度</dt><dd id="v2-quota-schedulable">—</dd></div><div><dt>最近 1 小时消耗</dt><dd id="v2-quota-consumed">—</dd></div><div><dt>最近 1 小时 API 产出</dt><dd id="v2-quota-output">—</dd></div><div><dt>预计可用时间</dt><dd id="v2-quota-estimated-hours">—</dd></div><div class="quota-quality-metric"><dt>优质额度可用时间</dt><dd id="v2-quota-quality-estimated-hours">—</dd><small id="v2-quota-quality-balance">评分 &gt;80 · 等待数据</small></div></dl>
+      <dl class="quota-monitor-values"><div class="quota-rate-metric"><dt>当前采样速率</dt><dd id="v2-quota-sample-speed">—</dd><small>人民币 / 小时</small></div><div class="quota-rate-metric"><dt>一小时滚动速率</dt><dd id="v2-quota-rolling-speed">—</dd><small>人民币 / 小时</small></div><div class="quota-cost-metric"><dt>当前采样成本</dt><dd id="v2-quota-sample-cost">—</dd><small>探测费率优先 · 人民币 / 刀</small></div><div class="quota-cost-metric"><dt>一小时滚动成本</dt><dd id="v2-quota-realtime-cost">—</dd><small>探测费率优先 · 人民币 / 刀</small></div><div><dt>总剩余额度</dt><dd id="v2-quota-total">—</dd></div><div><dt>可调度剩余额度</dt><dd id="v2-quota-schedulable">—</dd></div><div><dt>最近 1 小时消耗</dt><dd id="v2-quota-consumed">—</dd></div><div><dt>最近 1 小时 API 产出</dt><dd id="v2-quota-output">—</dd></div><div><dt>预计可用时间</dt><dd id="v2-quota-estimated-hours">—</dd></div><div class="quota-quality-metric"><dt>优质额度可用时间</dt><dd id="v2-quota-quality-estimated-hours">—</dd><small id="v2-quota-quality-balance">评分 &gt;80 · 等待数据</small></div></dl>
       <div class="quota-charts">
         <figure><figcaption><span>API 消耗速率</span><small>最近 8 小时</small></figcaption><svg id="v2-quota-balance-chart" viewBox="0 0 1000 150" role="img" aria-label="上游最近八小时消耗速率"></svg></figure>
         <figure><figcaption><span>实时成本</span><small>最近 8 小时</small></figcaption><svg id="v2-quota-cost-chart" viewBox="0 0 1000 150" role="img" aria-label="上游最近八小时实时成本"></svg></figure>
