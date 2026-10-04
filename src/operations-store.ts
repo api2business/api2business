@@ -12,6 +12,19 @@ export interface PriorityOptimizationQueueLease {
 
 type OperationsSqlFactory = (databaseUrl: string, max: number) => SQL;
 
+export function authoritativeUsageBalance(result: Record<string, unknown>): boolean {
+  if (result.ok !== true) return false;
+  const quota = result.quota && typeof result.quota === "object" && !Array.isArray(result.quota)
+    ? result.quota as Record<string, unknown>
+    : {};
+  const remaining = Number(quota.remaining);
+  if (String(quota.unit ?? "").toUpperCase() === "USD" && Number.isFinite(remaining) && remaining >= 0) return true;
+  // New API's unlimited_quota describes the API key, not the provider wallet,
+  // when account login/billing evidence is unavailable. Do not replace a
+  // previously observed wallet balance with that placeholder state.
+  return quota.unlimited === true && !String(result.warning ?? "").includes("只返回 API Key 配额");
+}
+
 export function postgresBigintArrayLiteral(values: number[]): string {
   if (values.some((value) => !Number.isSafeInteger(value) || value <= 0)) {
     throw new Error("PostgreSQL bigint array values must be positive integers");
@@ -106,7 +119,19 @@ export class OperationsStore {
       UPDATE api2business_upstream_usage_cache
       SET last_success_result=result, last_success_at=queried_at
       WHERE last_success_result IS NULL
-        AND COALESCE((result->>'ok')::boolean, false);
+        AND COALESCE((result->>'ok')::boolean, false)
+        AND (
+          (jsonb_typeof(result->'quota'->'remaining') = 'number'
+            AND UPPER(COALESCE(result->'quota'->>'unit', '')) = 'USD'
+            AND (result->'quota'->>'remaining')::numeric >= 0)
+          OR (result->'quota'->>'unlimited' = 'true'
+            AND COALESCE(result->>'warning', '') NOT LIKE '%只返回 API Key 配额%')
+        );
+      UPDATE api2business_upstream_usage_cache
+      SET last_success_result=NULL, last_success_at=NULL
+      WHERE last_success_result->>'provider' = 'new-api'
+        AND last_success_result->'quota'->>'remaining' IS NULL
+        AND COALESCE(last_success_result->>'warning', '') LIKE '%只返回 API Key 配额%';
       CREATE TABLE IF NOT EXISTS api2business_upstream_quota_samples (
         sampled_at timestamptz NOT NULL,
         wallet_key text NOT NULL,
@@ -499,23 +524,24 @@ export class OperationsStore {
       for (const result of results) {
         const accountId = Number(result.accountId);
         if (!Number.isSafeInteger(accountId) || accountId <= 0) continue;
+        const hasAuthoritativeBalance = authoritativeUsageBalance(result);
         await tx`
           INSERT INTO api2business_upstream_usage_cache (
             account_id, result, queried_at, last_success_result, last_success_at
           ) VALUES (
             ${accountId}, ${result}::jsonb, now(),
-            CASE WHEN COALESCE((${result}::jsonb->>'ok')::boolean, false) THEN ${result}::jsonb ELSE NULL END,
-            CASE WHEN COALESCE((${result}::jsonb->>'ok')::boolean, false) THEN now() ELSE NULL END
+            ${hasAuthoritativeBalance ? result : null}::jsonb,
+            ${hasAuthoritativeBalance ? new Date().toISOString() : null}::timestamptz
           )
           ON CONFLICT (account_id) DO UPDATE SET
             result=EXCLUDED.result,
             queried_at=now(),
             last_success_result=CASE
-              WHEN COALESCE((EXCLUDED.result->>'ok')::boolean, false) THEN EXCLUDED.result
+              WHEN ${hasAuthoritativeBalance} THEN EXCLUDED.result
               ELSE api2business_upstream_usage_cache.last_success_result
             END,
             last_success_at=CASE
-              WHEN COALESCE((EXCLUDED.result->>'ok')::boolean, false) THEN now()
+              WHEN ${hasAuthoritativeBalance} THEN now()
               ELSE api2business_upstream_usage_cache.last_success_at
             END
         `;

@@ -295,6 +295,10 @@
     快照和池质量读取不创建探活记录。手动核验任一作用域时使用
     `accounts idle-probe plan|reconcile|run --scope <codex|claude|grok> --over-api`；确认
     普通请求记录、`ordinaryLogRecorded` 和轮次记录成功后，才打开对应作用域的探活开关。
+  - Grok 评分和优先级的质量权重由 owning YAML 的 `grokScorePolicy` 与
+    `grokPriorityPlan` 独立控制。当前生产配置将优先级质量权重设为可靠性 70、延迟 30、
+    成本 0；质量更高的账号必须排在仅成本更低的账号之前，计划仍按
+    `minimumPriority` 起始的规范化 top-k 写入。
   - V2 的间隔和样本档位从 `scopes`、`snapshot` 回读；旧 priority automation 和
     priority plan 命令不再存在。
   - V2 首屏读取先返回按作用域持久化的读模型缓存；缓存未过
@@ -321,6 +325,11 @@
     不允许用短横线掩盖缓存状态。
   - 钱包汇总仍读取额度监控的持久化汇总；共享余额可以投影到账号行用于展示，但账号级
     用量、成本、状态和质量证据不能被钱包级余额替代。
+  - New API 账号密码采样按 `walletKey + username` 复用一个登录态；同一钱包的多个域名
+    不得并发重复登录，否则会触发上游会话限流并退回 Key 级“不限额”结果。
+  - Key 级“不限额”或缺少账号钱包证据不是余额成功样本；不能覆盖历史成功的数值余额。
+    采样失败、限流和不可换算都保留当前结果用于诊断，作用域仍从最近成功的共享钱包缓存
+    投影余额，直到新的权威数值样本到达。
 - Claude `Upstream access forbidden` 的切号边界：
   - `config/failover-templates/claude.yaml` 已按 Anthropic 平台配置精确的 `502` 状态码与
     `upstream access forbidden` 关键词，且运行时已回读到全部 Claude API-key 账号。

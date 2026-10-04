@@ -150,10 +150,10 @@ sub2api:
     ttftZeroScoreMs: 90000
     ttftPriorScore: 25
   grokScorePolicy:
-    reliabilityWeight: 50
+    reliabilityWeight: 55
     failoverWeight: 15
-    latencyWeight: 25
-    baselineWeight: 10
+    latencyWeight: 30
+    baselineWeight: 0
     failureZeroScoreRate: 0.2
     failureBurstCallLimit: 100
     failoverZeroScoreRate: 0.2
@@ -282,9 +282,9 @@ sub2api:
     eligibleGroupIds: [62]
     requiredConfidence: high
     requireCurrentAvailable: true
-    reliabilityWeight: 65
-    latencyWeight: 28
-    costWeight: 7
+    reliabilityWeight: 70
+    latencyWeight: 30
+    costWeight: 0
     evidenceWeight: 0
     evidenceTargetAttempts: 50
     evidenceTargetFirstTokenSamples: 20

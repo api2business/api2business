@@ -143,6 +143,32 @@ test("reads New API account balance with username/password login", async () => {
   expect(requests).toContain("GET https://api.example.com/api/user/self");
 });
 
+test("deduplicates New API wallet login across concurrent account aliases", async () => {
+  let loginCount = 0;
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
+    if (url.endsWith("/api/user/login")) {
+      loginCount += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Response(JSON.stringify({ data: { access_token: "shared-login-token" } }));
+    }
+    if (url.endsWith("/api/status")) return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
+    if (url.endsWith("/api/user/self")) return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
+    if (url.endsWith("/api/usage/token/") || url.endsWith("/api/log/token")) return new Response(JSON.stringify({ success: false }), { status: 401 });
+    return new Response(JSON.stringify({ data: {} }));
+  }) as typeof fetch;
+
+  const results = await queryUpstreamUsageConcurrently([
+    { ...target, id: 12, walletKey: "https://www.sheapi.cc", newApiCredentials: { username: "wallet-user", password: "secret" } },
+    { ...target, id: 13, baseUrl: "https://cf.sheapi.cc/v1", walletKey: "https://www.sheapi.cc", newApiCredentials: { username: "wallet-user", password: "secret" } },
+  ], { timeoutMs: 100, days: 7, concurrency: 2 });
+
+  expect(loginCount).toBe(1);
+  expect(results.map((result) => result.quota.remaining)).toEqual([14_654_923 / 500_000, 14_654_923 / 500_000]);
+});
+
 test("falls back to a positive New API group ratio when the user ratio is zero", async () => {
   globalThis.fetch = (async (input) => {
     const url = String(input);

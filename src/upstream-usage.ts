@@ -59,6 +59,7 @@ export interface UpstreamUsageResult {
 }
 
 type Row = Record<string, unknown>;
+type NewApiAuthCache = Map<string, Promise<string>>;
 
 function row(value: unknown): Row | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
@@ -122,7 +123,7 @@ async function requestJsonWithToken(target: UpstreamUsageTarget, path: string, t
   status: number;
   payload: unknown;
 }> {
-  const controlBaseUrl = target.baseUrl.replace(/\/$/u, "").replace(/\/v1$/u, "");
+  const controlBaseUrl = (target.walletKey ?? target.baseUrl).replace(/\/$/u, "").replace(/\/v1$/u, "");
   const response = await fetch(`${controlBaseUrl}${path}`, {
     headers: {
       authorization: `Bearer ${token}`,
@@ -151,7 +152,7 @@ function encryptedNewApiPassword(password: string, publicKey: string): string {
 async function loginNewApi(target: UpstreamUsageTarget, timeoutMs: number): Promise<string> {
   const credentials = target.newApiCredentials;
   if (!credentials) throw new Error("New API login credentials are not configured");
-  const controlBaseUrl = target.baseUrl.replace(/\/$/u, "").replace(/\/v1$/u, "");
+  const controlBaseUrl = (target.walletKey ?? target.baseUrl).replace(/\/$/u, "").replace(/\/v1$/u, "");
   const keyResponse = await fetch(`${controlBaseUrl}/api/user/login/encryption-key`, {
     headers: { accept: "application/json", "user-agent": "Api2Business-Upstream-Usage/1.0" },
     signal: AbortSignal.timeout(timeoutMs),
@@ -190,6 +191,31 @@ async function loginNewApi(target: UpstreamUsageTarget, timeoutMs: number): Prom
   const token = typeof loginData?.access_token === "string" ? loginData.access_token : "";
   if (!response.ok || !token) throw new Error(`New API login failed: HTTP ${response.status}`);
   return token;
+}
+
+function newApiAuthCacheKey(target: UpstreamUsageTarget): string {
+  const wallet = normalizeUpstreamWallet(target.walletKey ?? target.baseUrl);
+  return `${wallet}\u0000${target.newApiCredentials?.username ?? ""}`;
+}
+
+async function loginNewApiCached(
+  target: UpstreamUsageTarget,
+  timeoutMs: number,
+  cache?: NewApiAuthCache,
+): Promise<string> {
+  if (!cache) return loginNewApi(target, timeoutMs);
+  const key = newApiAuthCacheKey(target);
+  let pending = cache.get(key);
+  if (!pending) {
+    pending = loginNewApi(target, timeoutMs);
+    cache.set(key, pending);
+  }
+  try {
+    return await pending;
+  } catch (error) {
+    cache.delete(key);
+    throw error;
+  }
 }
 
 function rawNewApiQuotaToUsd(value: number | null, status: Row | null): number | null {
@@ -380,7 +406,7 @@ function parseNewApiLogs(payload: unknown): {
 
 export async function queryUpstreamUsage(
   target: UpstreamUsageTarget,
-  options: { timeoutMs: number; days: number },
+  options: { timeoutMs: number; days: number; authCache?: NewApiAuthCache },
 ): Promise<UpstreamUsageResult> {
   const startedAt = Date.now();
   const failures: string[] = [];
@@ -411,7 +437,7 @@ export async function queryUpstreamUsage(
   let accountQuota: { limit: number | null; used: number | null; remaining: number | null } | null = null;
   if (target.newApiCredentials) {
     try {
-      const loginToken = await loginNewApi(target, options.timeoutMs);
+      const loginToken = await loginNewApiCached(target, options.timeoutMs, options.authCache);
       const statusResponse = await requestJsonWithToken(target, "/api/status", options.timeoutMs, loginToken);
       const status = statusResponse.status >= 200 && statusResponse.status < 300 ? newApiData(statusResponse.payload) : null;
       const selfResponse = await requestJsonWithToken(target, "/api/user/self", options.timeoutMs, loginToken);
@@ -524,12 +550,13 @@ export async function queryUpstreamUsageConcurrently(
   options: { timeoutMs: number; days: number; concurrency: number },
 ): Promise<UpstreamUsageResult[]> {
   const results = new Array<UpstreamUsageResult>(targets.length);
+  const authCache: NewApiAuthCache = new Map();
   let next = 0;
   const workers = Array.from({ length: Math.min(options.concurrency, targets.length) }, async () => {
     for (;;) {
       const index = next++;
       if (index >= targets.length) return;
-      results[index] = await queryUpstreamUsage(targets[index]!, options);
+      results[index] = await queryUpstreamUsage(targets[index]!, { ...options, authCache });
     }
   });
   await Promise.all(workers);
