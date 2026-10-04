@@ -50,11 +50,12 @@
 - 探活账号范围、隔离分组、模型白名单、轮次终态和覆盖判定统一见
   [上游与调度](upstream-scheduling.md)；跨系统边界见 UniDesk 仓库的
   `.agents/skills/unidesk-sub2api/references/idle-probe-isolation.md`。
-- 当前自动探活只对 owning YAML 打开的 Codex/OpenAI API-key 作用域生效；Claude、Grok 和
-  OAuth 账号不套用这套 OpenAI Responses 隔离入口。
+- 每个作用域独立读取 owning YAML 的 `features.idleProbe`；当前 OpenAI/Codex 与 Grok
+  可分别启用，Claude 是否启用也只能由该作用域开关决定。
 - `accounts idle-probe plan` 只读，`accounts idle-probe reconcile` 只负责显式补齐隔离绑定，
-  `accounts idle-probe run` 只执行 active 且 schedulable 的已就绪账号，不恢复异常账号。
+  `accounts idle-probe run` 只执行 active 且 schedulable 的已就绪账号，不恢复异常账号；
+  非默认作用域必须显式传 `--scope`。
 - 自动探活前必须先完成同作用域的手动探活，并核对 HTTP、`ordinaryLogRecorded` 和轮次
-  终态；工作流 `running` 不能代替业务记录成功。
+  终态；工作流 `running` 或 in-flight 跳过只表示并发保护，不是业务失败。
 - 探活请求进入普通用量和错误记录；覆盖必须按专用 Key 归因的账号级记录验收，不能用
   普通用户流量或轮次汇总替代。
