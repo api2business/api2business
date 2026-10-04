@@ -1037,18 +1037,21 @@ export class UpstreamManagementService {
       ORDER BY id`,
       parameters: [accountIds.join(","), ","],
     });
-    const targets = query.rows.map((item): UpstreamUsageTarget => ({
+    const targets = query.rows.map((item): UpstreamUsageTarget => {
+      const baseUrl = normalizeBaseUrl(String(item.base_url ?? ""));
+      const credentials = newApiCredentials.get(normalizeUpstreamWallet(baseUrl));
+      return {
       id: Number(item.id),
       name: String(item.name ?? ""),
-      baseUrl: normalizeBaseUrl(String(item.base_url ?? "")),
+      baseUrl,
       apiKey: String(item.api_key ?? ""),
-      newApiCredentials: newApiCredentials.get(normalizeBaseUrl(String(item.base_url ?? ""))),
-      walletKey: newApiCredentials.get(normalizeBaseUrl(String(item.base_url ?? "")))?.walletKey
-        ?? normalizeUpstreamWallet(String(item.base_url ?? "")),
+      newApiCredentials: credentials,
+      walletKey: credentials?.walletKey ?? normalizeUpstreamWallet(baseUrl),
       status: String(item.status ?? "unknown"),
       schedulable: item.schedulable === true,
       apiAmountUsdTotal: Number(item.account_api_amount_usd_total ?? 0),
-    }));
+      };
+    });
     const results = await queryUpstreamUsageConcurrently(targets, {
       concurrency: settings.usageConcurrency,
       timeoutMs: settings.usageTimeoutMs,
