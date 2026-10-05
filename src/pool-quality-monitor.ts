@@ -1,6 +1,6 @@
 import type { AppConfig } from "./config";
 import { recentCallBucketWeight, scoreRecentDatabaseRow } from "./account-score-database";
-import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
 import {
   attributedInternalUpstreamFailureSql,
   modelRoutingPatternsSql,
@@ -383,6 +383,7 @@ export async function collectPoolQualityErrors(
     page: number;
     pageSize: number;
     filter: PoolQualityErrorFilter;
+    priority?: Sub2ApiReadPriority;
   },
 ) {
   const recentCallLimit = 1000;
@@ -407,7 +408,7 @@ export async function collectPoolQualityErrors(
   const query = await reads.query<Row>({
     key: JSON.stringify(["pool-quality-errors", platform, recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize]),
     kind: "pool-quality-errors",
-    priority: "manual",
+    priority: input.priority ?? "manual",
     cacheMode: "prefer-cache",
     sql: poolQualityErrorsSql,
     parameters: [recentCallLimit, groupIds.join(","), sampledAt, platform, input.filter, input.pageSize, offset],

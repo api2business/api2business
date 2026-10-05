@@ -850,6 +850,7 @@ export class OperationsService {
     pageSize: number;
     filter: PoolQualityErrorFilter;
     sampledAt?: string | null;
+    priority?: "manual" | "automatic";
   }) {
     const samples = await this.store.getPoolQualitySamples(8, input.platform) as Array<Record<string, unknown>>;
     const latest = samples.at(-1);
@@ -861,6 +862,7 @@ export class OperationsService {
       page: input.page,
       pageSize: input.pageSize,
       filter: input.filter,
+      priority: input.priority,
     });
   }
 
