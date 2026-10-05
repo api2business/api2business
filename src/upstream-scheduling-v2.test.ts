@@ -111,6 +111,38 @@ describe("upstream scheduling v2", () => {
     expect(snapshot.readOnly).toBeTrue();
   });
 
+  test("reuses the positive shared wallet cache when one account reports zero", async () => {
+    const { service } = fixture([
+      {
+        account_id: 101,
+        last_success_at: "2026-10-05T10:01:00.000Z",
+        last_success_result: {
+          ok: true,
+          baseUrl: "https://rapidapi.cc/v1",
+          queriedAt: "2026-10-05T10:01:00.000Z",
+          quota: { unit: "USD", remaining: 0 },
+        },
+      },
+      {
+        account_id: 999,
+        last_success_at: "2026-10-05T10:00:00.000Z",
+        last_success_result: {
+          ok: true,
+          baseUrl: "https://rapidapi.cc",
+          queriedAt: "2026-10-05T10:00:00.000Z",
+          quota: { unit: "USD", remaining: 20.5 },
+        },
+      },
+    ]);
+    const snapshot = await service.snapshot("codex");
+
+    expect(snapshot.data.accounts[0]).toMatchObject({
+      quota: { unit: "USD", remaining: 20.5 },
+      accountBalanceCny: 20.5,
+      quotaCacheStatus: "cached",
+    });
+  });
+
   test("prefers cached upstream probe cost and exposes its source", async () => {
     const { service } = fixture([{
       account_id: 101,

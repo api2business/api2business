@@ -6,7 +6,7 @@ import {
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
-import { configuredWalletKey, usageWalletKey } from "./upstream-wallet";
+import { configuredWalletKey, preferSharedWalletBalance, usageWalletKey } from "./upstream-wallet";
 
 type Row = Record<string, unknown>;
 
@@ -137,6 +137,7 @@ function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], con
     result: Row;
     cachedAt: string | null;
     timestamp: number;
+    remaining: number;
   }>();
   for (const row of records(usageRows)) {
     const accountId = Number(row.account_id ?? row.accountId);
@@ -166,7 +167,9 @@ function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], con
     if (status === "cached" && walletKey) {
       const timestamp = Date.parse(cached.cachedAt ?? String(result.queriedAt ?? "")) || 0;
       const previous = cachedByWallet.get(walletKey);
-      if (!previous || timestamp >= previous.timestamp) cachedByWallet.set(walletKey, { result, cachedAt: cached.cachedAt, timestamp });
+      if (preferSharedWalletBalance(previous, { remaining, timestamp })) {
+        cachedByWallet.set(walletKey, { result, cachedAt: cached.cachedAt, timestamp, remaining });
+      }
     }
   }
   const missingAccountIds: number[] = [];

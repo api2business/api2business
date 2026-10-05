@@ -30,6 +30,34 @@ test("deduplicates shared wallets and preserves schedulability", () => {
   ]);
 });
 
+test("shared wallet samples prefer positive cached balance over a zero account result", () => {
+  const samples = buildQuotaSamples([
+    {
+      accountId: 1522,
+      baseUrl: "https://rapidapi.cc/v1",
+      queriedAt: "2026-10-05T10:01:00.000Z",
+      ok: true,
+      status: "active",
+      schedulable: true,
+      provider: "sub2api",
+      quota: { unit: "USD", remaining: 0 },
+    },
+    {
+      accountId: 1523,
+      baseUrl: "https://rapidapi.cc",
+      queriedAt: "2026-10-05T10:00:00.000Z",
+      ok: true,
+      status: "active",
+      schedulable: true,
+      provider: "sub2api",
+      quota: { unit: "USD", remaining: 20.5 },
+    },
+  ], "2026-10-05T10:02:00.000Z", () => 1);
+
+  expect(samples).toHaveLength(1);
+  expect(samples[0]).toMatchObject({ remainingUsd: 20.5, remainingCny: 20.5, accountId: 1523 });
+});
+
 test("carries forward the last successful balance when a quota request fails", () => {
   const samples = buildQuotaSamples([
     { accountId: 1, baseUrl: "https://a.test", ok: false, status: "error", schedulable: true, provider: "sub2api", quota: null },

@@ -96,6 +96,11 @@ export interface ProbeIsolationBinding {
 export interface ProbeIsolationScope {
   platform: "openai" | "anthropic" | "grok";
   eligibleGroupIds: number[];
+  /**
+   * 账号已经拥有的业务分组之外，需要补绑的分组。
+   * V2 作用域只用于筛选账号，不能把整个作用域白名单写回每个账号。
+   */
+  bindingGroupIds?: number[];
 }
 
 interface ProbeIsolationRecordResult {
@@ -278,7 +283,7 @@ export class ProbeIsolationService {
     const currentGroupIds = accountGroupIds(account);
     const desiredGroupIds = [...new Set([
       ...currentGroupIds,
-      ...scope.eligibleGroupIds,
+      ...(scope.bindingGroupIds ?? scope.eligibleGroupIds),
       groupId,
     ])].sort((left, right) => left - right);
     if (desiredGroupIds.some((desiredGroupId) => !currentGroupIds.includes(desiredGroupId))) {
@@ -368,6 +373,7 @@ export class ProbeIsolationService {
   async ensure(accountId: number, scope: ProbeIsolationScope = {
     platform: "openai",
     eligibleGroupIds: this.config.operations.upstreamManagement.groupIds,
+    bindingGroupIds: this.config.operations.upstreamManagement.groupIds,
   }): Promise<ProbeIsolationBinding> {
     if (!this.config.sub2api.idleProbe.isolation.enabled) throw new Error("探活隔离策略未启用");
     if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error("探活账号 ID 无效");

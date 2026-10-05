@@ -376,7 +376,7 @@ export class IdleAccountProbeService {
     if (!this.isolation) throw new Error("idle probe reconciliation requires isolated probe API key");
     const scope = scopeName ? this.config.operations.upstreamSchedulingV2?.scopes[scopeName] : undefined;
     const isolationScope: ProbeIsolationScope | undefined = scope
-      ? { platform: scope.platform, eligibleGroupIds: scope.eligibleGroupIds }
+      ? { platform: scope.platform, eligibleGroupIds: scope.eligibleGroupIds, bindingGroupIds: [] }
       : undefined;
     const plan = await this.plan(accountIds, "automatic", scopeName);
     const candidates = (plan.candidates as IdleProbeCandidate[])
@@ -426,7 +426,7 @@ export class IdleAccountProbeService {
     const scope = scopeName ? this.config.operations.upstreamSchedulingV2?.scopes[scopeName] : undefined;
     const defaultProbeModel = policy.platformModels?.[scope?.platform ?? this.config.sub2api.priorityPlan.platform]?.[0] ?? policy.model;
     const isolationScope: ProbeIsolationScope | undefined = scope
-      ? { platform: scope.platform, eligibleGroupIds: scope.eligibleGroupIds }
+      ? { platform: scope.platform, eligibleGroupIds: scope.eligibleGroupIds, bindingGroupIds: [] }
       : undefined;
     const results: Array<Record<string, unknown>> = [];
     let planned = 0;

@@ -3,6 +3,34 @@ import { normalizeUpstreamWallet } from "./upstream-valuation";
 
 type Row = Record<string, unknown>;
 
+export interface SharedWalletBalanceCandidate {
+  remaining: number | null;
+  timestamp: number;
+}
+
+/**
+ * Pick one cached balance for a shared wallet.
+ *
+ * A zero returned by one account is weaker evidence than a positive cached
+ * value from another account of the same wallet: NewAPI can report a
+ * per-account failure as a successful zero while the wallet still has funds.
+ * Positive values therefore win over zero values; equal kinds keep the newest
+ * observation. No network request is made by this policy.
+ */
+export function preferSharedWalletBalance(
+  previous: SharedWalletBalanceCandidate | undefined,
+  candidate: SharedWalletBalanceCandidate,
+): boolean {
+  if (!previous) return true;
+  if (previous.remaining !== null && candidate.remaining === null) return false;
+  if (previous.remaining === null && candidate.remaining !== null) return true;
+  if (previous.remaining !== null && candidate.remaining !== null) {
+    if (previous.remaining === 0 && candidate.remaining > 0) return true;
+    if (previous.remaining > 0 && candidate.remaining === 0) return false;
+  }
+  return candidate.timestamp >= previous.timestamp;
+}
+
 /**
  * Resolve a provider endpoint to the configured wallet identity.
  *
@@ -47,15 +75,18 @@ export function projectSharedWalletUsageRows(rows: Row[], refs: NewApiCredential
   results: Row[];
   lastSuccessfulResults: Array<Row | null>;
 } {
-  const shared = new Map<string, { result: Row; timestamp: number }>();
+  const shared = new Map<string, { result: Row; timestamp: number; remaining: number }>();
   for (const row of rows) {
     const result = cachedResult(row);
     const quota = numericQuota(result);
     const walletKey = usageWalletKey(result, refs);
     if (!quota || !walletKey) continue;
+    const remaining = Number(quota.remaining);
     const timestamp = Date.parse(String(row.last_success_at ?? row.queried_at ?? result.queriedAt ?? "")) || 0;
     const previous = shared.get(walletKey);
-    if (!previous || timestamp >= previous.timestamp) shared.set(walletKey, { result, timestamp });
+    if (preferSharedWalletBalance(previous, { remaining, timestamp })) {
+      shared.set(walletKey, { result, timestamp, remaining });
+    }
   }
 
   const project = (row: Row, source: unknown): Row | null => {

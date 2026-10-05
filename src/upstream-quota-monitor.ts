@@ -1,4 +1,5 @@
 import { normalizeUpstreamWallet } from "./upstream-valuation";
+import { preferSharedWalletBalance } from "./upstream-wallet";
 
 type Row = Record<string, unknown>;
 
@@ -163,7 +164,11 @@ export function buildQuotaSamples(
   sampledAt: string,
   rateForWallet: (wallet: string) => number,
 ): UpstreamQuotaSample[] {
-  const wallets = new Map<string, UpstreamQuotaSample>();
+  const wallets = new Map<string, {
+    sample: UpstreamQuotaSample;
+    remaining: number | null;
+    timestamp: number;
+  }>();
   for (const result of results) {
     const walletKey = normalizeUpstreamWallet(result.walletKey ?? result.baseUrl);
     const accountId = Number(result.accountId);
@@ -196,9 +201,11 @@ export function buildQuotaSamples(
       walletApiAmountUsdTotal: finite(result.apiAmountUsdTotal),
       accountCostInputs,
     };
-    const current = wallets.get(walletKey);
-    if (!current) wallets.set(walletKey, candidate);
+    const candidateTimestamp = Date.parse(candidate.sourceQueriedAt ?? "") || 0;
+    const currentEntry = wallets.get(walletKey);
+    if (!currentEntry) wallets.set(walletKey, { sample: candidate, remaining: candidate.remainingCny, timestamp: candidateTimestamp });
     else {
+      const current = currentEntry.sample;
       current.schedulable ||= candidate.schedulable;
       current.walletApiAmountUsdTotal = current.walletApiAmountUsdTotal === null
         || current.walletApiAmountUsdTotal === undefined
@@ -207,17 +214,19 @@ export function buildQuotaSamples(
         ? null
         : current.walletApiAmountUsdTotal + candidate.walletApiAmountUsdTotal;
       current.accountCostInputs = [...(current.accountCostInputs ?? []), ...(candidate.accountCostInputs ?? [])];
-      if (current.remainingCny === null && candidate.remainingCny !== null) {
+      if (preferSharedWalletBalance(currentEntry, { remaining: candidate.remainingCny, timestamp: candidateTimestamp })) {
         current.accountId = candidate.accountId;
         current.remainingUsd = candidate.remainingUsd;
         current.remainingCny = candidate.remainingCny;
         current.provider = candidate.provider;
         current.probeOk = candidate.probeOk;
         current.sourceQueriedAt = candidate.sourceQueriedAt;
+        currentEntry.remaining = candidate.remainingCny;
+        currentEntry.timestamp = candidateTimestamp;
       }
     }
   }
-  return [...wallets.values()];
+  return [...wallets.values()].map((entry) => entry.sample);
 }
 
 export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHours = 1) {

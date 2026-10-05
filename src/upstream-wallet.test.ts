@@ -35,3 +35,30 @@ test("shared wallet projection makes aliases display one latest finite balance",
   expect(projected.results[0]).toMatchObject({ accountId: 524, walletKey: "https://www.sheapi.cc", quota: { remaining: 29.1 } });
   expect(projected.results[1]).toMatchObject({ accountId: 1488, walletKey: "https://www.sheapi.cc", quota: { remaining: 29.1 } });
 });
+
+test("shared wallet projection keeps positive cached balance when a later account reports zero", () => {
+  const projected = projectSharedWalletUsageRows([
+    {
+      account_id: 1522,
+      last_success_at: "2026-10-05T10:00:00.000Z",
+      last_success_result: {
+        ok: true,
+        accountId: 1522,
+        baseUrl: "https://rapidapi.cc/v1",
+        quota: { unit: "USD", remaining: 20.5 },
+      },
+    },
+    {
+      account_id: 1523,
+      last_success_at: "2026-10-05T10:01:00.000Z",
+      last_success_result: {
+        ok: true,
+        accountId: 1523,
+        baseUrl: "https://rapidapi.cc",
+        quota: { unit: "USD", remaining: 0 },
+      },
+    },
+  ]);
+
+  expect(projected.results.map((row) => (row.quota as { remaining: number }).remaining)).toEqual([20.5, 20.5]);
+});

@@ -175,6 +175,20 @@ test("probe isolation creates a Grok private group without adding Codex groups",
   expect(secret.records["42"]).toMatchObject({ platform: "grok", ready: true });
 });
 
+test("scoped Claude probing preserves Kiro membership without adding Claude MAX", async () => {
+  const { state, service } = fixture();
+  state.account = { id: 42, platform: "anthropic", type: "apikey", group_ids: [161] };
+
+  await service.ensure(42, {
+    platform: "anthropic",
+    eligibleGroupIds: [119, 161],
+    bindingGroupIds: [],
+  });
+
+  expect(state.accountUpdates).toEqual([expect.objectContaining({ group_ids: [51, 161] })]);
+  expect(state.accountUpdates[0]?.group_ids).not.toContain(119);
+});
+
 test("concurrent ensure calls are idempotent and keep the target as the only group member", async () => {
   const { state, service } = fixture();
   const results = await Promise.all([service.ensure(42), service.ensure(42)]);
