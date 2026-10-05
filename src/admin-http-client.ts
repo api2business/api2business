@@ -64,6 +64,15 @@ export class AdminHttpClient {
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
     return this.request(`/api/v2/upstream-scheduling/plan${query}`, {}, 60000);
   }
+  upstreamSchedulingV2PriorityRun(operationId: string, scope: string, recentCallLimit: number): Promise<Record<string, unknown>> {
+    return this.request("/api/internal/execute-worker-operation", {
+      method: "POST",
+      body: JSON.stringify({
+        operationId,
+        command: { kind: "priority.automation.v2.run", scope, recentCallLimit },
+      }),
+    }, 120000);
+  }
   upstreamSchedulingV2ModelSyncPlan(scope?: string | null, accountIds: number[] = []): Promise<Record<string, unknown>> {
     const query = new URLSearchParams();
     if (scope) query.set("scope", scope);

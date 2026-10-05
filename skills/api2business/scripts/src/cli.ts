@@ -1,4 +1,5 @@
 import { measureQuotaMonitor } from './quota-monitor-measure';
+import { randomUUID } from "node:crypto";
 import { AdminHttpClient } from "../../../../src/admin-http-client";
 import { readFileSync } from "node:fs";
 import { mergeAccountScores } from "../../../../src/account-score-aggregation";
@@ -226,6 +227,7 @@ function help(): Record<string, unknown> {
       "backend check",
       "scores get|pool-quality|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "upstream-scheduling-v2 scopes|snapshot|plan [--scope codex] --over-api (read-only; Codex phase first)",
+      "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api (manual priority adjustment)",
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api",
       "reads status",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
@@ -1028,6 +1030,29 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (action === "scopes") return await client.upstreamSchedulingV2Scopes();
     if (action === "snapshot") return await client.upstreamSchedulingV2Snapshot(parsed.scope);
     if (action === "plan") return await client.upstreamSchedulingV2Plan(parsed.scope);
+    if (action === "priority-run") {
+      const scope = parsed.scope;
+      if (scope !== "codex" && scope !== "claude" && scope !== "grok") {
+        throw new Error("upstream-scheduling-v2 priority-run requires --scope codex|claude|grok");
+      }
+      const recentCallLimit = config.operations.upstreamSchedulingV2?.automation.recentCallLimit
+        ?? config.monitor.recentCallLimit;
+      if (!parsed.confirm) {
+        return {
+          ok: true,
+          mutation: false,
+          action: "upstream-scheduling-v2-priority-run",
+          scope,
+          recentCallLimit,
+          hint: "add --confirm to execute",
+        };
+      }
+      return await client.upstreamSchedulingV2PriorityRun(
+        `manual:v2-priority:${scope}:${randomUUID()}`,
+        scope,
+        recentCallLimit,
+      );
+    }
     if (action === "model-sync") {
       const subcommand = parsed.command[2] ?? "plan";
       const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];

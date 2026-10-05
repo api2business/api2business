@@ -238,6 +238,34 @@ function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], con
   };
 }
 
+function projectCachedQuotaBalances(payload: V2SnapshotPayload, config: AppConfig): V2SnapshotPayload {
+  const usageByAccount = new Map<number, Row>();
+  for (const usage of records(payload.data.usage)) {
+    const accountId = Number(usage.accountId ?? usage.account_id);
+    if (Number.isSafeInteger(accountId) && accountId > 0) usageByAccount.set(accountId, usage);
+  }
+  const valuation = readUpstreamValuationPolicy(config.operations.ledgerYamlPath);
+  const accounts = payload.data.accounts.map((account) => {
+    const usage = usageByAccount.get(Number(account.accountId));
+    const usageQuota = object(usage?.quota);
+    const accountQuota = object(account.quota);
+    const unit = String(usageQuota.unit ?? accountQuota.unit ?? "").toUpperCase();
+    const rawRemaining = usageQuota.remaining ?? accountQuota.remaining;
+    const remaining = unit === "USD" && rawRemaining !== null && rawRemaining !== undefined
+      ? Number(rawRemaining)
+      : null;
+    const accountBalanceCny = remaining !== null && Number.isFinite(remaining) && remaining >= 0
+      ? remaining * upstreamBalanceRateByWallet(
+        configuredWalletKey(usage?.walletKey ?? usage?.baseUrl ?? account.accountName, config.sub2api.newApiCredentials),
+        valuation.defaultCnyPerApiUsd,
+        valuation.walletCnyPerApiUsd,
+      )
+      : null;
+    return { ...account, accountBalanceCny };
+  });
+  return { ...payload, data: { ...payload.data, accounts } };
+}
+
 function accountBelongsToScope(row: Row, scope: UpstreamSchedulingV2Scope): boolean {
   if (String(row.platform ?? "").trim().toLowerCase() !== scope.platform) return false;
   const groupIds = normalizedIds(row.groupIds);
@@ -306,7 +334,7 @@ export class UpstreamSchedulingV2Service {
   }
 
   private withCache(payload: V2SnapshotPayload, capturedAt: string, state: "hit" | "stale" | "refreshed", error: string | null = null): V2SnapshotPayload & { cache: Row } {
-    return { ...payload, cache: this.cacheMetadata(capturedAt, state, error) };
+    return { ...projectCachedQuotaBalances(payload, this.config), cache: this.cacheMetadata(capturedAt, state, error) };
   }
 
   private async persistedCache(scopeName: string): Promise<{ payload: V2SnapshotPayload; capturedAt: string } | null> {

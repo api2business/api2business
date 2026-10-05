@@ -136,7 +136,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   样本即可计算并参与评分，没有有效样本时才使用 prior；完整口径见上述参考。
 - 池级质量调查使用 `scores pool-quality --over-api`，账号评分快照使用 `scores get`，
   需要刷新时使用 `scores rank --calls <N> --over-api`。
-- V2 使用 `upstream-scheduling-v2 scopes|snapshot|plan --over-api`；作用域的
+- V2 使用 `upstream-scheduling-v2 scopes|snapshot|plan --over-api` 只读查看，使用
+  `upstream-scheduling-v2 priority-run --scope <codex|claude|grok> --confirm --over-api`
+  通过原生 worker 执行一次指定作用域的手动优先级调整；作用域的
   `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和
   `upstreamWrite` 只认 owning YAML；Codex、Claude、Grok 使用同一套平等作用域接口。
   自动探活必须先完成同作用域的手动探活核验，再打开
