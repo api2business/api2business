@@ -233,6 +233,63 @@ test("template application reports Grok as an explicit platform skip", async () 
   expect(source).toContain("skippedCount: skipped.length");
 });
 
+test("template application does not call runtime for a Grok-only selection", async () => {
+  let runtimeCalls = 0;
+  const reads = {
+    query: async () => ({
+      rows: [{ id: 1530, platform: "grok" }],
+      queueDurationMs: 0,
+      queryDurationMs: 0,
+      totalDurationMs: 0,
+      queryStartedAt: "",
+      queryCompletedAt: "",
+      deduplicated: false,
+      cached: false,
+    }),
+    status: () => ({
+      owner: "native-api",
+      applicationName: "api2business-read-broker",
+      connectionLimit: 1,
+      queueDepth: 0,
+      manualQueueDepth: 0,
+      automaticQueueDepth: 0,
+      active: false,
+      activeKind: null,
+      activeStartedAt: null,
+      totalQueries: 0,
+      deduplicatedQueries: 0,
+      cacheHits: 0,
+      queueTimeouts: 0,
+      queryTimeouts: 0,
+      connectionRecycles: 0,
+      failedQueries: 0,
+      maximumObservedDatabaseConcurrency: 0,
+      lastCompletedAt: null,
+      lastError: null,
+    }),
+  } as const;
+  const runtime = {
+    applyApiKeyFailoverTemplates: async () => {
+      runtimeCalls += 1;
+      throw new Error("Grok must not receive a failover template");
+    },
+  };
+  const service = new UpstreamManagementService(
+    loadConfig("config/api2business.example.yaml"),
+    reads as unknown as Sub2ApiReadClient,
+    null,
+    runtime as unknown as ConstructorParameters<typeof UpstreamManagementService>[3],
+  );
+  await expect(service.applyTemplate([1530])).resolves.toMatchObject({
+    ok: true,
+    targetCount: 0,
+    appliedCount: 0,
+    skippedCount: 1,
+    skipped: [{ accountId: 1530, platform: "grok", reason: "platform-has-no-failover-template" }],
+  });
+  expect(runtimeCalls).toBe(0);
+});
+
 test("upstream creation keeps the created account successful when post-processing is incomplete", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   const createBody = source.slice(source.indexOf("  async create(input:"), source.indexOf("  async update(id:"));
