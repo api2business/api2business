@@ -25,7 +25,7 @@ const frontendNoStoreHeaders = {
 
 const frontendRevision = createHash("sha256")
     .update(readdirSync(resolve(process.cwd(), "static"), { withFileTypes: true })
-    .filter((entry) => entry.isFile() && /\.(?:html|js|css)$/u.test(entry.name) && !entry.name.includes(".test.")))
+    .filter((entry) => entry.isFile() && /\.(?:html|js|css)$/u.test(entry.name) && !entry.name.includes(".test."))
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((entry) => `${entry.name}\0${readFileSync(join(resolve(process.cwd(), "static"), entry.name))}`)
     .join("\0"))

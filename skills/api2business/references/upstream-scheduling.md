@@ -290,6 +290,10 @@
   - 作用域深链统一使用 `/upstream-scheduling-v2?scope=<scope-name>`；例如
     `?scope=codex`、`?scope=claude`、`?scope=grok`。首次打开、切换、浏览器前进后退和
     刷新都以 URL 中的作用域为准，未知或已停用作用域回退到 owning YAML 的默认作用域。
+  - V2 页面只读快照默认每 30 秒自动刷新一次，间隔可在页面选择 30 秒、60 秒、2 分钟、
+    5 分钟或关闭；选择保存在浏览器本地。自动刷新使用快照接口的显式 refresh 请求，
+    只更新读模型缓存，不触发探活、优先级调整、模型同步或任何上游写入。刷新失败时保留
+    上一次成功快照，并在数据状态中显示失败原因，下一轮仍按失败完成时间重新计时。
   - Codex、Claude 和 Grok 是平等作用域。每个作用域的平台、分组、成本、评分、优先级、
     自动调度和探活是否启用均以该作用域开关为准，不把其他作用域数据互相投影。
   - Grok 作用域使用 `platform: grok` 和 `sub2api.grokPriorityPlan.eligibleGroupIds`，

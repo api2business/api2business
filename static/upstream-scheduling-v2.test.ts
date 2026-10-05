@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { runInNewContext } from "node:vm";
 
 test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   const html = await Bun.file(new URL("./upstream-scheduling-v2.html", import.meta.url)).text();
@@ -20,12 +21,20 @@ test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   expect(html).not.toContain('id="v2-plan-table"');
   expect(html).not.toContain('只读优先级计划');
   expect(html).toContain('id="v2-automation-state"');
+  expect(html).toContain('id="v2-refresh-interval"');
+  expect(html).toContain('<option value="30" selected>30 秒</option>');
+  expect(html).toContain('id="v2-refresh-countdown"');
   expect(html).not.toContain("对账");
   expect(script).not.toContain("对账");
   expect(script).toContain("/api/v2/upstream-scheduling/scopes");
   expect(script).toContain("/api/v2/upstream-scheduling/snapshot");
   expect(script).not.toContain("/api/v2/upstream-scheduling/plan");
   expect(script).toContain("scopeRequestId");
+  expect(script).toContain("x-api2business-refresh");
+  expect(script).toContain("api2business.operations.upstream-scheduling-v2-refresh-interval.v1");
+  expect(script).toContain("scheduleAutoRefresh");
+  expect(script).toContain("loadScope(true)");
+  expect(script).toContain("保留上一份快照");
   expect(script).toContain("state.activeScope !== scope");
   expect(script).toContain("new URLSearchParams(location.search)");
   expect(script).toContain("updateScopeDeepLink(state.activeScope, 'push')");
@@ -42,4 +51,59 @@ test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   expect(script).toContain("function externalUpstreamUrl(row)");
   expect(script).not.toMatch(/method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]/u);
   expect(app).toContain("upstream-scheduling-v2");
+});
+
+
+test("V2 defaults to 30 seconds and continues after a failed refresh", async () => {
+  const source = await Bun.file(new URL("./upstream-scheduling-v2.js", import.meta.url)).text();
+  const nodes = new Map<string, any>([
+    ["#v2-refresh-interval", { value: "30" }],
+    ["#v2-refresh-countdown", { textContent: "" }],
+    ["#v2-refresh", { disabled: false }],
+    ["#v2-data-state", { textContent: "", dataset: {} }],
+    ["#v2-data-detail", { textContent: "" }],
+  ]);
+  const timers = new Map<number, { callback: () => Promise<void>; ms: number }>();
+  let timerId = 0;
+  let stored: string | null = null;
+  let headers: unknown;
+  const context: any = {
+    document: { querySelector: (selector: string) => nodes.get(selector) },
+    localStorage: { getItem: () => stored },
+    setTimeout: (callback: () => Promise<void>, ms: number) => {
+      timers.set(++timerId, { callback, ms }); return timerId;
+    },
+    clearTimeout: (id: number) => timers.delete(id),
+    setInterval: () => ++timerId,
+    clearInterval: () => {},
+    AbortController,
+    fetch: async (_url: string, options: { headers: unknown }) => {
+      headers = options.headers;
+      throw new Error("HTTP 502");
+    },
+  };
+  runInNewContext(source.replace(/^import .*$/gm, "").replace("export async function", "async function")
+    + "\nthis.controls = { state, readRefreshInterval, scheduleAutoRefresh };", context);
+  const { state, readRefreshInterval, scheduleAutoRefresh } = context.controls;
+  expect(readRefreshInterval()).toBeNull();
+  stored = "0";
+  expect(readRefreshInterval()).toBe(0);
+  stored = "invalid";
+  expect(readRefreshInterval()).toBeNull();
+  state.activeScope = "claude";
+  const previous = { scope: "claude", data: { accounts: [{ accountId: 42 }] } };
+  state.snapshot = previous;
+  scheduleAutoRefresh();
+  expect([...timers.values()].map((timer) => timer.ms)).toEqual([30000]);
+  expect(nodes.get("#v2-refresh-countdown").textContent).toBe("下次刷新 00:30");
+  await [...timers.values()][0].callback();
+  expect(headers).toEqual({ "x-api2business-refresh": "1" });
+  expect(state.snapshot).toBe(previous);
+  expect(nodes.get("#v2-data-detail").textContent).toContain("保留上一份快照");
+  expect(nodes.get("#v2-refresh").disabled).toBeFalse();
+  expect([...timers.values()].map((timer) => timer.ms)).toEqual([30000]);
+  nodes.get("#v2-refresh-interval").value = "0";
+  scheduleAutoRefresh();
+  expect(timers.size).toBe(0);
+  expect(nodes.get("#v2-refresh-countdown").textContent).toBe("自动刷新已关闭");
 });

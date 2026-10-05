@@ -5,10 +5,12 @@ import { sampleTimeDisplay } from './sample-time.js'
 import { bindTableSortHeaders, sortTableRows, updateTableSortHeaders } from './table-sort.js?v=table-sort-v1'
 
 const $ = (selector) => document.querySelector(selector)
-const state = { scopes: [], activeScope: null, snapshot: null, accounts: [], accountPage: 1, errorPage: 1, historyPage: 1, probePage: 1, filter: '', scopeRequestId: 0, accountSort: { key: 'score', direction: 'desc' }, errorSort: { key: 'createdAt', direction: 'desc' }, historySort: { key: 'started_at', direction: 'desc' }, probeSort: { key: 'startedAt', direction: 'desc' }, modelSyncSort: { key: 'startedAt', direction: 'desc' } }
+const state = { scopes: [], activeScope: null, snapshot: null, accounts: [], accountPage: 1, errorPage: 1, historyPage: 1, probePage: 1, filter: '', scopeRequestId: 0, refreshTimer: null, refreshCountdownTimer: null, refreshDueAt: null, accountSort: { key: 'score', direction: 'desc' }, errorSort: { key: 'createdAt', direction: 'desc' }, historySort: { key: 'started_at', direction: 'desc' }, probeSort: { key: 'startedAt', direction: 'desc' }, modelSyncSort: { key: 'startedAt', direction: 'desc' } }
 const accountPageSize = 10
 const errorPageSize = 20
 const historyPageSize = 10
+const refreshIntervals = new Set([0, 30, 60, 120, 300])
+const refreshStorageKey = 'api2business.operations.upstream-scheduling-v2-refresh-interval.v1'
 
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/gu, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])) }
 function externalUpstreamUrl(row) {
@@ -42,6 +44,66 @@ function updateScopeDeepLink(scope, navigation = 'replace') {
 }
 function resetScopePaging() { state.accountPage = 1; state.errorPage = 1; state.historyPage = 1; state.probePage = 1 }
 
+function renderRefreshCountdown() {
+  const target = $('#v2-refresh-countdown')
+  if (!target) return
+  const interval = Number($('#v2-refresh-interval')?.value)
+  if (!refreshIntervals.has(interval) || interval <= 0) {
+    target.textContent = '自动刷新已关闭'
+    return
+  }
+  if (state.refreshDueAt === null) {
+    target.textContent = '下次刷新 --:--'
+    return
+  }
+  const remainingSeconds = Math.max(0, Math.ceil((state.refreshDueAt - Date.now()) / 1000))
+  target.textContent = remainingSeconds > 0
+    ? `下次刷新 ${String(Math.floor(remainingSeconds / 60)).padStart(2, '0')}:${String(remainingSeconds % 60).padStart(2, '0')}`
+    : '自动刷新中…'
+}
+
+function clearAutoRefresh() {
+  if (state.refreshTimer !== null) clearTimeout(state.refreshTimer)
+  if (state.refreshCountdownTimer !== null) clearInterval(state.refreshCountdownTimer)
+  state.refreshTimer = null
+  state.refreshCountdownTimer = null
+  state.refreshDueAt = null
+  renderRefreshCountdown()
+}
+
+function scheduleAutoRefresh() {
+  clearAutoRefresh()
+  const interval = Number($('#v2-refresh-interval')?.value)
+  if (!state.activeScope || !refreshIntervals.has(interval) || interval <= 0) return
+  state.refreshDueAt = Date.now() + interval * 1000
+  renderRefreshCountdown()
+  state.refreshCountdownTimer = setInterval(renderRefreshCountdown, 1000)
+  state.refreshTimer = setTimeout(async () => {
+    state.refreshDueAt = null
+    renderRefreshCountdown()
+    await loadScope(true)
+  }, interval * 1000)
+}
+
+function readRefreshInterval() {
+  try {
+    const stored = localStorage.getItem(refreshStorageKey)
+    if (stored === null || stored.trim() === '') return null
+    const value = Number(stored)
+    return refreshIntervals.has(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+function writeRefreshInterval(value) {
+  try {
+    localStorage.setItem(refreshStorageKey, String(value))
+  } catch {
+    // 隐私模式可能禁用存储，当前页面仍按选择继续刷新。
+  }
+}
+
 async function requestJson(path, options = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 20000)
@@ -56,7 +118,7 @@ async function requestJson(path, options = {}) {
 function renderScopeSwitch() {
   const target = $('#v2-scope-switch'); if (!target) return
   target.innerHTML = state.scopes.length ? state.scopes.map((scope) => `<button class="profile-tab${scope.name === state.activeScope ? ' is-active' : ''}" type="button" role="tab" aria-selected="${scope.name === state.activeScope}" data-v2-scope="${escapeHtml(scope.name)}"${scope.enabled ? '' : ' disabled'}>${escapeHtml(scopeLabel(scope.name))}${scope.enabled ? '' : '（待启用）'}</button>`).join('') : '<span class="section-state">没有启用的作用域</span>'
-  target.querySelectorAll('[data-v2-scope]').forEach((button) => button.addEventListener('click', () => { if (!button.disabled && button.dataset.v2Scope && button.dataset.v2Scope !== state.activeScope) { state.activeScope = button.dataset.v2Scope; resetScopePaging(); updateScopeDeepLink(state.activeScope, 'push'); renderScopeSwitch(); void loadScope() } }))
+  target.querySelectorAll('[data-v2-scope]').forEach((button) => button.addEventListener('click', () => { if (!button.disabled && button.dataset.v2Scope && button.dataset.v2Scope !== state.activeScope) { clearAutoRefresh(); state.activeScope = button.dataset.v2Scope; resetScopePaging(); updateScopeDeepLink(state.activeScope, 'push'); renderScopeSwitch(); void loadScope() } }))
 }
 
 function renderQuality(quality, scope) {
@@ -231,9 +293,39 @@ function renderSnapshot(data) {
   performance.mark(`upstream-scheduling-v2:${data.scope}:rendered`)
 }
 
-async function loadScope(forceRefresh = false) { if (!state.activeScope) return; const scope = state.activeScope; const requestId = ++state.scopeRequestId; $('#v2-data-state').textContent = forceRefresh ? '刷新中' : '读取中'; try { const data = await requestJson(`/api/v2/upstream-scheduling/snapshot?scope=${encodeURIComponent(scope)}`, { refresh: forceRefresh }); if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; renderSnapshot(data) } catch (error) { if (requestId !== state.scopeRequestId || state.activeScope !== scope) return; $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
+async function loadScope(forceRefresh = false) {
+  if (!state.activeScope) return
+  clearAutoRefresh()
+  const scope = state.activeScope
+  const requestId = ++state.scopeRequestId
+  const button = $('#v2-refresh')
+  button.disabled = true
+  $('#v2-data-state').textContent = forceRefresh ? '刷新中' : '读取中'
+  $('#v2-data-state').dataset.state = 'refreshing'
+  try {
+    const data = await requestJson(`/api/v2/upstream-scheduling/snapshot?scope=${encodeURIComponent(scope)}`, { refresh: forceRefresh })
+    if (requestId !== state.scopeRequestId || state.activeScope !== scope) return
+    renderSnapshot(data)
+  } catch (error) {
+    if (requestId !== state.scopeRequestId || state.activeScope !== scope) return
+    const message = error instanceof Error ? error.message : String(error)
+    $('#v2-data-state').textContent = forceRefresh ? '刷新失败' : '读取失败'
+    $('#v2-data-state').dataset.state = 'unavailable'
+    $('#v2-data-detail').textContent = state.snapshot?.scope === scope ? `保留上一份快照 · ${message}` : message
+  } finally {
+    if (requestId === state.scopeRequestId && state.activeScope === scope) {
+      button.disabled = false
+      scheduleAutoRefresh()
+    }
+  }
+}
 function bindControls() {
   $('#v2-refresh').addEventListener('click', () => void loadScope(true))
+  const refreshInterval = $('#v2-refresh-interval')
+  const storedInterval = readRefreshInterval()
+  if (storedInterval !== null) refreshInterval.value = String(storedInterval)
+  refreshInterval.addEventListener('change', () => { writeRefreshInterval(refreshInterval.value); scheduleAutoRefresh() })
+  renderRefreshCountdown()
   $('#v2-filter-apply').addEventListener('click', () => { state.filter = $('#v2-account-filter').value; state.accountPage = 1; renderAccounts() })
   $('#v2-account-filter').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('#v2-filter-apply').click() })
   $('#v2-account-prev').addEventListener('click', () => { state.accountPage -= 1; renderAccounts() })
@@ -247,4 +339,4 @@ function bindControls() {
   bindTableSortHeaders($('#v2-model-sync-table'), () => state.modelSyncSort, (next) => { state.modelSyncSort = next; renderModelSync(state.snapshot?.data?.modelSyncHistory ?? {}) })
 }
 
-export async function upstreamSchedulingV2Page() { bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); window.addEventListener('popstate', () => { const fallback = state.scopes.find((scope) => scope.enabled)?.name ?? null; const next = scopeFromLocation(fallback); if (!next || next === state.activeScope) return; state.activeScope = next; resetScopePaging(); renderScopeSwitch(); void loadScope() }); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = Array.isArray(data.scopes) ? data.scopes : []; const fallback = typeof data.defaultScope === 'string' ? data.defaultScope : state.scopes.find((scope) => scope.enabled)?.name ?? null; state.activeScope = scopeFromLocation(fallback); updateScopeDeepLink(state.activeScope); renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
+export async function upstreamSchedulingV2Page() { bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); window.addEventListener('popstate', () => { const fallback = state.scopes.find((scope) => scope.enabled)?.name ?? null; const next = scopeFromLocation(fallback); if (!next || next === state.activeScope) return; clearAutoRefresh(); state.activeScope = next; resetScopePaging(); renderScopeSwitch(); void loadScope() }); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = Array.isArray(data.scopes) ? data.scopes : []; const fallback = typeof data.defaultScope === 'string' ? data.defaultScope : state.scopes.find((scope) => scope.enabled)?.name ?? null; state.activeScope = scopeFromLocation(fallback); updateScopeDeepLink(state.activeScope); renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }

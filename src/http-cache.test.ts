@@ -14,6 +14,7 @@ test("frontend static resources are never stored across deployments", () => {
 
 test("the Vite production entry also disables immutable module caching", async () => {
   const config = await Bun.file(new URL("../vite.config.ts", import.meta.url)).text();
+  expect(() => new Bun.Transpiler({ loader: "ts" }).transformSync(config)).not.toThrow();
   expect(config).toContain("frontendNoStoreHeaders");
   expect(config).toContain('"Cache-Control": "private, no-store, max-age=0, must-revalidate"');
   expect(config).toContain("headers: frontendNoStoreHeaders");
