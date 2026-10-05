@@ -198,13 +198,12 @@ func UpstreamQuotaScheduleWorkflow(ctx workflow.Context, input ScheduleInput) er
 	}
 	ctx = workflow.WithActivityOptions(ctx, scheduledActivityOptions((time.Duration(timeout)*time.Millisecond).String(), 1))
 	for iteration := 0; iteration < 500; iteration++ {
-		futures := make([]workflow.Future, 0, 3)
 		for _, kind := range []string{"oauth.runtime.sample", "upstream.usage.sample", "pool.quality.sample"} {
 			request := OperationRequest{OperationID: fmt.Sprintf("%s:upstream-quota:%d:%s", workflow.GetInfo(ctx).WorkflowExecution.RunID, iteration, kind), Command: map[string]any{"kind": kind}}
-			futures = append(futures, workflow.ExecuteActivity(ctx, "executeOperation", request))
-		}
-		for _, future := range futures {
-			_ = future.Get(ctx, nil)
+			// The native read broker intentionally has one database connection.
+			// Running these heavy reads concurrently only queues them behind one
+			// another and can make the next scheduled round look stuck.
+			_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, nil)
 		}
 		if err := workflow.Sleep(ctx, time.Duration(input.IntervalMS)*time.Millisecond); err != nil {
 			return err
