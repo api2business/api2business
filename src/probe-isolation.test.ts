@@ -162,11 +162,11 @@ test("probe isolation creates one private internal-ID group and redacts every se
   expect(state.keyCreates[0]).not.toHaveProperty("custom_key");
 });
 
-test("probe isolation creates a Grok private group without adding Codex groups", async () => {
+test("probe isolation detects Grok platform without adding Codex groups", async () => {
   const { rootDirectory, state, service } = fixture();
   state.account = { id: 42, platform: "grok", type: "apikey", group_ids: [62] };
 
-  await service.ensure(42, { platform: "grok", eligibleGroupIds: [62] });
+  await service.ensure(42);
 
   expect(state.groupCreates[0]).toEqual(expect.objectContaining({ platform: "grok" }));
   expect(state.accountUpdates).toEqual([expect.objectContaining({ group_ids: [51, 62] })]);
@@ -377,7 +377,12 @@ test("probe isolation resumes at account binding after credentials were persiste
   const { rootDirectory, state, service } = fixture();
   const fake = service as unknown as { admin: { getAccount: () => Promise<Row> } };
   const getAccount = fake.admin.getAccount.bind(fake.admin);
-  fake.admin.getAccount = async () => { throw new DOMException("The operation timed out.", "TimeoutError"); };
+  let calls = 0;
+  fake.admin.getAccount = async () => {
+    calls += 1;
+    if (calls === 1) return state.account;
+    throw new DOMException("The operation timed out.", "TimeoutError");
+  };
 
   await expect(service.ensure(42)).rejects.toThrow("探活隔离账号绑定阶段失败");
   const secretPath = join(rootDirectory, ".state/idle-probe/probe-keys.json");

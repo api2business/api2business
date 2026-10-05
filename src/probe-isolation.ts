@@ -173,7 +173,8 @@ export class ProbeIsolationService {
       true,
       this.remainingTimeout(deadline),
     );
-    const existing = pageItems(listed).find((item) => String(item.name ?? "") === name);
+    const existing = pageItems(listed).find((item) => String(item.name ?? "") === name
+      && String(item.platform ?? "") === scope.platform);
     const existingId = id(existing?.id);
     const groupId = existingId ?? id((await this.admin.mutate<Row>("POST", "/admin/groups", {
       name,
@@ -306,7 +307,12 @@ export class ProbeIsolationService {
   private async ensureRecord(accountId: number, scope: ProbeIsolationScope, file: ProbeKeyFile, deadline?: number): Promise<ProbeIsolationRecordResult> {
     let existing = file.records[String(accountId)];
     if (existing?.platform && existing.platform !== scope.platform) {
-      throw new Error(`账号 ${accountId} 已绑定 ${existing.platform} 探活隔离凭据，不能复用到 ${scope.platform}`);
+      const account = row(await this.admin.getAccount(accountId, this.remainingTimeout(this.stageDeadline(deadline))));
+      if (String(account.platform ?? "") !== scope.platform) {
+        throw new Error(`账号 ${accountId} 的实际平台不匹配 ${scope.platform}，不能迁移探活隔离凭据`);
+      }
+      // 修复旧入口错误标记的平台；重新查找实际平台的私有组并迁移专用 Key。
+      existing.platform = scope.platform;
     }
     if (existing && !existing.platform && scope.platform !== "openai") {
       // 早期 Grok 记录可能在凭据已就绪后遗漏平台字段。先以 Sub2API
@@ -370,14 +376,30 @@ export class ProbeIsolationService {
     return { binding: { accountId, groupId, keyCreated: key.keyCreated }, record: completed };
   }
 
-  async ensure(accountId: number, scope: ProbeIsolationScope = {
-    platform: "openai",
-    eligibleGroupIds: this.config.operations.upstreamManagement.groupIds,
-    bindingGroupIds: this.config.operations.upstreamManagement.groupIds,
-  }): Promise<ProbeIsolationBinding> {
+  async ensure(accountId: number, scope?: ProbeIsolationScope): Promise<ProbeIsolationBinding> {
     if (!this.config.sub2api.idleProbe.isolation.enabled) throw new Error("探活隔离策略未启用");
     if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error("探活账号 ID 无效");
-    return await this.inLock(async () => (await this.ensureRecord(accountId, scope, this.readFile())).binding);
+    return await this.inLock(async () => {
+      let account: Row;
+      try {
+        account = row(await this.admin.getAccount(accountId, this.config.operations.upstreamManagement.mutationTimeoutMs));
+      } catch (error) {
+        throw new Error(`探活账号平台识别阶段失败：${errorMessage(error)}`);
+      }
+      const platform = String(account.platform ?? "").toLowerCase();
+      if (platform !== "openai" && platform !== "anthropic" && platform !== "grok") {
+        throw new Error(`账号 ${accountId} 缺少受支持的平台，不能创建探活隔离`);
+      }
+      if (scope && scope.platform !== platform) throw new Error(`账号 ${accountId} 的实际平台与探活作用域不一致`);
+      const actualScope = scope ?? (platform === "openai"
+        ? {
+            platform,
+            eligibleGroupIds: this.config.operations.upstreamManagement.groupIds,
+            bindingGroupIds: this.config.operations.upstreamManagement.groupIds,
+          }
+        : { platform, eligibleGroupIds: accountGroupIds(account), bindingGroupIds: [] });
+      return (await this.ensureRecord(accountId, actualScope, this.readFile())).binding;
+    });
   }
 
   get(accountId: number, scope?: ProbeIsolationScope): ProbeIsolationBinding | null {
