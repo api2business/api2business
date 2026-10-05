@@ -175,7 +175,9 @@ export class AccountScoreService {
         error: message,
       };
       if (!this.snapshotStore) this.writeCache(this.snapshot);
-      return this.snapshot;
+      // Keep the last successful read model, but fail the refresh operation so
+      // its caller and Temporal activity cannot mistake stale data for success.
+      throw error;
     }
   }
 

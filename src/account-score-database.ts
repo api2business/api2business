@@ -18,7 +18,7 @@ WITH target_accounts AS (
   SELECT
     a.id AS account_id,
     a.name AS account_name,
-    a.base_url,
+    NULLIF(a.credentials->>'base_url', '') AS base_url,
     a.platform,
     a.type AS account_type,
     a.status,

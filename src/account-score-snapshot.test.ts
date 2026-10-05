@@ -45,6 +45,57 @@ test("shared score snapshot keeps the last success after a failed refresh", asyn
   expect(state).toMatchObject({ ok: true, status: "stale", refreshedAt: "2026-08-05T01:00:00.000Z", error: "temporary query failure" });
 });
 
+test("failed refresh preserves the payload but rejects the refresh operation", async () => {
+  let stored: Record<string, unknown> = {
+    schema_version: "api-key-platform-v1",
+    payload: {
+      cacheVersion: "api-key-platform-v1",
+      ok: true,
+      status: "ready",
+      refreshedAt: "2026-08-05T01:00:00.000Z",
+      refreshStartedAt: null,
+      nextRefreshAt: "2099-08-05T01:05:00.000Z",
+      window: "最近 1,000 次",
+      groups: [],
+      accounts: [],
+      error: null,
+      source: "postgresql-recent-account-calls",
+    },
+    refresh_started_at: null,
+    last_error: null,
+  };
+  const store = {
+    async getSnapshot() { return stored; },
+    async beginSnapshotRefresh() { stored.refresh_started_at = "2026-08-05T01:04:00.000Z"; },
+    async completeSnapshot() {},
+    async failSnapshotRefresh(_key: string, _schema: string, error: string) {
+      stored.refresh_started_at = null;
+      stored.last_error = error;
+    },
+  } satisfies ScoreSnapshotStore;
+  const config = {
+    monitor: { recentCallLimit: 1000, recentCallOptions: [1000], refreshIntervalMinutes: 5 },
+    sub2api: {
+      scorePolicy: {}, grokScorePolicy: {}, scoreSamplePolicy: {},
+      priorityPlan: { eligibleGroupIds: [] }, grokPriorityPlan: { eligibleGroupIds: [] },
+    },
+  };
+  const service = new AccountScoreService(
+    config as never,
+    "/tmp/api2business-unused-score-cache.json",
+    {} as never,
+    { async query() { throw new Error("database unavailable"); } } as never,
+    store,
+  );
+  await expect(service.refresh(1000)).rejects.toThrow("database unavailable");
+  await expect(service.state()).resolves.toMatchObject({
+    ok: true,
+    status: "stale",
+    refreshedAt: "2026-08-05T01:00:00.000Z",
+    error: "database unavailable",
+  });
+});
+
 test("rank refreshes the shared snapshot and both reads return the policy score", async () => {
   const policy = {
     reliabilityWeight: 48,

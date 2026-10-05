@@ -23,6 +23,8 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery.match(/LIMIT \$1/gu)?.length).toBe(3);
   expect(recentAccountAggregateQuery).toContain("a.name = $2::text");
   expect(recentAccountAggregateQuery).toContain("a.type AS account_type");
+  expect(recentAccountAggregateQuery).toContain("NULLIF(a.credentials->>'base_url', '') AS base_url");
+  expect(recentAccountAggregateQuery).not.toContain("a.base_url");
   expect(recentAccountAggregateQuery).toContain("LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'");
   expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.name = $3::text");
@@ -58,6 +60,7 @@ test("database aggregate uses bounded account indexes and current state is displ
   const row = scoreRecentDatabaseRow({
     account_id: 9,
     account_name: "empty-balance 0.1",
+    base_url: "https://upstream.example/v1",
     status: "error",
     schedulable: false,
     error_message: "Insufficient account balance",
@@ -87,6 +90,7 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(row.currentStateScoreImpact).toBe("none");
   expect(row.priority).toBe(5);
   expect(row.accountType).toBeNull();
+  expect(row.baseUrl).toBe("https://upstream.example/v1");
 });
 
 test("业务额度限制事实不会成为账号质量失败", () => {

@@ -305,6 +305,13 @@
     `operations.upstreamSchedulingV2.readModelCacheSeconds` 时直接命中，过期时先返回陈旧
     快照并后台刷新。冷启动或显式刷新才等待重建；重建失败保留上一份快照，不把账号、额度
     或评分清空为零。页面通过 `cache.state` 显示命中、陈旧后台刷新或刚完成刷新。
+  - 评分刷新失败时必须保留最后一次成功的账号数据，并让刷新作业以失败终态返回；
+    不得把带旧 `refreshedAt` 的陈旧快照报告为本次刷新成功。排查停更时同时核对
+    `scores rank --over-api` 的真实 `refreshedAt`、worker 活动错误和数据库查询错误，
+    不能只看页面仍能显示旧缓存。
+  - 评分 SQL 读取上游地址时使用 `accounts.credentials->>'base_url'`；`accounts` 表没有
+    `base_url` 列。修改账号链接投影前必须以原生表结构和现有上游查询为准，并通过真实
+    `scores rank --over-api` 回读验证，避免共用评分刷新因列错误连续失败。
   - 修改页面投影后必须更新静态资源并重新读取正式入口；CLI/API 事实先于截图，截图
     只用于人工核对真实页面。
   - `scores rank` 的单账号评分包含该账号绑定的专用探活样本，用于补足用户请求不足；
