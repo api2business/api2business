@@ -364,7 +364,7 @@ function refreshQuotaConsumption() {
   const now = Date.now()
   for (const row of quotaMonitorRows) {
     row.consumed24h = 0
-    row.consumption = { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 }
+    row.consumption = { 'codex-mix': 0, 'no-degrade': 0, claude: 0, 'claude-kiro': 0, grok: 0 }
     for (const point of row.usagePoints ?? []) {
       const sampledAt = Date.parse(point.sampledAt)
       if (!Number.isFinite(sampledAt) || sampledAt < cutoff || sampledAt > now) continue
@@ -379,20 +379,20 @@ function refreshQuotaConsumption() {
 
 function quotaPieMarkup(group, rows) {
   const { total, available, unavailable, ratio } = quotaAvailabilityTotals(rows, group)
-  const labels = { 'codex-mix': 'Codex 混池', 'no-degrade': '不降智分组', claude: 'Claude', grok: 'Grok' }
+  const labels = { 'codex-mix': 'Codex 混池', 'no-degrade': '不降智分组', claude: 'Claude', 'claude-kiro': 'Claude Kiro', grok: 'Grok' }
   return `<article class="quota-group-card"><div class="quota-group-card-head"><div><p class="eyebrow">${labels[group]}</p><h3>${quotaDisplay(total)}</h3></div><span>${number(rows.length)} 个上游钱包</span></div><div class="quota-pie" style="--quota-pie:${ratio * 360}deg"><strong>${number(ratio * 100, 0)}%</strong><small>可用额度占比</small></div><dl><div><dt>可用额度</dt><dd>${quotaDisplay(available)}</dd></div><div><dt>不可用额度</dt><dd>${quotaDisplay(unavailable)}</dd></div></dl></article>`
 }
 
 function renderQuotaMonitor() {
   refreshQuotaConsumption()
-  const groups = ['codex-mix', 'no-degrade', 'claude', 'grok']
+  const groups = ['codex-mix', 'no-degrade', 'claude', 'claude-kiro', 'grok']
   const grouped = Object.fromEntries(groups.map((group) => [group, quotaMonitorRows.filter((row) => quotaMemberships(row).has(group))]))
   const cards = $('#quota-group-cards'); if (cards) cards.innerHTML = groups.map((group) => quotaPieMarkup(group, grouped[group])).join('')
   const filteredRows = quotaMonitorFilter === 'all' ? quotaMonitorRows : quotaMonitorRows.filter((row) => quotaMemberships(row).has(quotaMonitorFilter))
   const sorted = sortTableRows(filteredRows, quotaMonitorSort, (row, key) => key.startsWith('consumption.') ? row.consumption[key.slice('consumption.'.length)] : row[key], (a, b) => Number(a.accountId) - Number(b.accountId))
   const totalPages = Math.max(1, Math.ceil(sorted.length / quotaMonitorPageSize)); quotaMonitorPageNumber = Math.min(quotaMonitorPageNumber, totalPages)
   const pageRows = sorted.slice((quotaMonitorPageNumber - 1) * quotaMonitorPageSize, quotaMonitorPageNumber * quotaMonitorPageSize)
-  const body = $('#quota-monitor-body'); if (body) body.innerHTML = pageRows.length ? pageRows.map((row) => `<tr><td>${upstreamWalletMarkup(row)}<small>${number(row.accountCount)} 个账号 · ${escapeHtml(row.wallet)}</small></td><td>${quotaDisplay(row.remaining)}</td><td>${quotaDisplay(row.consumed24h)}</td><td>${quotaDisplay(row.consumption['codex-mix'])}</td><td>${quotaDisplay(row.consumption['no-degrade'])}</td><td>${quotaDisplay(row.consumption.claude)}</td><td>${quotaDisplay(row.consumption.grok)}</td><td>${escapeHtml(row.groups.join('、') || '—')}</td></tr>`).join('') : '<tr><td colspan="8" class="empty">暂无额度缓存数据</td></tr>'
+  const body = $('#quota-monitor-body'); if (body) body.innerHTML = pageRows.length ? pageRows.map((row) => `<tr><td>${upstreamWalletMarkup(row)}<small>${number(row.accountCount)} 个账号 · ${escapeHtml(row.wallet)}</small></td><td>${quotaDisplay(row.remaining)}</td><td>${quotaDisplay(row.consumed24h)}</td><td>${quotaDisplay(row.consumption['codex-mix'])}</td><td>${quotaDisplay(row.consumption['no-degrade'])}</td><td>${quotaDisplay(row.consumption.claude)}</td><td>${quotaDisplay(row.consumption['claude-kiro'])}</td><td>${quotaDisplay(row.consumption.grok)}</td><td>${escapeHtml(row.groups.join('、') || '—')}</td></tr>`).join('') : '<tr><td colspan="9" class="empty">暂无额度缓存数据</td></tr>'
   const state = $('#quota-monitor-state'); if (state) state.textContent = `上游总资产 ${quotaDisplay(quotaMonitorTotalRemaining)} · ${quotaRangeLabel(quotaMonitorRange)} · 读取 ${number(quotaMonitorRows.length)} 个上游钱包 · 共 ${totalPages} 页 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
   const consumptionLabel = $('#quota-monitor-consumption-label'); if (consumptionLabel) consumptionLabel.textContent = `${quotaRangeLabel(quotaMonitorRange)}消耗`
   const pageLabel = $('#quota-monitor-page'); if (pageLabel) pageLabel.textContent = `${quotaMonitorPageNumber} / ${totalPages} · ${number(sorted.length)} 条`
@@ -436,11 +436,12 @@ function renderQuotaGroupHistory(points) {
       { key: 'codexMix', className: 'chart-quota-codex', label: 'Codex 混池' },
       { key: 'noDegrade', className: 'chart-quota-no-degrade', label: '不降智' },
       { key: 'claude', className: 'chart-quota-claude', label: 'Claude' },
+      { key: 'claudeKiro', className: 'chart-quota-claude-kiro', label: 'Claude Kiro' },
       { key: 'grok', className: 'chart-quota-grok', label: 'Grok' },
     ],
     valueFormatter: (value) => `¥${number(value, 2)}`,
     unit: '人民币余额',
-    ariaLabel: '四个额度分组人民币余额趋势',
+    ariaLabel: '五个额度分组人民币余额趋势',
     chartWidth,
     chartHeight,
     plotRight: chartWidth - 12,
@@ -546,7 +547,7 @@ async function quotaMonitorPage() {
   for (const account of accounts) {
     const wallet = quotaWallet(account.walletKey ?? account.baseUrl)
     if (!wallet) continue
-    const current = wallets.get(wallet) ?? { wallet, accounts: [], groupRows: [], usagePoints: [], consumed24h: 0, consumption: { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 } }
+    const current = wallets.get(wallet) ?? { wallet, accounts: [], groupRows: [], usagePoints: [], consumed24h: 0, consumption: { 'codex-mix': 0, 'no-degrade': 0, claude: 0, 'claude-kiro': 0, grok: 0 } }
     current.accounts.push(account)
     current.groupRows.push(account)
     // 按请求实际所属组统计，账号挂多个组不会重复记账；每个账号先换算人民币再合并钱包。
@@ -566,12 +567,12 @@ async function quotaMonitorPage() {
     const availableGroups = [...new Set(walletRow.accounts.filter((account) => quotaAccountAvailable(stateById.get(Number(account.id))))
       .flatMap((account) => [...quotaMemberships(account)]))]
     const remaining = remainingByWallet.get(walletRow.wallet) ?? null
-    const availableRemainingByGroup = Object.fromEntries(['codex-mix', 'no-degrade', 'claude', 'grok'].map((key) => {
+    const availableRemainingByGroup = Object.fromEntries(['codex-mix', 'no-degrade', 'claude', 'claude-kiro', 'grok'].map((key) => {
       const scoped = walletRow.accounts.filter((account) => quotaMemberships(account).has(key))
       const availableCount = scoped.filter((account) => quotaAccountAvailable(stateById.get(Number(account.id)))).length
       return [key, remaining === null || scoped.length === 0 ? 0 : remaining * availableCount / scoped.length]
     }))
-    return { accountId: Number(representative.id) || index + 1, name: walletRow.wallet, wallet: walletRow.wallet, walletRate: walletRateByWallet.get(walletRow.wallet) ?? 1, usagePoints: walletRow.usagePoints, accountCount: walletRow.accounts.length, platform: representative.platform ?? '—', groups: [...new Set(walletRow.accounts.flatMap((account) => quotaGroupNames(account)))], group, availableGroups, availableRemainingByGroup, remaining, consumed24h: 0, consumption: { 'codex-mix': 0, 'no-degrade': 0, claude: 0, grok: 0 } }
+    return { accountId: Number(representative.id) || index + 1, name: walletRow.wallet, wallet: walletRow.wallet, walletRate: walletRateByWallet.get(walletRow.wallet) ?? 1, usagePoints: walletRow.usagePoints, accountCount: walletRow.accounts.length, platform: representative.platform ?? '—', groups: [...new Set(walletRow.accounts.flatMap((account) => quotaGroupNames(account)))], group, availableGroups, availableRemainingByGroup, remaining, consumed24h: 0, consumption: { 'codex-mix': 0, 'no-degrade': 0, claude: 0, 'claude-kiro': 0, grok: 0 } }
   })
   renderQuotaMonitor()
 }

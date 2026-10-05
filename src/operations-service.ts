@@ -721,13 +721,13 @@ export class OperationsService {
       const wallets = [...accountsByWallet].filter(([, entries]) => entries.some((meta) => ids.has(meta.accountId))).map(([wallet]) => wallet);
       samples = quotaSamplesForAccounts(samples, accountIds, wallets);
     }
-    type HistoryKey = "codexMix" | "noDegrade" | "claude" | "grok";
+    type HistoryKey = "codexMix" | "noDegrade" | "claude" | "claudeKiro" | "grok";
     const groupedHistory = [...new Set(samples.map((row) => row.sampledAt))].sort((left, right) => Date.parse(left) - Date.parse(right)).map((sampledAt) => {
-      const point: Record<HistoryKey, number> & { sampledAt: string } = { sampledAt, codexMix: 0, noDegrade: 0, claude: 0, grok: 0 };
+      const point: Record<HistoryKey, number> & { sampledAt: string } = { sampledAt, codexMix: 0, noDegrade: 0, claude: 0, claudeKiro: 0, grok: 0 };
       for (const row of samples.filter((item) => item.sampledAt === sampledAt && item.remainingCny !== null)) {
         const walletAccounts = accountsByWallet.get(row.walletKey) ?? [];
         const groupLabels: Record<string, HistoryKey> = {
-          "codex-mix": "codexMix", "no-degrade": "noDegrade", claude: "claude", grok: "grok",
+          "codex-mix": "codexMix", "no-degrade": "noDegrade", claude: "claude", "claude-kiro": "claudeKiro", grok: "grok",
         };
         const groups = new Set<HistoryKey>(walletAccounts.flatMap((meta) => [...quotaMemberships({ groupNames: meta.names, platform: meta.platform, baseUrl: meta.walletKey })].map((group: unknown) => groupLabels[String(group)]).filter((group): group is HistoryKey => Boolean(group))));
         if (!groups.size) groups.add("codexMix");
