@@ -23,13 +23,9 @@ const frontendNoStoreHeaders = {
   "Surrogate-Control": "no-store",
 };
 
-const frontendAssetNames = new Set([
-  "app.js", "styles.css", "history-chart.js", "ledger-pages.js",
-  "upstream-quality-assets.js", "bugteam-cost.js", "upstream-scheduling-v2.js",
-]);
 const frontendRevision = createHash("sha256")
     .update(readdirSync(resolve(process.cwd(), "static"), { withFileTypes: true })
-    .filter((entry) => entry.isFile() && (entry.name.endsWith(".html") || frontendAssetNames.has(entry.name)))
+    .filter((entry) => entry.isFile() && /\.(?:html|js|css)$/u.test(entry.name) && !entry.name.includes(".test.")))
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((entry) => `${entry.name}\0${readFileSync(join(resolve(process.cwd(), "static"), entry.name))}`)
     .join("\0"))
@@ -43,7 +39,8 @@ const frontendRevisionPlugin = {
   },
   transform(code: string, id: string) {
     if (!id.split("?", 1)[0].endsWith(".js")) return null;
-    return code.replace(/((?:\.\/|\/)(?:history-chart|ledger-pages|upstream-quality-assets|bugteam-cost|upstream-scheduling-v2)\.js)\?v=[^"']+/gu, `$1?v=${frontendRevision}`);
+    // 所有本地模块都随同一个部署版本变化，尤其是额度分组和可用性模块。
+    return code.replace(/(["'])((?:\.\/|\/)[\w-]+\.js)(?:\?v=[^"']+)?\1/gu, `$1$2?v=${frontendRevision}$1`);
   },
 };
 
