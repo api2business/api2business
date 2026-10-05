@@ -7,6 +7,7 @@
 - 账号导入、退役、探活作业和公开复活的操作入口：
   `skills/api2business/references/account-operations.md`。
 - 运行面、写入边界和缓存终态规格：`docs/specs/runtime-control.md`。
+- 上游资产管理边界和写入验收：`docs/specs/upstream-management.md`。
 - 评分分层和缺失数据判定规格：`docs/specs/account-scoring.md`。
 - 每日运营分析（本机运行态，Git 忽略）：`.state/operations-daily/`。
   - 按业务日期保存收入、成本、资本、待履约变化、毛利和数据质量说明。
