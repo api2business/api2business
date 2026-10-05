@@ -602,6 +602,7 @@ export function createHandler(
         const id = Number(url.pathname.split("/")[3]);
         const input = await body(request);
         return json(await upstreams.submitUpdate(id, {
+          baseUrl: input.baseUrl,
           suffix: input.suffix,
           rateCnyPerApiUsd: input.rateCnyPerApiUsd,
           groupIds: input.groupIds,

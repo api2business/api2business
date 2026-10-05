@@ -254,6 +254,30 @@ test("API-key creation uses the native batch endpoint and YAML-owned mutation ti
   }, timeoutMs: 120000 }]);
 });
 
+test("API-key creation selects the failover template from the account platform", async () => {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {
+    calls.push({ path, body });
+    return { id: 456 };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(
+    client,
+    [{ error_code: 502, keywords: ["gpt upstream"], duration_minutes: 3 }],
+    { anthropic: [{ error_code: 503, keywords: ["no available accounts"], duration_minutes: 10 }] },
+  );
+  await runtime.createApiKeyAccount({
+    platform: "anthropic",
+    type: "apikey",
+    credentials: { api_key: "redacted" },
+  }, "create-claude-key", 120000);
+  const accounts = calls[0]?.body.accounts;
+  const credentials = Array.isArray(accounts) ? (accounts[0] as Record<string, unknown>).credentials as Record<string, unknown> : {};
+  expect(credentials.temp_unschedulable_rules).toEqual([
+    { error_code: 503, keywords: ["no available accounts"], duration_minutes: 10 },
+  ]);
+  expect(JSON.stringify(credentials)).not.toContain("gpt upstream");
+});
+
 test("bulk API-key configuration combines runtime settings and failover template", async () => {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
   const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {

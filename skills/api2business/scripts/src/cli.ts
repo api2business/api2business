@@ -281,7 +281,7 @@ function help(): Record<string, unknown> {
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
       "upstreams create --platform openai|grok|anthropic --base-url <https-url> --suffix <name> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
-      "upstreams update --id <account-id> [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api",
+      "upstreams update --id <account-id> [--base-url <https-url>] [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api",
       "upstreams recharge --base-url <https-url> --recharge-cny <CNY> [--idempotency-key <key>] [--confirm] --over-api",
       "upstreams recharge-status --id <workflow-id> --over-api",
       "upstreams recover --accounts <id-or-range,...> [--confirm] --over-api",
@@ -749,8 +749,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "upstreams" && action === "update") {
     const id = Number(parsed.id);
     if (!Number.isSafeInteger(id) || id <= 0) throw new Error("upstreams update requires a positive --id");
-    if (parsed.suffix === null && parsed.rate === null && parsed.groups === null && !parsed.templateOnly) throw new Error("upstreams update requires --suffix, --rate, --groups, or --template-only");
+    if (parsed.baseUrl === null && parsed.suffix === null && parsed.rate === null && parsed.groups === null && !parsed.templateOnly) throw new Error("upstreams update requires --base-url, --suffix, --rate, --groups, or --template-only");
     const input = {
+      ...(parsed.baseUrl === null ? {} : { baseUrl: parsed.baseUrl }),
       ...(parsed.suffix === null ? {} : { suffix: parsed.suffix }),
       ...(parsed.rate === null ? {} : { rateCnyPerApiUsd: parsed.rate }),
       ...(parsed.groups === null ? {} : { groupIds: parsed.groups.split(",").map(Number) }),

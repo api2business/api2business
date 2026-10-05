@@ -69,6 +69,9 @@
     `config/failover-templates/claude.yaml` 只服务 Anthropic；Grok 保持空规则。
     `operations.upstreamManagement.templateFiles` 是两份文件的唯一配置入口，不能把
     Codex 规则复制到 Claude 账号。
+  - 所有 API-key 创建、批量配置、费率同步和探活隔离都必须携带已回读的平台；平台缺失时
+    不得猜测为 Codex。新增作用域分组时，同时更新该作用域的 V2 `eligibleGroupIds` 与
+    对应优先级计划白名单，否则账号虽能探活和评分，优先级计划仍会漏选。
   - 回读该作业的 `verifiedCount`、`failedCount` 和 `misalignedCount`。
   - 只有 owning YAML 打开该作用域 `features.idleProbe` 时，才对该账号执行
     `upstreams isolation --confirm --over-api`。
@@ -77,7 +80,7 @@
     作用域不创建私有探活分组。
   - 比该默认集合更多的业务分组，必须在隔离前绑上，隔离后仍要回读到。
   - 用户要的业务分组少于这个并集时，隔离完成后收回：
-    - 使用 `upstreams update --id <account-id> --groups <id,id,...> --confirm --over-api`。
+    - 使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] --confirm --over-api`；`--base-url` 只更新 `credentials.base_url`，不会覆盖其他凭据。
     - `--groups` 整表替换；启用探活的账号保留自己的私有探活分组，其他账号只保留用户
       指定的业务分组。
     - 启用探活账号漏写私有探活分组会把它从账号上拆掉。

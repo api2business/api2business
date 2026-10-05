@@ -163,7 +163,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 切号是否命中、候选是否耗尽、正文是否缺失，只以 `references/upstream-scheduling.md` 为准。
 - 切号模板的匹配、近义短语、热加载、分组口语、同步范围和新增上游收口，只以该参考为准。
 - 新增上游省略 `--rate`；占位费率与最终费率回读也只以该参考为准。
-- 已有上游改分组使用 `upstreams update --id <account-id> --groups <id,id,...> --confirm --over-api`。
+- 已有上游改配置使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] [--suffix <name>] [--rate <CNY/API_USD>] --confirm --over-api`。
+  - `--base-url` 只合并更新 `credentials.base_url`，不会重置 API key、模型映射、池模式或其他凭据字段。
+  - Anthropic API-key 的地址应填写供应商 origin；网关会自行拼接 `/v1/messages`，不要把 `/v1` 再写入地址。
   - `--groups` 整表替换全部分组，并重写切号模板。
   - 已启用探活账号的私有分组必须列入；隔离后的收回顺序只见
     `references/upstream-scheduling.md`。

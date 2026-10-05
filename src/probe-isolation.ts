@@ -285,7 +285,7 @@ export class ProbeIsolationService {
       if (!this.runtime) throw new Error("探活账号绑定需要 Sub2API runtime mutation service");
       await this.runtime.configureApiKeyAccounts([accountId], {
         group_ids: desiredGroupIds,
-      }, this.remainingTimeout(deadline));
+      }, this.remainingTimeout(deadline), scope.platform);
     }
     const verifiedAccount = row(await this.admin.getAccount(accountId, this.remainingTimeout(deadline)));
     const verifiedGroupIds = accountGroupIds(verifiedAccount);

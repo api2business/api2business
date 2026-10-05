@@ -98,7 +98,7 @@ export interface UpstreamCreateInput {
 
 export type UpstreamWorkerOperation =
   | { action: "create"; input: UpstreamCreateInput }
-  | { action: "update"; input: { id: number; suffix?: string; rateCnyPerApiUsd?: number; groupIds?: number[] } }
+  | { action: "update"; input: { id: number; baseUrl?: string; suffix?: string; rateCnyPerApiUsd?: number; groupIds?: number[] } }
   | { action: "recharge"; input: { id: number; amountCny: number; operationId: string; description?: string } }
   | { action: "recover"; input: { accountIds: number[] } }
   | { action: "isolation"; input: { accountIds: number[] } }
@@ -561,19 +561,21 @@ export class UpstreamManagementService {
   }
 
   async submitUpdate(id: number, input: {
+    baseUrl?: unknown;
     suffix?: unknown;
     rateCnyPerApiUsd?: unknown;
     groupIds?: unknown;
     operationId?: string | null;
   }): Promise<Record<string, unknown>> {
     if (!positiveInteger(id)) throw new Error("上游账号 ID 无效");
+    const baseUrl = input.baseUrl === undefined ? undefined : normalizeBaseUrl(String(input.baseUrl));
     const suffix = input.suffix === undefined ? undefined : validateSuffix(String(input.suffix));
     const rateCnyPerApiUsd = input.rateCnyPerApiUsd === undefined ? undefined : validateRate(input.rateCnyPerApiUsd);
     const groupIds = input.groupIds === undefined ? undefined : validateGroupIds(input.groupIds);
     const idempotency = operationId(input.operationId, `upstream-update-${id}`);
     return await this.submitOperation(idempotency, {
       action: "update",
-      input: { id, suffix, rateCnyPerApiUsd, groupIds },
+      input: { id, baseUrl, suffix, rateCnyPerApiUsd, groupIds },
     });
   }
 
@@ -1115,6 +1117,7 @@ export class UpstreamManagementService {
       ? null
       : validateRate(options.fallbackRateCnyPerApiUsd);
     for (const result of results) {
+      const accountPlatform = (await this.accountQuery(result.accountId))?.platform;
       const multiplier = Number(result.billingMultiplier.value);
       const parsed = parseUpstreamName(result.accountName, result.baseUrl) ?? parseUpstreamNameTail(result.accountName);
       if (result.billingMultiplier.value == null || !Number.isFinite(multiplier) || multiplier <= 0) {
@@ -1122,7 +1125,7 @@ export class UpstreamManagementService {
           try {
             const name = formatUpstreamName(result.baseUrl, parsed.suffix, fallbackRate);
             await this.runtime.configureApiKeyAccounts([result.accountId], { name },
-              this.config.operations.upstreamManagement.mutationTimeoutMs);
+              this.config.operations.upstreamManagement.mutationTimeoutMs, accountPlatform);
             const readback = await this.accountQuery(result.accountId);
             if (!readback || readback.name !== name || readback.rateCnyPerApiUsd === null
               || Math.abs(readback.rateCnyPerApiUsd - fallbackRate) > 0.0000005) {
@@ -1164,7 +1167,7 @@ export class UpstreamManagementService {
       try {
         const name = formatUpstreamName(result.baseUrl, parsed.suffix, detectedRate);
         await this.runtime.configureApiKeyAccounts([result.accountId], { name },
-          this.config.operations.upstreamManagement.mutationTimeoutMs);
+          this.config.operations.upstreamManagement.mutationTimeoutMs, accountPlatform);
         const readback = await this.accountQuery(result.accountId);
         if (!readback || readback.name !== name || readback.rateCnyPerApiUsd === null
           || Math.abs(readback.rateCnyPerApiUsd - detectedRate) > 0.0000005) {
@@ -1472,6 +1475,7 @@ export class UpstreamManagementService {
             },
           },
           settings.mutationTimeoutMs,
+          input.platform,
         );
       } catch (error) {
         console.warn(`[upstream-create:${resolvedAccountId}] 后处理未完成：${safeMessage(error instanceof Error ? error.message : String(error))}`);
@@ -1513,6 +1517,7 @@ export class UpstreamManagementService {
   }
 
   async update(id: number, input: {
+    baseUrl?: unknown;
     suffix?: unknown;
     rateCnyPerApiUsd?: unknown;
     groupIds?: unknown;
@@ -1520,12 +1525,13 @@ export class UpstreamManagementService {
     const account = await this.accountQuery(id);
     if (!account) throw new UpstreamManagementError("上游账号不存在", 404, { operation: "update", accountId: id });
     if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
+    const baseUrl = input.baseUrl === undefined ? account.baseUrl : normalizeBaseUrl(String(input.baseUrl));
     let name: string | undefined;
     if (input.suffix !== undefined || input.rateCnyPerApiUsd !== undefined) {
       const suffix = input.suffix === undefined ? account.suffix : validateSuffix(String(input.suffix));
       const rate = input.rateCnyPerApiUsd === undefined ? account.rateCnyPerApiUsd : validateRate(input.rateCnyPerApiUsd);
       if (!suffix || rate === null) throw new Error("当前账号缺少可解析的后缀或费率，请同时填写后缀和费率");
-      name = formatUpstreamName(account.baseUrl, suffix, rate);
+      name = formatUpstreamName(baseUrl, suffix, rate);
     }
     const templateRules = account.platform.toLowerCase() === "openai"
       ? this.config.operations.upstreamManagement.failoverRulesByPlatform.openai
@@ -1537,6 +1543,7 @@ export class UpstreamManagementService {
       ...(name && name !== account.name ? { name } : {}),
       ...(groupIds ? { group_ids: groupIds } : {}),
       credentials: {
+        ...(baseUrl !== account.baseUrl ? { base_url: baseUrl } : {}),
         pool_mode: account.poolMode,
         ...(templateRules.length > 0 ? {
           temp_unschedulable_enabled: true,
@@ -1546,7 +1553,7 @@ export class UpstreamManagementService {
           temp_unschedulable_rules: [],
         }),
       },
-    }, this.config.operations.upstreamManagement.mutationTimeoutMs);
+    }, this.config.operations.upstreamManagement.mutationTimeoutMs, account.platform);
     const updated = await this.accountQuery(id);
     if (!updated) throw new UpstreamManagementError("runtime 改名完成但排队查询未找到账号", 502, { operation: "update", accountId: id });
     return { ok: true, operation: "update", account: updated };

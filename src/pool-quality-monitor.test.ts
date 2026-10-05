@@ -108,7 +108,7 @@ test("pool quality uses the Claude whitelist and platform predicate", async () =
   } as unknown as Sub2ApiReadClient;
   const config = loadConfig("config/api2business.yaml");
   const sample = await collectPoolQualitySample(config, reads, "2026-08-03T00:00:00.000Z", "claude");
-  expect(parameters).toEqual([1000, "119", "2026-08-03T00:00:00.000Z", "claude"]);
+  expect(parameters).toEqual([1000, "119,161", "2026-08-03T00:00:00.000Z", "claude"]);
   expect(sample.platform).toBe("claude");
   expect(poolQualitySql).toContain("CASE $4::text WHEN 'codex' THEN 'openai' WHEN 'claude' THEN 'anthropic'");
 });

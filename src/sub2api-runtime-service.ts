@@ -252,7 +252,10 @@ export class Sub2ApiRuntimeService {
     } else if (types.has("apikey")) {
       const prepared = accounts.map((account) => ({
         ...account,
-        credentials: this.apiKeyCredentials(account.credentials, String(account.platform ?? "")),
+        credentials: this.apiKeyCredentials(
+          account.credentials,
+          account.platform === undefined ? undefined : String(account.platform),
+        ),
         priority: input.priority,
         concurrency: input.capacity,
         load_factor: rateMultiplier,
@@ -404,13 +407,16 @@ export class Sub2ApiRuntimeService {
       accounts: [{
         ...accountWithoutProxy,
         ...createProxyField(Number(requestedProxyId ?? 0)),
-        credentials: this.apiKeyCredentials(account.credentials),
+        credentials: this.apiKeyCredentials(
+          account.credentials,
+          account.platform === undefined ? undefined : String(account.platform),
+        ),
         confirm_mixed_channel_risk: true,
       }],
     }, idempotencyKey, timeoutMs);
   }
 
-  async configureApiKeyAccounts(accountIds: number[], patch: Row, timeoutMs?: number): Promise<Record<string, unknown>> {
+  async configureApiKeyAccounts(accountIds: number[], patch: Row, timeoutMs?: number, platform?: string): Promise<Record<string, unknown>> {
     const ids = [...new Set(accountIds)].sort((left, right) => left - right);
     if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
       throw new Error("bulk API-key configuration requires stable positive account IDs");
@@ -418,7 +424,7 @@ export class Sub2ApiRuntimeService {
     const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update", {
       account_ids: ids,
       ...patch,
-      credentials: this.apiKeyCredentials(patch.credentials),
+      credentials: this.apiKeyCredentials(patch.credentials, platform),
       confirm_mixed_channel_risk: true,
     }, undefined, timeoutMs);
     const failed = Number(result.failed ?? 0);
@@ -517,7 +523,10 @@ export class Sub2ApiRuntimeService {
       throw new Error(`account ${accountId} is not an API-key account`);
     }
     return await this.updateAccount(accountId, {
-      credentials: this.apiKeyCredentials(account.credentials, String(account.platform ?? "")),
+      credentials: this.apiKeyCredentials(
+        account.credentials,
+        account.platform === undefined ? undefined : String(account.platform),
+      ),
     }, timeoutMs);
   }
 
