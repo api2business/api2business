@@ -1106,9 +1106,34 @@ export class OperationsService {
     );
     const usageRows = records(await this.store.getUpstreamUsageCache([]));
     const usageById = new Map(usageRows.map((row) => [Number(row.account_id), object(row.last_success_result ?? row.result)]));
+    const usageByWallet = new Map<string, { result: Record<string, unknown>; observedAt: number }>();
+    for (const row of usageRows) {
+      const result = object(row.last_success_result ?? row.result);
+      const wallet = usageWalletKey(result, this.config.sub2api.newApiCredentials);
+      const quota = object(result.quota);
+      const remaining = quota.unit === "USD" && quota.remaining !== null && quota.remaining !== undefined
+        ? Number(quota.remaining)
+        : Number.NaN;
+      if (!wallet || result.ok !== true || !Number.isFinite(remaining) || remaining < 0) continue;
+      const currentAt = Date.parse(String(row.last_success_at ?? row.queried_at ?? result.queriedAt ?? "")) || 0;
+      const previous = usageByWallet.get(wallet);
+      if (!previous || currentAt >= previous.observedAt) {
+        usageByWallet.set(wallet, { result, observedAt: currentAt });
+      }
+    }
     const valuation = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
     const accounts = records(ranking.accounts).map((row) => {
-      const usage = usageById.get(Number(row.accountId));
+      const directUsage = usageById.get(Number(row.accountId));
+      const directQuota = object(directUsage?.quota);
+      const directRemaining = directQuota.unit === "USD" && directQuota.remaining !== null && directQuota.remaining !== undefined
+        ? Number(directQuota.remaining)
+        : Number.NaN;
+      const wallet = configuredWalletKey(
+        directUsage?.walletKey ?? directUsage?.baseUrl ?? row.accountName,
+        this.config.sub2api.newApiCredentials,
+      );
+      const sharedUsage = usageByWallet.get(wallet)?.result;
+      const usage = Number.isFinite(directRemaining) && directRemaining >= 0 ? directUsage : sharedUsage ?? directUsage;
       if (!usage || usage.ok !== true) return row;
       const quota = object(usage.quota);
       const remaining = quota.unit === "USD" && quota.remaining !== null && quota.remaining !== undefined
