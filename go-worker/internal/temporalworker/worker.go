@@ -100,6 +100,14 @@ func scheduleOptions(id, taskQueue string) client.StartWorkflowOptions {
 	}
 }
 
+func replacingScheduleOptions(id, taskQueue string) client.StartWorkflowOptions {
+	return client.StartWorkflowOptions{
+		ID: id, TaskQueue: taskQueue,
+		WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_TERMINATE_EXISTING,
+		WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+	}
+}
+
 type scheduleIdentities struct {
 	Score, Quota, BugTeamCost string
 }
@@ -160,7 +168,7 @@ func retireReplacedSchedulingWorkflows(c client.Client, cfg Config) error {
 	return nil
 }
 
-func ensureSchedules(c client.Client, cfg Config) error {
+func ensureSchedules(c client.Client, cfg Config, replaceQuota bool) error {
 	base := cfg.ScoreScheduleWorkflowID
 	identities := configuredScheduleIdentities(cfg)
 	if cfg.AutomaticRefreshEnabled && cfg.RefreshIntervalMinutes > 0 {
@@ -179,7 +187,16 @@ func ensureSchedules(c client.Client, cfg Config) error {
 				return err
 			}
 		}
-		if err := startWorkflow(c, scheduleOptions(identities.Quota, cfg.TaskQueue), "upstreamQuotaScheduleWorkflow", ScheduleInput{IntervalMS: cfg.QuotaIntervalSeconds * 1000, RoundTimeoutMS: cfg.QuotaTimeoutSeconds * 1000, ActivityStartToCloseTimeout: cfg.ActivityTimeout, MaximumAttempts: int32(cfg.MaximumAttempts)}); err != nil {
+		// Quota cadence is configuration, but the workflow ID is stable. Replace
+		// an already-running execution on startup so a changed YAML interval
+		// cannot leave the old timer alive indefinitely. The watchdog only
+		// restores a missing execution; replacing it every 30 seconds would
+		// cancel every in-flight sampling round.
+		quotaOptions := scheduleOptions(identities.Quota, cfg.TaskQueue)
+		if replaceQuota {
+			quotaOptions = replacingScheduleOptions(identities.Quota, cfg.TaskQueue)
+		}
+		if err := startWorkflow(c, quotaOptions, "upstreamQuotaScheduleWorkflow", ScheduleInput{IntervalMS: cfg.QuotaIntervalSeconds * 1000, RoundTimeoutMS: cfg.QuotaTimeoutSeconds * 1000, ActivityStartToCloseTimeout: cfg.ActivityTimeout, MaximumAttempts: int32(cfg.MaximumAttempts)}); err != nil {
 			return err
 		}
 	}
@@ -308,7 +325,7 @@ func watchSchedules(ctx context.Context, c client.Client, cfg Config) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := ensureSchedules(c, cfg); err != nil {
+			if err := ensureSchedules(c, cfg, false); err != nil {
 				fmt.Fprintf(os.Stderr, "{\"ok\":false,\"component\":\"schedule-watchdog\",\"error\":%q,\"valuesPrinted\":false}\n", err.Error())
 			}
 		}
@@ -380,7 +397,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer w.Stop()
-	if err := ensureSchedules(c, cfg); err != nil {
+	if err := ensureSchedules(c, cfg, true); err != nil {
 		return err
 	}
 	watchContext, stopWatch := context.WithCancel(ctx)

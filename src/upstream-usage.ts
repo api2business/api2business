@@ -1,5 +1,6 @@
-import { publicEncrypt, constants as cryptoConstants } from "node:crypto";
 import { normalizeUpstreamWallet } from "./upstream-valuation";
+import { newApiLoginSession, newApiAuthCacheKey, type NewApiAuthCache, type NewApiSession } from "./new-api-auth";
+export type { NewApiAuthCache } from "./new-api-auth";
 
 export interface UpstreamUsageTarget {
   id: number;
@@ -59,7 +60,9 @@ export interface UpstreamUsageResult {
 }
 
 type Row = Record<string, unknown>;
-type NewApiAuthCache = Map<string, Promise<string>>;
+type NewApiAccountQuota = { limit: number | null; used: number | null; remaining: number | null };
+type NewApiWalletQuota = { accountQuota: NewApiAccountQuota | null; status: Row | null; session: NewApiSession };
+type NewApiWalletQuotaCache = Map<string, Promise<NewApiWalletQuota>>;
 
 function row(value: unknown): Row | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
@@ -141,83 +144,6 @@ async function requestJsonWithToken(target: UpstreamUsageTarget, path: string, t
   return { status: response.status, payload };
 }
 
-function encryptedNewApiPassword(password: string, publicKey: string): string {
-  return publicEncrypt({
-    key: publicKey,
-    padding: cryptoConstants.RSA_PKCS1_OAEP_PADDING,
-    oaepHash: "sha256",
-  }, Buffer.from(password, "utf8")).toString("base64");
-}
-
-async function loginNewApi(target: UpstreamUsageTarget, timeoutMs: number): Promise<string> {
-  const credentials = target.newApiCredentials;
-  if (!credentials) throw new Error("New API login credentials are not configured");
-  const controlBaseUrl = (target.walletKey ?? target.baseUrl).replace(/\/$/u, "").replace(/\/v1$/u, "");
-  const keyResponse = await fetch(`${controlBaseUrl}/api/user/login/encryption-key`, {
-    headers: { accept: "application/json", "user-agent": "Api2Business-Upstream-Usage/1.0" },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const keyText = await keyResponse.text();
-  let keyPayload: Row | null = null;
-  try { keyPayload = row(JSON.parse(keyText)); } catch { /* handled below */ }
-  const keyData = newApiData(keyPayload);
-  let body: Record<string, string>;
-  if (keyResponse.ok && keyData?.enabled === true) {
-    const keyId = typeof keyData.kid === "string" ? keyData.kid : "";
-    const publicKey = typeof keyData.public_key === "string" ? keyData.public_key : "";
-    if (!keyId || !publicKey) throw new Error(`New API login encryption key unavailable (HTTP ${keyResponse.status})`);
-    body = {
-      username: credentials.username,
-      password_encrypted: encryptedNewApiPassword(credentials.password, publicKey),
-      encryption_key_id: keyId,
-    };
-  } else {
-    body = { username: credentials.username, password: credentials.password };
-  }
-  const response = await fetch(`${controlBaseUrl}/api/user/login`, {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-      "user-agent": "Api2Business-Upstream-Usage/1.0",
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const text = await response.text();
-  let payload: Row | null = null;
-  try { payload = row(JSON.parse(text)); } catch { /* handled below */ }
-  const loginData = newApiData(payload);
-  const token = typeof loginData?.access_token === "string" ? loginData.access_token : "";
-  if (!response.ok || !token) throw new Error(`New API login failed: HTTP ${response.status}`);
-  return token;
-}
-
-function newApiAuthCacheKey(target: UpstreamUsageTarget): string {
-  const wallet = normalizeUpstreamWallet(target.walletKey ?? target.baseUrl);
-  return `${wallet}\u0000${target.newApiCredentials?.username ?? ""}`;
-}
-
-async function loginNewApiCached(
-  target: UpstreamUsageTarget,
-  timeoutMs: number,
-  cache?: NewApiAuthCache,
-): Promise<string> {
-  if (!cache) return loginNewApi(target, timeoutMs);
-  const key = newApiAuthCacheKey(target);
-  let pending = cache.get(key);
-  if (!pending) {
-    pending = loginNewApi(target, timeoutMs);
-    cache.set(key, pending);
-  }
-  try {
-    return await pending;
-  } catch (error) {
-    cache.delete(key);
-    throw error;
-  }
-}
-
 function rawNewApiQuotaToUsd(value: number | null, status: Row | null): number | null {
   if (value === null) return null;
   const quotaPerUnit = firstNumber(status, ["quota_per_unit"]);
@@ -243,6 +169,40 @@ function parseNewApiAccountQuota(payload: unknown, status: Row | null): {
   const used = rawNewApiQuotaToUsd(firstNumber(data, ["used_quota"]), status);
   if (remaining === null && used === null) return null;
   return { limit: remaining !== null && used !== null ? remaining + used : null, used, remaining };
+}
+
+async function queryNewApiWalletQuota(
+  target: UpstreamUsageTarget,
+  timeoutMs: number,
+  authCache: NewApiAuthCache | undefined,
+  walletQuotaCache: NewApiWalletQuotaCache | undefined,
+): Promise<NewApiWalletQuota> {
+  const key = newApiAuthCacheKey(target);
+  const existing = walletQuotaCache?.get(key);
+  if (existing) return await existing;
+  const request = (async () => {
+    let session = await newApiLoginSession(target, timeoutMs, authCache);
+    let statusResponse = await requestJsonWithToken(target, "/api/status", timeoutMs, session.token);
+    let status = statusResponse.status >= 200 && statusResponse.status < 300 ? newApiData(statusResponse.payload) : null;
+    let selfResponse = await requestJsonWithToken(target, "/api/user/self", timeoutMs, session.token);
+    if ((statusResponse.status === 401 || statusResponse.status === 403 || selfResponse.status === 401 || selfResponse.status === 403) && authCache) {
+      session = await newApiLoginSession(target, timeoutMs, authCache, session.token);
+      statusResponse = await requestJsonWithToken(target, "/api/status", timeoutMs, session.token);
+      status = statusResponse.status >= 200 && statusResponse.status < 300 ? newApiData(statusResponse.payload) : null;
+      selfResponse = await requestJsonWithToken(target, "/api/user/self", timeoutMs, session.token);
+    }
+    if (selfResponse.status < 200 || selfResponse.status >= 300) {
+      throw new Error(`New API 登录成功但 /api/user/self HTTP ${selfResponse.status}`);
+    }
+    return { accountQuota: parseNewApiAccountQuota(selfResponse.payload, status), status, session };
+  })();
+  walletQuotaCache?.set(key, request);
+  try {
+    return await request;
+  } catch (error) {
+    if (walletQuotaCache?.get(key) === request) walletQuotaCache.delete(key);
+    throw error;
+  }
 }
 
 function emptyResult(target: UpstreamUsageTarget, startedAt: number, days: number): UpstreamUsageResult {
@@ -406,7 +366,7 @@ function parseNewApiLogs(payload: unknown): {
 
 export async function queryUpstreamUsage(
   target: UpstreamUsageTarget,
-  options: { timeoutMs: number; days: number; authCache?: NewApiAuthCache },
+  options: { timeoutMs: number; days: number; authCache?: NewApiAuthCache; walletQuotaCache?: NewApiWalletQuotaCache },
 ): Promise<UpstreamUsageResult> {
   const startedAt = Date.now();
   const failures: string[] = [];
@@ -435,18 +395,13 @@ export async function queryUpstreamUsage(
   }
 
   let accountQuota: { limit: number | null; used: number | null; remaining: number | null } | null = null;
+  let accountStatus: Row | null = null;
   if (target.newApiCredentials) {
     try {
-      const loginToken = await loginNewApiCached(target, options.timeoutMs, options.authCache);
-      const statusResponse = await requestJsonWithToken(target, "/api/status", options.timeoutMs, loginToken);
-      const status = statusResponse.status >= 200 && statusResponse.status < 300 ? newApiData(statusResponse.payload) : null;
-      const selfResponse = await requestJsonWithToken(target, "/api/user/self", options.timeoutMs, loginToken);
-      if (selfResponse.status >= 200 && selfResponse.status < 300) {
-        accountQuota = parseNewApiAccountQuota(selfResponse.payload, status);
-        if (!accountQuota) failures.push("New API 登录成功但 /api/user/self 未返回可换算额度");
-      } else {
-        failures.push(`New API 登录成功但 /api/user/self HTTP ${selfResponse.status}`);
-      }
+      const wallet = await queryNewApiWalletQuota(target, options.timeoutMs, options.authCache, options.walletQuotaCache);
+      accountQuota = wallet.accountQuota;
+      accountStatus = wallet.status;
+      if (!accountQuota) failures.push("New API 登录成功但 /api/user/self 未返回可换算额度");
     } catch (error) {
       failures.push(`New API 账号密码登录 ${safeError(error)}`);
     }
@@ -460,12 +415,17 @@ export async function queryUpstreamUsage(
       const result = emptyResult(target, startedAt, options.days);
       result.ok = true;
       result.provider = "new-api";
-      let status: Row | null = null;
-      try {
-        const statusResponse = await requestJson(target, "/api/status", options.timeoutMs);
-        if (statusResponse.status >= 200 && statusResponse.status < 300) status = newApiData(statusResponse.payload);
-      } catch {
-        // The token endpoint remains useful when older New API forks do not expose status.
+      let status = accountStatus;
+      if (!status) {
+        try {
+          const statusResponse = await requestJson(target, "/api/status", options.timeoutMs);
+          if (statusResponse.status >= 200 && statusResponse.status < 300) {
+            status = newApiData(statusResponse.payload);
+            accountStatus = status;
+          }
+        } catch {
+          // The token endpoint remains useful when older New API forks do not expose status.
+        }
       }
       const quotaPerUnit = firstNumber(status, ["quota_per_unit"]);
       const unlimited = typeof quota?.unlimited_quota === "boolean" ? quota.unlimited_quota : null;
@@ -502,7 +462,10 @@ export async function queryUpstreamUsage(
             };
             result.warning = "New API 余额取自经账号级证据确认的 billing 接口";
           } else {
-            result.warning = "New API 只返回 API Key 配额；缺少可证明账号钱包余额的 Dashboard/PAT 凭据";
+            result.warning = [
+              "New API 只返回 API Key 配额；缺少可证明账号钱包余额的 Dashboard/PAT 凭据",
+              ...failures.filter((failure) => failure.startsWith("New API 账号密码登录")),
+            ].join("；");
           }
         } catch (error) {
           result.warning = `New API 账号级 billing 查询失败：${safeError(error)}`;
@@ -547,16 +510,21 @@ export async function queryUpstreamUsage(
 
 export async function queryUpstreamUsageConcurrently(
   targets: UpstreamUsageTarget[],
-  options: { timeoutMs: number; days: number; concurrency: number },
+  options: { timeoutMs: number; days: number; concurrency: number; authCache?: NewApiAuthCache },
 ): Promise<UpstreamUsageResult[]> {
   const results = new Array<UpstreamUsageResult>(targets.length);
   const authCache: NewApiAuthCache = new Map();
+  const walletQuotaCache: NewApiWalletQuotaCache = new Map();
   let next = 0;
   const workers = Array.from({ length: Math.min(options.concurrency, targets.length) }, async () => {
     for (;;) {
       const index = next++;
       if (index >= targets.length) return;
-      results[index] = await queryUpstreamUsage(targets[index]!, { ...options, authCache });
+      results[index] = await queryUpstreamUsage(targets[index]!, {
+        ...options,
+        authCache: options.authCache ?? authCache,
+        walletQuotaCache,
+      });
     }
   });
   await Promise.all(workers);

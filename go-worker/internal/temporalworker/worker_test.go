@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	enumspb "go.temporal.io/api/enums/v1"
 	sdkactivity "go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
 )
@@ -119,6 +120,16 @@ func TestConfiguredScheduleIdentitiesRemainStable(t *testing.T) {
 	}
 	if identities != expected {
 		t.Fatalf("schedule identities changed: %#v", identities)
+	}
+}
+
+func TestReplacingScheduleOptionsTerminatesStaleCadence(t *testing.T) {
+	options := replacingScheduleOptions("quota", "queue")
+	if options.WorkflowIDConflictPolicy != enumspb.WORKFLOW_ID_CONFLICT_POLICY_TERMINATE_EXISTING {
+		t.Fatalf("quota schedule must replace a stale running execution: %#v", options)
+	}
+	if options.WorkflowIDReusePolicy != enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE {
+		t.Fatalf("quota schedule must allow reuse after replacement: %#v", options)
 	}
 }
 

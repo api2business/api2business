@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { readApiKeyCutoffEvents, recordApiKeyCutoffEvent, type ApiKeyCutoffTrigger } from "./api-key-cutoff-ledger";
 import {
   queryUpstreamUsageConcurrently,
+  type NewApiAuthCache,
   type UpstreamUsageResult,
   type UpstreamUsageTarget,
 } from "./upstream-usage";
@@ -375,6 +376,10 @@ function isAlreadyExistsError(error: unknown): boolean {
 
 export class UpstreamManagementService {
   private ledgerWriteChain: Promise<void> = Promise.resolve();
+  // New API limits session issuance. Keep one login promise per shared wallet
+  // across sampling rounds; queryUpstreamUsage removes it after expiry or a
+  // rejected session response.
+  private readonly newApiAuthCache: NewApiAuthCache = new Map();
   private readonly pendingOperations = new Map<string, {
     operation: UpstreamWorkerOperation;
     submitted: Record<string, unknown>;
@@ -1073,6 +1078,7 @@ export class UpstreamManagementService {
       concurrency: settings.usageConcurrency,
       timeoutMs: settings.usageTimeoutMs,
       days: settings.usageDays,
+      authCache: this.newApiAuthCache,
     });
     return {
       ok: true,

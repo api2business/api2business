@@ -145,6 +145,7 @@ test("reads New API account balance with username/password login", async () => {
 
 test("deduplicates New API wallet login across concurrent account aliases", async () => {
   let loginCount = 0;
+  let selfCount = 0;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
@@ -155,7 +156,10 @@ test("deduplicates New API wallet login across concurrent account aliases", asyn
       return new Response(JSON.stringify({ data: { access_token: "shared-login-token" } }));
     }
     if (url.endsWith("/api/status")) return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
-    if (url.endsWith("/api/user/self")) return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
+    if (url.endsWith("/api/user/self")) {
+      selfCount += 1;
+      return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
+    }
     if (url.endsWith("/api/usage/token/") || url.endsWith("/api/log/token")) return new Response(JSON.stringify({ success: false }), { status: 401 });
     return new Response(JSON.stringify({ data: {} }));
   }) as typeof fetch;
@@ -166,7 +170,87 @@ test("deduplicates New API wallet login across concurrent account aliases", asyn
   ], { timeoutMs: 100, days: 7, concurrency: 2 });
 
   expect(loginCount).toBe(1);
+  expect(selfCount).toBe(1);
   expect(results.map((result) => result.quota.remaining)).toEqual([14_654_923 / 500_000, 14_654_923 / 500_000]);
+});
+
+test("reuses a New API wallet login across sampling rounds", async () => {
+  let loginCount = 0;
+  const authCache = new Map();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
+    if (url.endsWith("/api/user/login")) {
+      loginCount += 1;
+      return new Response(JSON.stringify({ data: { access_token: "opaque-wallet-token" } }));
+    }
+    if (url.endsWith("/api/status")) return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
+    if (url.endsWith("/api/user/self")) return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
+    if (url.endsWith("/api/usage/token/") || url.endsWith("/api/log/token")) return new Response(JSON.stringify({ success: false }), { status: 401 });
+    return new Response(JSON.stringify({ data: {} }));
+  }) as unknown as typeof fetch;
+
+  const first = await queryUpstreamUsage({ ...target, newApiCredentials: { username: "wallet-user", password: "secret" } }, { timeoutMs: 100, days: 7, authCache });
+  const second = await queryUpstreamUsage({ ...target, newApiCredentials: { username: "wallet-user", password: "secret" } }, { timeoutMs: 100, days: 7, authCache });
+  expect(loginCount).toBe(1);
+  expect(first.quota.remaining).toBe(14_654_923 / 500_000);
+  expect(second.quota.remaining).toBe(14_654_923 / 500_000);
+});
+
+test("backs off a rate-limited New API wallet login across sampling rounds", async () => {
+  let loginCount = 0;
+  const authCache = new Map();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
+    if (url.endsWith("/api/user/login")) {
+      loginCount += 1;
+      return new Response(JSON.stringify({ code: "AUTH_SESSION_ISSUANCE_LIMIT", message: "Too Many Requests" }), { status: 429 });
+    }
+    if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({ data: { total_available: 1, unlimited_quota: false } }));
+    if (url.endsWith("/api/log/token")) return new Response(JSON.stringify({ data: [] }));
+    return new Response(JSON.stringify({ data: {} }));
+  }) as unknown as typeof fetch;
+
+  const loginTarget = { ...target, newApiCredentials: { username: "wallet-user", password: "secret" } };
+  const first = await queryUpstreamUsage(loginTarget, { timeoutMs: 100, days: 7, authCache });
+  const second = await queryUpstreamUsage(loginTarget, { timeoutMs: 100, days: 7, authCache });
+  expect(loginCount).toBe(1);
+  expect(first.warning).toContain("AUTH_SESSION_ISSUANCE_LIMIT");
+  expect(second.warning).toContain("AUTH_SESSION_ISSUANCE_LIMIT");
+});
+
+test("refreshes an expired New API session without issuing another login", async () => {
+  let loginCount = 0;
+  let refreshCount = 0;
+  const authCache = new Map();
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
+    if (url.endsWith("/api/user/login")) {
+      loginCount += 1;
+      return new Response(JSON.stringify({ data: { access_token: "login-token", access_expires_at: Math.floor(Date.now() / 1000) + 1, session: { sid: "sid-1" } } }), { headers: { "set-cookie": "new_api_refresh=refresh-1; Path=/api/user/auth" } });
+    }
+    if (url.endsWith("/api/user/auth/refresh")) {
+      refreshCount += 1;
+      return new Response(JSON.stringify({ data: { access_token: "refreshed-token", access_expires_at: Math.floor(Date.now() / 1000) + 900, session: { sid: "sid-1" } } }), { headers: { "set-cookie": "new_api_refresh=refresh-2; Path=/api/user/auth" } });
+    }
+    if (url.endsWith("/api/status")) return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
+    if (url.endsWith("/api/user/self")) return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
+    if (url.endsWith("/api/usage/token/") || url.endsWith("/api/log/token")) return new Response(JSON.stringify({ success: false }), { status: 401 });
+    return new Response(JSON.stringify({ data: {} }));
+  }) as unknown as typeof fetch;
+
+  const firstTarget = { ...target, newApiCredentials: { username: "wallet-user", password: "secret" } };
+  const first = await queryUpstreamUsage(firstTarget, { timeoutMs: 100, days: 7, authCache });
+  const second = await queryUpstreamUsage(firstTarget, { timeoutMs: 100, days: 7, authCache });
+  expect(loginCount).toBe(1);
+  expect(refreshCount).toBe(1);
+  expect(first.quota.remaining).toBe(14_654_923 / 500_000);
+  expect(second.quota.remaining).toBe(14_654_923 / 500_000);
 });
 
 test("falls back to a positive New API group ratio when the user ratio is zero", async () => {
