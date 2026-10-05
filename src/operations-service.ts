@@ -1111,7 +1111,9 @@ export class OperationsService {
       const usage = usageById.get(Number(row.accountId));
       if (!usage || usage.ok !== true) return row;
       const quota = object(usage.quota);
-      const remaining = quota.unit === "USD" ? Number(quota.remaining) : Number.NaN;
+      const remaining = quota.unit === "USD" && quota.remaining !== null && quota.remaining !== undefined
+        ? Number(quota.remaining)
+        : Number.NaN;
       const walletRate = upstreamBalanceRateByWallet(
         configuredWalletKey(usage.walletKey ?? usage.baseUrl ?? row.accountName, this.config.sub2api.newApiCredentials),
         valuation.defaultCnyPerApiUsd,

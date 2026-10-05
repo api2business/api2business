@@ -125,7 +125,9 @@ function enrichAccountCostEvidence(
   });
 }
 
-function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], refs: import("./config").NewApiCredentialRef[]) {
+function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], config: AppConfig) {
+  const refs = config.sub2api.newApiCredentials;
+  const valuation = readUpstreamValuationPolicy(config.operations.ledgerYamlPath);
   const cachedByAccount = new Map<number, {
     result: Row;
     cachedAt: string | null;
@@ -189,15 +191,29 @@ function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], ref
       };
     }
     const quota = object(effective.result.quota);
+    const remaining = effective.status === "cached"
+      && String(quota.unit ?? "").toUpperCase() === "USD"
+      && quota.remaining !== null
+      && quota.remaining !== undefined
+      ? Number(quota.remaining)
+      : null;
+    const accountBalanceCny = remaining !== null && Number.isFinite(remaining) && remaining >= 0
+      ? remaining * upstreamBalanceRateByWallet(
+        configuredWalletKey(effective.result.walletKey ?? effective.result.baseUrl ?? account.accountName, refs),
+        valuation.defaultCnyPerApiUsd,
+        valuation.walletCnyPerApiUsd,
+      )
+      : null;
     if (effective.status === "cached") numericAccountCount += 1;
     if (effective.status === "unlimited") unlimitedAccountCount += 1;
     if (effective.status === "unavailable") unavailableAccountIds.push(accountId);
     return {
       ...account,
+      accountBalanceCny,
       quota: {
         limit: quota.limit ?? null,
         used: quota.used ?? null,
-        remaining: effective.status === "cached" ? Number(quota.remaining) : null,
+        remaining,
         unlimited: quota.unlimited ?? null,
         unit: quota.unit == null ? null : String(quota.unit),
       },
@@ -453,7 +469,7 @@ export class UpstreamSchedulingV2Service {
     const probeHistory = object(probeHistoryRaw);
     const modelSyncHistory = object(modelSyncHistoryRaw);
     const costAccounts = enrichAccountCostEvidence(accounts, usageRows, this.config);
-    const quotaProjection = enrichAccountsWithQuotaCache(costAccounts, usageRows, this.config.sub2api.newApiCredentials);
+    const quotaProjection = enrichAccountsWithQuotaCache(costAccounts, usageRows, this.config);
     return {
       scoreSnapshot,
       accounts: quotaProjection.accounts,
@@ -593,10 +609,10 @@ export class UpstreamSchedulingV2Service {
     if (!selected.scope.features.planRead) {
       throw new UpstreamSchedulingV2Error(409, "feature_disabled", `${selected.name}.features.planRead=false`);
     }
-    const source = await this.source(selected.name, selected.scope);
+    const snapshot = await this.snapshot(selected.name);
     const ranking = {
-      recentCallLimit: Number(source.scoreSnapshot.recentCallLimit ?? this.config.monitor.recentCallLimit),
-      accounts: source.accounts,
+      recentCallLimit: Number(snapshot.data.recentCallLimit ?? this.config.monitor.recentCallLimit),
+      accounts: snapshot.data.accounts,
     };
     const rawPlan = object(buildAccountPriorityPlan(ranking, this.config));
     const changes = records(rawPlan.changes).filter((change) => String(change.profile ?? "") === selected.name);
@@ -620,7 +636,7 @@ export class UpstreamSchedulingV2Service {
         mutation: false,
         reason: selected.scope.features.planWrite ? null : `${selected.name}.features.planWrite=false`,
       },
-      reconciliation: this.reconciliation(selected.name, selected.scope, source),
+      reconciliation: snapshot.reconciliation,
       valuesPrinted: false,
     };
   }

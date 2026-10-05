@@ -95,6 +95,7 @@ describe("upstream scheduling v2", () => {
     expect(snapshot.data.accounts[0]).toMatchObject(row);
     expect(snapshot.data.accounts[0]).toMatchObject({
       quota: { unit: "USD", remaining: 12.5 },
+      accountBalanceCny: 12.5,
       quotaCacheAt: "2026-10-03T00:01:00.000Z",
       quotaCacheStatus: "cached",
     });
