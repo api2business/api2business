@@ -132,8 +132,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   [上游与调度](references/upstream-scheduling.md)。
 - 该参考同时定义 API-key 切号模板的平台边界、成本补齐、评分分层和 V2 迁移；本技能只
   保留入口和命令，不复制第二套算法或状态机。
-- TTFT 只认非空 `first_token_ms`；探活必须使用流式 Responses，存在一个有效首 Token
-  样本即可计算并参与评分，没有有效样本时才使用 prior；完整口径见上述参考。
+- TTFT、流式探活、缺失样本和评分参与边界只见上述参考，本技能不复制评分算法。
 - 池级质量调查使用 `scores pool-quality --over-api`，账号评分快照使用 `scores get`，
   需要刷新时使用 `scores rank --calls <N> --over-api`。
 - V2 使用 `upstream-scheduling-v2 scopes|snapshot|plan --over-api` 只读查看，使用
@@ -169,8 +168,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `--groups` 整表替换全部分组，并重写切号模板。
   - 已启用探活账号的私有分组必须列入；隔离后的收回顺序只见
     `references/upstream-scheduling.md`。
-- 多个同充值地址 API Key 只对实际充值动作记一笔充值；创建、模板和探活隔离作业按账号
-  ID 幂等回读。余额共享钱包不扩大写入范围。
+- 多个同充值地址 API Key 只对实际充值动作记一笔充值；余额共享钱包、账号投影和写入范围见
+  [额度监控](references/quota-monitoring.md) 与 [上游与调度](references/upstream-scheduling.md)。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
 - 手工收入明细使用 `cash ledger --period YYYY-MM --over-api`，汇总使用 `profit daily`。
 - BugTeam 客户 API 使用 `bugteam` CLI 命令组，配置中的 `bugTeam.customerToken`、`customerAccount`、`customerPassword` 只能引用仓库外 Secret：
@@ -209,8 +208,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   关闭 `strict`、排除测试或静默断言来掩盖错误。
 - 提交前使用 `git diff --check`、配置校验和部署校验；未归属的并行工作区文件不得加入提交，
   只有完成语义合并并通过对应验证后才清理。
-- 读取失败保留上一份成功快照；未知余额、未知评分和缺失成本必须保留其状态，不能
-  静默写成零值或最低优先级。
+- 读取失败、共享钱包回退和缺失状态的唯一口径见 [额度监控](references/quota-monitoring.md)；
+  本技能不另定义缓存状态机。
 - Sub2API 业务查询统一通过 Api2Business 排队 broker 读取 NC01 本地专用库；
   CLI、Web、worker 和人工脚本不得直连旧 PK01 数据库。
 - 账号级代理默认策略：OAuth 导入、Plus/Team 账号和 API-key 上游默认直连，不绑定
@@ -226,17 +225,15 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api`；
   - 评测只复用持久化探活专用 API Key，不读取供应商原始 Key，也不轮换探活 Key。
 - 上游模型同步使用 `upstreams models sync --accounts <id-or-range,...> --confirm --over-api`；
-  CLI 先读取各账号上游 `/v1/models`，再通过 Sub2API 原生
-  `POST /admin/accounts/bulk-update` 只合并 `credentials.model_mapping`。
-  禁止用单账号 `PUT /admin/accounts/:id` 写回；该接口的不完整凭据对象会丢弃非敏感的
-  `base_url` 等字段。读取、写回和失败语义唯一见
+  读取、原生 bulk merge、单账号失败边界和写后回读唯一见
   [上游与调度](references/upstream-scheduling.md)。
 - V2 作用域模型同步使用以下 CLI：
   - `upstream-scheduling-v2 model-sync plan --scope <codex|claude|grok> --over-api` 只读生成下一批计划；
   - `upstream-scheduling-v2 model-sync run --scope <scope> [--accounts <id,...>] --confirm --over-api` 执行手动批次；
   - `upstream-scheduling-v2 model-sync history --scope <scope> --over-api` 查询轮次和账号明细。
   - 自动批次上限和间隔由 `operations.upstreamSchedulingV2.modelSync` 配置；自动开关只认各作用域的 `features.modelSyncAutomation`，每批最多 10 个，上一批完成后开始计时。
-- V2 模型同步保留父轮次和账号明细记录；单账号上游错误只标记该账号，不能阻断同批其他账号，也不能把失败账号改写成成功。
+- V2 模型同步保留父轮次和账号明细记录；批次边界、失败隔离和游标语义唯一见
+  [上游与调度](references/upstream-scheduling.md)。
 - 评分与产出分母继续使用 `total_cost`。
 - 额度监控的供应商实际支出、余额缓存、缺失处理和首屏测量唯一见
   [额度监控](references/quota-monitoring.md)。
