@@ -1,6 +1,7 @@
 node_modules/
 .tmp/
 .worktree/
+.worktrees/
 .state/
 .state/operations-daily/
 *.sqlite
