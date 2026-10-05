@@ -166,15 +166,27 @@ export class ProbeIsolationService {
 
   private async findOrCreateGroup(accountId: number, scope: ProbeIsolationScope, deadline?: number): Promise<number> {
     const isolation = this.config.sub2api.idleProbe.isolation;
-    const name = `${isolation.groupNamePrefix}${accountId}`;
+    const baseName = `${isolation.groupNamePrefix}${accountId}`;
     const listed = await this.admin.request<Paginated<Row>>(
-      `/admin/groups?platform=${encodeURIComponent(scope.platform)}&search=${encodeURIComponent(name)}&page=1&page_size=100`,
+      `/admin/groups?platform=${encodeURIComponent(scope.platform)}&search=${encodeURIComponent(baseName)}&page=1&page_size=100`,
       {},
       true,
       this.remainingTimeout(deadline),
     );
-    const existing = pageItems(listed).find((item) => String(item.name ?? "") === name
+    const existing = pageItems(listed).find((item) => String(item.name ?? "") === baseName
       && String(item.platform ?? "") === scope.platform);
+    let name = baseName;
+    if (!existing) {
+      const allPlatforms = await this.admin.request<Paginated<Row>>(
+        `/admin/groups?search=${encodeURIComponent(baseName)}&page=1&page_size=100`,
+        {},
+        true,
+        this.remainingTimeout(deadline),
+      );
+      const conflicting = pageItems(allPlatforms).some((item) => String(item.name ?? "") === baseName
+        && String(item.platform ?? "") !== scope.platform);
+      if (conflicting) name = `${isolation.groupNamePrefix}${scope.platform}-${accountId}`;
+    }
     const existingId = id(existing?.id);
     const groupId = existingId ?? id((await this.admin.mutate<Row>("POST", "/admin/groups", {
       name,

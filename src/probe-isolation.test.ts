@@ -175,6 +175,19 @@ test("probe isolation detects Grok platform without adding Codex groups", async 
   expect(secret.records["42"]).toMatchObject({ platform: "grok", ready: true });
 });
 
+test("probe isolation namespaces a platform after a stale cross-platform group collision", async () => {
+  const { state, service } = fixture();
+  state.account = { id: 42, platform: "grok", type: "apikey", group_ids: [62] };
+  state.groups.push({ id: 70, name: "api2business-probe-42", platform: "openai", status: "active" });
+
+  await service.ensure(42);
+
+  expect(state.groupCreates[0]).toEqual(expect.objectContaining({
+    name: "api2business-probe-grok-42",
+    platform: "grok",
+  }));
+});
+
 test("scoped Claude probing preserves Kiro membership without adding Claude MAX", async () => {
   const { state, service } = fixture();
   state.account = { id: 42, platform: "anthropic", type: "apikey", group_ids: [161] };
