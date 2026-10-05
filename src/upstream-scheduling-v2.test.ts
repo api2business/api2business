@@ -270,6 +270,14 @@ describe("upstream scheduling v2", () => {
     expect(calls.save).toBe(1);
   });
 
+  test("does not block a forced refresh on the upstream read path", async () => {
+    const { service, calls } = fixture();
+    await service.snapshot("codex");
+    const refreshed = await service.snapshot("codex", true);
+    expect(refreshed.cache).toMatchObject({ state: "stale" });
+    expect(calls.dispatch).toBeGreaterThanOrEqual(1);
+  });
+
   test("deduplicates concurrent cold snapshot builds", async () => {
     const { service, calls, operations } = fixture();
     let release!: () => void;

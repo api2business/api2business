@@ -572,6 +572,10 @@ export class UpstreamSchedulingV2Service {
     const ageMs = cached ? Date.now() - Date.parse(cached.capturedAt) : Number.POSITIVE_INFINITY;
     const fresh = cached !== null && Number.isFinite(ageMs) && ageMs <= ttlMs;
     if (!forceRefresh && cached && fresh) return this.withCache(cached.payload, cached.capturedAt, "hit");
+    if (forceRefresh && cached) {
+      void this.refreshInBackground(selected.name, selected.scope, cached);
+      return this.withCache(cached.payload, cached.capturedAt, "stale");
+    }
     if (!forceRefresh && cached) {
       void this.refreshInBackground(selected.name, selected.scope, cached);
       return this.withCache(cached.payload, cached.capturedAt, "stale");
