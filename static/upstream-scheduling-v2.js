@@ -11,6 +11,19 @@ const errorPageSize = 20
 const historyPageSize = 10
 
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/gu, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])) }
+function externalUpstreamUrl(row) {
+  const values = [row?.upstreamUrl, row?.baseUrl, row?.walletKey, row?.accountName]
+  for (const value of values) {
+    const text = String(value ?? '').trim()
+    const candidate = text.match(/^https?:\/\/[^\s]+/iu)?.[0]
+    if (!candidate) continue
+    try {
+      const url = new URL(candidate)
+      if (url.protocol === 'http:' || url.protocol === 'https:') return url.href
+    } catch { /* 账号名可能包含 URL 后缀，继续检查下一候选值。 */ }
+  }
+  return null
+}
 function number(value, digits = 0) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed.toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits }) : '—' }
 function percent(value, digits = 1) { const parsed = Number(value); return Number.isFinite(parsed) ? `${(parsed * 100).toFixed(digits)}%` : '—' }
 function money(value) { const parsed = Number(value); return Number.isFinite(parsed) ? `¥${number(parsed, 2)}` : '—' }
@@ -138,7 +151,12 @@ function renderAccounts() {
     const cost = accountCost(row)
     const costSource = accountCostSource(row)
     const costTitle = row.costProbe?.source ? `${costSource} · ${row.costProbe.source}` : costSource
-    return `<tr><td><strong>${escapeHtml(row.accountName ?? row.accountId)}</strong><small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td title="${escapeHtml(costTitle)}">${cost == null ? '—' : `¥${number(cost, 4)}/刀`}<small>${escapeHtml(costSource)}</small></td><td>${cny(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td><td>${percent(row.failureRate)}<small>${number(attempts)} 次尝试</small></td><td>${row.ttftP95Ms == null ? '—' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`}</td><td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
+    const accountLabel = escapeHtml(row.accountName ?? row.accountId)
+    const upstreamUrl = externalUpstreamUrl(row)
+    const accountMarkup = upstreamUrl
+      ? `<a class="upstream-account-link" href="${escapeHtml(upstreamUrl)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开上游页面">${accountLabel}</a>`
+      : `<strong>${accountLabel}</strong>`
+    return `<tr><td>${accountMarkup}<small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td title="${escapeHtml(costTitle)}">${cost == null ? '—' : `¥${number(cost, 4)}/刀`}<small>${escapeHtml(costSource)}</small></td><td>${cny(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td><td>${percent(row.failureRate)}<small>${number(attempts)} 次尝试</small></td><td>${row.ttftP95Ms == null ? '—' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`}</td><td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
   }).join('') : '<tr><td colspan="13" class="empty">当前作用域没有评分账号</td></tr>'
   updateTableSortHeaders($('#v2-account-table'), state.accountSort)
   $('#v2-account-page').textContent = rows.length ? `${state.accountPage} / ${pages} · 共 ${number(rows.length)} 条` : '0 条'; $('#v2-account-prev').disabled = state.accountPage <= 1; $('#v2-account-next').disabled = state.accountPage >= pages

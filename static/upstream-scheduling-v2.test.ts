@@ -37,6 +37,9 @@ test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   expect(script).not.toContain("yMax: 0.3");
   expect(script).toContain("bindTableSortHeaders");
   expect(script).toContain("sortTableRows");
+  expect(script).toContain('target="_blank"');
+  expect(script).toContain('rel="noopener noreferrer"');
+  expect(script).toContain("function externalUpstreamUrl(row)");
   expect(script).not.toMatch(/method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]/u);
   expect(app).toContain("upstream-scheduling-v2");
 });

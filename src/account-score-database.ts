@@ -18,6 +18,7 @@ WITH target_accounts AS (
   SELECT
     a.id AS account_id,
     a.name AS account_name,
+    a.base_url,
     a.platform,
     a.type AS account_type,
     a.status,
@@ -412,6 +413,7 @@ export function scoreRecentDatabaseRow(
   return {
     accountId: numeric(row.account_id),
     accountName,
+    baseUrl: row.base_url ?? null,
     platform: row.platform,
     accountType: row.account_type ?? row.type ?? null,
     status: row.status,

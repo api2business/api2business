@@ -328,6 +328,24 @@ function quotaRemaining(result) {
 
 function quotaDisplay(value) { return value === null ? '—' : `¥${number(value, 2)}` }
 
+function externalUpstreamUrl(value) {
+  const text = String(value ?? '').trim()
+  const candidate = text.match(/^https?:\/\/[^\s]+/iu)?.[0]
+  if (!candidate) return null
+  try {
+    const url = new URL(candidate)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+  } catch { return null }
+}
+
+function upstreamWalletMarkup(row) {
+  const label = escapeHtml(row.name)
+  const url = externalUpstreamUrl(row.wallet)
+  return url
+    ? `<a class="quota-wallet-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开上游页面">${label}</a>`
+    : `<strong>${label}</strong>`
+}
+
 function quotaRangeCutoff(range, now = Date.now()) {
   if (range === '1h') return now - 3_600_000
   if (range === 'today') {
@@ -374,7 +392,7 @@ function renderQuotaMonitor() {
   const sorted = sortTableRows(filteredRows, quotaMonitorSort, (row, key) => key.startsWith('consumption.') ? row.consumption[key.slice('consumption.'.length)] : row[key], (a, b) => Number(a.accountId) - Number(b.accountId))
   const totalPages = Math.max(1, Math.ceil(sorted.length / quotaMonitorPageSize)); quotaMonitorPageNumber = Math.min(quotaMonitorPageNumber, totalPages)
   const pageRows = sorted.slice((quotaMonitorPageNumber - 1) * quotaMonitorPageSize, quotaMonitorPageNumber * quotaMonitorPageSize)
-  const body = $('#quota-monitor-body'); if (body) body.innerHTML = pageRows.length ? pageRows.map((row) => `<tr><td><strong>${escapeHtml(row.name)}</strong><small>${number(row.accountCount)} 个账号 · ${escapeHtml(row.wallet)}</small></td><td>${quotaDisplay(row.remaining)}</td><td>${quotaDisplay(row.consumed24h)}</td><td>${quotaDisplay(row.consumption['codex-mix'])}</td><td>${quotaDisplay(row.consumption['no-degrade'])}</td><td>${quotaDisplay(row.consumption.claude)}</td><td>${quotaDisplay(row.consumption.grok)}</td><td>${escapeHtml(row.groups.join('、') || '—')}</td></tr>`).join('') : '<tr><td colspan="8" class="empty">暂无额度缓存数据</td></tr>'
+  const body = $('#quota-monitor-body'); if (body) body.innerHTML = pageRows.length ? pageRows.map((row) => `<tr><td>${upstreamWalletMarkup(row)}<small>${number(row.accountCount)} 个账号 · ${escapeHtml(row.wallet)}</small></td><td>${quotaDisplay(row.remaining)}</td><td>${quotaDisplay(row.consumed24h)}</td><td>${quotaDisplay(row.consumption['codex-mix'])}</td><td>${quotaDisplay(row.consumption['no-degrade'])}</td><td>${quotaDisplay(row.consumption.claude)}</td><td>${quotaDisplay(row.consumption.grok)}</td><td>${escapeHtml(row.groups.join('、') || '—')}</td></tr>`).join('') : '<tr><td colspan="8" class="empty">暂无额度缓存数据</td></tr>'
   const state = $('#quota-monitor-state'); if (state) state.textContent = `上游总资产 ${quotaDisplay(quotaMonitorTotalRemaining)} · ${quotaRangeLabel(quotaMonitorRange)} · 读取 ${number(quotaMonitorRows.length)} 个上游钱包 · 共 ${totalPages} 页 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
   const consumptionLabel = $('#quota-monitor-consumption-label'); if (consumptionLabel) consumptionLabel.textContent = `${quotaRangeLabel(quotaMonitorRange)}消耗`
   const pageLabel = $('#quota-monitor-page'); if (pageLabel) pageLabel.textContent = `${quotaMonitorPageNumber} / ${totalPages} · ${number(sorted.length)} 条`
@@ -886,7 +904,7 @@ async function boot() {
   if (page === 'login') return await loginPage()
   await shell()
   if (page === 'upstream-scheduling-v2') {
-    const v2 = await import('./upstream-scheduling-v2.js?v=v2-table-sort-1')
+    const v2 = await import('./upstream-scheduling-v2.js?v=v2-links-2')
     return await v2.upstreamSchedulingV2Page()
   }
   if (page === 'quota-monitor') return await quotaMonitorPage()

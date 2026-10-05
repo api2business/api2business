@@ -20,6 +20,9 @@ test("quota monitor keeps reading persistent usage cache", async () => {
   expect(app).toContain("requestJson('/api/upstreams/quota-summary',");
   expect(html).toContain('id="quota-monitor-refresh-interval"');
   expect(html).toContain('id="quota-monitor-range"');
+  expect(app).toContain("function upstreamWalletMarkup(row)");
+  expect(app).toContain('target="_blank"');
+  expect(app).toContain('rel="noopener noreferrer"');
 });
 
 test("V2 account table renders quota cache coverage", async () => {
