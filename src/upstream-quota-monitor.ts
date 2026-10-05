@@ -114,6 +114,13 @@ interface WalletCostObservation {
   apiAmountUsd: number;
 }
 
+interface ApiOutputObservation {
+  endedAt: number;
+  startedAt: number;
+  apiAmountUsd: number;
+  reset?: boolean;
+}
+
 function sameRate(left: number, right: number): boolean {
   return Math.abs(left - right) <= 0.0000005;
 }
@@ -155,6 +162,53 @@ function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObser
       }
       anchor = current;
     }
+  }
+  return observations;
+}
+
+/**
+ * Pair cumulative output by sampling round before calculating a rate.
+ *
+ * Scope projections can start with a wallet sample whose account output is
+ * missing. Treating the next cumulative value as a delta makes the first
+ * rolling point look like a huge hourly rate. An observation is valid only
+ * when a complete cumulative baseline is present across two consecutive
+ * sampling rounds.
+ */
+function apiOutputObservations(samples: UpstreamQuotaSample[]): ApiOutputObservation[] {
+  const byTimestamp = new Map<string, number>();
+  for (const sample of samples) {
+    if (sample.remainingCny === null || sample.apiAmountUsdTotal === null || sample.apiAmountUsdTotal === undefined) continue;
+    // The stored value is a scope total and is repeated for every wallet in
+    // the sampling round. Keep one value per timestamp to avoid multiplying
+    // it by the number of wallets.
+    if (!byTimestamp.has(sample.sampledAt)) byTimestamp.set(sample.sampledAt, sample.apiAmountUsdTotal);
+  }
+  const points = [...byTimestamp.entries()].sort((left, right) => Date.parse(left[0]) - Date.parse(right[0]));
+  const observations: ApiOutputObservation[] = [];
+  let previousAt: number | null = null;
+  let previousValue: number | null = null;
+  let baselineReady = false;
+  for (const [sampledAt, value] of points) {
+    const endedAt = Date.parse(sampledAt);
+    if (previousAt === null || previousValue === null) {
+      previousAt = endedAt;
+      previousValue = value;
+      baselineReady = value !== 0;
+      continue;
+    }
+    if (value < previousValue) {
+      observations.push({ endedAt, startedAt: previousAt, apiAmountUsd: 0, reset: true });
+      baselineReady = false;
+    } else if (baselineReady && endedAt > previousAt) {
+      observations.push({ endedAt, startedAt: previousAt, apiAmountUsd: value - previousValue });
+    } else if (!baselineReady && value !== 0) {
+      // The first non-zero value after a missing/zero baseline is a fresh
+      // counter snapshot, not usage in the current rolling window.
+      baselineReady = true;
+    }
+    previousAt = endedAt;
+    previousValue = value;
   }
   return observations;
 }
@@ -275,17 +329,33 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
   }
   const insufficient = known.length - coverage;
   const burnKnown = coverage > 0;
-  const productionPoints = [...new Map(samples
-    .filter((row) => Date.parse(row.sampledAt) >= latestAt - windowHours * 3_600_000
-      && row.apiAmountUsdTotal !== null && row.apiAmountUsdTotal !== undefined)
-    .map((row) => [row.sampledAt, row.apiAmountUsdTotal!])).entries()]
-    .sort((a, b) => Date.parse(a[0]) - Date.parse(b[0]));
-  const apiAmountUsd = productionPoints.length >= 2
-    ? Math.max(0, productionPoints.at(-1)![1] - productionPoints[0]![1]) : null;
-  const burnWindowHours = productionPoints.length >= 2
-    ? Math.max(0, (Date.parse(productionPoints.at(-1)![0]) - Date.parse(productionPoints[0]![0])) / 3_600_000)
-    : 0;
   const cutoffAt = latestAt - windowHours * 3_600_000;
+  const hasAccountInputs = samples.some((sample) => (sample.accountCostInputs?.length ?? 0) > 0);
+  let apiAmountUsd: number | null;
+  let burnWindowHours: number;
+  if (!hasAccountInputs) {
+    const productionPoints = [...new Map(samples
+      .filter((row) => Date.parse(row.sampledAt) >= cutoffAt
+        && row.apiAmountUsdTotal !== null && row.apiAmountUsdTotal !== undefined)
+      .map((row) => [row.sampledAt, row.apiAmountUsdTotal!])).entries()]
+      .sort((a, b) => Date.parse(a[0]) - Date.parse(b[0]));
+    apiAmountUsd = productionPoints.length >= 2
+      ? Math.max(0, productionPoints.at(-1)![1] - productionPoints[0]![1]) : null;
+    burnWindowHours = productionPoints.length >= 2
+      ? Math.max(0, (Date.parse(productionPoints.at(-1)![0]) - Date.parse(productionPoints[0]![0])) / 3_600_000)
+      : 0;
+  } else {
+    const outputWindow = apiOutputObservations(samples)
+      .filter((observation) => observation.endedAt > cutoffAt && observation.endedAt <= latestAt);
+    const lastOutputResetAt = Math.max(0, ...outputWindow.filter((observation) => observation.reset).map((observation) => observation.endedAt));
+    const outputObservations = outputWindow.filter((observation) => !observation.reset && observation.endedAt > lastOutputResetAt);
+    apiAmountUsd = outputObservations.length > 0
+      ? outputObservations.reduce((sum, observation) => sum + observation.apiAmountUsd, 0) : null;
+    // The chart is a one-hour rolling rate. Use the full configured window
+    // after a valid paired delta instead of extrapolating a short boundary
+    // interval into an abnormally large first point.
+    burnWindowHours = outputObservations.length > 0 ? windowHours : 0;
+  }
   const costObservations = walletCostObservations(samples)
     .filter((observation) => observation.endedAt >= cutoffAt && observation.endedAt <= latestAt);
   const currentCostObservations = costObservations.filter((observation) => observation.endedAt === latestAt);
@@ -330,17 +400,15 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
 export function quotaHistory(samples: UpstreamQuotaSample[], windowHours = 1, displayHours = 8) {
   const timestamps = [...new Set(samples.map((row) => row.sampledAt))]
     .sort((a, b) => Date.parse(a) - Date.parse(b));
-  const history = timestamps.map((sampledAt, index) => {
+  const outputObservations = apiOutputObservations(samples);
+  const history = timestamps.map((sampledAt) => {
     const end = Date.parse(sampledAt);
-    const apiAmountUsdTotal = samples.find((row) => row.sampledAt === sampledAt
-      && row.apiAmountUsdTotal !== null && row.apiAmountUsdTotal !== undefined)?.apiAmountUsdTotal ?? null;
-    const previousAt = timestamps[index - 1];
-    const previousApiAmountUsdTotal = previousAt === undefined ? null : samples.find((row) => row.sampledAt === previousAt
-      && row.apiAmountUsdTotal !== null && row.apiAmountUsdTotal !== undefined)?.apiAmountUsdTotal ?? null;
-    const sampleElapsedHours = previousAt === undefined ? 0 : (end - Date.parse(previousAt)) / 3_600_000;
-    const sampleApiAmountUsdPerHour = apiAmountUsdTotal !== null && previousApiAmountUsdTotal !== null && sampleElapsedHours > 0
-      ? Math.max(0, apiAmountUsdTotal - previousApiAmountUsdTotal) / sampleElapsedHours
-      : null;
+    const currentOutput = outputObservations.filter((observation) => observation.endedAt === end);
+    const sampleStartAt = currentOutput.length > 0
+      ? Math.min(...currentOutput.map((observation) => observation.startedAt)) : null;
+    const sampleElapsedHours = sampleStartAt !== null ? (end - sampleStartAt) / 3_600_000 : 0;
+    const sampleApiAmountUsdPerHour = currentOutput.length > 0 && sampleElapsedHours > 0
+      ? currentOutput.reduce((sum, observation) => sum + observation.apiAmountUsd, 0) / sampleElapsedHours : null;
     const historical = samples.filter((row) => {
       const at = Date.parse(row.sampledAt);
       return at <= end;

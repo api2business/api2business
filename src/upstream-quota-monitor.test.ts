@@ -167,6 +167,17 @@ test("uses actual sample intervals and clamps upstream API output rollback", () 
   expect(history[2]!.rollingApiAmountUsdPerHour).toBeCloseTo(20);
 });
 
+test("does not extrapolate a cold-start cumulative output into the first rolling point", () => {
+  const base = { walletKey: "wallet", accountId: 1, schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 20, cnyPerUsd: 1, remainingCny: 20, sourceQueriedAt: null, accountCostInputs: costInputs(0, 0.1) };
+  const history = quotaHistory([
+    { ...base, sampledAt: "2026-08-02T00:00:00Z", apiAmountUsdTotal: 0 },
+    { ...base, sampledAt: "2026-08-02T00:10:00Z", apiAmountUsdTotal: 32555, accountCostInputs: costInputs(32555, 0.1) },
+    { ...base, sampledAt: "2026-08-02T00:20:00Z", apiAmountUsdTotal: 32565, accountCostInputs: costInputs(32565, 0.1) },
+  ], 1, 8);
+  expect(history[1]!.rollingApiAmountUsdPerHour).toBeNull();
+  expect(history[2]!.rollingApiAmountUsdPerHour).toBe(10);
+});
+
 test("missing intermediate samples preserves rolling burn and cost", () => {
   const base = {
     walletKey: "wallet", accountId: 1, schedulable: true, status: "active",
