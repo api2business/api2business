@@ -226,6 +226,13 @@ test("template application verifies persisted runtime fields through the queued 
   expect(source).toContain("verifiedCount");
 });
 
+test("template application reports Grok as an explicit platform skip", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  expect(source).toContain("LOWER(a.platform) IN ('openai', 'anthropic', 'grok')");
+  expect(source).toContain('reason: "platform-has-no-failover-template"');
+  expect(source).toContain("skippedCount: skipped.length");
+});
+
 test("upstream creation keeps the created account successful when post-processing is incomplete", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   const createBody = source.slice(source.indexOf("  async create(input:"), source.indexOf("  async update(id:"));

@@ -191,8 +191,11 @@
     - 模板增强只作用于 API-key 上游。
     - 先按文末「配置生效」确认持有规则的进程已加载新声明，再同步。
     - 模板变更的应用范围：
-      - `upstreams template --confirm --over-api` 覆盖目标 OpenAI/Anthropic API-key 上游。
-      - Grok 保持不套模板。
+      - `upstreams template --confirm --over-api` 只覆盖目标 OpenAI/Anthropic API-key 上游。
+      - Grok 保持不套模板；执行结果会在 `skipped[]` 和 `skippedCount` 中明确列出
+        `platform-has-no-failover-template`，不会再用 `targetCount=0` 静默表示成功或失败。
+      - 只选择 Grok 时，`appliedCount=0` 是预期结果；应检查 `skipped[]`，不能重试或把
+        Codex/Claude 模板强行写入 Grok。
       - 只改 Claude 时，先按 `platform=anthropic` 和 owning 分组筛出账号，再传 `--accounts`。
       - 不得把 Codex 或 Grok 混入 Claude 作业。
     - 只给新账号套用现有模板时，加上 `--accounts <id>`，不重写全池。

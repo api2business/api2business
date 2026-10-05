@@ -704,7 +704,14 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   }
   if (group === "upstreams" && action === "template") {
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
-    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-template", accountIds, scope: accountIds.length ? "selected" : "all-api-key", hint: "add --confirm to execute" };
+    if (!parsed.confirm) return {
+      ok: true,
+      mutation: false,
+      action: "upstream-template",
+      accountIds,
+      scope: accountIds.length ? "selected" : "all-api-key",
+      hint: "add --confirm to execute; Grok is skipped and reported in skipped[]",
+    };
     return await client.upstreamTemplate(accountIds, `upstream-template-${crypto.randomUUID()}`);
   }
   if (group === "upstreams" && action === "isolation") {

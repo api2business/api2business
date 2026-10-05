@@ -1208,24 +1208,31 @@ export class UpstreamManagementService {
         FROM accounts a
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
-          AND LOWER(a.platform) IN ('openai', 'anthropic')
+          AND LOWER(a.platform) IN ('openai', 'anthropic', 'grok')
           AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
           AND ($1::text = '' OR a.id = ANY(string_to_array($1::text, $2::text)::bigint[]))
         ORDER BY a.id`,
       parameters: [accountIds.join(","), ","],
     });
-    const ids = query.rows.map((item) => Number(item.id)).filter((id) => positiveInteger(id) !== null);
-    const applied = ids;
+    const skipped: Array<{ accountId: number; platform: string; reason: string }> = [];
+    const ids: number[] = [];
     const failed: Array<{ accountId: number; error: string }> = [];
     const platformGroups = new Map<string, number[]>();
     for (const row of query.rows) {
       const accountId = Number(row.id);
       const platform = String(row.platform ?? "").toLowerCase();
-      if (positiveInteger(accountId) === null || !["openai", "anthropic"].includes(platform)) continue;
+      if (positiveInteger(accountId) === null) continue;
+      if (platform === "grok") {
+        skipped.push({ accountId, platform, reason: "platform-has-no-failover-template" });
+        continue;
+      }
+      if (!["openai", "anthropic"].includes(platform)) continue;
+      ids.push(accountId);
       const group = platformGroups.get(platform) ?? [];
       group.push(accountId);
       platformGroups.set(platform, group);
     }
+    const applied = ids;
     for (const [platform, platformAccountIds] of platformGroups) {
       try {
         await this.runtime.applyApiKeyFailoverTemplates(
@@ -1291,11 +1298,13 @@ export class UpstreamManagementService {
       operation: "template",
       requestedAccountIds: accountIds,
       targetCount: ids.length,
+      skippedCount: skipped.length,
       appliedCount: applied.length,
       failedCount: failed.length,
       verifiedCount: verified.length,
       misalignedCount: misaligned.length,
       applied,
+      skipped,
       failed,
       verified,
       misaligned,
