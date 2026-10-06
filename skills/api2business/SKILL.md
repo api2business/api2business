@@ -135,7 +135,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - TTFT、流式探活、缺失样本和评分参与边界只见上述参考，本技能不复制评分算法。
 - 池级质量调查使用 `scores pool-quality --over-api`，账号评分快照使用 `scores get`，
   需要刷新时使用 `scores rank --calls <N> --over-api`。
-- V2 使用 `upstream-scheduling-v2 scopes|snapshot|plan --over-api` 只读查看，使用
+- V2 使用 `upstream-scheduling-v2 scopes|plan --over-api` 或
+  `upstream-scheduling-v2 snapshot --scope <scope> --over-api` 只读查看；新鲜度告警或刷新失败
+  排查可追加 `--cache-only`，只读取最近成功的读模型缓存，不触发新的刷新请求。使用
   `upstream-scheduling-v2 priority-run --scope <codex|claude|grok> --confirm --over-api`
   通过原生 worker 执行一次指定作用域的手动优先级调整；作用域的
   `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和

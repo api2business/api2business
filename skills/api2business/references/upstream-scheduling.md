@@ -271,7 +271,8 @@
   - `priorityAutomation` 是独立的周期优先级写入功能；它不等价于
     `planWrite`。周期写入仍须同时满足 `operations.writePolicy.enabled`，并按平台
     使用相应的写入开关。
-  - `upstream-scheduling-v2 scopes|snapshot|plan --over-api` 是只读核对入口；
+  - `upstream-scheduling-v2 scopes|plan --over-api` 和
+    `upstream-scheduling-v2 snapshot --scope <scope> --over-api` 是只读核对入口；
     `planWrite=false` 时 plan 必须返回 `mutation=false`，不创建写入计划。
   - 启用自动探活前，先用同一作用域显式执行一次手动探活，并核对 HTTP 结果、
     `ordinaryLogRecorded` 和探活轮次记录；手动成功后才打开该作用域的 `idleProbe`。
@@ -320,6 +321,9 @@
     `operations.upstreamSchedulingV2.readModelCacheSeconds` 时直接命中，过期时先返回陈旧
     快照并后台刷新。冷启动或显式刷新才等待重建；重建失败保留上一份快照，不把账号、额度
     或评分清空为零。页面通过 `cache.state` 显示命中、陈旧后台刷新或刚完成刷新。
+  - 新鲜度检查的显式刷新失败时，只允许追加一次 `--cache-only` 读取最近成功缓存；该读取
+    不重试刷新、不延长本轮间隔。缓存仍在告警阈值内时保持 ready，下一轮再按 owning YAML
+    周期刷新；缓存也不可读时才记录该作用域错误。
   - 评分刷新失败时必须保留最后一次成功的账号数据，并让刷新作业以失败终态返回；
     不得把带旧 `refreshedAt` 的陈旧快照报告为本次刷新成功。排查停更时同时核对
     `scores rank --over-api` 的真实 `refreshedAt`、worker 活动错误和数据库查询错误，
@@ -517,6 +521,8 @@
   个状态来源，计划 API 仅用于 CLI/API 审计。
 - 探活历史查询按作用域功能开关和平台读取，不能用 Codex/Grok 的质量档位过滤掉已启用的
   Claude 记录；读模型首次为空或过期时，应等待后台刷新后按同一作用域再次读取。
+- 新鲜度告警遇到单作用域 CLI 进程或传输失败时，先区分工具失败与缓存陈旧；只读缓存兜底
+  可以避免把健康作用域误报为未知，但不能把旧缓存伪装成本轮刷新成功。
 
 ### 失败或误判模式
 

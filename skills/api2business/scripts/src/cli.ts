@@ -229,7 +229,8 @@ function help(): Record<string, unknown> {
       "config validate",
       "backend check",
       "scores get|pool-quality|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
-      "upstream-scheduling-v2 scopes|snapshot|plan [--scope codex] [--cache-only] --over-api (read-only; Codex phase first)",
+      "upstream-scheduling-v2 scopes|plan [--scope codex|claude|grok] --over-api (read-only; Codex phase first)",
+      "upstream-scheduling-v2 snapshot [--scope codex|claude|grok] [--cache-only] --over-api (read-only cache/read-model query)",
       "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api (manual priority adjustment)",
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api",
       "reads status",
@@ -1195,6 +1196,9 @@ export async function runCli(args: string[]): Promise<void> {
   try {
     if (args.includes("--help") || args.length === 0) return emit(help(), wantsJson);
     const parsed = parseArgs(args);
+    if (parsed.cacheOnly && !(parsed.command[0] === "upstream-scheduling-v2" && parsed.command[1] === "snapshot")) {
+      throw new Error("--cache-only 只适用于 upstream-scheduling-v2 snapshot");
+    }
     const config = loadConfig(parsed.configPath);
     if (parsed.command.join(" ") === "config validate") return emit({
       ok: true, configPath: config.configPath, kind: config.kind, service: config.metadata.name,

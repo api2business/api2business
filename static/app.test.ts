@@ -56,7 +56,8 @@ test("V2 displays quota and output values as RMB", async () => {
 
 test("retired scheduling commands are absent from the CLI", async () => {
   const cli = await read("../skills/api2business/scripts/src/cli.ts");
-  expect(cli).toContain("upstream-scheduling-v2 scopes|snapshot|plan");
+  expect(cli).toContain("upstream-scheduling-v2 scopes|plan");
+  expect(cli).toContain("upstream-scheduling-v2 snapshot");
   expect(cli).toContain("priority history --over-api");
   expect(cli).not.toContain("priority " + "automation");
   expect(cli).not.toContain("priority" + "-plan");
