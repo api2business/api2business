@@ -107,7 +107,9 @@ export class Sub2ApiRuntimeService {
     const defaultTemplate = platform === undefined || rules.length > 0;
     return {
       ...input,
-      pool_mode: typeof input.pool_mode === "boolean" ? input.pool_mode : false,
+      // JSONB bulk-update 合并时，省略 pool_mode 才能保留账号现值。
+      // 探活隔离只更新分组和模板，不能把已开启的 Claude 池模式重置为 false。
+      ...(typeof input.pool_mode === "boolean" ? { pool_mode: input.pool_mode } : {}),
       temp_unschedulable_enabled: typeof input.temp_unschedulable_enabled === "boolean" ? input.temp_unschedulable_enabled : defaultTemplate,
       temp_unschedulable_rules: Array.isArray(input.temp_unschedulable_rules) ? input.temp_unschedulable_rules : defaultTemplate ? rules : [],
     };

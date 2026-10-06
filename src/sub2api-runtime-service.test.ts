@@ -302,6 +302,26 @@ test("bulk API-key configuration combines runtime settings and failover template
   }) }]);
 });
 
+test("bulk API-key isolation patch preserves the existing pool mode", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const client = { mutate: async (_method: string, _path: string, body: Record<string, unknown>) => {
+    calls.push(body);
+    return { success: 1, failed: 0, success_ids: [488] };
+  } } as unknown as Sub2ApiClient;
+  const runtime = new Sub2ApiRuntimeService(client, [], {
+    anthropic: [{ error_code: 503, keywords: ["local_capacity_exhausted"], duration_minutes: 3 }],
+  });
+
+  await runtime.configureApiKeyAccounts([488], { group_ids: [161] }, 120000, "anthropic");
+
+  const credentials = calls[0]?.credentials as Record<string, unknown>;
+  expect(credentials.pool_mode).toBeUndefined();
+  expect(credentials.temp_unschedulable_enabled).toBe(true);
+  expect(credentials.temp_unschedulable_rules).toEqual([
+    { error_code: 503, keywords: ["local_capacity_exhausted"], duration_minutes: 3 },
+  ]);
+});
+
 test("bulk API-key template uses the YAML-owned mutation timeout", async () => {
   const calls: Array<{ path: string; timeoutMs?: number }> = [];
   const client = { mutate: async (_method: string, path: string, _body: unknown, _key?: string, timeoutMs?: number) => {
