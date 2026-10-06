@@ -36,6 +36,7 @@ interface Parsed {
   includeRecords: boolean;
   overApi: boolean;
   json: boolean;
+  cacheOnly: boolean;
   id: string | null;
   requestId: string | null;
   component: NativeServiceId | "all" | null;
@@ -125,7 +126,7 @@ function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
   const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
-  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
+  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--cache-only", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index]!;
@@ -165,6 +166,7 @@ function parseArgs(args: string[]): Parsed {
     includeRecords: args.includes("--include-records"),
     overApi: args.includes("--over-api"),
     json: args.includes("--json"),
+    cacheOnly: args.includes("--cache-only"),
     id: value(args, "--id"),
     requestId: value(args, "--request-id"),
     component,
@@ -227,7 +229,7 @@ function help(): Record<string, unknown> {
       "config validate",
       "backend check",
       "scores get|pool-quality|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
-      "upstream-scheduling-v2 scopes|snapshot|plan [--scope codex] --over-api (read-only; Codex phase first)",
+      "upstream-scheduling-v2 scopes|snapshot|plan [--scope codex] [--cache-only] --over-api (read-only; Codex phase first)",
       "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api (manual priority adjustment)",
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api",
       "reads status",
@@ -1037,7 +1039,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "upstream-scheduling-v2") {
     if (action === "scopes") return await client.upstreamSchedulingV2Scopes();
-    if (action === "snapshot") return await client.upstreamSchedulingV2Snapshot(parsed.scope);
+    if (action === "snapshot") return await client.upstreamSchedulingV2Snapshot(parsed.scope, !parsed.cacheOnly);
     if (action === "plan") return await client.upstreamSchedulingV2Plan(parsed.scope);
     if (action === "priority-run") {
       const scope = parsed.scope;

@@ -56,13 +56,14 @@ export class AdminHttpClient {
   upstreamSchedulingV2Scopes(): Promise<Record<string, unknown>> {
     return this.request("/api/v2/upstream-scheduling/scopes");
   }
-  upstreamSchedulingV2Snapshot(scope?: string | null): Promise<Record<string, unknown>> {
+  upstreamSchedulingV2Snapshot(scope?: string | null, refresh = true): Promise<Record<string, unknown>> {
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
-    // Freshness checks and explicit CLI snapshots must kick the bounded read-model
-    // refresh; the API still returns the last successful payload if one section fails.
+    // Freshness checks and explicit CLI snapshots kick the bounded read-model refresh.
+    // A cache-only read is reserved for a transport/process failure so a healthy
+    // last snapshot remains visible without issuing a dense refresh retry.
     return this.request(`/api/v2/upstream-scheduling/snapshot${query}`, {
-      headers: { "x-api2business-refresh": "1", "cache-control": "no-cache" },
-    }, 120000);
+      headers: refresh ? { "x-api2business-refresh": "1", "cache-control": "no-cache" } : { "cache-control": "no-cache" },
+    }, refresh ? 120000 : 30000);
   }
   upstreamSchedulingV2Plan(scope?: string | null): Promise<Record<string, unknown>> {
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
