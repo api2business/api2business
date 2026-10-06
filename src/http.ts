@@ -338,7 +338,9 @@ export function createHandler(
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams") {
         const page = pageNumber(url);
-        return json(await upstreams.list(page, url.searchParams.get("search")));
+        const requestedPageSize = positiveInteger(url.searchParams.get("pageSize"), config.operations.upstreamManagement.pageSize);
+        if (requestedPageSize === null || requestedPageSize > 100) return json({ ok: false, error: "pageSize must be from 1 to 100" }, 400);
+        return json(await upstreams.list(page, url.searchParams.get("search"), requestedPageSize));
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/benchmarks") {
         const selector = url.searchParams.get("accountIds");

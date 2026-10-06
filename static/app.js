@@ -294,6 +294,7 @@ async function rankingPage() {
 
 let quotaMonitorRows = []
 let quotaMonitorTotalRemaining = null
+let quotaMonitorSummary = { walletDistribution: [], groupHistory: [] }
 let quotaMonitorFilter = 'all'
 const quotaRangeQuery = new URLSearchParams(location.search).get('range')
 let quotaMonitorRange = quotaRangeQuery === 'today' || quotaRangeQuery === '1h' ? quotaRangeQuery : '24h'
@@ -404,9 +405,11 @@ function renderQuotaMonitor() {
 async function quotaMonitorAccountRead(path, accountIds) {
   const chunks = []
   for (let index = 0; index < accountIds.length; index += 100) chunks.push(accountIds.slice(index, index + 100))
-  const results = await Promise.all(chunks.map((chunk) => requestJson(`${path}?accountIds=${chunk.join(',')}`, { redirectOnUnauthorized: false })))
-  if (path.endsWith('/usage-cache')) return { results: results.flatMap((item) => item.results ?? []) }
-  return { ...results[0], rows: results.flatMap((item) => item.rows ?? []) }
+  const settled = await Promise.allSettled(chunks.map((chunk) => requestJson(`${path}?accountIds=${chunk.join(',')}`, { redirectOnUnauthorized: false })))
+  const results = settled.filter((item) => item.status === 'fulfilled').map((item) => item.value)
+  const failedRequests = settled.length - results.length
+  if (path.endsWith('/usage-cache')) return { results: results.flatMap((item) => item.results ?? []), failedRequests }
+  return { ...(results[0] ?? {}), rows: results.flatMap((item) => item.rows ?? []), failedRequests }
 }
 
 let quotaGroupHistoryPoints = []
@@ -516,19 +519,35 @@ async function quotaMonitorPage() {
     interval?.addEventListener('change', scheduleAutoRefresh); scheduleAutoRefresh()
   }
   const state = $('#quota-monitor-state'); if (state && !quotaMonitorLoading) state.textContent = '正在读取已有额度缓存…'
-  const firstPage = await requestJson('/api/upstreams?page=1')
+  let firstPage
+  try {
+    // 额度监控只需要一次完整账号目录；独立 pageSize 避免把 100 个账号拆成
+    // 十多个串行数据库队列任务，其他上游管理页面仍保持原分页大小。
+    firstPage = await requestJson('/api/upstreams?page=1&pageSize=100')
+  } catch (_error) {
+    renderQuotaMonitor()
+    if (state) state.textContent = '额度缓存暂时读取失败，保留上一份数据并自动重试…'
+    return
+  }
   const accounts = [...(firstPage.accounts ?? [])]
   const totalPages = Number(firstPage.totalPages ?? 1)
+  let accountReadFailures = 0
   if (totalPages > 1) {
-    const pages = await Promise.all(Array.from({ length: Math.min(totalPages, 20) - 1 }, (_, index) => requestJson(`/api/upstreams?page=${index + 2}`)))
-    for (const data of pages) accounts.push(...(data.accounts ?? []))
+    const settledPages = await Promise.allSettled(Array.from({ length: Math.min(totalPages, 20) - 1 }, (_, index) => requestJson(`/api/upstreams?page=${index + 2}&pageSize=100`)))
+    accountReadFailures = settledPages.filter((item) => item.status === 'rejected').length
+    for (const item of settledPages) if (item.status === 'fulfilled') accounts.push(...(item.value.accounts ?? []))
   }
   const ids = accounts.map((row) => Number(row.id)).filter(Number.isSafeInteger)
-  const [cached, usage24h, summary] = await Promise.all([
+  const [cachedResult, usage24hResult, summaryResult] = await Promise.allSettled([
     ids.length ? quotaMonitorAccountRead('/api/upstreams/usage-cache', ids) : Promise.resolve({ results: [] }),
     ids.length ? quotaMonitorAccountRead('/api/upstreams/quota-monitor-usage', ids) : Promise.resolve({ rows: [] }),
     requestJson('/api/upstreams/quota-summary', { redirectOnUnauthorized: false }),
   ])
+  const cached = cachedResult.status === 'fulfilled' ? cachedResult.value : { results: [], failedRequests: 1 }
+  const usage24h = usage24hResult.status === 'fulfilled' ? usage24hResult.value : { rows: [], failedRequests: 1 }
+  const summary = summaryResult.status === 'fulfilled' ? summaryResult.value : quotaMonitorSummary
+  if (summaryResult.status === 'fulfilled') quotaMonitorSummary = summary
+  const readFailures = accountReadFailures + Number(cached.failedRequests ?? 0) + Number(usage24h.failedRequests ?? 0) + (summaryResult.status === 'fulfilled' ? 0 : 1)
   const sourceTotal = Number(summary.totalRemainingCny)
   quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? sourceTotal : null
   const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny)]))
@@ -575,6 +594,7 @@ async function quotaMonitorPage() {
     return { accountId: Number(representative.id) || index + 1, name: walletRow.wallet, wallet: walletRow.wallet, walletRate: walletRateByWallet.get(walletRow.wallet) ?? 1, usagePoints: walletRow.usagePoints, accountCount: walletRow.accounts.length, platform: representative.platform ?? '—', groups: [...new Set(walletRow.accounts.flatMap((account) => quotaGroupNames(account)))], group, availableGroups, availableRemainingByGroup, remaining, consumed24h: 0, consumption: { 'codex-mix': 0, 'no-degrade': 0, claude: 0, 'claude-kiro': 0, grok: 0 } }
   })
   renderQuotaMonitor()
+  if (readFailures && state) state.textContent = `${state.textContent} · 部分缓存读取失败，保留上一份数据`
 }
 
 function creditLabel(status) {

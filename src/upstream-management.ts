@@ -880,8 +880,9 @@ export class UpstreamManagementService {
     return null;
   }
 
-  async list(page: number, search: string | null): Promise<Record<string, unknown>> {
-    const pageSize = this.config.operations.upstreamManagement.pageSize;
+  async list(page: number, search: string | null, requestedPageSize?: number): Promise<Record<string, unknown>> {
+    const pageSize = requestedPageSize ?? this.config.operations.upstreamManagement.pageSize;
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new Error("upstream page size must be from 1 to 100");
     const normalizedSearch = searchValue(search);
     const offset = (page - 1) * pageSize;
     const query = await this.reads.query<Row>({

@@ -18,6 +18,9 @@ test("quota monitor keeps reading persistent usage cache", async () => {
   expect(app).toContain("quotaMonitorAccountRead('/api/upstreams/usage-cache', ids)");
   expect(app).toContain("quotaMonitorAccountRead('/api/upstreams/quota-monitor-usage', ids)");
   expect(app).toContain("requestJson('/api/upstreams/quota-summary',");
+  expect(app).toContain("/api/upstreams?page=1&pageSize=100");
+  expect(app).toContain("Promise.allSettled");
+  expect((await read("../src/http.ts"))).toContain("pageSize must be from 1 to 100");
   expect(html).toContain('id="quota-monitor-refresh-interval"');
   expect(html).toContain('id="quota-monitor-range"');
   expect(app).toContain("function upstreamWalletMarkup(row)");
