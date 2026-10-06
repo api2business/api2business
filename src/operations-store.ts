@@ -598,7 +598,7 @@ export class OperationsStore {
     return await this.sql`
       SELECT DISTINCT ON (wallet_key)
         sampled_at, wallet_key, account_id, remaining_usd, cny_per_usd,
-        remaining_cny, source_queried_at, account_cost_inputs
+        remaining_cny, source_queried_at, account_cost_inputs, probe_ok
       FROM api2business_upstream_quota_samples
       WHERE probe_ok=true AND remaining_cny IS NOT NULL
       ORDER BY wallet_key, sampled_at DESC

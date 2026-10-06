@@ -19,11 +19,20 @@ WITH low_balance AS (
     CASE WHEN jsonb_typeof($2::jsonb)='array' THEN $2::jsonb
       ELSE (($2::jsonb)#>>'{}')::jsonb END
   )
+), billing_accounts AS MATERIALIZED (
+  SELECT a.id
+  FROM accounts a
+  WHERE a.deleted_at IS NULL
+    AND LOWER(TRIM(COALESCE(a.type, '')))='apikey'
+    AND EXISTS (
+      SELECT 1 FROM billing_patterns p
+      WHERE LOWER(COALESCE(a.error_message, '')) LIKE p.pattern
+    )
 ), current_billing AS (
   SELECT a.id AS account_id, billing_event.anchor_at
-  FROM accounts a
+  FROM billing_accounts a
   LEFT JOIN LATERAL (
-    SELECT MAX(o.created_at) AS anchor_at
+    SELECT o.created_at AS anchor_at
     FROM ops_error_logs o
     WHERE o.account_id=a.id
       AND EXISTS (
@@ -32,13 +41,9 @@ WITH low_balance AS (
           o.upstream_error_message, o.upstream_error_detail)) LIKE p.pattern
       )
       AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
+    ORDER BY o.created_at DESC
+    LIMIT 1
   ) billing_event ON true
-  WHERE a.deleted_at IS NULL
-    AND LOWER(TRIM(COALESCE(a.type, '')))='apikey'
-    AND EXISTS (
-      SELECT 1 FROM billing_patterns p
-      WHERE LOWER(COALESCE(a.error_message, '')) LIKE p.pattern
-    )
 ), candidates AS (
   SELECT a.id AS account_id, a.name AS account_name,
     RTRIM(COALESCE(a.credentials->>'base_url', ''), '/') AS base_url, a.platform,

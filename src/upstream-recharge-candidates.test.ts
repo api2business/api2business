@@ -25,6 +25,14 @@ test("充值候选历史 SQL 保留欠费前窗口和业务错误排除口径", 
   expect(rechargeCandidatesQuery).toContain("jsonb_typeof($1::jsonb)='array'");
 });
 
+test("充值候选先固定当前欠费账号，再按时间索引读取最近欠费事件", () => {
+  expect(rechargeCandidatesQuery).toContain("billing_accounts AS MATERIALIZED");
+  expect(rechargeCandidatesQuery).toContain("FROM billing_accounts a");
+  expect(rechargeCandidatesQuery).toContain("SELECT o.created_at AS anchor_at");
+  expect(rechargeCandidatesQuery).toContain("ORDER BY o.created_at DESC\n    LIMIT 1");
+  expect(rechargeCandidatesQuery).not.toContain("MAX(o.created_at)");
+});
+
 test("充值候选只读取一次 Sub2API，并返回低余额账号的 24 小时表现", async () => {
   let queryCount = 0;
   const config = {
