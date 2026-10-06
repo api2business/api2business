@@ -55,6 +55,8 @@
 - `accounts idle-probe plan` 只读，`accounts idle-probe reconcile` 只负责显式补齐隔离绑定，
   `accounts idle-probe run` 只执行 active 且 schedulable 的已就绪账号，不恢复异常账号；
   非默认作用域必须显式传 `--scope`。
+- `accounts idle-probe coverage --scope <codex|claude|grok> --window-minutes <N> --over-api`
+  只读核对指定作用域在窗口内的专用 Key 记录；省略作用域时使用 owning YAML 默认作用域。
 - 自动探活前必须先完成同作用域的手动探活，并核对 HTTP、`ordinaryLogRecorded` 和轮次
   终态；工作流 `running` 或 in-flight 跳过只表示并发保护，不是业务失败。
 - 探活请求进入普通用量和错误记录；覆盖必须按专用 Key 归因的账号级记录验收，不能用
