@@ -590,7 +590,11 @@ export class OperationsService {
   }
 
   async getReadModelSnapshot(key: string) {
-    return await this.store.getSnapshot(key);
+    return await this.readWithConnectionRecovery(() => this.store.getSnapshot(key));
+  }
+
+  async readWithConnectionRecovery<T>(operation: () => Promise<T>): Promise<T> {
+    return await this.store.readWithConnectionRecovery(operation);
   }
 
   async saveReadModelSnapshot(key: string, schemaVersion: string, payload: Record<string, unknown>, capturedAt: string): Promise<void> {

@@ -489,16 +489,16 @@ export class UpstreamSchedulingV2Service {
         : "grok";
     const accountIds = accounts.map((row) => Number(row.accountId));
     const results = await Promise.allSettled([
-      this.operations.poolQualitySummary(qualityProfile),
-      this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all", priority: "automatic" }),
-      this.operations.priorityHistory(),
-      this.operations.upstreamQuotaSummary(accountIds),
-      accountIds.length ? this.operations.getUpstreamUsageCache([]) : Promise.resolve([]),
+      this.readSection(() => this.operations.poolQualitySummary(qualityProfile), "pool-quality"),
+      this.readSection(() => this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all", priority: "automatic" }), "errors"),
+      this.readSection(() => this.operations.priorityHistory(), "priority-history"),
+      this.readSection(() => this.operations.upstreamQuotaSummary(accountIds), "quota"),
+      this.readSection(() => accountIds.length ? this.operations.getUpstreamUsageCache([]) : Promise.resolve([]), "usage-cache"),
       scope.features.idleProbe
-        ? this.operations.idleProbeHistory(1, 10, scopeName)
+        ? this.readSection(() => this.operations.idleProbeHistory(1, 10, scopeName), "probe-history")
         : Promise.resolve({ records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
       typeof this.operations.modelSyncHistory === "function"
-        ? this.operations.modelSyncHistory(1, 10, scopeName)
+        ? this.readSection(() => this.operations.modelSyncHistory(1, 10, scopeName), "model-sync-history")
         : Promise.resolve({ ok: true, scope: scopeName, automaticEnabled: false, batchSize: this.configuration().modelSync.batchSize, intervalSeconds: this.configuration().modelSync.intervalSeconds, records: [], pagination: { page: 1, totalPages: 1, total: 0 }, valuesPrinted: false }),
     ]);
     const section = <T>(index: number, fallback: T, name: string): T => {
@@ -561,6 +561,21 @@ export class UpstreamSchedulingV2Service {
       probeHistory,
       modelSyncHistory,
     };
+  }
+
+  private async readSection<T>(read: () => Promise<T>, name: string): Promise<T> {
+    const timeoutMs = (this.config.operations.upstreamSchedulingV2?.readModelRefreshTimeoutSeconds ?? 60) * 1000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        read(),
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`V2 读模型分区 ${name} 超过 ${timeoutMs}ms`)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private reconciliation(
@@ -638,8 +653,27 @@ export class UpstreamSchedulingV2Service {
     const fresh = cached !== null && Number.isFinite(ageMs) && ageMs <= ttlMs;
     if (!forceRefresh && cached && fresh) return this.withCache(cached.payload, cached.capturedAt, "hit");
     if (forceRefresh && cached) {
-      void this.refreshInBackground(selected.name, selected.scope, cached);
-      return this.withCache(cached.payload, cached.capturedAt, "stale");
+      const existing = this.inFlight.get(selected.name);
+      if (existing) {
+        try {
+          const payload = await existing;
+          const current = this.memoryCache.get(this.cacheKey(selected.name));
+          return this.withCache(payload, current?.capturedAt ?? new Date().toISOString(), "refreshed");
+        } catch (error) {
+          return this.withCache(cached.payload, cached.capturedAt, "stale", error instanceof Error ? error.message : String(error));
+        }
+      }
+      const refresh = this.buildSnapshot(selected.name, selected.scope, cached.payload.data);
+      this.inFlight.set(selected.name, refresh);
+      try {
+        const payload = await refresh;
+        const current = this.memoryCache.get(this.cacheKey(selected.name));
+        return this.withCache(payload, current?.capturedAt ?? new Date().toISOString(), "refreshed");
+      } catch (error) {
+        return this.withCache(cached.payload, cached.capturedAt, "stale", error instanceof Error ? error.message : String(error));
+      } finally {
+        if (this.inFlight.get(selected.name) === refresh) this.inFlight.delete(selected.name);
+      }
     }
     if (!forceRefresh && cached) {
       void this.refreshInBackground(selected.name, selected.scope, cached);

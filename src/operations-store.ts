@@ -10,7 +10,7 @@ export interface PriorityOptimizationQueueLease {
   waitMs: number;
 }
 
-type OperationsSqlFactory = (databaseUrl: string, max: number) => SQL;
+type OperationsSqlFactory = (databaseUrl: string, max: number, prepare: boolean) => SQL;
 
 export function authoritativeUsageBalance(result: Record<string, unknown>): boolean {
   if (result.ok !== true) return false;
@@ -41,7 +41,8 @@ export class OperationsStore {
 
   constructor(
     private readonly databaseUrl: string,
-    private readonly sqlFactory: OperationsSqlFactory = (url, max) => new SQL(url, { max }),
+    private readonly sqlFactory: OperationsSqlFactory = (url, max, prepare) => new SQL(url, { max, prepare }),
+    private readonly prepareStatements = false,
   ) {
     this.sql = this.createSql(4);
     this.priorityOptimizationQueueSql = this.createSql(1);
@@ -416,7 +417,11 @@ export class OperationsStore {
   }
 
   private createSql(max: number): SQL {
-    return this.sqlFactory(this.databaseUrl, max);
+    return this.sqlFactory(this.databaseUrl, max, this.prepareStatements);
+  }
+
+  async readWithConnectionRecovery<T>(operation: () => Promise<T>): Promise<T> {
+    return await this.withConnectionRecovery(operation);
   }
 
   private async withConnectionRecovery<T>(operation: () => Promise<T>): Promise<T> {

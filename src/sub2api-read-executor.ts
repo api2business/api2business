@@ -422,6 +422,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
   private createDatabase(databaseUrl: string): ScoreDatabaseLike {
     return new SQL(databaseUrl, {
       max: 1,
+      prepare: false,
       connection: { application_name: "api2business-read-broker" },
     }) as unknown as ScoreDatabaseLike;
   }

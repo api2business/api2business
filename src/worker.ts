@@ -97,7 +97,7 @@ const accountLifecycle = new AccountLifecycleService(config, remoteReads, null, 
 }, runtime);
 const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
 if (!operationsDatabaseUrl) throw new Error(`worker requires env ${config.operations.databaseUrlEnv}`);
-const operationsStore = new OperationsStore(operationsDatabaseUrl);
+const operationsStore = new OperationsStore(operationsDatabaseUrl, undefined, config.operations.databasePrepareStatements);
 const operations = new OperationsService(config, operationsStore, remoteReads, runtime, probeIsolation);
 await operations.initialize();
 const upstreams = new UpstreamManagementService(config, remoteReads, null, runtime, probeIsolation);

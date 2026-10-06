@@ -376,6 +376,7 @@ operations:
     enabled: true
     defaultScope: codex
     readModelCacheSeconds: 30
+    readModelRefreshTimeoutSeconds: 60
     automation:
       intervalSeconds: 600
       recentCallLimit: 1000
@@ -423,6 +424,7 @@ operations:
           upstreamWrite: false
           modelSyncAutomation: false
   databaseUrlEnv: API2BUSINESS_DATABASE_URL
+  databasePrepareStatements: true
   ledgerYamlPath: /var/lib/api2business/sub2api-pool.yaml
   accountImportLedgerPath: /var/lib/api2business/ledger/account-import-costs.jsonl
   upstreamRechargeLedgerPath: /var/lib/api2business/ledger/upstream-recharge-costs.jsonl

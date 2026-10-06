@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { OperationsStore } from "./operations-store";
+import { isRecoverableDatabaseConnectionError } from "./database-connection";
 
 interface FakeSql extends Function {
   close(): Promise<void>;
@@ -58,4 +59,9 @@ test("does not rebuild operation pools for SQL semantic errors", async () => {
   await expect(store.health()).rejects.toThrow("column missing_value does not exist");
   expect(mainPools).toBe(1);
   await store.close();
+});
+
+test("recycles Bun protocol read failures", () => {
+  expect(isRecoverableDatabaseConnectionError(new Error("Failed to read data"))).toBeTrue();
+  expect(isRecoverableDatabaseConnectionError(Object.assign(new Error("protocol"), { code: "ERR_POSTGRES_INVALID_MESSAGE" }))).toBeTrue();
 });

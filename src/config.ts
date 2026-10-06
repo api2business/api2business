@@ -170,6 +170,7 @@ export interface UpstreamSchedulingV2Config {
   enabled: boolean;
   defaultScope: string;
   readModelCacheSeconds: number;
+  readModelRefreshTimeoutSeconds: number;
   automation: {
     intervalSeconds: number;
     recentCallLimit: number;
@@ -277,6 +278,7 @@ export interface AppConfig {
     };
     upstreamSchedulingV2?: UpstreamSchedulingV2Config;
     databaseUrlEnv: string;
+    databasePrepareStatements: boolean;
     ledgerYamlPath: string;
     accountImportLedgerPath: string;
     upstreamRechargeLedgerPath: string;
@@ -659,6 +661,7 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
     enabled,
     defaultScope,
     readModelCacheSeconds: integerValue(root, "readModelCacheSeconds", path, 1, 3600),
+    readModelRefreshTimeoutSeconds: integerValue(root, "readModelRefreshTimeoutSeconds", path, 1, 300),
     automation: {
       intervalSeconds: integerValue(automation, "intervalSeconds", `${path}.automation`, 5, 86400),
       recentCallLimit: integerValue(automation, "recentCallLimit", `${path}.automation`, 1, 100000),
@@ -1079,6 +1082,7 @@ export function loadConfig(path: string): AppConfig {
       })(),
       upstreamSchedulingV2,
       databaseUrlEnv: stringValue(operations, "databaseUrlEnv", "operations"),
+      databasePrepareStatements: booleanValue(operations, "databasePrepareStatements", "operations"),
       ledgerYamlPath: stringValue(operations, "ledgerYamlPath", "operations"),
       accountImportLedgerPath: stringValue(operations, "accountImportLedgerPath", "operations"),
       upstreamRechargeLedgerPath: stringValue(operations, "upstreamRechargeLedgerPath", "operations"),

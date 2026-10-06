@@ -302,11 +302,11 @@ describe("upstream scheduling v2", () => {
     expect(calls.save).toBe(1);
   });
 
-  test("does not block a forced refresh on the upstream read path", async () => {
+  test("waits for a bounded forced refresh on the upstream read path", async () => {
     const { service, calls } = fixture();
     await service.snapshot("codex");
     const refreshed = await service.snapshot("codex", true);
-    expect(refreshed.cache).toMatchObject({ state: "stale" });
+    expect(refreshed.cache).toMatchObject({ state: "refreshed" });
     expect(calls.dispatch).toBeGreaterThanOrEqual(1);
   });
 

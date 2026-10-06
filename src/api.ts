@@ -31,7 +31,7 @@ const reads = new SingleConnectionSub2ApiReadExecutor(
 );
 const operationsDatabaseUrl = process.env[config.operations.databaseUrlEnv];
 if (!operationsDatabaseUrl) throw new Error(`server target requires env ${config.operations.databaseUrlEnv}`);
-const operationsStore = new OperationsStore(operationsDatabaseUrl);
+const operationsStore = new OperationsStore(operationsDatabaseUrl, undefined, config.operations.databasePrepareStatements);
 await operationsStore.migrate();
 const context = createServerContext(config, target, reads, operationsStore);
 const probeIsolation = new ProbeIsolationService(config, context.admin, context.runtime);
