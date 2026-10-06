@@ -354,8 +354,12 @@ export class UpstreamSchedulingV2Service {
     return cached;
   }
 
-  private async buildSnapshot(scopeName: string, scope: UpstreamSchedulingV2Scope): Promise<V2SnapshotPayload> {
-    const source = await this.source(scopeName, scope);
+  private async buildSnapshot(
+    scopeName: string,
+    scope: UpstreamSchedulingV2Scope,
+    fallbackData?: V2SnapshotData,
+  ): Promise<V2SnapshotPayload> {
+    const source = await this.source(scopeName, scope, fallbackData);
     const payload: V2SnapshotPayload = {
       ok: true,
       version: "v2",
@@ -402,7 +406,7 @@ export class UpstreamSchedulingV2Service {
 
   private async refreshInBackground(scopeName: string, scope: UpstreamSchedulingV2Scope, cached: { payload: V2SnapshotPayload; capturedAt: string }): Promise<void> {
     if (this.inFlight.has(scopeName)) return;
-    const refresh = this.buildSnapshot(scopeName, scope).catch((error) => {
+    const refresh = this.buildSnapshot(scopeName, scope, cached.payload.data).catch((error) => {
       this.memoryCache.set(this.cacheKey(scopeName), cached);
       throw error;
     });
@@ -454,7 +458,11 @@ export class UpstreamSchedulingV2Service {
     return await this.operations.modelSyncHistory(page, 10, selected);
   }
 
-  private async source(scopeName: string, scope: UpstreamSchedulingV2Scope): Promise<{
+  private async source(
+    scopeName: string,
+    scope: UpstreamSchedulingV2Scope,
+    fallbackData?: V2SnapshotData,
+  ): Promise<{
     scoreSnapshot: Row;
     accounts: Row[];
     quotaCoverage: Row;
@@ -480,31 +488,9 @@ export class UpstreamSchedulingV2Service {
         ? "claude"
         : "grok";
     const accountIds = accounts.map((row) => Number(row.accountId));
-    const [poolQualityRaw, errorsRaw, priorityHistoryRaw, quotaRaw, usageRows, probeHistoryRaw, modelSyncHistoryRaw] = await Promise.all([
+    const results = await Promise.allSettled([
       this.operations.poolQualitySummary(qualityProfile),
-      this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all", priority: "automatic" }).catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(JSON.stringify({
-          ok: false,
-          component: "upstream-scheduling-v2-errors",
-          action: "deferred",
-          platform: qualityProfile,
-          error: message,
-          valuesPrinted: false,
-        }));
-        return {
-          ok: false,
-          platform: qualityProfile,
-          sampledAt: new Date().toISOString(),
-          recentCallLimit: this.config.monitor.recentCallLimit,
-          filter: "all",
-          rows: [],
-          modelDistribution: [],
-          pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 },
-          error: message,
-          valuesPrinted: false,
-        };
-      }),
+      this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all", priority: "automatic" }),
       this.operations.priorityHistory(),
       this.operations.upstreamQuotaSummary(accountIds),
       accountIds.length ? this.operations.getUpstreamUsageCache([]) : Promise.resolve([]),
@@ -515,6 +501,32 @@ export class UpstreamSchedulingV2Service {
         ? this.operations.modelSyncHistory(1, 10, scopeName)
         : Promise.resolve({ ok: true, scope: scopeName, automaticEnabled: false, batchSize: this.configuration().modelSync.batchSize, intervalSeconds: this.configuration().modelSync.intervalSeconds, records: [], pagination: { page: 1, totalPages: 1, total: 0 }, valuesPrinted: false }),
     ]);
+    const section = <T>(index: number, fallback: T, name: string): T => {
+      const result = results[index];
+      if (result?.status === "fulfilled") return result.value as T;
+      const reason = result?.status === "rejected" ? result.reason : new Error("missing settled result");
+      const message = reason instanceof Error ? reason.message : String(reason);
+      console.error(JSON.stringify({
+        ok: false,
+        component: "upstream-scheduling-v2-section",
+        action: "deferred",
+        scope: scopeName,
+        section: name,
+        error: message,
+        valuesPrinted: false,
+      }));
+      if (fallback && typeof fallback === "object" && !Array.isArray(fallback)) {
+        return { ...(fallback as Row), ok: false, error: message } as T;
+      }
+      return fallback;
+    };
+    const poolQualityRaw = section(0, fallbackData?.poolQuality ?? { ok: false, platform: qualityProfile, groupIds: scope.eligibleGroupIds, score: null, error: "pool quality unavailable" }, "pool-quality");
+    const errorsRaw = section(1, fallbackData?.errors ?? { ok: false, platform: qualityProfile, rows: [], modelDistribution: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 }, error: "error list unavailable" }, "errors");
+    const priorityHistoryRaw = section(2, fallbackData?.priorityHistory ? { ok: true, records: fallbackData.priorityHistory } : { ok: false, records: [], error: "priority history unavailable" }, "priority-history");
+    const quotaRaw = section(3, fallbackData?.quota ?? { ok: false, history: [], error: "quota summary unavailable" }, "quota");
+    const usageRows = section(4, fallbackData?.usage ?? [], "usage-cache");
+    const probeHistoryRaw = section(5, fallbackData?.probeHistory ?? { ok: false, records: [], pagination: { page: 1, totalPages: 1, total: 0 }, error: "probe history unavailable" }, "probe-history");
+    const modelSyncHistoryRaw = section(6, fallbackData?.modelSyncHistory ?? { ok: false, records: [], pagination: { page: 1, totalPages: 1, total: 0 }, error: "model sync history unavailable" }, "model-sync-history");
     const poolQuality = object(poolQualityRaw);
     const errors = object(errorsRaw);
     const priorityHistory = object(priorityHistoryRaw);
