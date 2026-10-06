@@ -351,6 +351,10 @@ test("keeps Codex and Claude templates as separate platform files", () => {
   const claude = parsed.operations.upstreamManagement.failoverTemplates.claude;
   expect(codex.platform).toBe("openai");
   expect(claude.platform).toBe("anthropic");
+  const anthropicInvalidRequestRule = claude.rules.find((rule) =>
+    rule.error_code === 400 && rule.keywords.includes("请求参数或格式不正确"));
+  expect(anthropicInvalidRequestRule?.duration_minutes).toBe(3);
+  expect(anthropicInvalidRequestRule?.keywords).toEqual(["请求参数或格式不正确"]);
   expect(claude.rules.some((rule) => rule.keywords.includes("local_capacity_exhausted"))).toBe(true);
   expect(claude.rules.find((rule) => rule.error_code === 503)?.keywords).toEqual(expect.arrayContaining([
     "no available accounts",

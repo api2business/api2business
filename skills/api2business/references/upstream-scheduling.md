@@ -148,6 +148,10 @@
   - 模型错误：
     - `selected model is at capacity` 表示模型或容量临时异常，可以切号；
     - `404 model_not_found` 不进入模板，直接保留标准模型错误。
+    - Claude 供应商兼容层已确认返回 HTTP `400` 且正文包含完整短语
+      `请求参数或格式不正确` 时，Claude 专用模板按 3 分钟短暂冷却当前 API-key 并切换；
+      不把泛化的 `invalid_request_error` 或其他参数错误加入模板，避免客户请求本身有误时
+      扩散到整个账号池。
     - 仅当 `400` 正文包含 `unknown provider for model gpt-5.6-terra` 或
       `unknown provider for model gpt-5.6-sol` 时，才按当前上游不支持目标模型处理；这是账号级上游能力不匹配，可以短暂冷却当前 API-key 账号并切换候选。
     - 不将通用 `unknown provider for model`、`model_not_found` 或 `model not found` 作为关键词，避免把其他模型的错误误判为可由切号恢复的问题。
@@ -487,9 +491,10 @@
     `codex` 文件只服务 OpenAI，`claude` 文件只服务 Anthropic。
   - 执行模板写入的是持有该快照的 API 进程。
   - 只转发作业的 Temporal worker 不持有切号规则。
-  - API 按配置文件指纹热加载：校验通过后替换内存配置，并更新运行时切号规则。
+  - API 按主 YAML 及其 `templateFiles` 引用文件的联合指纹热加载：校验通过后替换内存配置，
+    并更新运行时切号规则；只修改独立模板文件也会触发加载。
   - 热加载成功的证据是文件修改之后的 `config-hot-reload` 日志。
-  - 同时确认运行进程读到的配置文件已经含有新关键词。
+  - 同时确认运行进程读到的配置文件和模板文件已经含有新关键词。
   - 仓库路径和运行路径可以是同一文件。
   - 以热加载日志里的 `configPath` 为准。
   - 有上述证据时直接提交模板作业，不重启健康的 API。

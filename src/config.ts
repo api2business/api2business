@@ -1266,18 +1266,27 @@ export function startConfigHotReload(
   intervalMs = 1000,
 ): () => void {
   const configPath = resolve(path);
+  const fingerprintFor = (candidate: AppConfig): string => {
+    const paths = new Set([
+      configPath,
+      resolve(candidate.rootDirectory, candidate.operations.upstreamManagement.templateFiles.codex),
+      resolve(candidate.rootDirectory, candidate.operations.upstreamManagement.templateFiles.claude),
+    ]);
+    return [...paths].sort().map((filePath) => {
+      const stat = statSync(filePath);
+      return `${filePath}:${stat.mtimeMs}:${stat.size}`;
+    }).join("|");
+  };
   let fingerprint = "";
   let stopped = false;
   const refresh = (): void => {
     if (stopped) return;
     try {
-      const stat = statSync(configPath);
-      const nextFingerprint = `${stat.mtimeMs}:${stat.size}`;
-      if (nextFingerprint === fingerprint) return;
+      if (fingerprintFor(config) === fingerprint) return;
       const next = loadConfig(configPath);
       // Only publish a fully validated config. Invalid edits keep the last good version.
       Object.assign(config, next);
-      fingerprint = nextFingerprint;
+      fingerprint = fingerprintFor(next);
       onReload?.(next);
       console.log(JSON.stringify({ ok: true, component: "config-hot-reload", configPath, reloadedAt: new Date().toISOString(), valuesPrinted: false }));
     } catch (error) {

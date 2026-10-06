@@ -3,6 +3,11 @@ kind: FailoverTemplate
 name: claude-upstream-failover
 platform: anthropic
 rules:
+- errorCode: 400
+  keywords:
+  - 请求参数或格式不正确
+  durationMinutes: 3
+  description: Claude 供应商兼容层拒绝当前请求格式时短暂冷却并切换账号；不泛化匹配其他 invalid_request_error
 - errorCode: 429
   keywords:
   - rate_limit_error
