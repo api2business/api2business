@@ -270,7 +270,7 @@ export async function verifyRechargeWorkflow(
 
   const checks = [
     { name: "accounting.operationId", ok: operationId === expectedOperationId, expected: expectedOperationId, actual: operationId },
-    { name: "accounting.entryId", ok: entryId.length > 0, expected: "non-empty", actual: entryId },
+    { name: "accounting.entryId", ok: entryId !== null && entryId.length > 0, expected: "non-empty", actual: entryId },
     { name: "accounting.amountCny", ok: amountCny === expectedAmountCny, expected: expectedAmountCny, actual: amountCny },
     { name: "accounting.accountId", ok: accountingAccountId === expectedAnchorAccountId, expected: expectedAnchorAccountId, actual: accountingAccountId },
     { name: "account.baseUrl", ok: workflowBaseUrl === expectedBaseUrl, expected: expectedBaseUrl, actual: workflowBaseUrl },

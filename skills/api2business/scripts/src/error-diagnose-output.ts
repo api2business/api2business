@@ -39,7 +39,7 @@ function classifyChain(chain: Row): Row {
   const abortedClientDisconnected = chain.failoverAborted === true
     || systemEvents.includes("failover_aborted_client_disconnected");
   const attempts = rawAttempts.map((attempt) => {
-    const projected = { ...attempt, responseEvidence: responseEvidence(attempt) };
+    const projected: Row = { ...attempt, responseEvidence: responseEvidence(attempt) };
     delete projected.errorMessage;
     delete projected.errorBody;
     delete projected.upstreamErrorMessage;
@@ -182,7 +182,7 @@ export function emitErrorDiagnosis(value: Row, json: boolean): void {
 
 export function emitErrorInspection(value: Row, json: boolean): void {
   const diagnosis = decorateDiagnosis((value.diagnosis as Row | undefined) ?? {});
-  const output = { ...value, diagnosis };
+  const output: Row = { ...value, diagnosis };
   if (json) {
     console.log(JSON.stringify(output, null, 2));
     return;

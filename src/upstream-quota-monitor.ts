@@ -204,7 +204,7 @@ function apiOutputObservations(samples: UpstreamQuotaSample[]): ApiOutputObserva
     if (value < previousValue) {
       observations.push({ endedAt, startedAt: previousAt, apiAmountUsd: 0, reset: true });
       baselineReady = false;
-    } else if (baselineReady && endedAt > previousAt) {
+    } else if ((baselineReady || value === previousValue) && endedAt > previousAt) {
       observations.push({ endedAt, startedAt: previousAt, apiAmountUsd: value - previousValue });
     } else if (!baselineReady && value !== 0) {
       // The first non-zero value after a missing/zero baseline is a fresh

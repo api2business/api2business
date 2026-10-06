@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts"]
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "skills/api2business/scripts/**/*.ts"]
 }

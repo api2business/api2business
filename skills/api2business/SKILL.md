@@ -253,9 +253,13 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
     --config config/api2business.yaml \
     --over-api \
     web screenshot \
-    --profile upstream-scheduling-v2
+    --profile upstream-scheduling-v2 \
+    --scope grok
   ```
 
+- `--scope` 可选，只接受 owning YAML 中已启用的 `codex`、`claude` 或 `grok` 作用域；CLI 将其写入
+  V2 深链查询参数，并在 stderr 输出带 profile、scope 和 phase 的短进度行，避免临时脚本拼接 URL
+  或长时间无输出。省略时使用配置中的默认作用域。
 - CLI 通过 `/api/login` 获取 Cookie，并只在内存中传给 WebProbe；WebProbe 不填写登录表单，Cookie 不进入 argv、日志、报告或磁盘。
 - 验证重启后账本、缓存、采样和作业状态仍可读取。
 - 失败时按配置、Secret、网络、数据库、worker 和外部 API 的顺序定位首个断点。

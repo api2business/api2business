@@ -187,6 +187,19 @@ test("calculates zero output even when the paired quota balance is temporarily u
   expect(history[1]!.rollingApiAmountUsdPerHour).toBe(0);
 });
 
+test("calculates zero output between confirmed zero counters without inventing a cold-start spike", () => {
+  const samples = [0, 0, 100, 110].map((apiAmountUsdTotal, hour) => ({
+    walletKey: "wallet", accountId: 1, sampledAt: `2026-08-02T0${hour}:00:00Z`,
+    sourceQueriedAt: null, schedulable: true, status: "active", provider: "sub2api",
+    probeOk: false, remainingUsd: null, cnyPerUsd: 1, remainingCny: null, apiAmountUsdTotal,
+  }));
+  const history = quotaHistory(samples);
+  expect(history[1]!.sampleApiAmountUsdPerHour).toBe(0);
+  expect(history[1]!.rollingApiAmountUsdPerHour).toBe(0);
+  expect(history[2]!.sampleApiAmountUsdPerHour).toBeNull();
+  expect(history[3]!.sampleApiAmountUsdPerHour).toBe(10);
+});
+
 test("does not extrapolate a cold-start cumulative output into the first rolling point", () => {
   const base = { walletKey: "wallet", accountId: 1, schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 20, cnyPerUsd: 1, remainingCny: 20, sourceQueriedAt: null, accountCostInputs: costInputs(0, 0.1) };
   const history = quotaHistory([
