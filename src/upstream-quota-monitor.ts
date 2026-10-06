@@ -178,6 +178,7 @@ function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObser
  */
 function apiOutputObservations(samples: UpstreamQuotaSample[]): ApiOutputObservation[] {
   const byTimestamp = new Map<string, number>();
+  const accountByTimestamp = new Map<string, Map<number, number>>();
   for (const sample of samples) {
     // 产出累计值来自用量缓存，和额度余额是两条独立证据链。额度探测
     // 某一轮失败时，仍可用连续的累计产出值计算该轮的真实零增量；不应
@@ -187,8 +188,26 @@ function apiOutputObservations(samples: UpstreamQuotaSample[]): ApiOutputObserva
     // the sampling round. Keep one value per timestamp to avoid multiplying
     // it by the number of wallets.
     if (!byTimestamp.has(sample.sampledAt)) byTimestamp.set(sample.sampledAt, sample.apiAmountUsdTotal);
+    if (sample.accountCostInputs?.length) {
+      const accounts = accountByTimestamp.get(sample.sampledAt) ?? new Map<number, number>();
+      for (const input of sample.accountCostInputs) {
+        accounts.set(input.accountId, (accounts.get(input.accountId) ?? 0) + input.apiAmountUsdTotal);
+      }
+      accountByTimestamp.set(sample.sampledAt, accounts);
+    }
   }
   const points = [...byTimestamp.entries()].sort((left, right) => Date.parse(left[0]) - Date.parse(right[0]));
+  const completeAccountCounters = points.length > 0 && points.every(([sampledAt, aggregate]) => {
+    const accounts = accountByTimestamp.get(sampledAt);
+    if (!accounts || accounts.size === 0) return false;
+    const total = [...accounts.values()].reduce((sum, value) => sum + value, 0);
+    return Math.abs(total - aggregate) <= Math.max(0.000001, Math.abs(aggregate) * 0.000000001);
+  });
+  if (completeAccountCounters) return accountOutputObservations(points, accountByTimestamp);
+  return aggregateOutputObservations(points);
+}
+
+function aggregateOutputObservations(points: Array<[string, number]>): ApiOutputObservation[] {
   const observations: ApiOutputObservation[] = [];
   let previousAt: number | null = null;
   let previousValue: number | null = null;
@@ -213,6 +232,60 @@ function apiOutputObservations(samples: UpstreamQuotaSample[]): ApiOutputObserva
     }
     previousAt = endedAt;
     previousValue = value;
+  }
+  return observations;
+}
+
+function accountOutputObservations(
+  points: Array<[string, number]>,
+  accountByTimestamp: Map<string, Map<number, number>>,
+): ApiOutputObservation[] {
+  const observations: ApiOutputObservation[] = [];
+  const previous = new Map<number, { at: number; value: number; ready: boolean }>();
+  for (const [sampledAt] of points) {
+    const endedAt = Date.parse(sampledAt);
+    const current = accountByTimestamp.get(sampledAt) ?? new Map<number, number>();
+    let startedAt = Number.POSITIVE_INFINITY;
+    let apiAmountUsd = 0;
+    let valid = false;
+    let reset = false;
+    for (const [accountId, value] of current) {
+      const prior = previous.get(accountId);
+      if (!prior) {
+        previous.set(accountId, { at: endedAt, value, ready: false });
+        continue;
+      }
+      if (value < prior.value) {
+        reset = true;
+        previous.set(accountId, { at: endedAt, value, ready: false });
+        continue;
+      }
+      if (endedAt <= prior.at) {
+        previous.set(accountId, { at: endedAt, value, ready: prior.ready });
+        continue;
+      }
+      if (prior.ready) {
+        apiAmountUsd += value - prior.value;
+        startedAt = Math.min(startedAt, prior.at);
+        valid = true;
+        previous.set(accountId, { at: endedAt, value, ready: true });
+      } else if (value === prior.value) {
+        // Equal counters confirm a real zero interval. Keep a zero account
+        // unready for later first non-zero values, but still emit the zero
+        // interval so the scope does not become falsely "no data".
+        valid = true;
+        startedAt = Math.min(startedAt, prior.at);
+        previous.set(accountId, { at: endedAt, value, ready: value !== 0 });
+      } else {
+        // A newly observed non-zero counter is a baseline, not a delta.
+        previous.set(accountId, { at: endedAt, value, ready: true });
+      }
+    }
+    for (const accountId of previous.keys()) {
+      if (!current.has(accountId)) previous.delete(accountId);
+    }
+    if (reset) observations.push({ endedAt, startedAt: Number.isFinite(startedAt) ? startedAt : endedAt, apiAmountUsd: 0, reset: true });
+    else if (valid && Number.isFinite(startedAt)) observations.push({ endedAt, startedAt, apiAmountUsd });
   }
   return observations;
 }

@@ -211,6 +211,29 @@ test("does not extrapolate a cold-start cumulative output into the first rolling
   expect(history[2]!.rollingApiAmountUsdPerHour).toBe(10);
 });
 
+test("does not extrapolate a non-zero cold-start cumulative output", () => {
+  const base = { walletKey: "wallet", accountId: 1, schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 20, cnyPerUsd: 1, remainingCny: 20, sourceQueriedAt: null };
+  const history = quotaHistory([
+    { ...base, sampledAt: "2026-08-02T00:00:00Z", apiAmountUsdTotal: 100, accountCostInputs: costInputs(100, 0.1) },
+    { ...base, sampledAt: "2026-08-02T00:10:00Z", apiAmountUsdTotal: 200, accountCostInputs: costInputs(200, 0.1) },
+    { ...base, sampledAt: "2026-08-02T00:20:00Z", apiAmountUsdTotal: 210, accountCostInputs: costInputs(210, 0.1) },
+  ], 1, 8);
+  expect(history[1]!.sampleApiAmountUsdPerHour).toBeNull();
+  expect(history[1]!.rollingApiAmountUsdPerHour).toBeNull();
+  expect(history[2]!.sampleApiAmountUsdPerHour).toBeCloseTo(60);
+  expect(history[2]!.rollingApiAmountUsdPerHour).toBe(10);
+});
+
+test("keeps a confirmed zero account interval as zero output", () => {
+  const base = { walletKey: "wallet", accountId: 1, schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 20, cnyPerUsd: 1, remainingCny: 20, sourceQueriedAt: null };
+  const history = quotaHistory([
+    { ...base, sampledAt: "2026-08-02T00:00:00Z", apiAmountUsdTotal: 0, accountCostInputs: costInputs(0, 0.1) },
+    { ...base, sampledAt: "2026-08-02T00:10:00Z", apiAmountUsdTotal: 0, accountCostInputs: costInputs(0, 0.1) },
+  ]);
+  expect(history[1]!.sampleApiAmountUsdPerHour).toBe(0);
+  expect(history[1]!.rollingApiAmountUsdPerHour).toBe(0);
+});
+
 test("missing intermediate samples preserves rolling burn and cost", () => {
   const base = {
     walletKey: "wallet", accountId: 1, schedulable: true, status: "active",
