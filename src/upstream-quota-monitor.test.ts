@@ -30,6 +30,16 @@ test("deduplicates shared wallets and preserves schedulability", () => {
   ]);
 });
 
+test("keeps cumulative output when the account cost rate is unknown", () => {
+  const samples = buildQuotaSamples([
+    { accountId: 1, baseUrl: "https://a.test", ok: true, status: "active", schedulable: true, provider: "sub2api", quota: { unit: "USD", remaining: 10 }, apiAmountUsdTotal: 7 },
+  ], "2026-08-02T00:00:00Z", () => 1);
+  expect(samples[0]!.accountCostInputs).toEqual([{
+    accountId: 1, apiAmountUsdTotal: 7, costRateCnyPerApiUsd: null, source: null,
+  }]);
+  expect(quotaSamplesForAccounts(samples, [1], ["https://a.test"])[0]!.apiAmountUsdTotal).toBe(7);
+});
+
 test("shared wallet samples prefer positive cached balance over a zero account result", () => {
   const samples = buildQuotaSamples([
     {
@@ -165,6 +175,16 @@ test("uses actual sample intervals and clamps upstream API output rollback", () 
   expect(history[1]!.sampleRealtimeCostCnyPerApiUsd).toBeNull();
   expect(history[2]!.sampleApiAmountUsdPerHour).toBe(0);
   expect(history[2]!.rollingApiAmountUsdPerHour).toBeCloseTo(20);
+});
+
+test("calculates zero output even when the paired quota balance is temporarily unavailable", () => {
+  const base = { walletKey: "a", accountId: 1, schedulable: true, status: "active", provider: "sub2api", probeOk: false, cnyPerUsd: 1, remainingUsd: null, remainingCny: null, sourceQueriedAt: null };
+  const history = quotaHistory([
+    { ...base, sampledAt: "2026-08-02T01:00:00Z", apiAmountUsdTotal: 100 },
+    { ...base, sampledAt: "2026-08-02T01:10:00Z", apiAmountUsdTotal: 100 },
+  ]);
+  expect(history[1]!.sampleApiAmountUsdPerHour).toBe(0);
+  expect(history[1]!.rollingApiAmountUsdPerHour).toBe(0);
 });
 
 test("does not extrapolate a cold-start cumulative output into the first rolling point", () => {

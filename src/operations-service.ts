@@ -679,12 +679,13 @@ export class OperationsService {
           return {
             accountId: Number(input.accountId),
             apiAmountUsdTotal: Number(input.apiAmountUsdTotal),
-            costRateCnyPerApiUsd: Number(input.costRateCnyPerApiUsd),
-            source: input.source === "detected" ? "detected" as const : "manual" as const,
+            costRateCnyPerApiUsd: input.costRateCnyPerApiUsd == null ? null : Number(input.costRateCnyPerApiUsd),
+            source: input.source === "detected" ? "detected" as const : input.source === "manual" ? "manual" as const : null,
           };
         }).filter((item) => Number.isSafeInteger(item.accountId) && item.accountId > 0
-          && Number.isFinite(item.apiAmountUsdTotal) && Number.isFinite(item.costRateCnyPerApiUsd)
-          && item.costRateCnyPerApiUsd > 0)
+          && Number.isFinite(item.apiAmountUsdTotal)
+          && (item.costRateCnyPerApiUsd === null
+            || (Number.isFinite(item.costRateCnyPerApiUsd) && item.costRateCnyPerApiUsd > 0)))
         : [],
     }));
     samples = carryForwardQuotaHistory(samples);

@@ -23,8 +23,8 @@ export interface UpstreamQuotaSample {
 export interface UpstreamAccountCostInput {
   accountId: number;
   apiAmountUsdTotal: number;
-  costRateCnyPerApiUsd: number;
-  source: "detected" | "manual";
+  costRateCnyPerApiUsd: number | null;
+  source: "detected" | "manual" | null;
 }
 
 // A failed quota request is not evidence that the wallet reached zero. Keep the
@@ -149,6 +149,7 @@ function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObser
         const previous = previousById.get(item.accountId);
         if (!previous || item.apiAmountUsdTotal < previous.apiAmountUsdTotal) continue;
         const delta = item.apiAmountUsdTotal - previous.apiAmountUsdTotal;
+        if (item.costRateCnyPerApiUsd === null || !Number.isFinite(item.costRateCnyPerApiUsd) || item.costRateCnyPerApiUsd <= 0) continue;
         apiAmountUsd += delta;
         consumedCny += delta * item.costRateCnyPerApiUsd;
       }
@@ -178,7 +179,10 @@ function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObser
 function apiOutputObservations(samples: UpstreamQuotaSample[]): ApiOutputObservation[] {
   const byTimestamp = new Map<string, number>();
   for (const sample of samples) {
-    if (sample.remainingCny === null || sample.apiAmountUsdTotal === null || sample.apiAmountUsdTotal === undefined) continue;
+    // 产出累计值来自用量缓存，和额度余额是两条独立证据链。额度探测
+    // 某一轮失败时，仍可用连续的累计产出值计算该轮的真实零增量；不应
+    // 因为余额暂时未知而把曲线误标为“无数据”。
+    if (sample.apiAmountUsdTotal === null || sample.apiAmountUsdTotal === undefined) continue;
     // The stored value is a scope total and is repeated for every wallet in
     // the sampling round. Keep one value per timestamp to avoid multiplying
     // it by the number of wallets.
@@ -236,9 +240,9 @@ export function buildQuotaSamples(
       ? multiplier * cnyPerUsd
       : manualRate && Number(manualRate[1]) > 0 ? Number(manualRate[1]) : null;
     const accountOutput = finite(result.apiAmountUsdTotal);
-    const accountCostInputs: UpstreamAccountCostInput[] = costRate !== null && accountOutput !== null
+    const accountCostInputs: UpstreamAccountCostInput[] = accountOutput !== null
       ? [{ accountId, apiAmountUsdTotal: accountOutput, costRateCnyPerApiUsd: costRate,
-        source: multiplier !== null && multiplier > 0 ? "detected" : "manual" }]
+        source: costRate === null ? null : multiplier !== null && multiplier > 0 ? "detected" : "manual" }]
       : [];
     const candidate: UpstreamQuotaSample = {
       sampledAt,
