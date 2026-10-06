@@ -186,7 +186,23 @@ account_stats AS (
             ELSE false
           END AS scoreable
         FROM ops_error_logs o
-        WHERE o.account_id = a.account_id
+        WHERE (
+          o.account_id = a.account_id
+          OR (
+            o.account_id IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM groups probe_group
+              WHERE probe_group.id = o.group_id
+                AND probe_group.deleted_at IS NULL
+                AND probe_group.platform = a.platform
+                AND probe_group.name IN (
+                  CONCAT('api2business-probe-', a.account_id::text),
+                  CONCAT('api2business-probe-', a.platform, '-', a.account_id::text)
+                )
+            )
+          )
+        )
           AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
           AND o.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'

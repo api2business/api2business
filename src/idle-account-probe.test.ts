@@ -61,7 +61,7 @@ test("idle probe selects only normal schedulable API-key accounts", async () => 
 test("idle probe prefers Terra and falls back to Sol from the account model whitelist", () => {
   expect(selectIdleProbeModel(["gpt-5.6-sol", "gpt-5.5"], "gpt-5.6-terra")).toBe("gpt-5.6-sol");
   expect(selectIdleProbeModel(["gpt-5.6-terra", "gpt-5.6-sol"], "gpt-5.6-terra")).toBe("gpt-5.6-terra");
-  expect(selectIdleProbeModel(["gpt-5.5"], "gpt-5.6-terra")).toBeNull();
+  expect(selectIdleProbeModel(["gpt-5.5"], "gpt-5.6-terra")).toBe("gpt-5.5");
   expect(selectIdleProbeModel([], "gpt-5.6-terra")).toBe("gpt-5.6-terra");
 });
 

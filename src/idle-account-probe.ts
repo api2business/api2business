@@ -27,7 +27,23 @@ CROSS JOIN LATERAL (
     UNION ALL
     SELECT o.id
     FROM ops_error_logs o
-    WHERE o.account_id = a.id
+    WHERE (
+        o.account_id = a.id
+        OR (
+          o.account_id IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM groups probe_group
+            WHERE probe_group.id = o.group_id
+              AND probe_group.deleted_at IS NULL
+              AND probe_group.platform = a.platform
+              AND probe_group.name IN (
+                CONCAT('api2business-probe-', a.id::text),
+                CONCAT('api2business-probe-', a.platform, '-', a.id::text)
+              )
+          )
+        )
+      )
       AND o.created_at >= NOW() - INTERVAL '8 hours'
       AND (
         LOWER(COALESCE(o.error_message, '')) LIKE ANY (ARRAY[
@@ -65,7 +81,23 @@ WHERE a.deleted_at IS NULL
   ))
   AND ($6::boolean OR sample_stats.available_sample_count < 100 OR NOT EXISTS (
     SELECT 1 FROM ops_error_logs o
-    WHERE o.account_id = a.id
+    WHERE (
+      o.account_id = a.id
+      OR (
+        o.account_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM groups probe_group
+          WHERE probe_group.id = o.group_id
+            AND probe_group.deleted_at IS NULL
+            AND probe_group.platform = a.platform
+            AND probe_group.name IN (
+              CONCAT('api2business-probe-', a.id::text),
+              CONCAT('api2business-probe-', a.platform, '-', a.id::text)
+            )
+        )
+      )
+    )
       AND o.created_at >= NOW() - ($3::int * INTERVAL '1 second')
   ))
 ORDER BY COALESCE((
@@ -73,7 +105,25 @@ ORDER BY COALESCE((
   FROM (
     SELECT MAX(u.created_at) AS created_at FROM usage_logs u WHERE u.account_id = a.id
     UNION ALL
-    SELECT MAX(o.created_at) AS created_at FROM ops_error_logs o WHERE o.account_id = a.id
+    SELECT MAX(o.created_at) AS created_at
+    FROM ops_error_logs o
+    WHERE (
+      o.account_id = a.id
+      OR (
+        o.account_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM groups probe_group
+          WHERE probe_group.id = o.group_id
+            AND probe_group.deleted_at IS NULL
+            AND probe_group.platform = a.platform
+            AND probe_group.name IN (
+              CONCAT('api2business-probe-', a.id::text),
+              CONCAT('api2business-probe-', a.platform, '-', a.id::text)
+            )
+        )
+      )
+    )
   ) recent
 ), '-infinity'::timestamptz), a.id
 LIMIT $4
@@ -104,10 +154,15 @@ export function selectIdleProbeModel(
   preferredModels: readonly string[] = defaultProbeModels,
 ): string | null {
   const names = Array.isArray(modelNames)
-    ? modelNames.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+    ? modelNames.map((value) => String(value).trim()).filter(Boolean)
     : [];
   if (names.length === 0) return fallbackModel;
-  return preferredModels.find((model) => names.includes(model.toLowerCase())) ?? null;
+  const normalized = new Map(names.map((name) => [name.toLowerCase(), name]));
+  return preferredModels
+    .map((model) => normalized.get(model.toLowerCase()))
+    .find((model): model is string => model !== undefined)
+    ?? names[0]
+    ?? fallbackModel;
 }
 
 function numericIds(value: unknown): number[] {
@@ -168,7 +223,13 @@ WITH target_accounts AS (
   FROM accounts a
   WHERE a.deleted_at IS NULL
     AND LOWER(TRIM(COALESCE(a.type, ''))) = 'apikey'
-    AND a.platform = 'openai'
+    AND a.platform = $3
+    AND EXISTS (
+      SELECT 1
+      FROM account_groups eligible_ag
+      WHERE eligible_ag.account_id = a.id
+        AND eligible_ag.group_id = ANY(string_to_array($2, ',')::bigint[])
+    )
 ), probe_keys AS (
   SELECT k.id AS api_key_id,
     SUBSTRING(k.name FROM '^api2business-probe-([0-9]+)$')::int AS account_id
@@ -325,15 +386,23 @@ export class IdleAccountProbeService {
     };
   }
 
-  async coverage(windowMinutes = 20, priority: Sub2ApiReadPriority = "manual"): Promise<Record<string, unknown>> {
+  async coverage(windowMinutes = 20, priority: Sub2ApiReadPriority = "manual", scopeName?: string): Promise<Record<string, unknown>> {
     if (!Number.isInteger(windowMinutes) || windowMinutes < 1 || windowMinutes > 1440) {
       throw new Error("idle probe coverage window must be an integer from 1 to 1440 minutes");
     }
+    const scheduling = this.config.operations.upstreamSchedulingV2;
+    const scope = scopeName ? scheduling?.scopes[scopeName] : undefined;
+    if (scopeName && (!scheduling?.enabled || !scope?.enabled)) {
+      throw new Error(`idle probe scope is unavailable: ${scopeName}`);
+    }
+    const selectedScope = scopeName ?? scheduling?.defaultScope ?? "codex";
+    const groupIds = scope?.eligibleGroupIds ?? this.config.sub2api.priorityPlan.eligibleGroupIds;
+    const platform = scope?.platform ?? this.config.sub2api.priorityPlan.platform;
     const result = await this.reads.query<Record<string, unknown>>({
-      key: `accounts.idle-probe.coverage:${windowMinutes}`,
+      key: `accounts.idle-probe.coverage:${selectedScope}:${windowMinutes}`,
       kind: "accounts.idle-probe.coverage",
       sql: idleProbeCoverageSql,
-      parameters: [windowMinutes],
+      parameters: [windowMinutes, groupIds.join(","), platform],
       priority,
       cacheMode: "bypass-cache",
     });
@@ -355,7 +424,8 @@ export class IdleAccountProbeService {
     return {
       ok: missing.length === 0,
       mutation: false,
-      scope: "openai-apikey",
+      scope: selectedScope,
+      platform,
       windowMinutes,
       observedAt: new Date().toISOString(),
       targetCount: required.length,
@@ -443,13 +513,6 @@ export class IdleAccountProbeService {
         const plannedCandidates = plan.candidates as IdleProbeCandidate[];
         const candidates = plannedCandidates
           .filter((candidate) => candidate.status === "active" && candidate.schedulable === true)
-          .filter((candidate) => {
-            if (candidate.probeModel === null) {
-              modelUnavailableAccountIds.add(candidate.accountId);
-              return false;
-            }
-            return true;
-          })
           .filter((candidate) => {
             const binding = this.isolation!.get(candidate.accountId, isolationScope);
             return binding !== null && candidate.groupIds.includes(binding.groupId);

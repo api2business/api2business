@@ -270,8 +270,8 @@ export class OperationsService {
     return await this.idleProbe.summary("manual");
   }
 
-  async idleProbeCoverage(windowMinutes = 20) {
-    return await this.idleProbe.coverage(windowMinutes, "manual");
+  async idleProbeCoverage(windowMinutes = 20, scopeName?: string) {
+    return await this.idleProbe.coverage(windowMinutes, "manual", scopeName);
   }
 
   async idleProbeHistory(page = 1, pageSize = 10, scopeName = "codex") {

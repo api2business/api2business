@@ -115,8 +115,10 @@ export class AdminHttpClient {
     if (scope) query.set("scope", scope);
     return this.request(`/api/operations/idle-probe/history?${query}`);
   }
-  idleProbeCoverage(windowMinutes: number): Promise<Record<string, unknown>> {
-    return this.request(`/api/operations/idle-probe/coverage?windowMinutes=${windowMinutes}`);
+  idleProbeCoverage(windowMinutes: number, scope?: string | null): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ windowMinutes: String(windowMinutes) });
+    if (scope) query.set("scope", scope);
+    return this.request(`/api/operations/idle-probe/coverage?${query}`);
   }
   idleProbeRun(accountIds: number[], rounds: number, scope?: string | null): Promise<Record<string, unknown>> {
     return this.request("/api/operations/idle-probe", {

@@ -838,7 +838,7 @@ export function createHandler(
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/coverage") {
         const windowMinutes = positiveInteger(url.searchParams.get("windowMinutes"), 20);
         if (windowMinutes === null || windowMinutes > 1440) return json({ ok: false, error: "windowMinutes must be an integer from 1 to 1440" }, 400);
-        return json(await operations.idleProbeCoverage(windowMinutes));
+        return json(await operations.idleProbeCoverage(windowMinutes, url.searchParams.get("scope") ?? undefined));
       }
       if (request.method === "GET" && url.pathname === "/api/operations/idle-probe/history") {
         return json(await operations.idleProbeHistory(pageNumber(url), 10, url.searchParams.get("scope") ?? "codex"));

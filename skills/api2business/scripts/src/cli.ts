@@ -264,7 +264,7 @@ function help(): Record<string, unknown> {
       "accounts oauth-runtime-sample --over-api",
       "accounts idle-probe plan [--accounts <id-or-range,...>] [--scope codex|claude|grok] --over-api",
       "accounts idle-probe history [--scope codex|claude|grok] [--page N] --over-api",
-      "accounts idle-probe coverage [--window-minutes N] --over-api",
+      "accounts idle-probe coverage [--scope codex|claude|grok] [--window-minutes N] --over-api",
       "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--scope codex|claude|grok] [--confirm] --over-api",
       "accounts idle-probe run [--accounts <id-or-range,...>] [--scope codex|claude|grok] [--rounds 1..10] [--confirm] --over-api",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
@@ -926,7 +926,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
     if (verb === "plan") return await client.idleProbePlan(accountIds, parsed.scope);
     if (verb === "history") return await client.idleProbeHistory(parsed.page ?? 1, parsed.scope);
-    if (verb === "coverage") return await client.idleProbeCoverage(parsed.windowMinutes ?? 20);
+    if (verb === "coverage") return await client.idleProbeCoverage(parsed.windowMinutes ?? 20, parsed.scope);
     if (verb === "reconcile") {
       if (!parsed.confirm) return {
         ok: true,
