@@ -482,7 +482,29 @@ export class UpstreamSchedulingV2Service {
     const accountIds = accounts.map((row) => Number(row.accountId));
     const [poolQualityRaw, errorsRaw, priorityHistoryRaw, quotaRaw, usageRows, probeHistoryRaw, modelSyncHistoryRaw] = await Promise.all([
       this.operations.poolQualitySummary(qualityProfile),
-      this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all", priority: "automatic" }),
+      this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all", priority: "automatic" }).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(JSON.stringify({
+          ok: false,
+          component: "upstream-scheduling-v2-errors",
+          action: "deferred",
+          platform: qualityProfile,
+          error: message,
+          valuesPrinted: false,
+        }));
+        return {
+          ok: false,
+          platform: qualityProfile,
+          sampledAt: new Date().toISOString(),
+          recentCallLimit: this.config.monitor.recentCallLimit,
+          filter: "all",
+          rows: [],
+          modelDistribution: [],
+          pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 },
+          error: message,
+          valuesPrinted: false,
+        };
+      }),
       this.operations.priorityHistory(),
       this.operations.upstreamQuotaSummary(accountIds),
       accountIds.length ? this.operations.getUpstreamUsageCache([]) : Promise.resolve([]),

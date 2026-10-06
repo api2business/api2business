@@ -328,4 +328,21 @@ describe("upstream scheduling v2", () => {
     expect(right.scope).toBe("codex");
     expect(calls.dispatch).toBe(1);
   });
+
+  test("keeps the snapshot refresh alive when the auxiliary error query fails", async () => {
+    const { service, operations } = fixture();
+    operations.poolQualityErrors = async () => {
+      throw new Error("sub2api_read_query_timeout: query pool-quality-errors exceeded 15000ms");
+    };
+
+    const snapshot = await service.snapshot("codex");
+
+    expect(snapshot.cache).toMatchObject({ state: "refreshed" });
+    expect(snapshot.data.accounts).toHaveLength(1);
+    expect(snapshot.data.errors).toMatchObject({
+      ok: false,
+      rows: [],
+      error: "sub2api_read_query_timeout: query pool-quality-errors exceeded 15000ms",
+    });
+  });
 });
