@@ -105,6 +105,15 @@ function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+function parseGroupIds(raw: string | null, command: string): number[] {
+  if (raw === null) throw new Error(`${command} requires --groups <id,id,...>; resolve live business groups before writing`);
+  const values = raw.split(",").map((item) => Number(item.trim()));
+  if (values.length === 0 || values.some((value) => !Number.isSafeInteger(value) || value <= 0)) {
+    throw new Error(`${command} requires --groups with positive integer IDs`);
+  }
+  return [...new Set(values)].sort((left, right) => left - right);
+}
+
 export function retirementSelectionMode(selection: string | null, scope: string, planType: string): "database-dead" | "database-all" {
   const selected = selection ?? "dead";
   if (selected !== "dead" && selected !== "all") throw new Error("--selection must be dead or all");
@@ -284,7 +293,7 @@ function help(): Record<string, unknown> {
       "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
-      "upstreams create --platform openai|grok|anthropic --base-url <https-url> --suffix <name> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --groups 2,3 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
+      "upstreams create --platform openai|grok|anthropic --base-url <https-url> --suffix <name> --groups <id,id,...> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
       "upstreams update --id <account-id> [--base-url <https-url>] [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api",
       "upstreams recharge --base-url <https-url> --recharge-cny <CNY> [--idempotency-key <key>] [--confirm] --over-api",
       "upstreams recharge-status --id <workflow-id> --over-api",
@@ -735,11 +744,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "upstreams" && action === "create") {
     if (!parsed.platform || !["openai", "grok", "anthropic"].includes(parsed.platform)) throw new Error("upstreams create requires --platform openai|grok|anthropic");
     if (!parsed.baseUrl || !parsed.suffix) throw new Error("upstreams create requires --base-url and --suffix");
+    const groupIds = parseGroupIds(parsed.groups, "upstreams create");
     if (!parsed.apiKeyStdin) throw new Error("upstreams create requires --api-key-stdin; API keys are never accepted in argv");
     const input = { platform: parsed.platform, poolMode: parsed.poolMode ?? false, baseUrl: parsed.baseUrl, suffix: parsed.suffix,
       ...(parsed.rate === null ? {} : { rateCnyPerApiUsd: parsed.rate }),
       priority: parsed.priority ?? 1, capacity: parsed.capacity ?? 16,
-      groupIds: (parsed.groups ?? "2,3").split(",").map(Number), rechargeCny: parsed.rechargeCny };
+      groupIds, rechargeCny: parsed.rechargeCny };
     if (!parsed.confirm) return {
       ok: true,
       mutation: false,
@@ -1195,6 +1205,11 @@ export async function runCli(args: string[]): Promise<void> {
   const wantsJson = args.includes("--json");
   try {
     if (args.includes("--help") || args.length === 0) return emit(help(), wantsJson);
+    const overApiIndex = args.indexOf("--over-api");
+    const overApiValue = overApiIndex >= 0 ? args[overApiIndex + 1] : undefined;
+    if (overApiValue?.startsWith("http://") || overApiValue?.startsWith("https://")) {
+      throw new Error("--over-api is a flag without a value; configure runtime.overApiTarget in config/api2business.yaml");
+    }
     const parsed = parseArgs(args);
     if (parsed.cacheOnly && !(parsed.command[0] === "upstream-scheduling-v2" && parsed.command[1] === "snapshot")) {
       throw new Error("--cache-only 只适用于 upstream-scheduling-v2 snapshot");

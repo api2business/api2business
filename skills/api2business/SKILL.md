@@ -173,6 +173,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `--groups` 整表替换全部分组，并重写切号模板。
   - 已启用探活账号的私有分组必须列入；隔离后的收回顺序只见
     `references/upstream-scheduling.md`。
+- 创建上游必须显式传入通过实时分组读取解析出的 `--groups <id,id,...>`；CLI 不再使用固定
+  分组默认值，避免平台或作用域误绑。`--over-api` 是无值开关，目标地址只从
+  `config/api2business.yaml` 的 `runtime.overApiTarget` 读取；帮助命令可在不提供配置时直接运行。
 - 多个同充值地址 API Key 只对实际充值动作记一笔充值；余额共享钱包、账号投影和写入范围见
   [额度监控](references/quota-monitoring.md) 与 [上游与调度](references/upstream-scheduling.md)。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。

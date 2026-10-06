@@ -110,11 +110,10 @@
     - 私有分组 exclusive，且成员只有该账号。
     - 业务分组成员与用户指定一致；未启用探活的账号不检查私有分组。
   - 探活是否已经打过请求，见 [账号操作](account-operations.md)。
+  - `upstreams create` 必须显式带上通过实时读取解析出的 `--groups <id,id,...>`，禁止省略后
+    使用源码或 YAML 中的固定分组默认值；分组缺失时 CLI 在读取 Secret 前直接失败。
   - `upstreams create` 即使只做预检也必须带 `--api-key-stdin`。
     - 只有加上 `--confirm` 才读取标准输入。
-  - 省略 `--groups` 时，创建 CLI 使用源码中的固定分组列表，这次解析不读取 YAML `groupIds`。
-    - 用户指定了分组时，必须显式传入实时解析出的 ID。
-    - 该固定列表与 YAML `groupIds` 不一致时，以用户显式 `--groups` 为准，并先修正入口。
   - 账号处于 `sub2api.priorityPlan.eligibleGroupIds` 时，自动计划可能改写 `priority`。
     - 写入范围是该计划的 `minimumPriority` 到 `maximumPriority`，数值越小越优先。
     - 隔离若暂时并入这些分组，计划可能在收回默认分组之前写下优先级。
