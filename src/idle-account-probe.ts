@@ -22,7 +22,23 @@ CROSS JOIN LATERAL (
   FROM (
     SELECT u.id
     FROM usage_logs u
-    WHERE u.account_id = a.id
+    WHERE (
+        u.account_id = a.id
+        OR (
+          u.account_id IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM groups probe_group
+            WHERE probe_group.id = u.group_id
+              AND probe_group.deleted_at IS NULL
+              AND probe_group.platform = a.platform
+              AND probe_group.name IN (
+                CONCAT('api2business-probe-', a.id::text),
+                CONCAT('api2business-probe-', a.platform, '-', a.id::text)
+              )
+          )
+        )
+      )
       AND u.created_at >= NOW() - INTERVAL '8 hours'
     UNION ALL
     SELECT o.id
@@ -76,7 +92,23 @@ WHERE a.deleted_at IS NULL
   AND ($5::text IS NULL OR a.id = ANY(string_to_array($5, ',')::bigint[]))
   AND ($6::boolean OR sample_stats.available_sample_count < 100 OR NOT EXISTS (
     SELECT 1 FROM usage_logs u
-    WHERE u.account_id = a.id
+    WHERE (
+      u.account_id = a.id
+      OR (
+        u.account_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM groups probe_group
+          WHERE probe_group.id = u.group_id
+            AND probe_group.deleted_at IS NULL
+            AND probe_group.platform = a.platform
+            AND probe_group.name IN (
+              CONCAT('api2business-probe-', a.id::text),
+              CONCAT('api2business-probe-', a.platform, '-', a.id::text)
+            )
+        )
+      )
+    )
       AND u.created_at >= NOW() - ($3::int * INTERVAL '1 second')
   ))
   AND ($6::boolean OR sample_stats.available_sample_count < 100 OR NOT EXISTS (
@@ -103,7 +135,25 @@ WHERE a.deleted_at IS NULL
 ORDER BY COALESCE((
   SELECT MAX(recent.created_at)
   FROM (
-    SELECT MAX(u.created_at) AS created_at FROM usage_logs u WHERE u.account_id = a.id
+    SELECT MAX(u.created_at) AS created_at
+    FROM usage_logs u
+    WHERE (
+      u.account_id = a.id
+      OR (
+        u.account_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM groups probe_group
+          WHERE probe_group.id = u.group_id
+            AND probe_group.deleted_at IS NULL
+            AND probe_group.platform = a.platform
+            AND probe_group.name IN (
+              CONCAT('api2business-probe-', a.id::text),
+              CONCAT('api2business-probe-', a.platform, '-', a.id::text)
+            )
+        )
+      )
+    )
     UNION ALL
     SELECT MAX(o.created_at) AS created_at
     FROM ops_error_logs o

@@ -15,7 +15,7 @@ const scorePolicy = {
 };
 
 test("database aggregate uses bounded account indexes and current state is display-only", () => {
-  expect(recentAccountAggregateQuery).toContain("WHERE u.account_id = a.account_id");
+  expect(recentAccountAggregateQuery).toContain("u.account_id = a.account_id");
   expect(recentAccountAggregateQuery).toContain("o.account_id = a.account_id");
   expect(recentAccountAggregateQuery).toContain("api2business-probe-");
   expect(recentAccountAggregateQuery.match(/NOT LIKE '%luna%'/gu)?.length).toBe(2);

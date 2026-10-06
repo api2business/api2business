@@ -146,7 +146,23 @@ account_stats AS (
           NULL::boolean AS business_limited,
           false AS scoreable
         FROM usage_logs u
-        WHERE u.account_id = a.account_id
+        WHERE (
+          u.account_id = a.account_id
+          OR (
+            u.account_id IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM groups probe_group
+              WHERE probe_group.id = u.group_id
+                AND probe_group.deleted_at IS NULL
+                AND probe_group.platform = a.platform
+                AND probe_group.name IN (
+                  CONCAT('api2business-probe-', a.account_id::text),
+                  CONCAT('api2business-probe-', a.platform, '-', a.account_id::text)
+                )
+            )
+          )
+        )
           AND u.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
         ORDER BY u.created_at DESC
