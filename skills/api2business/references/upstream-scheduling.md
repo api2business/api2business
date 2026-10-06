@@ -10,6 +10,20 @@
 - 评分、容量与冷却见下文「评分、容量与冷却联动评估」。
 - 探活覆盖见 [账号操作](account-operations.md)。
 
+## 配置收口与事故复盘
+
+- Claude 兼容层返回 HTTP `400` 且正文完整包含
+  `请求参数或格式不正确` 时，才使用 Claude 专用模板的 3 分钟短冷却规则；
+  规则不能扩展为泛化 `invalid_request_error`，也不能写入 Codex 或 Grok 模板。
+- 修改独立模板文件后，先确认 API 输出新的 `config-hot-reload` 证据，再执行单账号模板作业；
+  通过原 workflow 回读 `verifiedCount`、`failedCount`、`misalignedCount`，随后按账号回读
+  平台、`base_url`、状态码和精确关键词，确认没有重置上游地址或凭据字段后才扩大范围。
+- `--over-api` 在 Api2Business CLI 中是无值开关；API 地址来自
+  `config/api2business.yaml` 的 owning 配置。不要把 URL 作为该开关的下一个 argv，
+  否则 URL 会被当成命令词并产生误导性的未知命令错误。
+- 这套顺序适用于模板、模型同步和探活等账号写入：单账号试点、workflow 终态、原生单账号回读、
+  再扩大范围。详细模板算法和字段仍只维护在本文，跨仓库入口只保留链接。
+
 ## 创建、分组与切号
 
 - 上游创建、调整、充值、额度查询和评分统一使用 Api2Business CLI 或 API。
