@@ -73,7 +73,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 不读取业务记录、不写表；覆盖窗口边界、重复 ID、重试恢复、探活与历史成本。
 
 ```bash
-bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml web screenshot --profile observability --over-api --json
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml web screenshot --profile observability --id <报告ID> --over-api --json
 ```
 
+- `--account <账号ID>` 在同一冻结报告中筛选共享钱包，关联账号仍完整显示。
 - 截图和邮件流程复用 [项目技能](../SKILL.md)。
