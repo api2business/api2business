@@ -5,7 +5,7 @@ import { authoritativeUsageBalance } from './operations-store';
 import { compactObservation,checkObservability } from '../skills/api2business/scripts/src/observability';
 import type { AppConfig } from './config';
 import type { AdminHttpClient } from './admin-http-client';
-const settings={sub2apiSuccessPercent:99,sub2apiTtftP95Ms:30000,api2businessNon5xxPercent:99.9,api2businessLatencyP95Ms:3000,walletFreshnessSeconds:3600,retentionDays:30};
+const settings={sub2apiSuccessPercent:95,sub2apiTtftP95Ms:30000,api2businessNon5xxPercent:99.9,api2businessLatencyP95Ms:3000,walletFreshnessSeconds:3600,retentionDays:30};
 const config={observability:settings,sub2api:{newApiCredentials:[{baseUrl:'https://alias.example',walletKey:'https://wallet.example'}]}} as AppConfig;
 const at='2026-10-07T04:00:00.000Z';
 const account=(id:number,url='https://wallet.example')=>({id,base_url:url,active:true,type:'apikey',platform:'openai'});
@@ -69,4 +69,16 @@ test('persisted historical rates cover cost without retroactively applying curre
  const result=costGovernance(facts,[],config,at,{defaultCnyPerApiUsd:99,walletCnyPerApiUsd:{}},'2026-10-07T05:00:00Z');
  expect(result).toMatchObject({complete:true,totalCostCny:1.5,knownRecords:2,coveragePercent:100});
  expect(result.accounts[0]?.reason).toBeNull();
+});
+
+
+test('success SLO requires strictly above 95 without rounding; historical comparisons stay explicit',()=>{
+ expect(slo(94.9999,95,'above')).toMatchObject({comparison:'gt',status:'missed'});
+ expect(slo(95,95,'above')).toMatchObject({comparison:'gt',status:'missed'});
+ expect(slo(95.0001,95,'above')).toMatchObject({comparison:'gt',status:'met'});
+ expect(slo(95.16,95,'above').status).toBe('met');
+ expect(slo(null,95,'above').status).toBe('insufficient_data');
+ expect(slo(100,95,'above',false).status).toBe('insufficient_data');
+ expect(slo(99.9,99.9,'min')).toMatchObject({comparison:'gte',status:'met'});
+ expect(slo(30000,30000,'max')).toMatchObject({comparison:'lte',status:'met'});
 });

@@ -28,8 +28,11 @@ export function observationPath(path: string): string | null {
   return parts.slice(0, 3).join("/") + (parts.length > 3 ? "/:operation" : "");
 }
 
-export function slo(value: number | null, target: number | undefined, direction: "min" | "max", complete = true) {
-  return { value, target: target ?? null, status: !complete || value === null || target === undefined ? "insufficient_data" : (direction === "min" ? value >= target : value <= target) ? "met" : "missed" };
+export function slo(value: number | null, target: number | undefined, direction: "min" | "max" | "above", complete = true) {
+  const comparison = direction === "above" ? "gt" : direction === "min" ? "gte" : "lte";
+  const sufficient = complete && value !== null && target !== undefined;
+  const met = sufficient && (comparison === "gt" ? value > target : comparison === "gte" ? value >= target : value <= target);
+  return { value, target: target ?? null, comparison, status: !sufficient ? "insufficient_data" : met ? "met" : "missed" };
 }
 
 export function walletGovernance(accounts: Row[], cache: Row[], config: AppConfig, capturedAt: string) {
@@ -179,7 +182,7 @@ export class OperationalObservability {
         walletAsOf:capturedAt,costPolicy:"recorded evidence at or before first usage; no historical backfill" },
       broker:this.reads.status(),
       sub2api:{ ...facts,accounts:undefined,costAccounts:undefined,requests:total,
-        successSlo:slo(total ? Number(facts.succeeded)/total*100 : null,settings.sub2apiSuccessPercent,"min",Number(facts.missingRequestIdRecords)===0),
+        successSlo:slo(total ? Number(facts.succeeded)/total*100 : null,settings.sub2apiSuccessPercent,"above",Number(facts.missingRequestIdRecords)===0),
         ttftSlo:slo(finite(facts.ttftP95Ms),settings.sub2apiTtftP95Ms,"max",Number(facts.ttftKnown)===Number(facts.streaming)) },
       api2business:{ ...http,coverage,layer:"application; public edge reachability is measured separately",
         non5xxSlo:slo(http.requests ? (http.requests-http.failed)/http.requests*100 : null,settings.api2businessNon5xxPercent,"min",coverage.complete),

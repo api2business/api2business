@@ -682,7 +682,7 @@ runtime:
       sessionSecretEnv: API2BUSINESS_SESSION_SECRET
   httpIdleTimeoutSeconds: 120
 observability:
-  sub2apiSuccessPercent: 99
+  sub2apiSuccessPercent: 95
   sub2apiTtftP95Ms: 30000
   api2businessNon5xxPercent: 99.9
   api2businessLatencyP95Ms: 3000

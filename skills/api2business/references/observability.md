@@ -21,12 +21,17 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 某次失败不会终止后续采集，也不会被后续成功覆盖。
   - 无收费推理、余额采样、充值或调度操作。
 - `report` 保存观测结果；`get` 不重新计算历史报告。
+  - 改目标后用新报告验收，不覆盖旧报告，也不使用当前规则改写旧标签。
+  - 严格比较在舍入前完成；页面只负责显示报告已保存的目标与比较符。
 
 ## owning YAML
 
-- `observability configure --file <JSON> --confirm` 更新 owning YAML。
+- `observability configure --file <JSON> --confirm` 合并所给字段到 owning YAML。
+  - 单字段变更不要求复制全部现有设置；回执返回变更前后值。
+  - 例如 `{"sub2apiSuccessPercent":95}`；比较边界唯一见规格。
+  - 已有截图 profile 保持原有设置，只在缺失时初始化。
   - 不传 `--confirm` 只预览。
-  - 同时建立沿用现有视口的 `observability` 截图 profile。
+
   - 修改后使用 `native start --component all` 应用同版本配置。
   - 可选 `httpIdleTimeoutSeconds` 写入 `runtime.httpIdleTimeoutSeconds`，范围 1–255 秒。
 - JSON 字段：
@@ -59,10 +64,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 
 ## HTTP 慢请求
 
-- Bun 默认 HTTP 空闲超时也作用于尚未输出响应的执行中请求。
-  - 超过默认十秒可能让代理返回 502，而应用稍后仍完成并记录 200。
-  - 依据：[Bun Server idleTimeout](https://bun.sh/docs/runtime/http/server#idletimeout)。
-- 先对照公开请求耗时、应用记录和源码配置，不能只延长客户端超时。
+- 上游语义与复现实验边界唯一见
+  [Bun HTTP 服务空闲超时](/root/unidesk/.agents/skills/docs-bun/references/server-timeouts.md)。
+- 产品排查对照公开请求耗时、应用记录和代理日志。
 - `runtime.httpIdleTimeoutSeconds` 与已有查询、排队预算协调，保持有界。
   - 未显式配置时从 owning CLI 时间预算派生，上限遵循 Bun 的 255 秒。
 - 不把一次恢复解释为历史每一次 502 都由同一原因导致。

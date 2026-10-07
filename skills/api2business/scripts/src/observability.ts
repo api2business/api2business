@@ -5,7 +5,7 @@ import { parseObservabilityConfig } from '../../../../src/observability-config';
 
 type Row=Record<string,any>;
 export const observabilityHelp={ok:true,commands:[
-  'observability configure --file settings.json [--confirm] (YAML dry-run by default; restart API to apply)',
+  'observability configure --file settings.json [--confirm] (合并所给字段，默认预览；--confirm 写入后重启 API)',
   'observability report [--start ISO --end ISO] --over-api [--include-records] (default: last 2 hours)',
   'observability verify --over-api (read-only SQL fixtures, no business records)',
   'observability get --id UUID --over-api [--include-records] (frozen report)',
@@ -13,9 +13,10 @@ export const observabilityHelp={ok:true,commands:[
 ], output:'Default report bounds wallet/cost details to 10 rows, with total and omitted counts. Full report remains available by id.'};
 export function configureObservability(configPath:string,file:string,confirm:boolean) {
   const input=JSON.parse(readFileSync(file,'utf8'));
-  const settings=parseObservabilityConfig(input);
-  if (!settings) throw new Error('settings must be a non-null object');
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('settings must be a non-null object');
   const document=parseDocument(readFileSync(configPath,'utf8'));
+  const previousSettings=document.toJS().observability ?? {};
+  const settings=parseObservabilityConfig({...previousSettings,...input})!;
   if (input.httpIdleTimeoutSeconds !== undefined) {
     if (!Number.isInteger(input.httpIdleTimeoutSeconds) || input.httpIdleTimeoutSeconds<1 || input.httpIdleTimeoutSeconds>255) throw new Error('httpIdleTimeoutSeconds must be 1..255');
     document.setIn(['runtime','httpIdleTimeoutSeconds'],input.httpIdleTimeoutSeconds);
@@ -23,12 +24,14 @@ export function configureObservability(configPath:string,file:string,confirm:boo
   document.set('observability',settings);
   const root=document.toJS();
   const baseline=root.webProbe?.smokeProfiles?.[root.webProbe?.defaultSmokeProfile];
-  if (baseline) document.setIn(['webProbe','smokeProfiles','observability'],{
+  if (baseline && !root.webProbe?.smokeProfiles?.observability) document.setIn(['webProbe','smokeProfiles','observability'],{
     ...baseline,path:'/observability',readySelector:'#observability-state[data-ready="true"]',settleMs:2000,
     screenshotName:'api2business-observability-desktop.png',mobileScreenshotName:'api2business-observability-mobile.png',
   });
   if (confirm) writeFileSync(configPath,String(document));
-  return {ok:true,applied:confirm,settings,restartRequired:confirm,valuesPrinted:false};
+  const changes=Object.entries(settings).filter(([key,value])=>previousSettings[key]!==value)
+    .map(([field,after])=>({field,before:previousSettings[field] ?? null,after}));
+  return {ok:true,applied:confirm,settings,changes,restartRequired:confirm,valuesPrinted:false};
 }
 export function compactObservation(report:Row,full:boolean) {
   if (full) return report;
