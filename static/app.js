@@ -80,6 +80,7 @@ async function shell() {
   const links = [
     ['upstream-scheduling-v2', '/upstream-scheduling-v2', '上游调度 V2'],
     ['quota-monitor', '/quota-monitor', '额度监控'],
+    ['observability', '/observability', '巡检与 SLO'],
     ['ranking', '/ranking', '用户用量'],
     ['lottery', '/lottery', '额度抽奖'],
     ['operations', '/operations', '经营管理'],

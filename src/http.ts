@@ -1,3 +1,4 @@
+import type { OperationalObservability } from "./operational-observability";
 import { resolve } from "node:path";
 import type { AppConfig } from "./config";
 import type { ApplicationDispatcher } from "./dispatcher";
@@ -35,6 +36,8 @@ import {
 const staticRoot = resolve(import.meta.dir, "../static");
 
 const persistentSnapshotApiPaths = [
+  /^\/api\/admin\/read-status$/u,
+  /^\/api\/observability(?:\/|$)/u,
   /^\/api\/upstreams(?:\/|$)/u,
   /^\/api\/upstreams\/pool-quality(?:\/|$)/u,
   /^\/api\/upstreams\/(?:quota-summary|quota-monitor-snapshot|usage-cache|quota-monitor-usage|recharge-candidates)$/u,
@@ -158,6 +161,7 @@ function errorResponse(error: unknown, request?: Request): Response {
     : 500;
   if (status >= 500) console.error(JSON.stringify({
     ok: false,
+    observedAt: new Date().toISOString(),
     component: "http",
     method: request?.method ?? null,
     path: request ? new URL(request.url).pathname : null,
@@ -225,6 +229,7 @@ export function createHandler(
   runtime: Sub2ApiRuntimeService,
   executeWorkerOperation?: (operation: OperationRequest) => Promise<unknown>,
   upstreamSchedulingV2?: UpstreamSchedulingV2Service,
+  observability?: OperationalObservability,
 ): (request: Request) => Promise<Response> {
   const cacheKey = (request: Request) => createHash("sha256").update(`${request.method} ${new URL(request.url).pathname}${new URL(request.url).search}`).digest("hex");
   const cacheRefreshes = new Map<string, Promise<ApiCacheRefreshResult>>();
@@ -258,6 +263,7 @@ export function createHandler(
         return session ? redirect(schedulingHome) : await staticFile("login.html", "text/html; charset=utf-8");
       }
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/styles.css") return await staticFile("styles.css", "text/css; charset=utf-8");
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/observability.js") return await staticFile("observability.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/app.js") return await staticFile("app.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/upstream-scheduling-v2.js") return await staticFile("upstream-scheduling-v2.js", "text/javascript; charset=utf-8");
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/ledger-pages.js") return await staticFile("ledger-pages.js", "text/javascript; charset=utf-8");
@@ -288,7 +294,7 @@ export function createHandler(
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/scores") {
         return redirect(session ? schedulingHome : "/login");
       }
-      const page = ({ "/upstream-scheduling-v2": "upstream-scheduling-v2.html", "/quota-monitor": "quota-monitor.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
+      const page = ({ "/observability": "observability.html", "/upstream-scheduling-v2": "upstream-scheduling-v2.html", "/quota-monitor": "quota-monitor.html", "/ranking": "ranking.html", "/lottery": "lottery.html", "/operations": "operations.html", "/oauth-cost": "oauth-cost.html", "/account-import": "account-import.html", "/upstreams": "upstreams.html", "/bugteam-cost": "bugteam-cost.html" } as Record<string, string>)[url.pathname];
       if (page) return session ? await staticFile(page, "text/html; charset=utf-8") : redirect("/login");
 
       if (url.pathname.startsWith("/api/") && !session && !apiKey) return json({ ok: false, error: "unauthorized" }, 401);
@@ -921,6 +927,20 @@ export function createHandler(
         try { return json(await operations.audits(pageNumber(url), 10)); }
         catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
       }
+      if (request.method === "GET" && url.pathname === "/api/observability/report") {
+        if (!observability) return json({ ok:false,error:"observability unavailable" },503);
+        try { return json(await observability.report(url.searchParams.get("start"),url.searchParams.get("end"))); }
+        catch (error) {
+          if (error instanceof Error && /invalid observation window|start and end must/u.test(error.message)) return json({ ok:false,error:error.message },400);
+          throw error;
+        }
+      }
+      if (request.method === "GET" && url.pathname.startsWith("/api/observability/reports/")) {
+        const id=url.pathname.slice("/api/observability/reports/".length);
+        if (!/^[\da-f-]{36}$/u.test(id)) return json({ ok:false,error:"invalid report id" },400);
+        const report=await observability?.get(id);
+        return report ? json(report) : json({ ok:false,error:"report not found" },404);
+      }
       if (request.method === "GET" && url.pathname === "/api/admin/read-status") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
         return json(operations.readStatus());
@@ -1152,7 +1172,7 @@ export function createHandler(
       return errorResponse(error, request);
     }
   };
-  return async (request) => {
+  const cachedHandle = async (request: Request) => {
     if (!isApiResponseCacheable(request)) return await handle(request);
     const authorized = sessionAuthorized(request, config, auth)
       || apiKeyAuthorized(request, auth)
@@ -1173,6 +1193,7 @@ export function createHandler(
     } catch (error) {
       console.error(JSON.stringify({
         ok: false,
+        observedAt: new Date().toISOString(),
         component: "http-cache",
         action: "refresh",
         path: new URL(request.url).pathname,
@@ -1180,5 +1201,11 @@ export function createHandler(
       }));
       return json({ ok: false, error: "服务暂时不可用，请稍后重试" }, 503);
     }
+  };
+  return async (request) => {
+    const started=performance.now();
+    const response=await cachedHandle(request);
+    observability?.observe(request,response,performance.now()-started);
+    return response;
   };
 }

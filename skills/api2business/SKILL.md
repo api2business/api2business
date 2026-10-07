@@ -290,3 +290,8 @@ bun skills/api2business/scripts/api2business-cli.ts \
 - CLI 通过 `/api/login` 获取 Cookie，并只在内存中传给 WebProbe；WebProbe 不填写登录表单，Cookie 不进入 argv、日志、报告或磁盘。
 - 验证重启后账本、缓存、采样和作业状态仍可读取。
 - 失败时按配置、Secret、网络、数据库、worker 和外部 API 的顺序定位首个断点。
+
+## 固定窗口巡检与 SLO
+
+- 两系统独立 SLO、broker 新鲜度、共享钱包与成本覆盖走
+  [固定窗口巡检](references/observability.md)。

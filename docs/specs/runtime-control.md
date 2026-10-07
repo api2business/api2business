@@ -27,3 +27,8 @@
 - 错误详情按当前请求关联，未知原因保持未知；切号模板是否命中、流式错误是否绕过模板，
   只见 [上游与调度](../../skills/api2business/references/upstream-scheduling.md)。
 - 本规格不复制 CLI 参数、状态机或评分算法；其他文档只交叉引用当前权威。
+
+## 运维观测
+
+- 独立系统 SLO 与冻结窗口报告见
+  [运维观测规格](operational-observability.md)。

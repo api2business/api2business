@@ -50,6 +50,7 @@ const pageRoutePlugin: Plugin = {
     server.middlewares.use((request, _response, next) => {
       const [pathname, query = ""] = String(request.url ?? "").split("?", 2);
       if (pathname === "/upstream-scheduling-v2") request.url = `/upstream-scheduling-v2.html${query ? `?${query}` : ""}`;
+      if (pathname === "/observability") request.url = `/observability.html${query ? `?${query}` : ""}`;
       next();
     });
   },

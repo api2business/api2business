@@ -60,7 +60,7 @@ function cachedResult(row: Row): Row {
 
 function numericQuota(result: Row): Row | null {
   const quota = object(result.quota);
-  const remaining = Number(quota.remaining);
+  const remaining = quota.remaining == null || quota.remaining === "" ? NaN : Number(quota.remaining);
   if (result.ok !== true || String(quota.unit ?? "").toUpperCase() !== "USD" || !Number.isFinite(remaining)) return null;
   return quota;
 }
@@ -81,7 +81,7 @@ export function projectSharedWalletUsageRows(rows: Row[], refs: NewApiCredential
     const quota = numericQuota(result);
     const walletKey = usageWalletKey(result, refs);
     if (!quota || !walletKey) continue;
-    const remaining = Number(quota.remaining);
+    const remaining = quota.remaining == null || quota.remaining === "" ? NaN : Number(quota.remaining);
     const timestamp = Date.parse(String(row.last_success_at ?? row.queried_at ?? result.queriedAt ?? "")) || 0;
     const previous = shared.get(walletKey);
     if (preferSharedWalletBalance(previous, { remaining, timestamp })) {

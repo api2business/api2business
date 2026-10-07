@@ -1,3 +1,4 @@
+import { parseObservabilityConfig, type ObservabilityConfig } from "./observability-config";
 import { readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { DateTime } from "luxon";
@@ -183,6 +184,7 @@ export interface UpstreamSchedulingV2Config {
 }
 
 export interface AppConfig {
+  observability?: ObservabilityConfig | null;
   apiVersion: string;
   kind: string;
   metadata: { name: string; owner: string };
@@ -890,6 +892,7 @@ export function loadConfig(path: string): AppConfig {
     };
   }
   return {
+    observability: parseObservabilityConfig(raw.observability),
     apiVersion: stringValue(raw, "apiVersion", "config"),
     kind: stringValue(raw, "kind", "config"),
     metadata: { name: stringValue(metadata, "name", "metadata"), owner: stringValue(metadata, "owner", "metadata") },

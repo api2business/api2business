@@ -1,3 +1,4 @@
+import { observabilityHelp, configureObservability, compactObservation, checkObservability } from "./observability";
 import { runWebScreenshot, webScreenshotHelp } from "./web-screenshot";
 import { measureQuotaMonitor } from './quota-monitor-measure';
 import { randomUUID } from "node:crypto";
@@ -251,6 +252,7 @@ function help(): Record<string, unknown> {
       "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api (manual priority adjustment)",
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api",
       "reads status",
+      "observability report|get|check|configure --help",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors cooldowns [--since <ISO>] [--until <ISO>] [--limit N] [--account <id-or-name>] [--model <exact-id>]",
@@ -597,6 +599,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || parsed.command.join(" ") === "accounts inspect"
     || (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle")
     || parsed.command.join(" ") === "payments alipay-revenue"
+    || parsed.command[0] === "observability"
     || parsed.command.join(" ") === "reads status"
   ) {
     throw new Error("Sub2API production reads require the Native API transport");
@@ -629,6 +632,12 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
 
 async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: HttpCliTarget): Promise<unknown> {
   const client = new AdminHttpClient(config, target);
+  if (parsed.command[0] === "observability") {
+    if (parsed.command[1] === "report") return compactObservation(await client.observationReport(parsed.start,parsed.end),parsed.includeRecords);
+    if (parsed.command[1] === "get" && parsed.id) return compactObservation(await client.observationGet(parsed.id),parsed.includeRecords);
+    if (parsed.command[1] === "check") return await checkObservability(client,parsed.rounds ?? 3);
+    throw new Error("observability requires report, get --id, check or configure --file");
+  }
   const [group, action] = parsed.command;
   if (group === "web" && action === "screenshot") return await runWebScreenshot(parsed, config, target);
   if (group === "bugteam" && action === "cost-monitor") {
@@ -1213,6 +1222,7 @@ export async function runCli(args: string[]): Promise<void> {
   const wantsJson = args.includes("--json");
   try {
     if (args.includes("--help") && args.includes("web") && args[args.indexOf("web") + 1] === "screenshot") return emit(webScreenshotHelp(), wantsJson);
+    if (args.includes("--help") && args.includes("observability")) return emit(observabilityHelp,wantsJson);
     if (args.includes("--help") || args.length === 0) return emit(help(), wantsJson);
     const overApiIndex = args.indexOf("--over-api");
     const overApiValue = overApiIndex >= 0 ? args[overApiIndex + 1] : undefined;
@@ -1222,6 +1232,10 @@ export async function runCli(args: string[]): Promise<void> {
     const parsed = parseArgs(args);
     if (parsed.cacheOnly && !(parsed.command[0] === "upstream-scheduling-v2" && parsed.command[1] === "snapshot")) {
       throw new Error("--cache-only 只适用于 upstream-scheduling-v2 snapshot");
+    }
+    if (parsed.command.join(" ") === "observability configure") {
+      if (!parsed.file) throw new Error("observability configure requires --file");
+      return emit(configureObservability(parsed.configPath,parsed.file,parsed.confirm),parsed.json);
     }
     const config = loadConfig(parsed.configPath);
     if (parsed.command.join(" ") === "config validate") return emit({
@@ -1254,7 +1268,8 @@ export async function runCli(args: string[]): Promise<void> {
     const nativeReadCommand = (
       parsed.command.join(" ") === "scores rank"
       || parsed.command[0] === "upstream-scheduling-v2"
-      || parsed.command.join(" ") === "reads status"
+      || parsed.command[0] === "observability"
+    || parsed.command.join(" ") === "reads status"
       || parsed.command[0] === "errors"
       || parsed.command.join(" ") === "users impact"
       || parsed.command.join(" ") === "users balance-liability"

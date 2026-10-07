@@ -17,7 +17,7 @@ export function authoritativeUsageBalance(result: Record<string, unknown>): bool
   const quota = result.quota && typeof result.quota === "object" && !Array.isArray(result.quota)
     ? result.quota as Record<string, unknown>
     : {};
-  const remaining = Number(quota.remaining);
+  const remaining = quota.remaining == null || quota.remaining === "" ? NaN : Number(quota.remaining);
   if (String(quota.unit ?? "").toUpperCase() === "USD" && Number.isFinite(remaining) && remaining >= 0) return true;
   // New API's unlimited_quota describes the API key, not the provider wallet,
   // when account login/billing evidence is unavailable. Do not replace a
@@ -50,6 +50,16 @@ export class OperationsStore {
 
   async migrate(): Promise<void> {
     await this.sql.unsafe(`
+      CREATE TABLE IF NOT EXISTS api2business_http_observations (
+        completed_at timestamptz NOT NULL, instance_id text NOT NULL,
+        path text NOT NULL, status integer NOT NULL, duration_ms double precision NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS api2business_http_observations_time
+        ON api2business_http_observations(completed_at);
+      CREATE TABLE IF NOT EXISTS api2business_observer_instances (
+        instance_id text PRIMARY KEY, started_at timestamptz NOT NULL,
+        last_seen_at timestamptz NOT NULL, failed_writes integer NOT NULL DEFAULT 0
+      );
       CREATE TABLE IF NOT EXISTS api2business_cash_entries (
         id uuid PRIMARY KEY,
         occurred_on date NOT NULL,
@@ -459,6 +469,31 @@ export class OperationsStore {
     } finally {
       if (this.recyclePromise === recycle) this.recyclePromise = null;
     }
+  }
+
+  async observeHttp(completedAt: string, instanceId: string, path: string, status: number, durationMs: number) {
+    await this.sql`INSERT INTO api2business_http_observations
+      (completed_at,instance_id,path,status,duration_ms)
+      VALUES (${completedAt},${instanceId},${path},${status},${durationMs})`;
+  }
+
+  async observeInstance(instanceId: string, startedAt: string, failedWrites: number, retentionDays: number) {
+    await this.sql`INSERT INTO api2business_observer_instances (instance_id,started_at,last_seen_at,failed_writes)
+      VALUES (${instanceId},${startedAt},now(),${failedWrites}) ON CONFLICT (instance_id)
+      DO UPDATE SET last_seen_at=now(),failed_writes=EXCLUDED.failed_writes`;
+    await this.sql`DELETE FROM api2business_http_observations WHERE completed_at < now()-${retentionDays}*interval '1 day'`;
+  }
+
+  async httpObservationFacts(start: string, end: string) {
+    const [row] = await this.sql`SELECT COUNT(*)::int AS requests,
+      COUNT(*) FILTER (WHERE status>=500)::int AS failed,
+      percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS latency_p95_ms,
+      MIN(completed_at) AS first_request_at, MAX(completed_at) AS last_request_at
+      FROM api2business_http_observations WHERE completed_at>=${start} AND completed_at<${end}`;
+    const instances = await this.sql`SELECT instance_id,started_at,last_seen_at,failed_writes
+      FROM api2business_observer_instances WHERE started_at<${end} AND last_seen_at>=${start}
+      ORDER BY started_at`;
+    return { ...row, instances: Array.from(instances) };
   }
 
   async getSnapshot(key: string) {

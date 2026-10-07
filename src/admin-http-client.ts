@@ -359,6 +359,15 @@ export class AdminHttpClient {
     if (period) query.set("period", period);
     return this.request(`/api/operations/ledger?${query.toString()}`, {}, 60000);
   }
+  observationReport(start?: string | null, end?: string | null): Promise<Record<string, unknown>> {
+    const query=new URLSearchParams();
+    if (start) query.set("start",start);
+    if (end) query.set("end",end);
+    return this.request(`/api/observability/report?${query}`,{},60000);
+  }
+  observationGet(id: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/observability/reports/${encodeURIComponent(id)}`);
+  }
   readStatus(): Promise<Record<string, unknown>> {
     return this.request("/api/admin/read-status");
   }

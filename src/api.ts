@@ -1,3 +1,4 @@
+import { OperationalObservability } from "./operational-observability";
 import { createServerContext } from "./bootstrap";
 import { loadConfig, startConfigHotReload } from "./config";
 import { ApplicationDispatcher } from "./dispatcher";
@@ -71,10 +72,12 @@ const executeWorkerOperation = createWorkerOperationExecutor({
   dispatcher, scores: context.monitor, operations, imports: workerImports,
   lifecycle: workerLifecycle, upstreams, temporal, purchases: workerPurchases,
 });
+const observability = new OperationalObservability(config, operationsStore, reads);
+await observability.start();
 const server = Bun.serve({
   hostname: target.listenHost,
   port: target.listenPort,
-  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, purchases, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation, upstreamSchedulingV2),
+  fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, purchases, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation, upstreamSchedulingV2, observability),
 });
 const stopConfigHotReload = startConfigHotReload(config, requiredOption("--config"), (next) => {
   context.runtime.updateApiKeyFailoverRules(
@@ -85,6 +88,8 @@ const stopConfigHotReload = startConfigHotReload(config, requiredOption("--confi
 
 console.log(JSON.stringify({
   ok: true,
+  observedAt: new Date().toISOString(),
+  instanceId: observability.instanceId,
   component: "api2business-api",
   runtime: runtimeId,
   listen: server.url.toString(),
@@ -102,6 +107,7 @@ async function stop(): Promise<void> {
   server.stop(true);
   stopConfigHotReload();
   context.close();
+  await observability.close();
   await operations.close();
   await reads.close();
   if (temporal) await temporal.close();

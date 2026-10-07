@@ -295,3 +295,20 @@ test("worker and CLI keep the Sub2API database owner in the API read broker", ()
   );
   expect(worker).toContain("else await standaloneStop");
 });
+
+test("live broker identity and last failure survive a later successful read", async () => {
+  let fail=true;
+  const database=new FakeDatabase(async()=>{if(fail)throw new Error('sensitive SQL detail');return [{ok:1}];});
+  const executor=new SingleConnectionSub2ApiReadExecutor('postgres://fixture',options(),database);
+  await expect(executor.query(request('failed'))).rejects.toThrow();
+  const failed=executor.status();
+  fail=false; await executor.query(request('recovered'));
+  const recovered=executor.status();
+  expect(recovered.instanceId).toBe(failed.instanceId);
+  expect(recovered.observedAt).toBeDefined();
+  expect(recovered.lastErrorAt).toBe(failed.lastErrorAt);
+  expect(recovered.lastError).toBe('sub2api_read_failed');
+  expect(JSON.stringify(recovered)).not.toContain('sensitive SQL detail');
+  expect(recovered.totalQueries).toBe(2);
+  await executor.close();
+});

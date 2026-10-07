@@ -109,6 +109,24 @@ webProbe:
       settleMs: 3000
       commandTimeoutSeconds: 90
       outputLimits: { failures: 12, network: 40, console: 12 }
+    observability:
+      path: /observability
+      readySelector: '#observability-state[data-ready="true"]'
+      screenshotName: api2business-observability-desktop.png
+      mobileScreenshotName: api2business-observability-mobile.png
+      viewport:
+        width: 1920
+        height: 1080
+      mobileViewport:
+        width: 390
+        height: 844
+      navigationTimeoutMs: 30000
+      settleMs: 2000
+      commandTimeoutSeconds: 90
+      outputLimits:
+        failures: 12
+        network: 40
+        console: 12
 
 sub2api:
   baseUrl: https://api.example.com/api/v1
@@ -170,9 +188,9 @@ sub2api:
     idleSeconds: 600
     model: gpt-5.6-terra
     platformModels:
-      openai: [gpt-5.6-terra, gpt-5.6-sol]
-      anthropic: [claude-sonnet-5-5]
-      grok: [grok-4.5]
+      openai: [ gpt-5.6-terra, gpt-5.6-sol ]
+      anthropic: [ claude-sonnet-5-5 ]
+      grok: [ grok-4.5 ]
     reasoningEffort: low
     candidateLimit: 10
     concurrency: 1000
@@ -191,7 +209,7 @@ sub2api:
       secretFile: .state/idle-probe/probe-keys.json
   priorityPlan:
     platform: openai
-    eligibleGroupIds: [2, 3]
+    eligibleGroupIds: [ 2, 3 ]
     requiredConfidence: high
     requireCurrentAvailable: true
     reliabilityWeight: 35
@@ -235,7 +253,7 @@ sub2api:
         - 欠费
   claudePriorityPlan:
     platform: anthropic
-    eligibleGroupIds: [119]
+    eligibleGroupIds: [ 119 ]
     requiredConfidence: high
     requireCurrentAvailable: true
     reliabilityWeight: 60
@@ -279,7 +297,7 @@ sub2api:
         - 欠费
   grokPriorityPlan:
     platform: grok
-    eligibleGroupIds: [62]
+    eligibleGroupIds: [ 62 ]
     requiredConfidence: high
     requireCurrentAvailable: true
     reliabilityWeight: 70
@@ -387,7 +405,7 @@ operations:
       codex:
         enabled: true
         platform: openai
-        eligibleGroupIds: [2, 3]
+        eligibleGroupIds: [ 2, 3 ]
         idleProbeIntervalSeconds: 60
         features:
           scoreRead: true
@@ -400,7 +418,7 @@ operations:
       claude:
         enabled: true
         platform: anthropic
-        eligibleGroupIds: [119]
+        eligibleGroupIds: [ 119 ]
         idleProbeIntervalSeconds: 300
         features:
           scoreRead: true
@@ -413,7 +431,7 @@ operations:
       grok:
         enabled: true
         platform: grok
-        eligibleGroupIds: [62]
+        eligibleGroupIds: [ 62 ]
         idleProbeIntervalSeconds: 60
         features:
           scoreRead: true
@@ -441,7 +459,7 @@ operations:
     capacity: 3
     rateMultiplier: 1000
     importTimeoutMs: 600000
-    groupIds: [2, 3]
+    groupIds: [ 2, 3 ]
     sourceProxyId: 0
     perAccountProxy: false
     planType: k12
@@ -451,7 +469,7 @@ operations:
     pageSize: 10
     defaultTemplate: codex-upstream-failover
     primaryGroupId: 2
-    groupIds: [2, 3]
+    groupIds: [ 2, 3 ]
     priority: 1
     capacity: 16
     proxyId: 0
@@ -478,8 +496,16 @@ operations:
       dryRun: true
       durationSeconds: 60
       rules:
-        - statusCodes: [499, 502, 503, 504, 522, 524]
-          keywords: [stream_read_error, stream disconnected before completion, upstream stream disconnected, upstream_unavailable, upstream service temporarily unavailable, unexpected eof]
+        - statusCodes: [ 499, 502, 503, 504, 522, 524 ]
+          keywords:
+            [
+              stream_read_error,
+              stream disconnected before completion,
+              upstream stream disconnected,
+              upstream_unavailable,
+              upstream service temporarily unavailable,
+              unexpected eof
+            ]
           description: 原生模板未切号的上游断流，外部补偿冷却 1 分钟
   upstreamBenchmark:
     enabled: true
@@ -488,13 +514,13 @@ operations:
     model: gpt-5.6-luna
     requestTimeoutMs: 75000
   oauthEconomics:
-    excludedAccountIds: [999999]
+    excludedAccountIds: [ 999999 ]
     idealApiUsdPerAccount:
       free: 3.8
       k12: 20
       plus: 135
       team: 28
-  rechargeDenominationsCny: [10, 20, 50]
+  rechargeDenominationsCny: [ 10, 20, 50 ]
   planTtlMinutes: 30
   auditLimit: 200
   priorityVerificationTimeoutMs: 15000
@@ -616,7 +642,7 @@ runtime:
       workerHealthPort: 8081
       webListenHost: 127.0.0.1
       webListenPort: 15173
-      webAllowedHosts: [api2business.example.com]
+      webAllowedHosts: [ api2business.example.com ]
       webApiBaseUrl: http://127.0.0.1:8080
       secureCookies: false
       databasePath: .state/api2business.sqlite
@@ -654,3 +680,10 @@ runtime:
       webPasswordEnv: API2BUSINESS_WEB_PASSWORD
       apiKeyEnv: API2BUSINESS_API_KEY
       sessionSecretEnv: API2BUSINESS_SESSION_SECRET
+observability:
+  sub2apiSuccessPercent: 99
+  sub2apiTtftP95Ms: 30000
+  api2businessNon5xxPercent: 99.9
+  api2businessLatencyP95Ms: 3000
+  walletFreshnessSeconds: 3600
+  retentionDays: 30

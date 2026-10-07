@@ -29,6 +29,11 @@ export interface Sub2ApiReadResult<Row extends Record<string, unknown>> {
 }
 
 export interface Sub2ApiReadStatus {
+  observedAt?: string;
+  instanceId?: string;
+  startedAt?: string;
+  uptimeSeconds?: number;
+  lastErrorAt?: string | null;
   owner: "native-api";
   applicationName: "api2business-read-broker";
   connectionLimit: 1;
@@ -104,6 +109,10 @@ function codedError(code: string, message: string): Error {
 }
 
 export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
+  private readonly instanceId = crypto.randomUUID();
+  private readonly startedAt = new Date().toISOString();
+  private readonly startedClock = performance.now();
+  private lastErrorAt: string | null = null;
   private database: ScoreDatabaseLike;
   private readonly databaseOverride: boolean;
   private readonly manualQueue: Array<QueueTask<Record<string, unknown>>> = [];
@@ -211,6 +220,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
             `query ${request.kind} exceeded ${this.options.queueTimeoutMs}ms in queue`,
           );
           this.metrics.lastError = error.message;
+          this.lastErrorAt = new Date().toISOString();
           reject(error);
         }, this.options.queueTimeoutMs),
       };
@@ -228,6 +238,11 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
 
   status(): Sub2ApiReadStatus {
     return {
+      observedAt: new Date().toISOString(),
+      instanceId: this.instanceId,
+      startedAt: this.startedAt,
+      uptimeSeconds: Math.floor((performance.now() - this.startedClock) / 1000),
+      lastErrorAt: this.lastErrorAt,
       owner: "native-api",
       applicationName: "api2business-read-broker",
       connectionLimit: 1,
@@ -387,7 +402,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
         rows,
         queueDurationMs,
         queryDurationMs,
-        totalDurationMs: roundedDuration(totalStartedAt),
+        totalDurationMs: Math.round((queueDurationMs + roundedDuration(totalStartedAt)) * 10) / 10,
         queryStartedAt,
         queryCompletedAt,
         deduplicated: false,
@@ -395,7 +410,6 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
       };
       this.metrics.totalQueries += 1;
       this.metrics.lastCompletedAt = queryCompletedAt;
-      this.metrics.lastError = null;
       this.remember(task.request.key, result);
       task.resolve(this.readStored(task.request.key) ?? result);
     } catch (error) {
@@ -406,7 +420,8 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
       else this.metrics.failedQueries += 1;
       this.metrics.totalQueries += 1;
       this.metrics.lastCompletedAt = new Date().toISOString();
-      this.metrics.lastError = message;
+      this.metrics.lastError = timedOut ? "sub2api_read_query_timeout" : "sub2api_read_failed";
+      this.lastErrorAt = this.metrics.lastCompletedAt;
       task.reject(timedOut
         ? codedError(
           "sub2api_read_query_timeout",
