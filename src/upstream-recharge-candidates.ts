@@ -145,6 +145,10 @@ function object(value: unknown): Row {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Row : {};
 }
 
+function sampleTime(value: unknown): Date {
+  return value instanceof Date ? value : new Date(String(value));
+}
+
 function billingPatterns(config: AppConfig): string[] {
   return [...new Set([
     ...config.sub2api.priorityPlan.procurementAdvice.billingErrorPatterns,
@@ -159,11 +163,11 @@ export function lowWalletRows(rows: Row[], threshold: number, lookbackHours: num
     const balance = number(row.remaining_cny);
     if (!wallet || balance === null || balance >= threshold || row.probe_ok !== true) continue;
     const current = latest.get(wallet);
-    if (!current || Date.parse(String(row.sampled_at)) > Date.parse(String(current.sampled_at))) latest.set(wallet, row);
+    if (!current || sampleTime(row.sampled_at).getTime() > sampleTime(current.sampled_at).getTime()) latest.set(wallet, row);
   }
   const output: Row[] = [];
   for (const row of latest.values()) {
-    const anchor = String(row.sampled_at);
+    const anchor = sampleTime(row.sampled_at).toISOString();
     const ids = [Number(row.account_id), ...((Array.isArray(row.account_cost_inputs) ? row.account_cost_inputs : [])
       .map((item) => Number(object(item).accountId)))];
     for (const accountId of new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0))) {

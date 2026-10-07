@@ -13,6 +13,15 @@ test("低余额候选严格使用人民币小于阈值，并展开共享 wallet 
   expect(rows.every((row) => Number(row.balance_cny) < 10 && row.lookbackHours === 24)).toBe(true);
 });
 
+test("真实数据库 Date 时间保留毫秒并序列化为 PostgreSQL 可读取的 ISO 时间", () => {
+  const rows = lowWalletRows([
+    { wallet_key: "https://a.example", sampled_at: new Date("2026-09-28T15:55:08.900Z"), probe_ok: true, remaining_cny: 2, account_id: 11 },
+    { wallet_key: "https://a.example", sampled_at: new Date("2026-09-28T15:55:08.100Z"), probe_ok: true, remaining_cny: 4, account_id: 11 },
+  ], 10, 24);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ balance_cny: 2, anchor_at: "2026-09-28T15:55:08.900Z" });
+});
+
 test("充值候选历史 SQL 保留欠费前窗口和业务错误排除口径", () => {
   expect(rechargeCandidatesQuery).toContain("o.created_at < c.anchor_at");
   expect(rechargeCandidatesQuery).toContain("c.anchor_at - ($3::int * INTERVAL '1 hour')");
