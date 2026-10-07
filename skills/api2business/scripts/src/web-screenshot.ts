@@ -2,17 +2,49 @@ import { readFileSync } from "node:fs";
 import { loadConfig, type HttpCliTarget } from "../../../../src/config";
 import { readSecret } from "../../../../src/secrets";
 import { runBoundedProcess } from "../../../../src/bounded-process";
+import { createSessionCookie } from "../../../../src/web-auth";
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+export function webScreenshotHelp(): Record<string, unknown> {
+  return {
+    command: "web screenshot",
+    usage: "bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml --over-api web screenshot [options]",
+    options: {
+      "--profile": "owning YAML 的截图 profile；省略时使用 defaultSmokeProfile",
+      "--scope": "已启用的 codex、claude 或 grok 作用域",
+      "--session-ttl-seconds": "独立验收会话的正整数期限，必须短于部署配置；省略时使用正式登录会话",
+      "--burst-count": "同页截图 1..30 帧；多帧使用 profile 的桌面视口",
+      "--burst-interval": "帧间隔 200ms..10s；默认 1s",
+      "--manifest": "完整原始事件的绝对文件路径",
+      "--json": "结构化回执；Cookie 和 Secret 不输出",
+    },
+    evidence: "默认回执保留有界失败请求；截图与原始事件不自动判定业务成功",
+  };
+}
+
 export async function runWebScreenshot(
-  parsed: { overApi: boolean; configPath: string; profile: string | null; scope: string | null },
+  parsed: {
+    overApi: boolean; configPath: string; profile: string | null; scope: string | null;
+    sessionTtlSeconds?: number | null; burstCount?: number | null;
+    burstInterval?: string | null; manifest?: string | null;
+  },
   config: ReturnType<typeof loadConfig>,
   target: HttpCliTarget,
 ): Promise<Record<string, unknown>> {
   if (!parsed.overApi) throw new Error("web screenshot requires --over-api");
+  const burstCount = parsed.burstCount ?? 1;
+  if (!Number.isSafeInteger(burstCount) || burstCount < 1 || burstCount > 30) throw new Error("--burst-count must be from 1 to 30");
+  const burstInterval = parsed.burstInterval ?? "1s";
+  const intervalMatch = /^([1-9]\d*)(ms|s|m)$/u.exec(burstInterval);
+  const intervalMs = intervalMatch ? Number(intervalMatch[1]) * (intervalMatch[2] === "ms" ? 1 : intervalMatch[2] === "s" ? 1000 : 60000) : NaN;
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 200 || intervalMs > 10000) throw new Error("--burst-interval must be from 200ms to 10s");
+  const sessionTtlSeconds = parsed.sessionTtlSeconds ?? null;
+  if (sessionTtlSeconds !== null && (!Number.isSafeInteger(sessionTtlSeconds) || sessionTtlSeconds <= 0 || sessionTtlSeconds >= config.webAuth.sessionTtlSeconds)) {
+    throw new Error("--session-ttl-seconds must be positive and shorter than webAuth.sessionTtlSeconds");
+  }
   const scheduling = config.operations.upstreamSchedulingV2;
   if (parsed.scope !== null && !scheduling?.scopes[parsed.scope]?.enabled) {
     throw new Error(`unavailable scope: ${parsed.scope}`);
@@ -31,9 +63,17 @@ export async function runWebScreenshot(
   const cookiePair = cookieHeader.split(";", 1)[0] ?? "";
   const separator = cookiePair.indexOf("=");
   const cookieName = separator > 0 ? cookiePair.slice(0, separator).trim() : "";
-  const cookieValue = separator > 0 ? cookiePair.slice(separator + 1).trim() : "";
+  let cookieValue = separator > 0 ? cookiePair.slice(separator + 1).trim() : "";
   if (cookieName !== config.webAuth.cookieName || cookieValue === "") {
     throw new Error(`Api2Business session response is missing ${config.webAuth.cookieName}`);
+  }
+  if (sessionTtlSeconds !== null) {
+    const sessionRef = config.runtime.native.env.API2BUSINESS_SESSION_SECRET;
+    if (!sessionRef) throw new Error("runtime.native.env.API2BUSINESS_SESSION_SECRET is required for a short-lived screenshot session");
+    const sessionSecret = readSecret(config, sessionRef);
+    const fixture = { ...config, webAuth: { ...config.webAuth, sessionTtlSeconds } };
+    cookieValue = createSessionCookie(fixture, { password: "", apiKey: "", sessionSecret }, true)
+      .split(";", 1)[0]!.slice(cookieName.length + 1);
   }
   const raw = record(Bun.YAML.parse(readFileSync(parsed.configPath, "utf8"))) ?? {};
   const webProbe = record(raw.webProbe) ?? {};
@@ -63,7 +103,10 @@ export async function runWebScreenshot(
   if (parsed.scope !== null) {
     url.searchParams.set("scope", parsed.scope);
   }
-  process.stderr.write(`API2BUSINESS WEB SCREENSHOT profile=${profileName} scope=${parsed.scope ?? "default"} phase=capturing\n`);
+  const startedAt = Date.now();
+  const progress = () => process.stderr.write(`API2BUSINESS WEB SCREENSHOT profile=${profileName} scope=${parsed.scope ?? "default"} phase=capturing elapsedMs=${Date.now() - startedAt}\n`);
+  progress();
+  const heartbeat = setInterval(progress, 5000);
   const probe = await runBoundedProcess([
     config.monitor.cli.executable,
     config.monitor.cli.entrypoint,
@@ -71,7 +114,9 @@ export async function runWebScreenshot(
     "--url", url.toString(),
     "--provided-session-cookie-source", "env:API2BUSINESS_WEB_PROBE_SESSION_COOKIE",
     "--provided-session-cookie-name", config.webAuth.cookieName,
-    "--viewports", `${viewportValue},${mobileViewportValue}`,
+    ...(burstCount > 1 ? ["--viewport", viewportValue, "--burst-count", String(burstCount), "--burst-interval", burstInterval]
+      : ["--viewports", `${viewportValue},${mobileViewportValue}`]),
+    ...(parsed.manifest ? ["--manifest", parsed.manifest] : []),
     "--settle-ms", String(settleMs),
     ...(Number.isSafeInteger(profile.commandTimeoutSeconds)
       ? ["--command-timeout-seconds", String(profile.commandTimeoutSeconds)] : []),
@@ -82,7 +127,7 @@ export async function runWebScreenshot(
     env: { ...process.env, API2BUSINESS_WEB_PROBE_SESSION_COOKIE: cookieValue },
     timeoutMs: config.monitor.cli.timeoutMs,
     maxOutputBytes: 2 * 1024 * 1024,
-  });
+  }).finally(() => clearInterval(heartbeat));
   if (probe.stdout.includes(cookieValue) || probe.stderr.includes(cookieValue)) {
     throw new Error("WebProbe output contained session material and was blocked");
   }
@@ -99,7 +144,7 @@ export async function runWebScreenshot(
     url: url.toString(),
     scope: parsed.scope,
     process: { exitCode: probe.exitCode, timedOut: probe.timedOut },
-    session: { cookieName, present: true, valuesPrinted: false },
+    session: { cookieName, present: true, ttlSeconds: sessionTtlSeconds ?? config.webAuth.sessionTtlSeconds, fixture: sessionTtlSeconds !== null, valuesPrinted: false },
     probe: result,
     mutation: false,
     valuesPrinted: false,
@@ -112,7 +157,7 @@ export async function runWebScreenshot(
     url: url.toString(),
     scope: parsed.scope,
     process: { exitCode: probe.exitCode, timedOut: probe.timedOut },
-    session: { cookieName, present: true, valuesPrinted: false },
+    session: { cookieName, present: true, ttlSeconds: sessionTtlSeconds ?? config.webAuth.sessionTtlSeconds, fixture: sessionTtlSeconds !== null, valuesPrinted: false },
     probe: projection,
     mutation: false,
     valuesPrinted: false,

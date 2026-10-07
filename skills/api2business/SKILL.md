@@ -74,7 +74,8 @@ description: >-
 7. 按“验收”章节完成检查：
    - 检查登录、主要数据页和至少一个异步作业；
    - 检查重启后的账本、缓存、采样和作业状态；
-   - 任一步失败时停止在首个断点，不跳过配置或 Secret 校验。
+   - 任一步失败时保留首个断点，修复后从原入口复验。
+   - 不跳过配置或 Secret 校验，也不把可修复的实现或取证缺口当作任务阻塞。
 
 ## 部署
 
@@ -265,6 +266,27 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - `--scope` 可选，只接受 owning YAML 中已启用的 `codex`、`claude` 或 `grok` 作用域；CLI 将其写入
   V2 深链查询参数，并在 stderr 输出带 profile、scope 和 phase 的短进度行，避免临时脚本拼接 URL
   或长时间无输出。省略时使用配置中的默认作用域。
+- 连拍复用 `web screenshot`。
+  - `web screenshot --help` 直接显示本操作参数，不要求配置或重印完整 catalog。
+  - `--burst-count 1..30` 和 `--burst-interval 200ms..10s` 控制同页采集。
+  - 多帧时使用 profile 的桌面视口；单帧保持桌面与移动视口采集。
+  - `--manifest <绝对路径>` 留存完整原始事件，默认回执保留有界失败请求。
+  - 采集期间每五秒输出 profile、scope、phase 和耗时。
+- `--session-ttl-seconds <正整数>` 显式创建独立的短时效验收会话。
+  - 期限必须短于 `webAuth.sessionTtlSeconds`；省略时使用正式登录 API 返回的会话。
+  - 先通过正式 `/api/login` 认证，再从 owning Secret source 读取签名材料。
+  - 复用原生认证函数，不修改部署配置或其他用户会话。
+  - 失效复验和正反经验见
+    [Web 登录态与失效复验](../../docs/reference/web-authentication.md)。
+
+```bash
+bun skills/api2business/scripts/api2business-cli.ts \
+  --config config/api2business.yaml --over-api \
+  web screenshot --profile upstream-scheduling-v2 --scope codex \
+  --session-ttl-seconds 20 --burst-count 10 --burst-interval 5s \
+  --manifest /absolute/path/session-expiry.json
+```
+
 - CLI 通过 `/api/login` 获取 Cookie，并只在内存中传给 WebProbe；WebProbe 不填写登录表单，Cookie 不进入 argv、日志、报告或磁盘。
 - 验证重启后账本、缓存、采样和作业状态仍可读取。
 - 失败时按配置、Secret、网络、数据库、worker 和外部 API 的顺序定位首个断点。

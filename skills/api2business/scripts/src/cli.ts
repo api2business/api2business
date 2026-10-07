@@ -1,4 +1,4 @@
-import { runWebScreenshot } from "./web-screenshot";
+import { runWebScreenshot, webScreenshotHelp } from "./web-screenshot";
 import { measureQuotaMonitor } from './quota-monitor-measure';
 import { randomUUID } from "node:crypto";
 import { AdminHttpClient } from "../../../../src/admin-http-client";
@@ -65,6 +65,10 @@ interface Parsed {
   scope: string | null;
   selection: string | null;
   profile: string | null;
+  sessionTtlSeconds: number | null;
+  burstCount: number | null;
+  burstInterval: string | null;
+  manifest: string | null;
   model: string | null;
   day: string | null;
   period: string | null;
@@ -134,7 +138,7 @@ function value(args: string[], name: string): string | null {
 function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
+  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
   const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--cache-only", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -199,6 +203,10 @@ function parseArgs(args: string[]): Parsed {
     scope: value(args, "--scope"),
     selection: value(args, "--selection"),
     profile: value(args, "--profile"),
+    sessionTtlSeconds: integer("--session-ttl-seconds"),
+    burstCount: integer("--burst-count"),
+    burstInterval: value(args, "--burst-interval"),
+    manifest: value(args, "--manifest"),
     model: value(args, "--model"),
     affectedOnly: args.includes("--affected-only"),
     file: value(args, "--file"), priority: integer("--priority"), capacity: integer("--capacity"),
@@ -258,7 +266,7 @@ function help(): Record<string, unknown> {
       "records list|delete",
       "credit test",
       "api smoke --over-api",
-      "web screenshot [--profile <owning smoke profile>] [--scope <enabled scope>] --over-api",
+      "web screenshot [--profile <owning smoke profile>] [--scope <enabled scope>] [--session-ttl-seconds N] [--burst-count 1..30] [--burst-interval 200ms..10s] [--manifest <absolute path>] --over-api",
       "workflow status --id <workflow-id>",
       "priority history --over-api",
       "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api",
@@ -1204,6 +1212,7 @@ function aggregateSmoke(): Record<string, unknown> {
 export async function runCli(args: string[]): Promise<void> {
   const wantsJson = args.includes("--json");
   try {
+    if (args.includes("--help") && args.includes("web") && args[args.indexOf("web") + 1] === "screenshot") return emit(webScreenshotHelp(), wantsJson);
     if (args.includes("--help") || args.length === 0) return emit(help(), wantsJson);
     const overApiIndex = args.indexOf("--over-api");
     const overApiValue = overApiIndex >= 0 ? args[overApiIndex + 1] : undefined;
