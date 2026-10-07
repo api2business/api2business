@@ -1,6 +1,8 @@
 // Both event sources use the same half-open window. No recent-N truncation.
 export const observabilitySql = `
-WITH probe_keys AS (
+WITH rate_events AS (
+  SELECT * FROM jsonb_to_recordset($3::jsonb) AS r(account_id bigint,at timestamptz,rate_cny double precision)
+), probe_keys AS (
   SELECT k.id FROM api_keys k LEFT JOIN users u ON u.id=k.user_id
   WHERE u.email='monitor-user@sub2api.platform-infra.local'
     OR LOWER(COALESCE(k.name,'')) LIKE 'api2business-probe-%'
@@ -40,12 +42,21 @@ errors AS (
   FROM errors e WHERE NULLIF(TRIM(e.request_id),'') IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM success s WHERE s.request_id=e.request_id)
   ORDER BY e.request_id,e.created_at DESC,e.id DESC
+), cost_usage AS (
+  SELECT u.*, rate.rate_cny,rate.at AS rate_at FROM usage u
+  LEFT JOIN LATERAL (
+    SELECT r.rate_cny,r.at FROM rate_events r WHERE r.account_id=u.account_id AND r.at<=u.created_at
+    ORDER BY r.at DESC LIMIT 1
+  ) rate ON true
 ), cost AS (
   SELECT account_id,COUNT(*)::int AS records,
-    COUNT(*) FILTER (WHERE actual_cost IS NOT NULL AND actual_cost>=0 AND rate_multiplier>0)::int AS valid_records,
-    SUM(actual_cost / NULLIF(rate_multiplier,0)) FILTER (WHERE actual_cost>=0 AND rate_multiplier>0)::float8 AS normalized_cost,
+    COUNT(*) FILTER (WHERE actual_cost IS NOT NULL AND actual_cost>=0 AND rate_multiplier>0 AND rate_cny IS NULL)::int AS valid_records,
+    COUNT(*) FILTER (WHERE actual_cost>=0 AND rate_multiplier>0 AND rate_cny>0)::int AS historical_records,
+    SUM(actual_cost / NULLIF(rate_multiplier,0)*rate_cny) FILTER (WHERE actual_cost>=0 AND rate_multiplier>0 AND rate_cny>0)::float8 AS historical_cost_cny,
+    MIN(rate_at) AS first_rate_at,MAX(rate_at) AS last_rate_at,
+    SUM(actual_cost / NULLIF(rate_multiplier,0)) FILTER (WHERE actual_cost>=0 AND rate_multiplier>0 AND rate_cny IS NULL)::float8 AS normalized_cost,
     MIN(created_at) AS first_at
-  FROM usage GROUP BY account_id
+  FROM cost_usage GROUP BY account_id
 ), account_rows AS (
   SELECT id,platform,type,RTRIM(COALESCE(credentials->>'base_url',''),'/') AS base_url,
     deleted_at IS NULL AS active

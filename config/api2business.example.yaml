@@ -680,6 +680,7 @@ runtime:
       webPasswordEnv: API2BUSINESS_WEB_PASSWORD
       apiKeyEnv: API2BUSINESS_API_KEY
       sessionSecretEnv: API2BUSINESS_SESSION_SECRET
+  httpIdleTimeoutSeconds: 120
 observability:
   sub2apiSuccessPercent: 99
   sub2apiTtftP95Ms: 30000

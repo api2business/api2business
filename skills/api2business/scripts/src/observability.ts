@@ -7,13 +7,19 @@ type Row=Record<string,any>;
 export const observabilityHelp={ok:true,commands:[
   'observability configure --file settings.json [--confirm] (YAML dry-run by default; restart API to apply)',
   'observability report [--start ISO --end ISO] --over-api [--include-records] (default: last 2 hours)',
+  'observability verify --over-api (read-only SQL fixtures, no business records)',
   'observability get --id UUID --over-api [--include-records] (frozen report)',
   'observability check [--rounds 3] --over-api (read-only quota/recharge/broker sampling)',
 ], output:'Default report bounds wallet/cost details to 10 rows, with total and omitted counts. Full report remains available by id.'};
 export function configureObservability(configPath:string,file:string,confirm:boolean) {
-  const settings=parseObservabilityConfig(JSON.parse(readFileSync(file,'utf8')));
+  const input=JSON.parse(readFileSync(file,'utf8'));
+  const settings=parseObservabilityConfig(input);
   if (!settings) throw new Error('settings must be a non-null object');
   const document=parseDocument(readFileSync(configPath,'utf8'));
+  if (input.httpIdleTimeoutSeconds !== undefined) {
+    if (!Number.isInteger(input.httpIdleTimeoutSeconds) || input.httpIdleTimeoutSeconds<1 || input.httpIdleTimeoutSeconds>255) throw new Error('httpIdleTimeoutSeconds must be 1..255');
+    document.setIn(['runtime','httpIdleTimeoutSeconds'],input.httpIdleTimeoutSeconds);
+  }
   document.set('observability',settings);
   const root=document.toJS();
   const baseline=root.webProbe?.smokeProfiles?.[root.webProbe?.defaultSmokeProfile];

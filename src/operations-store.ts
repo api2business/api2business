@@ -484,6 +484,23 @@ export class OperationsStore {
     await this.sql`DELETE FROM api2business_http_observations WHERE completed_at < now()-${retentionDays}*interval '1 day'`;
   }
 
+  async observedCostRates(start: string, end: string) {
+    return await this.sql`
+      WITH events AS MATERIALIZED (
+        SELECT s.sampled_at AS at, (i->>'accountId')::bigint AS account_id,
+          (i->>'costRateCnyPerApiUsd')::double precision AS rate_cny
+        FROM api2business_upstream_quota_samples s,
+          LATERAL jsonb_array_elements(s.account_cost_inputs) i
+        WHERE s.sampled_at<${end} AND i->>'source'='detected'
+          AND (i->>'costRateCnyPerApiUsd')::numeric>0
+      ), anchor AS (
+        SELECT DISTINCT ON (account_id) * FROM events WHERE at<${start}
+        ORDER BY account_id,at DESC
+      ) SELECT * FROM anchor UNION ALL SELECT * FROM events WHERE at>=${start}
+      ORDER BY account_id,at
+    `;
+  }
+
   async httpObservationFacts(start: string, end: string) {
     const [row] = await this.sql`SELECT COUNT(*)::int AS requests,
       COUNT(*) FILTER (WHERE status>=500)::int AS failed,

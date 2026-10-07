@@ -14,6 +14,8 @@ export function webScreenshotHelp(): Record<string, unknown> {
     usage: "bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml --over-api web screenshot [options]",
     options: {
       "--profile": "owning YAML 的截图 profile；省略时使用 defaultSmokeProfile",
+      "--id": "巡检页读取冻结报告 ID；用于复验同一窗口",
+      "--account": "巡检页筛选包含此账号的钱包",
       "--scope": "已启用的 codex、claude 或 grok 作用域",
       "--session-ttl-seconds": "独立验收会话的正整数期限，必须短于部署配置；省略时使用正式登录会话",
       "--burst-count": "同页截图 1..30 帧；多帧使用 profile 的桌面视口",
@@ -28,6 +30,7 @@ export function webScreenshotHelp(): Record<string, unknown> {
 export async function runWebScreenshot(
   parsed: {
     overApi: boolean; configPath: string; profile: string | null; scope: string | null;
+    id?: string | null; account?: string | null;
     sessionTtlSeconds?: number | null; burstCount?: number | null;
     burstInterval?: string | null; manifest?: string | null;
   },
@@ -100,6 +103,10 @@ export async function runWebScreenshot(
   const viewportValue = `${Number(viewport.width)}x${Number(viewport.height)}`;
   const mobileViewportValue = `${Number(mobileViewport.width)}x${Number(mobileViewport.height)}`;
   const url = new URL(path, originBaseUrl);
+  if (url.pathname === "/observability") {
+    if (parsed.id) url.searchParams.set("report",parsed.id);
+    if (parsed.account) url.searchParams.set("account",parsed.account);
+  }
   if (parsed.scope !== null) {
     url.searchParams.set("scope", parsed.scope);
   }

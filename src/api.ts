@@ -75,6 +75,7 @@ const executeWorkerOperation = createWorkerOperationExecutor({
 const observability = new OperationalObservability(config, operationsStore, reads);
 await observability.start();
 const server = Bun.serve({
+  idleTimeout: config.runtime.httpIdleTimeoutSeconds,
   hostname: target.listenHost,
   port: target.listenPort,
   fetch: createHandler(dispatcher, config, context.auth, adminToken, target.secureCookies, operations, imports, purchases, lifecycle, upstreams, reads, context.runtime, executeWorkerOperation, upstreamSchedulingV2, observability),
@@ -90,6 +91,7 @@ console.log(JSON.stringify({
   ok: true,
   observedAt: new Date().toISOString(),
   instanceId: observability.instanceId,
+  httpIdleTimeoutSeconds: config.runtime.httpIdleTimeoutSeconds,
   component: "api2business-api",
   runtime: runtimeId,
   listen: server.url.toString(),

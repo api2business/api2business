@@ -1,3 +1,4 @@
+import { verifyObservationWindow } from "./observability-fixture";
 import { observabilityHelp, configureObservability, compactObservation, checkObservability } from "./observability";
 import { runWebScreenshot, webScreenshotHelp } from "./web-screenshot";
 import { measureQuotaMonitor } from './quota-monitor-measure';
@@ -633,6 +634,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
 async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: HttpCliTarget): Promise<unknown> {
   const client = new AdminHttpClient(config, target);
   if (parsed.command[0] === "observability") {
+    if (parsed.command[1] === "verify") return await verifyObservationWindow(client);
     if (parsed.command[1] === "report") return compactObservation(await client.observationReport(parsed.start,parsed.end),parsed.includeRecords);
     if (parsed.command[1] === "get" && parsed.id) return compactObservation(await client.observationGet(parsed.id),parsed.includeRecords);
     if (parsed.command[1] === "check") return await checkObservability(client,parsed.rounds ?? 3);

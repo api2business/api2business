@@ -63,3 +63,10 @@ test('CLI bounds details and samples continue after an earlier 502',async()=>{
  expect(result.ok).toBeFalse();expect(result.samples).toHaveLength(6);
  expect(result.samples[1]?.error).toContain('502');expect(result.samples[4]?.ok).toBeTrue();
 });
+
+test('persisted historical rates cover cost without retroactively applying current policy',()=>{
+ const facts={accounts:[account(1)],costAccounts:[{account_id:1,records:2,valid_records:0,historical_records:2,historical_cost_cny:1.5,first_rate_at:'2026-10-07T01:00:00Z',last_rate_at:'2026-10-07T03:00:00Z',first_at:'2026-10-07T02:00:00Z'}]};
+ const result=costGovernance(facts,[],config,at,{defaultCnyPerApiUsd:99,walletCnyPerApiUsd:{}},'2026-10-07T05:00:00Z');
+ expect(result).toMatchObject({complete:true,totalCostCny:1.5,knownRecords:2,coveragePercent:100});
+ expect(result.accounts[0]?.reason).toBeNull();
+});

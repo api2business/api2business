@@ -28,6 +28,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 不传 `--confirm` 只预览。
   - 同时建立沿用现有视口的 `observability` 截图 profile。
   - 修改后使用 `native start --component all` 应用同版本配置。
+  - 可选 `httpIdleTimeoutSeconds` 写入 `runtime.httpIdleTimeoutSeconds`，范围 1–255 秒。
 - JSON 字段：
   - `sub2apiSuccessPercent`：Sub2API 成功率百分比目标。
   - `sub2apiTtftP95Ms`：TTFT P95 毫秒目标。
@@ -50,12 +51,26 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 陈旧的正余额是旧证据，不能当成此刻可用额度保证。
 - 成本必须披露缺少账务字段、供应商倍率或历史币种政策的记录数。
   - 只有源证据不晚于使用记录时才能计入已知成本。
+  - 优先使用已有额度采样中保存的 detected 倍率及币种换算，再按每条请求时间匹配。
   - 当前倍率和当前币种政策不可反填历史。
   - 已知部分可为零；完整成本未知必须保持 `null`。
 - 既有 HTTP 502、后续读取成功和发布重启分别记录。
   - 仅凭最新健康正常不能追认历史根因，更不能宣称持续恢复。
 
+## HTTP 慢请求
+
+- Bun 默认 HTTP 空闲超时也作用于尚未输出响应的执行中请求。
+  - 超过默认十秒可能让代理返回 502，而应用稍后仍完成并记录 200。
+  - 依据：[Bun Server idleTimeout](https://bun.sh/docs/runtime/http/server#idletimeout)。
+- 先对照公开请求耗时、应用记录和源码配置，不能只延长客户端超时。
+- `runtime.httpIdleTimeoutSeconds` 与已有查询、排队预算协调，保持有界。
+  - 未显式配置时从 owning CLI 时间预算派生，上限遵循 Bun 的 255 秒。
+- 不把一次恢复解释为历史每一次 502 都由同一原因导致。
+
 ## 验收
+
+- `observability verify --over-api` 经正式 broker 执行 VALUES 夹具。
+  - 不读取业务记录、不写表；覆盖窗口边界、重复 ID、重试恢复、探活与历史成本。
 
 ```bash
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml web screenshot --profile observability --over-api --json

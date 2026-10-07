@@ -347,6 +347,7 @@ export interface AppConfig {
     retry: { maximumAttempts: number };
   };
   runtime: {
+    httpIdleTimeoutSeconds?: number;
     secretsRoot: string;
     secretSourcePaths: Record<string, string>;
     defaultCliTarget: string;
@@ -1237,6 +1238,9 @@ export function loadConfig(path: string): AppConfig {
       retry: { maximumAttempts: integerValue(temporalRetry, "maximumAttempts", "temporal.retry", 1) },
     },
     runtime: {
+      httpIdleTimeoutSeconds: runtime.httpIdleTimeoutSeconds === undefined
+        ? Math.min(255, Math.ceil(integerValue(monitorCli, "timeoutMs", "monitor.cli", 1000) / 1000))
+        : integerValue(runtime, "httpIdleTimeoutSeconds", "runtime", 1, 255),
       secretsRoot: stringValue(runtime, "secretsRoot", "runtime"),
       secretSourcePaths: Object.fromEntries(Object.entries(secretSourcePathsRaw).map(([ref, value]) => {
         if (typeof value !== "string" || value.trim() === "") throw new Error(`runtime.secretSourcePaths.${ref} must be a non-empty string`);

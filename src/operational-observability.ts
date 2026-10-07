@@ -9,10 +9,11 @@ import { statSync } from "node:fs";
 type Row = Record<string, any>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 const finite = (value: unknown): number | null => value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
-const iso = (value: unknown): string | null => Number.isFinite(Date.parse(String(value))) ? new Date(String(value)).toISOString() : null;
+const iso = (value: unknown): string | null => value instanceof Date ? value.toISOString() : Number.isFinite(Date.parse(String(value))) ? new Date(String(value)).toISOString() : null;
 
 export function observationWindow(start?: string | null, end?: string | null, now = Date.now()) {
   if (Boolean(start) !== Boolean(end)) throw new Error("start and end must be supplied together");
+  if ([start,end].some(value => value && !/T.*(?:Z|[+-]\d{2}:\d{2})$/u.test(value))) throw new Error("invalid observation window: timezone is required");
   const until = end ? Date.parse(end) : now;
   const since = start ? Date.parse(start) : until - 7200000;
   if (!Number.isFinite(since) || !Number.isFinite(until) || since >= until || until > now + 1000) throw new Error("invalid observation window");
@@ -94,11 +95,15 @@ export function costGovernance(facts: Row, cache: Row[], config: AppConfig, end:
     else if (!rate || rate<=0 || !observedAt) reason="provider_rate_missing";
     else if (observedAt > end || observedAt > String(cost.first_at)) reason="historical_provider_rate_missing";
     else if (valuationAt > String(cost.first_at)) reason="historical_currency_policy_missing";
-    const valid = reason ? 0 : Number(cost.valid_records);
-    const known = valid ? Number(cost.normalized_cost) * rate! * currencyRate : null;
+    const historical=Number(cost.historical_records ?? 0);
+    const fallback=reason ? 0 : Number(cost.valid_records);
+    const valid=historical+fallback;
+    const known=valid ? Number(cost.historical_cost_cny ?? 0)+(fallback ? Number(cost.normalized_cost)*rate!*currencyRate : 0) : null;
+    if (valid===Number(cost.records)) reason=null;
     records += Number(cost.records); knownRecords += valid; knownCostCny += known ?? 0;
     return { accountId: Number(cost.account_id), walletKey: walletKey || null, records: Number(cost.records), knownRecords: valid,
       missingRecords: Number(cost.records)-valid, knownCostCny: known, reason: reason ?? (valid < Number(cost.records) ? "billing_fields_missing" : null),
+      historicalRecords: historical,firstHistoricalRateAt:cost.first_rate_at ?? null,lastHistoricalRateAt:cost.last_rate_at ?? null,
       providerRate: rate, providerRateObservedAt: observedAt, currencyRate, currencyPolicyObservedAt: valuationAt };
   });
   return { records, knownRecords, missingRecords: records-knownRecords, coveragePercent: records ? knownRecords/records*100 : null,
@@ -110,7 +115,7 @@ export function observerCoverage(instances: Row[], start: string, end: string) {
   const from=Date.parse(start), until=Date.parse(end);
   let cursor=from, coveredMs=0, failedWrites=0;
   for (const instance of instances) {
-    const left=Math.max(from,Date.parse(String(instance.started_at))), right=Math.min(until,Date.parse(String(instance.last_seen_at)));
+    const left=Math.max(from,Date.parse(iso(instance.started_at) ?? "")), right=Math.min(until,Date.parse(iso(instance.last_seen_at) ?? ""));
     if (right>Math.max(left,cursor)) coveredMs += right-Math.max(left,cursor);
     cursor=Math.max(cursor,right); failedWrites+=Number(instance.failed_writes ?? 0);
   }
@@ -159,8 +164,9 @@ export class OperationalObservability {
     if (!this.config.observability) throw new Error("observability is not configured in owning YAML");
     const window=observationWindow(start,end);
     await Promise.all(this.pending); await this.touch();
+    const rates=await this.store.observedCostRates(window.start,window.end);
     const query=await this.reads.query<Row>({ key:`observability:${window.start}:${window.end}`,kind:"observability.window",sql:observabilitySql,
-      parameters:[window.start,window.end],priority:"manual",cacheMode:"bypass-cache" });
+      parameters:[window.start,window.end,JSON.stringify(rates.map((r:Row)=>({...r,at:iso(r.at)})))],priority:"manual",cacheMode:"bypass-cache" });
     const facts=row(query.rows[0]?.facts);
     const [cache,http]=await Promise.all([this.store.getUpstreamUsageCache([]),this.store.httpObservationFacts(window.start,window.end)]);
     const capturedAt=new Date().toISOString();
