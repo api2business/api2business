@@ -109,6 +109,10 @@ async function requestJson(path, options = {}) {
   const timer = setTimeout(() => controller.abort(), 20000)
   try {
     const response = await fetch(path, { signal: controller.signal, headers: options.refresh ? { 'x-api2business-refresh': '1' } : {}, cache: 'no-store' })
+    if (response.status === 401) {
+      location.replace('/login')
+      throw new Error('登录状态已失效')
+    }
     const data = await response.json().catch(() => null)
     if (!response.ok || !data?.ok) throw new Error(data?.error ?? `HTTP ${response.status}`)
     return data

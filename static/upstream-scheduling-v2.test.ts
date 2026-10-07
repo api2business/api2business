@@ -1,6 +1,51 @@
 import { expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
 
+async function requestHarness(response: Response) {
+  const source = await Bun.file(new URL("./upstream-scheduling-v2.js", import.meta.url)).text();
+  const redirects: string[] = [];
+  const timers = new Set<number>();
+  const requests: { path: string; options: RequestInit }[] = [];
+  const context: any = {
+    AbortController,
+    location: { replace: (path: string) => redirects.push(path) },
+    setTimeout: () => { timers.add(1); return 1; },
+    clearTimeout: (id: number) => timers.delete(id),
+    fetch: async (path: string, options: RequestInit) => {
+      requests.push({ path, options });
+      return response;
+    },
+  };
+  runInNewContext(source.replace(/^import .*$/gm, "").replace("export async function", "async function")
+    + "\nthis.requestJson = requestJson;", context);
+  return { requestJson: context.requestJson, redirects, timers, requests };
+}
+
+test("V2 redirects expired sessions on initial, refresh and probe-history reads before parsing the body", async () => {
+  for (const path of ["/api/v2/upstream-scheduling/scopes", "/api/v2/upstream-scheduling/snapshot?scope=codex", "/api/v2/upstream-scheduling/probe-history?scope=grok&page=2"]) {
+    const response = new Response("unauthorized", { status: 401 });
+    response.json = () => { throw new Error("body must not be read before redirect"); };
+    const harness = await requestHarness(response);
+    await expect(harness.requestJson(path, { refresh: true })).rejects.toThrow("登录状态已失效");
+    expect(harness.redirects).toEqual(["/login"]);
+    expect(harness.timers.size).toBe(0);
+  }
+});
+
+test("V2 keeps successful reads and ordinary failures on the current page", async () => {
+  const success = await requestHarness(Response.json({ ok: true, scope: "claude" }));
+  expect(await success.requestJson("/api/v2/upstream-scheduling/snapshot?scope=claude", { refresh: true })).toEqual({ ok: true, scope: "claude" });
+  expect(success.requests[0]!.options).toMatchObject({ cache: "no-store", headers: { "x-api2business-refresh": "1" } });
+  expect(success.redirects).toEqual([]);
+  expect(success.timers.size).toBe(0);
+  for (const status of [403, 500]) {
+    const failure = await requestHarness(Response.json({ ok: false, error: "读取失败" }, { status }));
+    await expect(failure.requestJson("/api/v2/upstream-scheduling/snapshot?scope=codex")).rejects.toThrow("读取失败");
+    expect(failure.redirects).toEqual([]);
+    expect(failure.timers.size).toBe(0);
+  }
+});
+
 test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   const html = await Bun.file(new URL("./upstream-scheduling-v2.html", import.meta.url)).text();
   const script = await Bun.file(new URL("./upstream-scheduling-v2.js", import.meta.url)).text();
