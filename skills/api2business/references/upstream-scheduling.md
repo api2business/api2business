@@ -12,15 +12,20 @@
 
 ## 配置收口与事故复盘
 
-- Claude 兼容层返回 HTTP `400` 且正文完整包含
-  `请求参数或格式不正确` 时，才使用 Claude 专用模板的 3 分钟短冷却规则；
-  规则不能扩展为泛化 `invalid_request_error`，也不能写入 Codex 或 Grok 模板。
+- Claude 兼容层返回 HTTP `400` 时，按上游响应正文匹配专用模板：
+  - `请求参数或格式不正确` 或完整英文短语
+    `The request could not be processed. Please check the request parameters.`
+    命中后短暂冷却 3 分钟并切换账号。
+  - 不扩展为泛化 `invalid_request_error`，不写入 Codex 或 Grok 模板。
+  - 这类通用拒绝没有指出具体参数；规则命中不证明客户参数错误，
+    也不证明切换供应商能处理原请求。
 - 修改独立模板文件后，先确认 API 输出新的 `config-hot-reload` 证据，再执行单账号模板作业；
   通过原 workflow 回读 `verifiedCount`、`failedCount`、`misalignedCount`，随后按账号回读
   平台、`base_url`、状态码和精确关键词，确认没有重置上游地址或凭据字段后才扩大范围。
-- `--over-api <absolute-http(s)-URL>` 在 Api2Business CLI 中是无值开关；API 地址来自
-  `config/api2business.yaml` 的 owning 配置。不要把 URL 作为该开关的下一个 argv，
-  否则 URL 会被当成命令词并产生误导性的未知命令错误。
+- HTTP 运行面必须使用 `--over-api <absolute-http(s)-URL>`。
+  - URL 必须匹配 `config/api2business.yaml` 声明的唯一 HTTP target。
+  - 禁止无值、布尔开关、别名和隐式回退；回执核对 `canonicalUrl`。
+  - 完整入口与续查规则见 [项目技能](../SKILL.md#运行面与排队诊断)。
 - 这套顺序适用于模板、模型同步和探活等账号写入：单账号试点、workflow 终态、原生单账号回读、
   再扩大范围。详细模板算法和字段仍只维护在本文，跨仓库入口只保留链接。
 
@@ -429,7 +434,8 @@
   - 读取仍走 API 排队 broker，不因临时调查改为直连数据库。
 - 截图提示只用于定位，不作为上游原因：
   - “当前模型暂时不可用”不等于模型不存在。
-  - 客户端把 HTTP 400 显示成参数或格式错误时，那是网关包装，不是上游正文。
+  - 客户端把 HTTP 400 显示成参数或格式错误时，先用 `responseEvidence`
+    核对是否来自上游正文，不能直接断定是网关包装或客户参数错误。
   - 模板关键词只取上游响应体里的精确短语。
   - 先取得请求 ID；缺少时用用户邮箱、时区明确的时间段和精确模型定位。
   - 截图转写的请求 ID 先用账号、精确模型和时间窗核对。

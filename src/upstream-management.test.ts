@@ -357,7 +357,24 @@ test("keeps Codex and Claude templates as separate platform files", () => {
   const anthropicInvalidRequestRule = claude.rules.find((rule) =>
     rule.error_code === 400 && rule.keywords.includes("请求参数或格式不正确"));
   expect(anthropicInvalidRequestRule?.duration_minutes).toBe(3);
-  expect(anthropicInvalidRequestRule?.keywords).toEqual(["请求参数或格式不正确"]);
+  expect(anthropicInvalidRequestRule?.keywords).toEqual([
+    "请求参数或格式不正确",
+    "The request could not be processed. Please check the request parameters.",
+  ]);
+  const matchClaude = (status: number, body: unknown) => claude.rules.find((rule) =>
+    rule.error_code === status && rule.keywords.some((keyword) =>
+      JSON.stringify(body).toLowerCase().includes(keyword.toLowerCase())));
+  const kiroInvalidRequest = { error: {
+    code: "invalid_request",
+    type: "invalid_request_error",
+    message: "The request could not be processed. Please check the request parameters.",
+  } };
+  expect(matchClaude(400, kiroInvalidRequest)).toBe(anthropicInvalidRequestRule);
+  expect(matchClaude(401, kiroInvalidRequest)).toBeUndefined();
+  expect(matchClaude(400, { error: {
+    type: "invalid_request_error", message: "max_tokens must be greater than zero",
+  } })).toBeUndefined();
+  expect(codex.rules.some((rule) => rule.keywords.includes(kiroInvalidRequest.error.message))).toBe(false);
   expect(claude.rules.some((rule) => rule.keywords.includes("local_capacity_exhausted"))).toBe(true);
   expect(claude.rules.find((rule) => rule.error_code === 503)?.keywords).toEqual(expect.arrayContaining([
     "no available accounts",

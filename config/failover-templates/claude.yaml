@@ -6,6 +6,7 @@ rules:
 - errorCode: 400
   keywords:
   - 请求参数或格式不正确
+  - The request could not be processed. Please check the request parameters.
   durationMinutes: 3
   description: Claude 供应商兼容层拒绝当前请求格式时短暂冷却并切换账号；不泛化匹配其他 invalid_request_error
 - errorCode: 429
