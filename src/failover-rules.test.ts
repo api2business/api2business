@@ -5,7 +5,7 @@ function rule(errorCode: number, keywords: string[]): FailoverRule {
   return { error_code: errorCode, keywords, duration_minutes: 3, description: "test" };
 }
 
-test("preserves legacy failover keywords while rejecting model-not-found", () => {
+test("preserves legacy keywords and permits upstream expected-model failover", () => {
   expect(() => validateFailoverRules([rule(503, [
     "please retry later",
     "service temporarily unavailable",
@@ -14,12 +14,12 @@ test("preserves legacy failover keywords while rejecting model-not-found", () =>
     "concurrency limit exceeded",
     "504",
   ])])).not.toThrow();
-  expect(() => validateFailoverRules([rule(404, ["model_not_found"])] )).toThrow();
+  expect(() => validateFailoverRules([rule(404, ["model_not_found"])] )).not.toThrow();
   expect(() => validateFailoverRules([rule(404, [
-    'Model "gpt-5.6" is not supported by any configured account in this group',
-  ])])).toThrow();
-  expect(() => validateFailoverRules([rule(404, ["no available channel for model gpt-5.6"])]))
-    .toThrow();
+    'Model "gpt-6.1-sol" is not supported by any configured account in this group',
+  ])])).not.toThrow();
+  expect(() => validateFailoverRules([rule(404, ["no available channel for model gpt-6.1-sol"])]))
+    .not.toThrow();
 });
 
 test("preserves the legacy upstream wrapper phrase", () => {

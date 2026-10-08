@@ -171,11 +171,14 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   expect(codexTemplate).not.toContain("input exceeds the context window of this model");
   expect(codexTemplate).not.toContain("context_length_exceeded");
   expect(codexTemplate).not.toContain("maximum context length");
-  expect(codexTemplate).not.toContain("model_not_found");
-  expect(codexTemplate).not.toMatch(/errorCode: 404\n/u);
+  const expectedModelRule = parsed.operations.upstreamManagement.failoverRules.find((rule) => rule.error_code === 404);
+  expect(expectedModelRule?.keywords).toContain("model_not_found");
+  expect(expectedModelRule?.keywords).toContain("not supported by any configured account");
+  expect(expectedModelRule?.duration_minutes).toBe(3);
+  expect(badResponseRule?.keywords).toContain("unknown provider for model gpt-6.1-sol");
   expect(codexTemplate).not.toContain("statusCode:");
   expect(codexTemplate).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
-  expect(codexTemplate).toContain("description: 上游明确返回 gpt-5.6-terra 或 gpt-5.6-sol 的 Provider 不支持、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障");
+  expect(codexTemplate).toContain("description: 上游明确返回 gpt-5.6-terra、gpt-5.6-sol 或 gpt-6.1-sol 的 Provider 不支持、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障");
 });
 
 test("usage target discovery uses one queued database read", async () => {

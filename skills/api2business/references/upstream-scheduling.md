@@ -154,20 +154,27 @@
     - 不支持端点、错误阶段或排除条件。
   - 关键词规则：
     - 保留既有切号模板关键词，模板同步不得因为本地校验而静默删词；
-    - 普通 `model_not_found`、`model not found` 不得写入模板，因为客户请求了全池都不存在的模型时，切号不能恢复请求。
+    - 上游无法提供预期模型能力时允许切号。
+      - Codex 的 `gpt-6.1-sol` 属于预期能力。
+      - HTTP 404 的标准模型不存在短语由 Codex 专用模板声明。
+      - 全局分组路由失败没有选中账号，不进入账号模板。
     - 同状态码的精确规则放在通用规则之前；原生按声明顺序触发冷却。
     - 正文已含 `upstream_error` 时，原有通用规则可能已经覆盖；新增精确规则的作用可以是
       区分冷却时长，不能仅凭未观测切号断言旧模板漏配。
   - 模型错误：
     - `selected model is at capacity` 表示模型或容量临时异常，可以切号；
-    - `404 model_not_found` 不进入模板，直接保留标准模型错误。
+    - 已选上游返回 `404 model_not_found`、`model not found` 或模型无可用渠道时，
+      按 Codex 模板冷却当前账号 3 分钟，并尝试其他候选。
     - Claude 供应商兼容层已确认返回 HTTP `400` 且正文包含完整短语
       `请求参数或格式不正确` 时，Claude 专用模板按 3 分钟短暂冷却当前 API-key 并切换；
       不把泛化的 `invalid_request_error` 或其他参数错误加入模板，避免客户请求本身有误时
       扩散到整个账号池。
     - 仅当 `400` 正文包含 `unknown provider for model gpt-5.6-terra` 或
-      `unknown provider for model gpt-5.6-sol` 时，才按当前上游不支持目标模型处理；这是账号级上游能力不匹配，可以短暂冷却当前 API-key 账号并切换候选。
-    - 不将通用 `unknown provider for model`、`model_not_found` 或 `model not found` 作为关键词，避免把其他模型的错误误判为可由切号恢复的问题。
+      `unknown provider for model gpt-5.6-sol` 或
+      `unknown provider for model gpt-6.1-sol` 时，按当前上游能力不匹配切号。
+      - 当前 API-key 账号冷却 3 分钟，再切换候选。
+    - HTTP 400 的 Provider 不支持规则仍匹配完整模型短语。
+      - 不泛化成所有 `unknown provider for model` 或参数错误。
     - `400 No tool call found for function call output` 是用户明确选择的短暂切号例外：
       只匹配这条完整、稳定的上游短语，按 3 分钟冷却当前 API-key 账号；不得扩展为泛化的工具调用或 `invalid_request_error` 规则。
     - `401` 的 API key 认证失效可以进入模板，并进入较长的临时冷却；
@@ -497,7 +504,7 @@
   - 仅在明确授权后，为已确认的 Nginx 原生 404 HTML 结构添加规则；
   - 原生关键词是任一子串命中，不能把“404”和“Nginx”拆成两个关键词后当作同时满足；
   - 使用同时包含 404 标题及 Nginx 标记的连续片段，并按实际正文处理换行差异；
-  - 不扩展成通用 404、`model_not_found` 或普通模型不存在短语；
+  - 网页式 404 规则不扩展为通用 404；模型不存在规则独立遵循上文“模型错误”。
   - 验证已捕获页面可命中、普通模型错误与错误状态码不命中，再回读运行态并复测原会话。
 - 配置生效：
   - owning YAML 的 `operations.upstreamManagement.templateFiles` 是唯一模板声明；

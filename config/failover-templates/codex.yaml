@@ -3,6 +3,17 @@ kind: FailoverTemplate
 name: codex-upstream-failover
 platform: openai
 rules:
+- errorCode: 404
+  keywords:
+  - model_not_found
+  - model not found
+  - model_no_found
+  - moddel_no_found
+  - model does not exist
+  - not supported by any configured account
+  - no available channel for model
+  durationMinutes: 3
+  description: 上游无法提供预期模型能力（包括 gpt-6.1-sol）时短暂冷却当前账号并切号
 - errorCode: 422
   keywords:
   - upstream request failed
@@ -42,10 +53,11 @@ rules:
   - openai_error
   - unknown provider for model gpt-5.6-terra
   - unknown provider for model gpt-5.6-sol
+  - unknown provider for model gpt-6.1-sol
   - no tool output found for custom tool call
   - no tool call found for function call output
   durationMinutes: 3
-  description: 上游明确返回 gpt-5.6-terra 或 gpt-5.6-sol 的 Provider 不支持、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障
+  description: 上游明确返回 gpt-5.6-terra、gpt-5.6-sol 或 gpt-6.1-sol 的 Provider 不支持、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障
 - errorCode: 401
   keywords:
   - invalid api key
