@@ -8,7 +8,7 @@
   - 已有有效显式映射不覆盖，API-key 和 Grok OAuth 不适用；
   - `public-recovery` 复活导入关闭该默认注入，以便严格继承原账号快照。
 - 已有账号补关闭 Luna：
-  - 使用 `accounts models disable-luna --accounts <id-or-range,...> --confirm --over-api`；
+  - 使用 `accounts models disable-luna --accounts <id-or-range,...> --confirm --over-api <absolute-http(s)-URL>`；
   - CLI 先逐个校验平台为 `openai`、类型为 `oauth`，全部通过后才调用一次原生批量更新；
   - API-key、Grok 或混合选择均不执行写入。
 - 退役和结算必须先生成计划，再显式确认；默认只退役错误账号。
@@ -55,7 +55,7 @@
 - `accounts idle-probe plan` 只读，`accounts idle-probe reconcile` 只负责显式补齐隔离绑定，
   `accounts idle-probe run` 只执行 active 且 schedulable 的已就绪账号，不恢复异常账号；
   非默认作用域必须显式传 `--scope`。
-- `accounts idle-probe coverage --scope <codex|claude|grok> --window-minutes <N> --over-api`
+- `accounts idle-probe coverage --scope <codex|claude|grok> --window-minutes <N> --over-api <absolute-http(s)-URL>`
   只读核对指定作用域在窗口内的专用 Key 记录；省略作用域时使用 owning YAML 默认作用域。
 - 自动探活前必须先完成同作用域的手动探活，并核对 HTTP、`ordinaryLogRecorded` 和轮次
   终态；工作流 `running` 或 in-flight 跳过只表示并发保护，不是业务失败。

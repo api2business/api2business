@@ -9,9 +9,9 @@
 
 ```bash
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability --help
-bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability check --rounds 3 --over-api --json
-bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability report --over-api --json
-bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability get --id <报告ID> --over-api --json
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability check --rounds 3 --over-api <absolute-http(s)-URL> --json
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability report --over-api <absolute-http(s)-URL> --json
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability get --id <报告ID> --over-api <absolute-http(s)-URL> --json
 ```
 
 - 显式窗口同时传 `--start` 和 `--end`，使用带时区的 ISO 时间。
@@ -73,11 +73,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 
 ## 验收
 
-- `observability verify --over-api` 经正式 broker 执行 VALUES 夹具。
+- `observability verify --over-api <absolute-http(s)-URL>` 经正式 broker 执行 VALUES 夹具。
   - 不读取业务记录、不写表；覆盖窗口边界、重复 ID、重试恢复、探活与历史成本。
 
 ```bash
-bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml web screenshot --profile observability --id <报告ID> --over-api --json
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml web screenshot --profile observability --id <报告ID> --over-api <absolute-http(s)-URL> --json
 ```
 
 - `--account <账号ID>` 在同一冻结报告中筛选共享钱包，关联账号仍完整显示。

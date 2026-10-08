@@ -105,6 +105,19 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - API 应快速返回作业 ID，长流程由 worker 执行。
 - 数据库读取使用应用内排队读取通道，不从外部脚本直接连接业务数据库。
 
+## 运行面与排队诊断
+
+- HTTP 业务命令必须显式使用 `--over-api <绝对 http(s) URL>`。
+  - URL 只匹配 owning YAML 中的唯一 HTTP target。
+  - 不接受无值、布尔值、别名或隐式默认运行面。
+  - 回执显示 `canonicalUrl`；续查命令保留该 URL。
+- `reads query --file <broker-read-request.json> --over-api <绝对 http(s) URL>`：
+  - 复用 `/api/internal/sub2api-read` 的排队只读通道。
+  - 文件使用既有请求字段 `key`、`kind`、`sql` 和 `parameters`。
+  - 按需声明 `priority`、`cacheMode` 和 `setupStatements`。
+  - 查询只投影必要字段，不查询或输出 Secret、凭据和请求正文。
+  - 不从人工脚本建立数据库连接。
+
 ## 领域操作
 
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
@@ -115,7 +128,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 普通 OpenAI OAuth 导入若未提供有效的 `credentials.model_mapping`，自动写入当前 OpenAI
   模型白名单并排除 `gpt-5.6-luna`；已有显式映射保持不变。
 - 已有 OpenAI OAuth 账号可用 `accounts models disable-luna --accounts <id-or-range,...>
-  --confirm --over-api` 通过 Sub2API runtime 批量写入不含 Luna 的模型白名单；命令先校验
+  --confirm --over-api <absolute-http(s)-URL>` 通过 Sub2API runtime 批量写入不含 Luna 的模型白名单；命令先校验
   全部目标均为 OpenAI OAuth，校验失败时不写入任何账号。
 - 该默认限制只作用于普通 OAuth 导入；API-key、Grok OAuth 和
   `cutoffTrigger=public-recovery` 的复活导入不套用该策略。
@@ -134,12 +147,12 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 该参考同时定义 API-key 切号模板的平台边界、成本补齐、评分分层和 V2 迁移；本技能只
   保留入口和命令，不复制第二套算法或状态机。
 - TTFT、流式探活、缺失样本和评分参与边界只见上述参考，本技能不复制评分算法。
-- 池级质量调查使用 `scores pool-quality --over-api`，账号评分快照使用 `scores get`，
-  需要刷新时使用 `scores rank --calls <N> --over-api`。
-- V2 使用 `upstream-scheduling-v2 scopes|plan --over-api` 或
-  `upstream-scheduling-v2 snapshot --scope <scope> --over-api` 只读查看；新鲜度告警或刷新失败
+- 池级质量调查使用 `scores pool-quality --over-api <absolute-http(s)-URL>`，账号评分快照使用 `scores get`，
+  需要刷新时使用 `scores rank --calls <N> --over-api <absolute-http(s)-URL>`。
+- V2 使用 `upstream-scheduling-v2 scopes|plan --over-api <absolute-http(s)-URL>` 或
+  `upstream-scheduling-v2 snapshot --scope <scope> --over-api <absolute-http(s)-URL>` 只读查看；新鲜度告警或刷新失败
   排查可追加 `--cache-only`，只读取最近成功的读模型缓存，不触发新的刷新请求。使用
-  `upstream-scheduling-v2 priority-run --scope <codex|claude|grok> --confirm --over-api`
+  `upstream-scheduling-v2 priority-run --scope <codex|claude|grok> --confirm --over-api <absolute-http(s)-URL>`
   通过原生 worker 执行一次指定作用域的手动优先级调整；作用域的
   `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和
   `upstreamWrite` 只认 owning YAML；Codex、Claude、Grok 使用同一套平等作用域接口。
@@ -150,47 +163,47 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   `operations.upstreamSchedulingV2.scopes.<scope>.idleProbeIntervalSeconds`；未声明时才
   回退到 `sub2api.idleProbe.intervalSeconds`，具体生效与工作流替换规则见
   `references/upstream-scheduling.md`。
-- 充值候选使用 `upstreams recharge-candidates --over-api`。
+- 充值候选使用 `upstreams recharge-candidates --over-api <absolute-http(s)-URL>`。
 - 欠费、低余额和查询超时的判定见 `references/upstream-scheduling.md`。
-- 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api`；
+- 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api <absolute-http(s)-URL>`；
   同一充值地址只记账一次并恢复该地址账号。余额读取的跨 host `walletKey`、缓存和失败
   保留见 [额度监控](references/quota-monitoring.md)。
-- 充值确认后 CLI 立即返回异步 workflow ID，并做一次非阻塞只读状态与账号快照核验；最终一致性使用 `upstreams recharge-status --id <workflow-id> --over-api`。
+- 充值确认后 CLI 立即返回异步 workflow ID，并做一次非阻塞只读状态与账号快照核验；最终一致性使用 `upstreams recharge-status --id <workflow-id> --over-api <absolute-http(s)-URL>`。
 - 核验状态为 `pending`、`snapshot_mismatch` 或 `unavailable` 时，只表示作业未完成或读模型暂未追上，不代表充值失败；必须继续查询原 workflow。
 - 充值请求超时重试时必须复用相同的 `--idempotency-key`，禁止生成新 key 重复提交同一笔充值。
 - CLI 在提交传输异常时会回显本次幂等键和“结果未知”提示；只有复用该键重试，不能把传输异常当成未提交而生成新键。
-- 精确错误链使用 `errors diagnose --request-id <request-id> --over-api`。
-- 按模型定位使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api`。
-- 单请求排障使用 `errors inspect --request-id <request-id> --over-api`。
+- 精确错误链使用 `errors diagnose --request-id <request-id> --over-api <absolute-http(s)-URL>`。
+- 按模型定位使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api <absolute-http(s)-URL>`。
+- 单请求排障使用 `errors inspect --request-id <request-id> --over-api <absolute-http(s)-URL>`。
 - 切号是否命中、候选是否耗尽、正文是否缺失，只以 `references/upstream-scheduling.md` 为准。
 - 切号模板的匹配、近义短语、热加载、分组口语、同步范围和新增上游收口，只以该参考为准。
-- `upstreams template --confirm --over-api` 只写入 OpenAI/Anthropic；Grok 会在执行结果的
+- `upstreams template --confirm --over-api <absolute-http(s)-URL>` 只写入 OpenAI/Anthropic；Grok 会在执行结果的
   `skipped[]` 中明确标为 `platform-has-no-failover-template`，不能把 `appliedCount=0`
   当成未执行或改用其他平台模板重试。
 - 新增上游省略 `--rate`；占位费率与最终费率回读也只以该参考为准。
-- 已有上游改配置使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] [--suffix <name>] [--rate <CNY/API_USD>] --confirm --over-api`。
+- 已有上游改配置使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] [--suffix <name>] [--rate <CNY/API_USD>] --confirm --over-api <absolute-http(s)-URL>`。
   - `--base-url` 只合并更新 `credentials.base_url`，不会重置 API key、模型映射、池模式或其他凭据字段。
   - Anthropic API-key 的地址应填写供应商 origin；网关会自行拼接 `/v1/messages`，不要把 `/v1` 再写入地址。
   - `--groups` 整表替换全部分组，并重写切号模板。
   - 已启用探活账号的私有分组必须列入；隔离后的收回顺序只见
     `references/upstream-scheduling.md`。
-- 创建上游必须显式传入通过实时分组读取解析出的 `--groups <id,id,...>`；CLI 不再使用固定
-  分组默认值，避免平台或作用域误绑。`--over-api` 是无值开关，目标地址只从
-  `config/api2business.yaml` 的 `runtime.overApiTarget` 读取；帮助命令可在不提供配置时直接运行。
+- 创建上游必须显式传入实时读取解析出的 `--groups <id,id,...>`。
+  - 不使用固定分组默认值，避免平台或作用域误绑。
+  - URL 参数规则只见“运行面与排队诊断”。
 - 多个同充值地址 API Key 只对实际充值动作记一笔充值；余额共享钱包、账号投影和写入范围见
   [额度监控](references/quota-monitoring.md) 与 [上游与调度](references/upstream-scheduling.md)。
 - 收入、采购、充值、退款和毛利读取 `references/accounting.md`。
-- 手工收入明细使用 `cash ledger --period YYYY-MM --over-api`，汇总使用 `profit daily`。
+- 手工收入明细使用 `cash ledger --period YYYY-MM --over-api <absolute-http(s)-URL>`，汇总使用 `profit daily`。
 - BugTeam 客户 API 使用 `bugteam` CLI 命令组，配置中的 `bugTeam.customerToken`、`customerAccount`、`customerPassword` 只能引用仓库外 Secret：
   - 只读：`bugteam login`、`balance`、`inventory --product <id> --quantity N`、`shelves --product <id>`、`pickup order-status --id <id>`、`recoveries list`。
-  - 实时成本：`bugteam cost-monitor get --over-api` 读取最新摘要，显式增加 `--include-records` 才展开 6 小时历史；`bugteam cost-monitor sample --over-api` 提交一次采样，并用返回的 workflow ID 查询原作业。
+  - 实时成本：`bugteam cost-monitor get --over-api <absolute-http(s)-URL>` 读取最新摘要，显式增加 `--include-records` 才展开 6 小时历史；`bugteam cost-monitor sample --over-api <absolute-http(s)-URL>` 提交一次采样，并用返回的 workflow ID 查询原作业。
   - 订单：`pickup order-create --product <id> --quantity N [--idempotency-key <key>]`；创建必须 `--confirm`，超时不得重复下单。
   - 履约：`pickup download --id <id> --format sub2|cpa --output <path>`、`pickup push --id <id> --hub-id <id> --confirm`、`pickup take --id <id> --confirm`。
   - 401 修复：`recoveries claim --id <id> --ticket-stdin --output <path> --confirm`，Ticket 从 stdin 读取，必须复用同一 `--idempotency-key` 进行重试。
   - 余额兑换：`redeem --code-stdin --confirm`，CDK 不得出现在 argv、日志或输出中。
-  - 一键购买导入：先用 `bugteam purchase-import options --over-api` 回读默认值；
-    再用 `bugteam purchase-import create --quantity N --confirm --over-api` 提交，
-    并只用 `bugteam purchase-import status --id <job-id> --over-api` 跟踪原作业。
+  - 一键购买导入：先用 `bugteam purchase-import options --over-api <absolute-http(s)-URL>` 回读默认值；
+    再用 `bugteam purchase-import create --quantity N --confirm --over-api <absolute-http(s)-URL>` 提交，
+    并只用 `bugteam purchase-import status --id <job-id> --over-api <absolute-http(s)-URL>` 跟踪原作业。
   - 下载和领取只输出路径、字节数、SHA256 与版本摘要，绝不输出账号 JSON、Token 或 Ticket。
 - 30d.team 公开兑换找回使用独立的 `bugteam public-recovery` 命令组，不读取或发送 BugTeam 客户 Token：
   - 健康检查：`bugteam public-recovery health --base-url https://30d.team --card-code-stdin`。
@@ -227,26 +240,26 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   的出网代理配置。
 - 账号导入成功后异步触发一次 OAuth 实时成本采样；该采样独立于导入作业，不延长导入终态，失败只作为采样作业失败记录。
 - 账号导入成功后不再自动提交 API-key 切断作业；API-key 切断仅保留显式手动入口。
-- 手动验证同一采样路径使用 `accounts oauth-runtime-sample --over-api`，返回独立 Temporal workflow ID。
+- 手动验证同一采样路径使用 `accounts oauth-runtime-sample --over-api <absolute-http(s)-URL>`，返回独立 Temporal workflow ID。
 - 上游智商评测：
-  - 提交：`upstreams benchmark --id <account-id> --model <model> --confirm --over-api`；
-  - 进度与日志：`upstreams benchmark-status --id <benchmark-run-id> --over-api`；
-  - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api`；
+  - 提交：`upstreams benchmark --id <account-id> --model <model> --confirm --over-api <absolute-http(s)-URL>`；
+  - 进度与日志：`upstreams benchmark-status --id <benchmark-run-id> --over-api <absolute-http(s)-URL>`；
+  - 账号历史：`upstreams benchmark-history --id <account-id> --limit 20 --over-api <absolute-http(s)-URL>`；
   - 评测只复用持久化探活专用 API Key，不读取供应商原始 Key，也不轮换探活 Key。
-- 上游模型同步使用 `upstreams models sync --accounts <id-or-range,...> --confirm --over-api`；
+- 上游模型同步使用 `upstreams models sync --accounts <id-or-range,...> --confirm --over-api <absolute-http(s)-URL>`；
   读取、原生 bulk merge、单账号失败边界和写后回读唯一见
   [上游与调度](references/upstream-scheduling.md)。
 - V2 作用域模型同步使用以下 CLI：
-  - `upstream-scheduling-v2 model-sync plan --scope <codex|claude|grok> --over-api` 只读生成下一批计划；
-  - `upstream-scheduling-v2 model-sync run --scope <scope> [--accounts <id,...>] --confirm --over-api` 执行手动批次；
-  - `upstream-scheduling-v2 model-sync history --scope <scope> --over-api` 查询轮次和账号明细。
+  - `upstream-scheduling-v2 model-sync plan --scope <codex|claude|grok> --over-api <absolute-http(s)-URL>` 只读生成下一批计划；
+  - `upstream-scheduling-v2 model-sync run --scope <scope> [--accounts <id,...>] --confirm --over-api <absolute-http(s)-URL>` 执行手动批次；
+  - `upstream-scheduling-v2 model-sync history --scope <scope> --over-api <absolute-http(s)-URL>` 查询轮次和账号明细。
   - 自动批次上限和间隔由 `operations.upstreamSchedulingV2.modelSync` 配置；自动开关只认各作用域的 `features.modelSyncAutomation`，每批最多 10 个，上一批完成后开始计时。
 - V2 模型同步保留父轮次和账号明细记录；批次边界、失败隔离和游标语义唯一见
   [上游与调度](references/upstream-scheduling.md)。
 - 评分与产出分母继续使用 `total_cost`。
 - 额度监控的供应商实际支出、余额缓存、缺失处理和首屏测量唯一见
   [额度监控](references/quota-monitoring.md)。
-- 首屏性能测量使用 `upstreams quota-monitor measure --mode snapshot|source --rounds N --over-api`；
+- 首屏性能测量使用 `upstreams quota-monitor measure --mode snapshot|source --rounds N --over-api <absolute-http(s)-URL>`；
   `snapshot` 测缓存读模型，`source` 对照页面依赖链，输出只含耗时摘要，不展开账号或 Secret。
 
 ## 验收
@@ -257,7 +270,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   ```bash
   bun skills/api2business/scripts/api2business-cli.ts \
     --config config/api2business.yaml \
-    --over-api \
+    --over-api <absolute-http(s)-URL> \
     web screenshot \
     --profile upstream-scheduling-v2 \
     --scope grok
@@ -281,7 +294,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 
 ```bash
 bun skills/api2business/scripts/api2business-cli.ts \
-  --config config/api2business.yaml --over-api \
+  --config config/api2business.yaml --over-api <absolute-http(s)-URL> \
   web screenshot --profile upstream-scheduling-v2 --scope codex \
   --session-ttl-seconds 20 --burst-count 10 --burst-interval 5s \
   --manifest /absolute/path/session-expiry.json

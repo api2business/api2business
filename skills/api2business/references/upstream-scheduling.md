@@ -18,7 +18,7 @@
 - 修改独立模板文件后，先确认 API 输出新的 `config-hot-reload` 证据，再执行单账号模板作业；
   通过原 workflow 回读 `verifiedCount`、`failedCount`、`misalignedCount`，随后按账号回读
   平台、`base_url`、状态码和精确关键词，确认没有重置上游地址或凭据字段后才扩大范围。
-- `--over-api` 在 Api2Business CLI 中是无值开关；API 地址来自
+- `--over-api <absolute-http(s)-URL>` 在 Api2Business CLI 中是无值开关；API 地址来自
   `config/api2business.yaml` 的 owning 配置。不要把 URL 作为该开关的下一个 argv，
   否则 URL 会被当成命令词并产生误导性的未知命令错误。
 - 这套顺序适用于模板、模型同步和探活等账号写入：单账号试点、workflow 终态、原生单账号回读、
@@ -93,13 +93,13 @@
     对应优先级计划白名单，否则账号虽能探活和评分，优先级计划仍会漏选。
   - 回读该作业的 `verifiedCount`、`failedCount` 和 `misalignedCount`。
   - 只有 owning YAML 打开该作用域 `features.idleProbe` 时，才对该账号执行
-    `upstreams isolation --confirm --over-api`。
+    `upstreams isolation --confirm --over-api <absolute-http(s)-URL>`。
   - 启用探活时，隔离并集是当前分组、owning YAML 的
     `operations.upstreamManagement.groupIds` 以及新建的私有探活分组；未启用探活的
     作用域不创建私有探活分组。
   - 比该默认集合更多的业务分组，必须在隔离前绑上，隔离后仍要回读到。
   - 用户要的业务分组少于这个并集时，隔离完成后收回：
-    - 使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] --confirm --over-api`；`--base-url` 只更新 `credentials.base_url`，不会覆盖其他凭据。
+    - 使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] --confirm --over-api <absolute-http(s)-URL>`；`--base-url` 只更新 `credentials.base_url`，不会覆盖其他凭据。
     - `--groups` 整表替换；启用探活的账号保留自己的私有探活分组，其他账号只保留用户
       指定的业务分组。
     - 启用探活账号漏写私有探活分组会把它从账号上拆掉。
@@ -208,7 +208,7 @@
     - 模板增强只作用于 API-key 上游。
     - 先按文末「配置生效」确认持有规则的进程已加载新声明，再同步。
     - 模板变更的应用范围：
-      - `upstreams template --confirm --over-api` 只覆盖目标 OpenAI/Anthropic API-key 上游。
+      - `upstreams template --confirm --over-api <absolute-http(s)-URL>` 只覆盖目标 OpenAI/Anthropic API-key 上游。
       - Grok 保持不套模板；执行结果会在 `skipped[]` 和 `skippedCount` 中明确列出
         `platform-has-no-failover-template`，不会再用 `targetCount=0` 静默表示成功或失败。
       - 只选择 Grok 时，`appliedCount=0` 是预期结果；应检查 `skipped[]`，不能重试或把
@@ -288,8 +288,8 @@
   - `priorityAutomation` 是独立的周期优先级写入功能；它不等价于
     `planWrite`。周期写入仍须同时满足 `operations.writePolicy.enabled`，并按平台
     使用相应的写入开关。
-  - `upstream-scheduling-v2 scopes|plan --over-api` 和
-    `upstream-scheduling-v2 snapshot --scope <scope> --over-api` 是只读核对入口；
+  - `upstream-scheduling-v2 scopes|plan --over-api <absolute-http(s)-URL>` 和
+    `upstream-scheduling-v2 snapshot --scope <scope> --over-api <absolute-http(s)-URL>` 是只读核对入口；
     `planWrite=false` 时 plan 必须返回 `mutation=false`，不创建写入计划。
   - 启用自动探活前，先用同一作用域显式执行一次手动探活，并核对 HTTP 结果、
     `ordinaryLogRecorded` 和探活轮次记录；手动成功后才打开该作用域的 `idleProbe`。
@@ -332,7 +332,7 @@
     内的值保持严格递增，超出 top-k 的账号仍落在 `maximumPriority` 尾部。
     可以独立打开 `features.priorityAutomation` 和 `features.idleProbe`；关闭探活的作用域
     快照和池质量读取不创建探活记录。手动核验任一作用域时使用
-    `accounts idle-probe plan|reconcile|run --scope <codex|claude|grok> --over-api`；确认
+    `accounts idle-probe plan|reconcile|run --scope <codex|claude|grok> --over-api <absolute-http(s)-URL>`；确认
     普通请求记录、`ordinaryLogRecorded` 和轮次记录成功后，才打开对应作用域的探活开关。
   - Grok 评分和优先级的质量权重由 owning YAML 的 `grokScorePolicy` 与
     `grokPriorityPlan` 独立控制。当前生产配置将优先级质量权重设为可靠性 70、延迟 30、
@@ -349,11 +349,11 @@
     周期刷新；缓存也不可读时才记录该作用域错误。
   - 评分刷新失败时必须保留最后一次成功的账号数据，并让刷新作业以失败终态返回；
     不得把带旧 `refreshedAt` 的陈旧快照报告为本次刷新成功。排查停更时同时核对
-    `scores rank --over-api` 的真实 `refreshedAt`、worker 活动错误和数据库查询错误，
+    `scores rank --over-api <absolute-http(s)-URL>` 的真实 `refreshedAt`、worker 活动错误和数据库查询错误，
     不能只看页面仍能显示旧缓存。
   - 评分 SQL 读取上游地址时使用 `accounts.credentials->>'base_url'`；`accounts` 表没有
     `base_url` 列。修改账号链接投影前必须以原生表结构和现有上游查询为准，并通过真实
-    `scores rank --over-api` 回读验证，避免共用评分刷新因列错误连续失败。
+    `scores rank --over-api <absolute-http(s)-URL>` 回读验证，避免共用评分刷新因列错误连续失败。
   - V2 读模型的重型错误明细查询必须进入自动读队列；它失败或超时时保留旧读模型，
     不得占满单连接读队列，阻塞评分、额度和下一轮调度。单轮活动失败后由 Temporal
     工作流在该轮结束时间之后等待配置间隔，再开始下一轮，不得立即密集重试。
@@ -396,7 +396,7 @@
   - 模板调查先同时核对 `stream`、记录状态、语义上游状态、响应正文和模板回读；模板
     本身已有精确规则且错误不进入匹配路径时，不再堆叠近义词规则。
 - 充值候选分析：
-  - `upstreams recharge-candidates --over-api` 同时列出当前欠费账号和最新人民币余额低于
+  - `upstreams recharge-candidates --over-api <absolute-http(s)-URL>` 同时列出当前欠费账号和最新人民币余额低于
     `operations.upstreamManagement.rechargeCandidates.lowBalanceCny` 的账号，默认阈值为 `¥10`；等于阈值不纳入低余额候选。
   - 当前错误匹配额度不足时标记为 `billing-depleted`；已知余额为零时标记为
     `balance-depleted`；已知余额大于零但低于阈值时标记为 `low-balance`。
@@ -410,8 +410,8 @@
   - 排队读取超时是查询失败，不是空的欠费或低余额名单。
 - 自动调整每轮有界超时，失败后跳过本轮并从结束时间计算下一轮。
 - 任何真实写操作先展示计划，再显式确认并回读验证。
-- 单个请求的切号判定优先使用 `errors inspect --request-id <request-id> --over-api`；该入口并行取得诊断链和请求详情。需要只看聚合诊断时才使用 `errors diagnose --request-id <request-id> --over-api`，不要用大范围错误列表推断单请求是否命中模板。
-- 按模型排障使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api`。返回的模型 × 账号 × 链矩阵与样本链均来自已持久化尝试；运行面未记录的候选排除原因必须标记为未知，不能反推。
+- 单个请求的切号判定优先使用 `errors inspect --request-id <request-id> --over-api <absolute-http(s)-URL>`；该入口并行取得诊断链和请求详情。需要只看聚合诊断时才使用 `errors diagnose --request-id <request-id> --over-api <absolute-http(s)-URL>`，不要用大范围错误列表推断单请求是否命中模板。
+- 按模型排障使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api <absolute-http(s)-URL>`。返回的模型 × 账号 × 链矩阵与样本链均来自已持久化尝试；运行面未记录的候选排除原因必须标记为未知，不能反推。
 - 精确诊断中的 `responseEvidence` 只展示限长脱敏摘要；`available=false` 表示运行面没有持久化可读正文，不能把包装层错误文本当作供应商业务原因。
 
 ## 稳定性观察与用户报错
@@ -545,7 +545,7 @@
   个状态来源，计划 API 仅用于 CLI/API 审计。
 - 探活历史查询按作用域功能开关和平台读取，不能用 Codex/Grok 的质量档位过滤掉已启用的
   Claude 记录；读模型首次为空或过期时，应等待后台刷新后按同一作用域再次读取。
-- `accounts idle-probe coverage --scope <codex|claude|grok> --window-minutes <N> --over-api`
+- `accounts idle-probe coverage --scope <codex|claude|grok> --window-minutes <N> --over-api <absolute-http(s)-URL>`
   是按作用域核对专用 Key 覆盖的唯一 CLI 入口；coverage 的平台和 eligible groups 必须
   从该作用域 YAML 传入，不能固定查询 OpenAI。短窗口缺失只表示该窗口没有专用记录，需
   同时查看 24 小时 coverage 和账号快照，不能把短窗口缺失当作账号永久无样本。
@@ -582,3 +582,26 @@
 ## 额度监控交叉引用
 
 - 额度监控的状态、缓存、人民币换算和验收唯一见 [额度监控](quota-monitoring.md)。
+
+## Responses 断流归因
+
+- 先精确匹配用户 ID，再关联请求分组、模型、上游账号和时间。
+  - GPT 请求进入 Grok 分组导致 `model_not_found` 属于分组不匹配。
+  - `account_id` 为空的路由失败不能归因到某个已选上游。
+- Codex 报 `stream closed before response.completed` 时核对 Responses 终态。
+  - HTTP 200、`[DONE]` 和用量记录不单独证明 `response.completed` 已送达。
+  - 零 token、短耗时和重复请求是异常线索，不单独等于失败。
+  - 同时核对完成事件、客户端断开状态与上游错误。
+- 用量记录与系统日志可能使用不同请求身份。
+  - `usage_logs.request_id` 的 `client:` 前缀关联系统日志
+    `extra.client_request_id`。
+  - 系统日志自己的 `request_id` 用于网关内部请求链。
+  - 不因两个字段不相等就断言日志缺失。
+- 模型同步读取供应商模型列表，不按单次 LLM 请求成败删模型。
+  - 读取失败或空列表不写入旧映射。
+  - 成功返回的非空列表会替换该账号映射，供应商返回不完整列表仍需单独调查。
+  - 变更数量不能证明指定模型被删除；核对账号、前后映射与用户报错时间。
+  - 单账号变化不能替代目标分组整体模型覆盖情况。
+- 需要有界自定义取证时，使用 Api2Business skill 的 `reads query`。
+  - 复用已有只读 broker 请求字段与单连接队列。
+  - 只读取必要诊断列，避免凭据、完整请求正文和用户隐私。

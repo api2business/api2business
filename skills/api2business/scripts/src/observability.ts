@@ -6,10 +6,10 @@ import { parseObservabilityConfig } from '../../../../src/observability-config';
 type Row=Record<string,any>;
 export const observabilityHelp={ok:true,commands:[
   'observability configure --file settings.json [--confirm] (合并所给字段，默认预览；--confirm 写入后重启 API)',
-  'observability report [--start ISO --end ISO] --over-api [--include-records] (default: last 2 hours)',
-  'observability verify --over-api (read-only SQL fixtures, no business records)',
-  'observability get --id UUID --over-api [--include-records] (frozen report)',
-  'observability check [--rounds 3] --over-api (read-only quota/recharge/broker sampling)',
+  'observability report [--start ISO --end ISO] --over-api <absolute-http(s)-URL> [--include-records] (default: last 2 hours)',
+  'observability verify --over-api <absolute-http(s)-URL> (read-only SQL fixtures, no business records)',
+  'observability get --id UUID --over-api <absolute-http(s)-URL> [--include-records] (frozen report)',
+  'observability check [--rounds 3] --over-api <absolute-http(s)-URL> (read-only quota/recharge/broker sampling)',
 ], output:'Default report bounds wallet/cost details to 10 rows, with total and omitted counts. Full report remains available by id.'};
 export function configureObservability(configPath:string,file:string,confirm:boolean) {
   const input=JSON.parse(readFileSync(file,'utf8'));

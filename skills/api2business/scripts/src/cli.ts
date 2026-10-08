@@ -37,6 +37,7 @@ interface Parsed {
   confirm: boolean;
   includeRecords: boolean;
   overApi: boolean;
+  overApiUrl: string | null;
   json: boolean;
   cacheOnly: boolean;
   id: string | null;
@@ -133,15 +134,25 @@ function value(args: string[], name: string): string | null {
   const index = args.indexOf(name);
   if (index < 0) return null;
   const result = args[index + 1];
-  if (!result || result.startsWith("--")) throw new Error(`${name} requires a value`);
+  if (!result || result.startsWith("-")) throw new Error(`${name} requires a value`);
   return result;
 }
 
 function parseArgs(args: string[]): Parsed {
+  const overApiUrl = value(args, "--over-api");
+  if (value(args, "--target") !== null) throw new Error("--target 已退役；使用 --over-api <绝对 http(s) URL>");
+  if (overApiUrl !== null) {
+    let selected: URL;
+    try { selected = new URL(overApiUrl); }
+    catch { throw new Error("--over-api 必须是绝对 http(s) URL"); }
+    if (!["http:", "https:"].includes(selected.protocol) || selected.username || selected.password || selected.hash || selected.search) {
+      throw new Error("--over-api 必须是无凭据、查询或片段的绝对 http(s) URL");
+    }
+  }
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
-  const flags = new Set(["--confirm", "--include-records", "--over-api", "--json", "--cache-only", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
+  const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
+  const flags = new Set(["--confirm", "--include-records", "--json", "--cache-only", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index]!;
@@ -180,6 +191,7 @@ function parseArgs(args: string[]): Parsed {
     confirm: args.includes("--confirm"),
     includeRecords: args.includes("--include-records"),
     overApi: args.includes("--over-api"),
+    overApiUrl,
     json: args.includes("--json"),
     cacheOnly: args.includes("--cache-only"),
     id: value(args, "--id"),
@@ -243,16 +255,16 @@ function parseArgs(args: string[]): Parsed {
 function help(): Record<string, unknown> {
   return {
     ok: true,
-    usage: "bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.example.yaml [--over-api] [--target <id>] <command>",
+    usage: "bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.example.yaml [--over-api <absolute-http(s)-URL>] <command>",
     commands: [
       "config validate",
       "backend check",
       "scores get|pool-quality|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
-      "upstream-scheduling-v2 scopes|plan [--scope codex|claude|grok] --over-api (read-only; Codex phase first)",
-      "upstream-scheduling-v2 snapshot [--scope codex|claude|grok] [--cache-only] --over-api (read-only cache/read-model query)",
-      "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api (manual priority adjustment)",
-      "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api",
-      "reads status",
+      "upstream-scheduling-v2 scopes|plan [--scope codex|claude|grok] --over-api <absolute-http(s)-URL> (read-only; Codex phase first)",
+      "upstream-scheduling-v2 snapshot [--scope codex|claude|grok] [--cache-only] --over-api <absolute-http(s)-URL> (read-only cache/read-model query)",
+      "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
+      "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api <absolute-http(s)-URL>",
+      "reads status --over-api <absolute-http(s)-URL>",
       "observability report|get|check|configure --help",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
@@ -261,64 +273,65 @@ function help(): Record<string, unknown> {
       "errors list [--limit N]",
       "errors external-cutoff-match [--limit N]",
       "errors get --request-id <request-id>",
+      "reads query --file <broker-read-request.json> --over-api <absolute-http(s)-URL> (read-only broker)",
       "users impact --start <ISO> --end <ISO> [--affected-only]",
-      "users balance-liability [--over-api]",
-      "profit daily-facts --day YYYY-MM-DD [--over-api]",
-      "profit daily [--day YYYY-MM-DD] [--over-api] (default: today in configured timezone)",
+      "users balance-liability [--over-api <absolute-http(s)-URL>]",
+      "profit daily-facts --day YYYY-MM-DD [--over-api <absolute-http(s)-URL>]",
+      "profit daily [--day YYYY-MM-DD] [--over-api <absolute-http(s)-URL>] (default: today in configured timezone)",
       "lottery status|draw|reset",
       "records list|delete",
       "credit test",
-      "api smoke --over-api",
-      "web screenshot [--profile <owning smoke profile>] [--scope <enabled scope>] [--session-ttl-seconds N] [--burst-count 1..30] [--burst-interval 200ms..10s] [--manifest <absolute path>] --over-api",
+      "api smoke --over-api <absolute-http(s)-URL>",
+      "web screenshot [--profile <owning smoke profile>] [--scope <enabled scope>] [--session-ttl-seconds N] [--burst-count 1..30] [--burst-interval 200ms..10s] [--manifest <absolute path>] --over-api <absolute-http(s)-URL>",
       "workflow status --id <workflow-id>",
-      "priority history --over-api",
-      "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api",
-      "accounts status --id <job-id> --over-api",
-      "accounts inspect --accounts <id-or-range,...> [--over-api]",
-      "accounts models disable-luna --accounts <id-or-range,...> [--confirm] --over-api",
-      "accounts delete --accounts <id-or-range,...> [--confirm] --over-api",
-      "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api]",
-      "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api]",
-      "accounts oauth-economics [--profile codex|grok] [--over-api]",
-      "accounts oauth-runtime [--profile codex|grok] [--over-api]",
-      "accounts oauth-runtime-sample --over-api",
-      "accounts idle-probe plan [--accounts <id-or-range,...>] [--scope codex|claude|grok] --over-api",
-      "accounts idle-probe history [--scope codex|claude|grok] [--page N] --over-api",
-      "accounts idle-probe coverage [--scope codex|claude|grok] [--window-minutes N] --over-api",
-      "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--scope codex|claude|grok] [--confirm] --over-api",
-      "accounts idle-probe run [--accounts <id-or-range,...>] [--scope codex|claude|grok] [--rounds 1..10] [--confirm] --over-api",
-      "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api",
-      "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] [--selection dead|all] [--unit-cost-cny CNY] --over-api",
-      "accounts lifecycle retire status --id <plan-id> --over-api",
-      "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api",
-      "upstreams list [--page N --search <text>] --over-api",
-      "upstreams usage [--accounts <id-or-range,...>] --over-api",
-      "upstreams models sync --accounts <id-or-range,...> [--confirm] --over-api",
-      "upstreams usage-cache [--accounts <id-or-range,...>] --over-api",
-      "upstreams quota-summary --over-api",
-      "upstreams quota-monitor snapshot|measure [--mode source|snapshot --rounds N] --over-api",
-      "upstreams recharge-candidates [--json] --over-api",
-      "upstreams benchmark [--id <account-id> --model <id> --confirm] --over-api",
-      "upstreams benchmark-status --id <benchmark-run-id> --over-api",
-      "upstreams benchmark-history --id <account-id> [--limit 20] --over-api",
-      "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api",
-      "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api",
-      "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api",
-      "upstreams create --platform openai|grok|anthropic --base-url <https-url> --suffix <name> --groups <id,id,...> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api",
-      "upstreams update --id <account-id> [--base-url <https-url>] [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api",
-      "upstreams recharge --base-url <https-url> --recharge-cny <CNY> [--idempotency-key <key>] [--confirm] --over-api",
-      "upstreams recharge-status --id <workflow-id> --over-api",
-      "upstreams recover --accounts <id-or-range,...> [--confirm] --over-api",
-      "upstreams status --id <workflow-id> --over-api",
-      "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api]",
-      "cash ledger [--period YYYY-MM --page N] --over-api",
-      "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api",
+      "priority history --over-api <absolute-http(s)-URL>",
+      "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api <absolute-http(s)-URL>",
+      "accounts status --id <job-id> --over-api <absolute-http(s)-URL>",
+      "accounts inspect --accounts <id-or-range,...> [--over-api <absolute-http(s)-URL>]",
+      "accounts models disable-luna --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
+      "accounts delete --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
+      "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api <absolute-http(s)-URL>]",
+      "accounts import-economics --day YYYY-MM-DD [--external-costs-json <json>] [--over-api <absolute-http(s)-URL>]",
+      "accounts oauth-economics [--profile codex|grok] [--over-api <absolute-http(s)-URL>]",
+      "accounts oauth-runtime [--profile codex|grok] [--over-api <absolute-http(s)-URL>]",
+      "accounts oauth-runtime-sample --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe plan [--accounts <id-or-range,...>] [--scope codex|claude|grok] --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe history [--scope codex|claude|grok] [--page N] --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe coverage [--scope codex|claude|grok] [--window-minutes N] --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--scope codex|claude|grok] [--confirm] --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe run [--accounts <id-or-range,...>] [--scope codex|claude|grok] [--rounds 1..10] [--confirm] --over-api <absolute-http(s)-URL>",
+      "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api <absolute-http(s)-URL>",
+      "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] [--selection dead|all] [--unit-cost-cny CNY] --over-api <absolute-http(s)-URL>",
+      "accounts lifecycle retire status --id <plan-id> --over-api <absolute-http(s)-URL>",
+      "accounts lifecycle retire confirm --id <plan-id> --confirm --over-api <absolute-http(s)-URL>",
+      "upstreams list [--page N --search <text>] --over-api <absolute-http(s)-URL>",
+      "upstreams usage [--accounts <id-or-range,...>] --over-api <absolute-http(s)-URL>",
+      "upstreams models sync --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams usage-cache [--accounts <id-or-range,...>] --over-api <absolute-http(s)-URL>",
+      "upstreams quota-summary --over-api <absolute-http(s)-URL>",
+      "upstreams quota-monitor snapshot|measure [--mode source|snapshot --rounds N] --over-api <absolute-http(s)-URL>",
+      "upstreams recharge-candidates [--json] --over-api <absolute-http(s)-URL>",
+      "upstreams benchmark [--id <account-id> --model <id> --confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams benchmark-status --id <benchmark-run-id> --over-api <absolute-http(s)-URL>",
+      "upstreams benchmark-history --id <account-id> [--limit 20] --over-api <absolute-http(s)-URL>",
+      "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api <absolute-http(s)-URL>",
+      "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams create --platform openai|grok|anthropic --base-url <https-url> --suffix <name> --groups <id,id,...> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams update --id <account-id> [--base-url <https-url>] [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams recharge --base-url <https-url> --recharge-cny <CNY> [--idempotency-key <key>] [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams recharge-status --id <workflow-id> --over-api <absolute-http(s)-URL>",
+      "upstreams recover --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams status --id <workflow-id> --over-api <absolute-http(s)-URL>",
+      "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api <absolute-http(s)-URL>]",
+      "cash ledger [--period YYYY-MM --page N] --over-api <absolute-http(s)-URL>",
+      "cash add --day YYYY-MM-DD --direction income|expense --category <name> --amount-cny <CNY> --description <text> --confirm --over-api <absolute-http(s)-URL>",
       "bugteam login|balance|inventory --product <id> --quantity N|shelves --product <id>|cost-monitor get [--include-records]|sample|pickup order-create|order-status|download|push|take|recoveries list|recoveries claim|redeem",
       "bugteam public-recovery health|status|reclaim|download --base-url <https-origin> --card-code-stdin [--mode 401] [--confirm] [--output <path>]",
       "bugteam public-recovery start --account-id <Sub2API账号ID> --base-url <https-origin> --output <path> --plan-type <type> --confirm（仅创建作业并冻结原账号配置；新账号固定按 ¥0.01 记账）",
       "bugteam public-recovery import --account-id <原OAuth账号ID> --file <已下载JSON> --plan-type <type> --confirm（保留原账号并创建复活副本，固定按 ¥0.01 记账）",
       "bugteam public-recovery status|logs|continue|retry --id <job-id> [--stage health|reclaim|status|download|import-submit|import-status|verify] [--card-code-stdin] [--confirm]",
-      "bugteam purchase-import options|create --quantity N [--priority 1 --capacity 16 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api|status --id <job-id> --over-api",
+      "bugteam purchase-import options|create --quantity N [--priority 1 --capacity 16 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api <absolute-http(s)-URL>|status --id <job-id> --over-api <absolute-http(s)-URL>",
       "native start|stop|status|logs [--component all|api|worker|web] [--tail N]",
     ],
     output: "k8s-style text by default; add --json for machine output",
@@ -345,8 +358,10 @@ async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConf
       if (!parsed.output) throw new Error("bugteam public-recovery download requires --output");
       return await client.download(cardCode, parsed.output);
     }
-    const target = config.runtime.cliTargets[config.runtime.overApiTarget];
-    if (!target || target.mode !== "http") throw new Error("public recovery job requires the configured HTTP over-api target");
+    if (!parsed.overApiUrl) throw new Error("public recovery job requires --over-api <absolute-http(s)-URL>");
+    const target = Object.values(config.runtime.cliTargets).find((candidate) => candidate.mode === "http"
+      && new URL(candidate.baseUrl).href.replace(/\/$/u, "") === new URL(parsed.overApiUrl!).href.replace(/\/$/u, ""));
+    if (!target || target.mode !== "http") throw new Error("--over-api URL 必须匹配 owning YAML 的 HTTP target");
     const manager = new PublicRecoveryJobManager(config, target);
     if (action === "start") {
       if (parsed.accountId === null || !parsed.baseUrl || !parsed.output || !parsed.planType) {
@@ -480,6 +495,16 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
   }
 }
 
+function bindRuntimeCommands<T>(value: T, canonicalUrl: string): T {
+  if (Array.isArray(value)) return value.map((item) => bindRuntimeCommands(item, canonicalUrl)) as T;
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
+    key === "next" && typeof item === "string"
+      ? item.replace(/--over-api(?!\s+(?:https?:\/\/|<))/gu, `--over-api ${canonicalUrl}`)
+      : bindRuntimeCommands(item, canonicalUrl),
+  ])) as T;
+}
+
 function emit(value: Record<string, unknown>, json: boolean): void {
   if (json) {
     console.log(JSON.stringify(value, null, 2));
@@ -587,7 +612,7 @@ function isAppCommand(value: AppCommand | Record<string, unknown>): value is App
 }
 
 async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, target: EmbeddedCliTarget): Promise<unknown> {
-  if (parsed.command[0] === "priority") throw new Error("priority runtime CRUD requires --over-api");
+  if (parsed.command[0] === "priority") throw new Error("priority runtime CRUD requires --over-api <absolute-http(s)-URL>");
   if (
     parsed.command.join(" ") === "scores rank"
     || parsed.command[0] === "errors"
@@ -1114,6 +1139,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account, parsed.group);
   }
   if (group === "reads" && action === "status") return await client.readStatus();
+  if (group === "reads" && action === "query") {
+    if (!parsed.file) throw new Error("reads query requires --file <broker-read-request.json>");
+    const request = JSON.parse(readFileSync(parsed.file, "utf8"));
+    const result = await client.sub2ApiRead(request);
+    return { ok: true, mode: "sub2api-read-broker", ...result, valuesPrinted: false };
+  }
   if (group === "errors" && action === "aggregate") {
     return await client.errorAggregate(
       parsed.limit ?? config.monitor.errorAggregateLimit,
@@ -1226,11 +1257,6 @@ export async function runCli(args: string[]): Promise<void> {
     if (args.includes("--help") && args.includes("web") && args[args.indexOf("web") + 1] === "screenshot") return emit(webScreenshotHelp(), wantsJson);
     if (args.includes("--help") && args.includes("observability")) return emit(observabilityHelp,wantsJson);
     if (args.includes("--help") || args.length === 0) return emit(help(), wantsJson);
-    const overApiIndex = args.indexOf("--over-api");
-    const overApiValue = overApiIndex >= 0 ? args[overApiIndex + 1] : undefined;
-    if (overApiValue?.startsWith("http://") || overApiValue?.startsWith("https://")) {
-      throw new Error("--over-api is a flag without a value; configure runtime.overApiTarget in config/api2business.yaml");
-    }
     const parsed = parseArgs(args);
     if (parsed.cacheOnly && !(parsed.command[0] === "upstream-scheduling-v2" && parsed.command[1] === "snapshot")) {
       throw new Error("--cache-only 只适用于 upstream-scheduling-v2 snapshot");
@@ -1286,16 +1312,23 @@ export async function runCli(args: string[]): Promise<void> {
       || (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle")
       || parsed.command.join(" ") === "payments alipay-revenue"
     );
-    const targetId = parsed.targetId ?? (
-      parsed.overApi || nativeReadCommand
-        ? config.runtime.overApiTarget
-        : config.runtime.defaultCliTarget
-    );
+    let targetId: string;
+    if (parsed.overApiUrl) {
+      const selected = new URL(parsed.overApiUrl);
+      const matches = Object.entries(config.runtime.cliTargets).filter(([, candidate]) =>
+        candidate.mode === "http" && new URL(candidate.baseUrl).href.replace(/\/$/u, "") === selected.href.replace(/\/$/u, ""));
+      if (matches.length !== 1) throw new Error("--over-api URL 必须唯一匹配 owning YAML 的 HTTP target");
+      targetId = matches[0]![0];
+    } else {
+      if (nativeReadCommand) throw new Error("业务查询必须提供 --over-api <绝对 http(s) URL>");
+      targetId = config.runtime.defaultCliTarget;
+    }
     const target = config.runtime.cliTargets[targetId];
     if (!target) throw new Error(`runtime.cliTargets.${targetId} does not exist`);
-    if (parsed.overApi && target.mode !== "http") throw new Error(`--over-api requires an http target; ${targetId} is ${target.mode}`);
+    if (target.mode === "http" && !parsed.overApiUrl) throw new Error("HTTP 操作必须提供 --over-api <绝对 http(s) URL>");
     const result = target.mode === "embedded" ? await embedded(parsed, config, target) : await remote(parsed, config, target);
-    const output = { target: targetId, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...result as Record<string, unknown> };
+    const routedResult = target.mode === "http" ? bindRuntimeCommands(result, target.baseUrl) : result;
+    const output: Record<string, unknown> = { target: targetId, canonicalUrl: target.mode === "http" ? target.baseUrl : null, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...routedResult as Record<string, unknown> };
     if (parsed.command.join(" ") === "scores rank") emitScoreRanking(output, parsed.json);
     else if (parsed.command.join(" ") === "scores pool-quality") emitPoolQuality(output, parsed.json);
     else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
@@ -1308,7 +1341,14 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "accounts oauth-economics") emitOAuthEconomics(output, parsed.json);
     else if (parsed.command.join(" ") === "profit daily") emitDailyProfit(output, parsed.json);
     else if (parsed.command.join(" ") === "upstreams recharge-candidates") emitRechargeCandidates(output, parsed.json);
-    else if (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle" && !parsed.json) emit(summarizeLifecycleResponse(output), false);
+    else if (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle" && !parsed.json) emit(bindRuntimeCommands(summarizeLifecycleResponse(output), target.mode === "http" ? target.baseUrl : "") as Record<string, unknown>, false);
+    else if (parsed.command.join(" ") === "reads query" && !parsed.json) {
+      const rows = Array.isArray(output.rows) ? output.rows : [];
+      emit({ ok: output.ok, canonicalUrl: output.canonicalUrl, mode: output.mode,
+        rowCount: rows.length, queueDurationMs: output.queueDurationMs,
+        queryDurationMs: output.queryDurationMs, cached: output.cached,
+        disclosure: "add --json for full projected rows" }, false);
+    }
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);

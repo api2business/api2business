@@ -2,6 +2,9 @@
 
 - Api2Business 是账号、上游、评分、调度、错误诊断和经营核算的唯一控制入口；运行面和
   配置边界见 [Api2Business 技能](../../skills/api2business/SKILL.md)。
+- HTTP 业务入口必须显式提供 owning YAML 声明的绝对运行面 URL。
+  - 无值、布尔值、别名、未知 URL 和隐式环境定位必须失败。
+  - 续查回执保留该运行面；CLI 参数以技能为唯一权威。
 - owning YAML 是运维事实来源。V2 的作用域、功能开关、周期、模型白名单和模板文件由
   YAML 定义，代码只负责校验、渲染和执行。
 - V2 是当前上游调度运行面；Codex、Claude、Grok 使用同一作用域接口，旧全局调度配置

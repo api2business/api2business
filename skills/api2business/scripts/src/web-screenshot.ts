@@ -11,7 +11,7 @@ function record(value: unknown): Record<string, unknown> | null {
 export function webScreenshotHelp(): Record<string, unknown> {
   return {
     command: "web screenshot",
-    usage: "bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml --over-api web screenshot [options]",
+    usage: "bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml --over-api <absolute-http(s)-URL> web screenshot [options]",
     options: {
       "--profile": "owning YAML 的截图 profile；省略时使用 defaultSmokeProfile",
       "--id": "巡检页读取冻结报告 ID；用于复验同一窗口",
@@ -37,7 +37,7 @@ export async function runWebScreenshot(
   config: ReturnType<typeof loadConfig>,
   target: HttpCliTarget,
 ): Promise<Record<string, unknown>> {
-  if (!parsed.overApi) throw new Error("web screenshot requires --over-api");
+  if (!parsed.overApi) throw new Error("web screenshot requires --over-api <absolute-http(s)-URL>");
   const burstCount = parsed.burstCount ?? 1;
   if (!Number.isSafeInteger(burstCount) || burstCount < 1 || burstCount > 30) throw new Error("--burst-count must be from 1 to 30");
   const burstInterval = parsed.burstInterval ?? "1s";

@@ -35,6 +35,22 @@ test("syncs upstream models through native bulk merge without replacing account 
   expect(output.results).toEqual([expect.objectContaining({ accountId: 1520, modelCount: 2, persisted: true, writeMode: "native-bulk-merge", persistedModelCount: 2 })]);
 });
 
+test("failed upstream model discovery preserves the last available model mapping", async () => {
+  const mapping = { "gpt-6.1-sol": "gpt-6.1-sol" };
+  const writes: string[] = [];
+  const client = {
+    getAccount: async () => ({ credentials: { model_mapping: mapping } }),
+    mutate: async (_method: string, path: string) => {
+      writes.push(path);
+      throw new Error("upstream model list HTTP 503");
+    },
+  } as unknown as Sub2ApiClient;
+  await expect(new Sub2ApiRuntimeService(client).syncUpstreamModels([479]))
+    .rejects.toThrow("upstream model list HTTP 503");
+  expect(writes).toEqual(["/admin/accounts/479/models/sync-upstream"]);
+  expect(mapping).toEqual({ "gpt-6.1-sol": "gpt-6.1-sol" });
+});
+
 test("imports Grok OAuth through native batch create and preserves Grok fields", async () => {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
   const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {
