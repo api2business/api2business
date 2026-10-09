@@ -119,6 +119,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
   private readonly automaticQueue: Array<QueueTask<Record<string, unknown>>> = [];
   private readonly inFlight = new Map<string, Promise<Sub2ApiReadResult<Record<string, unknown>>>>();
   private readonly cache = new Map<string, CacheEntry>();
+  private cacheExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   private activeTask: QueueTask<Record<string, unknown>> | null = null;
   private draining = false;
   private closed = false;
@@ -259,6 +260,9 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    if (this.cacheExpiryTimer !== null) clearTimeout(this.cacheExpiryTimer);
+    this.cacheExpiryTimer = null;
+    this.cache.clear();
     const error = codedError("sub2api_read_closed", "Sub2API read executor is closing");
     for (const task of [...this.manualQueue, ...this.automaticQueue]) {
       if (task.cancelled || task.started) continue;
@@ -291,6 +295,7 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
     key: string,
     result: Sub2ApiReadResult<Record<string, unknown>>,
   ): void {
+    if (this.closed) return;
     this.cache.delete(key);
     this.cache.set(key, {
       expiresAt: this.options.cacheTtlMs > 0
@@ -303,6 +308,25 @@ export class SingleConnectionSub2ApiReadExecutor implements Sub2ApiReadClient {
       if (oldest === undefined) break;
       this.cache.delete(oldest);
     }
+    this.scheduleCacheExpiry();
+  }
+
+  private scheduleCacheExpiry(): void {
+    if (this.cacheExpiryTimer !== null) clearTimeout(this.cacheExpiryTimer);
+    this.cacheExpiryTimer = null;
+    if (this.closed || this.options.cacheTtlMs <= 0) return;
+    const now = Date.now();
+    let nextExpiry = Number.POSITIVE_INFINITY;
+    for (const [key, entry] of this.cache) {
+      if (entry.expiresAt <= now) this.cache.delete(key);
+      else nextExpiry = Math.min(nextExpiry, entry.expiresAt);
+    }
+    if (!Number.isFinite(nextExpiry)) return;
+    this.cacheExpiryTimer = setTimeout(() => {
+      this.cacheExpiryTimer = null;
+      this.scheduleCacheExpiry();
+    }, Math.min(2_147_483_647, Math.max(1, nextExpiry - now)));
+    this.cacheExpiryTimer.unref();
   }
 
   private nextTask(): QueueTask<Record<string, unknown>> | null {

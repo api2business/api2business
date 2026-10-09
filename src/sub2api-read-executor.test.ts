@@ -77,6 +77,38 @@ function request(
   };
 }
 
+test("releases expired results without another lookup and clears cache on close", async () => {
+  const database = new FakeDatabase(async () => [{ payload: "cached" }]);
+  const executor = new SingleConnectionSub2ApiReadExecutor(
+    "postgres://fixture", options({ cacheTtlMs: 20 }), database,
+  );
+  const retained = executor as unknown as { cache: Map<string, unknown>; cacheExpiryTimer: unknown };
+  await executor.query(request("idle-result"));
+  expect(retained.cache.size).toBe(1);
+  await Bun.sleep(60);
+  expect(retained.cache.size).toBe(0);
+  expect(retained.cacheExpiryTimer).toBeNull();
+  await executor.query(request("closing-result"));
+  await executor.close();
+  expect(retained.cache.size).toBe(0);
+  expect(retained.cacheExpiryTimer).toBeNull();
+});
+
+test("zero TTL retains bounded results without an expiry timer until close", async () => {
+  const database = new FakeDatabase(async () => [{ payload: "cached" }]);
+  const executor = new SingleConnectionSub2ApiReadExecutor(
+    "postgres://fixture", options({ cacheMaxEntries: 1 }), database,
+  );
+  const retained = executor as unknown as { cache: Map<string, unknown>; cacheExpiryTimer: unknown };
+  await executor.query(request("first"));
+  await executor.query(request("second"));
+  expect(retained.cache.size).toBe(1);
+  expect(retained.cache.has("second")).toBe(true);
+  expect(retained.cacheExpiryTimer).toBeNull();
+  await executor.close();
+  expect(retained.cache.size).toBe(0);
+});
+
 test("serializes all queries and lets queued manual work pass automatic work", async () => {
   const order: string[] = [];
   let releaseBlocker!: () => void;
