@@ -294,6 +294,11 @@
   - V2 工作流按作用域独立运行。每个作用域的
     `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和
     `upstreamWrite` 都只从 owning YAML 读取，代码不得替代开关。
+  - 探活候选计划必须使用一次集合聚合查询，再按账号回补私有探活分组的用量和错误；
+    禁止恢复逐账号 `LATERAL` 或相关子查询。该查询属于自动读队列，必须在读代理语句
+    超时前完成，不能让一个大作用域长期产生 `planned=0` 的失败轮次。
+  - 探活并发保护按作用域维护。相同作用域的重叠轮次可以标记 `in-flight` 并跳过，
+    Codex、Claude、Grok 之间必须互不阻塞；不能用一个全局运行标志把其他作用域误判为 skip。
   - 自动探活周期使用 `operations.upstreamSchedulingV2.scopes.<scope>.idleProbeIntervalSeconds`；
     未声明时回退到 `sub2api.idleProbe.intervalSeconds`。因此调整单一平台周期时，必须保留
     其他作用域的显式值，避免改变全局默认。
@@ -535,6 +540,9 @@
 
 - 新增或调整作用域时先核对 owning YAML 的独立功能开关，再检查 V2 状态、业务记录和
   作用域范围；禁止通过旧全局状态推断当前作用域。
+- 探活长期出现 `planned=0` 时，先用三作用域的 `accounts idle-probe plan --scope ...`
+  比较 `queryDurationMs` 和 `queueDurationMs`，再按作用域执行一次手动轮次；不要把读
+  查询超时误判成账号全部不可用。
 - TTFT 采样使用流式 Responses；评分只把非空 `first_token_ms` 视为首 Token 证据，至少
   一个有效样本即可计算 P95 并参与延迟分，没有证据才回退 YAML prior。
 - 手动探活先验证 HTTP 结果、模型白名单、`ordinaryLogRecorded` 和轮次汇总，成功后才
@@ -577,6 +585,8 @@
   读模型。记录缺少平台时，先按原生账号平台核对后再修复，不能用 URL 或历史标签猜测归属。
 - `in-flight` 跳过属于并发保护，不是账号失败；计划中的未就绪账号不计为成功，普通请求记录、
   `ordinaryLogRecorded` 和持久化轮次终态缺一不可。
+- 旧的逐账号候选扫描会在 Codex 大作用域触发 15 秒读超时，随后把下一次重叠轮次表现为
+  skip；修复应保持集合聚合查询与按作用域运行锁，不能通过放宽超时掩盖根因。
 - 不要只改 Node 配置解析或只改 Go worker；API 校验、worker YAML 解析、工作流调度和运行
   日志必须一起核对。配置文件通过校验不能替代定时器实际周期的运行面证据。
 - API、worker、Web 重启或代理短暂失败先归入运行面证据，与账号上游错误分开调查；未认证

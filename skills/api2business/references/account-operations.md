@@ -55,6 +55,10 @@
 - `accounts idle-probe plan` 只读，`accounts idle-probe reconcile` 只负责显式补齐隔离绑定，
   `accounts idle-probe run` 只执行 active 且 schedulable 的已就绪账号，不恢复异常账号；
   非默认作用域必须显式传 `--scope`。
+- `accounts idle-probe run` 返回异步 workflow ID；必须继续用
+  `workflow status --id <workflow-id> --over-api <absolute-http(s)-URL>` 查询到终态，
+  只有终态中的 `succeeded` 或明确的 `partial`/`failed` 才能作为轮次证据，不能把
+  `submitted` 或 `running` 当作探活成功。
 - `accounts idle-probe coverage --scope <codex|claude|grok> --window-minutes <N> --over-api <absolute-http(s)-URL>`
   只读核对指定作用域在窗口内的专用 Key 记录；省略作用域时使用 owning YAML 默认作用域。
 - 自动探活前必须先完成同作用域的手动探活，并核对 HTTP、`ordinaryLogRecorded` 和轮次

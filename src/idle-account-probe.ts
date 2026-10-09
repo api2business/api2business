@@ -4,178 +4,116 @@ import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { ProbeIsolationScope, ProbeIsolationService } from "./probe-isolation";
 
 const idleProbeCandidatesSql = `
-SELECT a.id::int AS account_id, a.name AS account_name, a.platform, a.priority::int AS priority,
-  a.status AS account_status, a.schedulable,
-  a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until,
-  COALESCE((
-    SELECT array_agg(binding.group_id::int ORDER BY binding.group_id)
-    FROM account_groups binding
-    WHERE binding.account_id = a.id
-  ), '{}') AS group_ids,
-  COALESCE(ARRAY(
-    SELECT jsonb_object_keys(COALESCE(a.credentials->'model_mapping', '{}'::jsonb))
-  ), '{}') AS model_mapping_keys,
-  sample_stats.available_sample_count
-FROM accounts a
-CROSS JOIN LATERAL (
-  SELECT COUNT(*)::int AS available_sample_count
+WITH target_accounts AS MATERIALIZED (
+  SELECT a.id::int AS account_id, a.name AS account_name, a.platform,
+    a.priority::int AS priority, a.status AS account_status, a.schedulable,
+    a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until,
+    COALESCE(array_agg(DISTINCT all_binding.group_id::int ORDER BY all_binding.group_id::int)
+      FILTER (WHERE all_binding.group_id IS NOT NULL), '{}') AS group_ids,
+    COALESCE(ARRAY(SELECT jsonb_object_keys(COALESCE(a.credentials->'model_mapping', '{}'::jsonb))), '{}') AS model_mapping_keys
+  FROM accounts a
+  LEFT JOIN account_groups all_binding ON all_binding.account_id = a.id
+  WHERE a.deleted_at IS NULL
+    AND LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'
+    AND a.platform = $1
+    AND ($7::boolean OR (
+      a.status = 'active'
+      AND COALESCE(a.schedulable, false) = true
+      AND EXISTS (
+        SELECT 1 FROM account_groups eligible
+        WHERE eligible.account_id = a.id
+          AND eligible.group_id = ANY(string_to_array($2, ',')::bigint[])
+      )
+    ))
+    AND ($5::text IS NULL OR a.id = ANY(string_to_array($5, ',')::bigint[]))
+  GROUP BY a.id, a.name, a.platform, a.priority, a.status, a.schedulable,
+    a.rate_limit_reset_at, a.overload_until, a.temp_unschedulable_until, a.credentials
+), probe_groups AS (
+  SELECT ta.account_id, g.id AS group_id
+  FROM target_accounts ta
+  JOIN groups g ON g.deleted_at IS NULL
+    AND g.platform = ta.platform
+    AND g.name IN (
+      CONCAT('api2business-probe-', ta.account_id::text),
+      CONCAT('api2business-probe-', ta.platform, '-', ta.account_id::text)
+    )
+), usage_events AS (
+  SELECT ta.account_id, u.created_at
+  FROM target_accounts ta
+  JOIN usage_logs u ON u.account_id = ta.account_id
+    AND u.created_at >= NOW() - INTERVAL '8 hours'
+  UNION ALL
+  SELECT pg.account_id, u.created_at
+  FROM probe_groups pg
+  JOIN usage_logs u ON u.account_id IS NULL
+    AND u.group_id = pg.group_id
+    AND u.created_at >= NOW() - INTERVAL '8 hours'
+), error_events AS (
+  SELECT ta.account_id, o.created_at, o.error_message, o.error_phase,
+    o.error_type, o.error_body, o.upstream_error_message, o.upstream_error_detail
+  FROM target_accounts ta
+  JOIN ops_error_logs o ON o.account_id = ta.account_id
+    AND o.created_at >= NOW() - INTERVAL '8 hours'
+  UNION ALL
+  SELECT pg.account_id, o.created_at, o.error_message, o.error_phase,
+    o.error_type, o.error_body, o.upstream_error_message, o.upstream_error_detail
+  FROM probe_groups pg
+  JOIN ops_error_logs o ON o.account_id IS NULL
+    AND o.group_id = pg.group_id
+    AND o.created_at >= NOW() - INTERVAL '8 hours'
+), sample_counts AS (
+  SELECT account_id, COUNT(*)::int AS available_sample_count
   FROM (
-    SELECT u.id
-    FROM usage_logs u
-    WHERE (
-        u.account_id = a.id
-        OR (
-          u.account_id IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM groups probe_group
-            WHERE probe_group.id = u.group_id
-              AND probe_group.deleted_at IS NULL
-              AND probe_group.platform = a.platform
-              AND probe_group.name IN (
-                CONCAT('api2business-probe-', a.id::text),
-                CONCAT('api2business-probe-', a.platform, '-', a.id::text)
-              )
-          )
-        )
-      )
-      AND u.created_at >= NOW() - INTERVAL '8 hours'
+    SELECT account_id, created_at FROM usage_events
     UNION ALL
-    SELECT o.id
-    FROM ops_error_logs o
+    SELECT account_id, created_at
+    FROM error_events
     WHERE (
-        o.account_id = a.id
-        OR (
-          o.account_id IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM groups probe_group
-            WHERE probe_group.id = o.group_id
-              AND probe_group.deleted_at IS NULL
-              AND probe_group.platform = a.platform
-              AND probe_group.name IN (
-                CONCAT('api2business-probe-', a.id::text),
-                CONCAT('api2business-probe-', a.platform, '-', a.id::text)
-              )
-          )
-        )
-      )
-      AND o.created_at >= NOW() - INTERVAL '8 hours'
-      AND (
-        LOWER(COALESCE(o.error_message, '')) LIKE ANY (ARRAY[
-          '%upstream service temporarily unavailable%', '%upstream request failed%',
-          '%bad gateway%', '%gateway timeout%', '%error code: 502%',
-          '%error code: 503%', '%error code: 504%', '%error code: 524%'
-        ])
-        OR o.error_phase = 'upstream'
-        OR LOWER(COALESCE(o.error_type, '')) LIKE '%upstream%'
-      )
-      AND NOT (LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
-        o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (ARRAY[
-        '%insufficient_balance%', '%insufficient account balance%',
-        '%balance is insufficient%', '%余额不足%', '%额度不足%'
-      ]))
-  ) available_samples
-) sample_stats
-WHERE a.deleted_at IS NULL
-  AND LOWER(TRIM(COALESCE(a.type, ''))) <> 'oauth'
-  AND a.platform = $1
-  AND ($7::boolean OR (
-    a.status = 'active'
-    AND COALESCE(a.schedulable, false) = true
-    AND EXISTS (
-      SELECT 1 FROM account_groups ag
-      WHERE ag.account_id = a.id
-        AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
+      LOWER(COALESCE(error_message, '')) LIKE ANY (ARRAY[
+        '%upstream service temporarily unavailable%', '%upstream request failed%',
+        '%bad gateway%', '%gateway timeout%', '%error code: 502%',
+        '%error code: 503%', '%error code: 504%', '%error code: 524%'
+      ])
+      OR error_phase = 'upstream'
+      OR LOWER(COALESCE(error_type, '')) LIKE '%upstream%'
     )
-  ))
-  AND ($5::text IS NULL OR a.id = ANY(string_to_array($5, ',')::bigint[]))
-  AND ($6::boolean OR sample_stats.available_sample_count < 100 OR NOT EXISTS (
-    SELECT 1 FROM usage_logs u
-    WHERE (
-      u.account_id = a.id
-      OR (
-        u.account_id IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM groups probe_group
-          WHERE probe_group.id = u.group_id
-            AND probe_group.deleted_at IS NULL
-            AND probe_group.platform = a.platform
-            AND probe_group.name IN (
-              CONCAT('api2business-probe-', a.id::text),
-              CONCAT('api2business-probe-', a.platform, '-', a.id::text)
-            )
-        )
-      )
-    )
-      AND u.created_at >= NOW() - ($3::int * INTERVAL '1 second')
-  ))
-  AND ($6::boolean OR sample_stats.available_sample_count < 100 OR NOT EXISTS (
-    SELECT 1 FROM ops_error_logs o
-    WHERE (
-      o.account_id = a.id
-      OR (
-        o.account_id IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM groups probe_group
-          WHERE probe_group.id = o.group_id
-            AND probe_group.deleted_at IS NULL
-            AND probe_group.platform = a.platform
-            AND probe_group.name IN (
-              CONCAT('api2business-probe-', a.id::text),
-              CONCAT('api2business-probe-', a.platform, '-', a.id::text)
-            )
-        )
-      )
-    )
-      AND o.created_at >= NOW() - ($3::int * INTERVAL '1 second')
-  ))
-ORDER BY COALESCE((
-  SELECT MAX(recent.created_at)
+    AND NOT (LOWER(CONCAT_WS(' ', error_message, error_body,
+      upstream_error_message, upstream_error_detail)) LIKE ANY (ARRAY[
+      '%insufficient_balance%', '%insufficient account balance%',
+      '%balance is insufficient%', '%余额不足%', '%额度不足%'
+    ]))
+  ) all_samples
+  GROUP BY account_id
+), recent_usage AS (
+  SELECT account_id FROM usage_events
+  WHERE created_at >= NOW() - ($3::int * INTERVAL '1 second')
+  GROUP BY account_id
+), recent_errors AS (
+  SELECT account_id FROM error_events
+  WHERE created_at >= NOW() - ($3::int * INTERVAL '1 second')
+  GROUP BY account_id
+), recent_activity AS (
+  SELECT account_id, MAX(created_at) AS latest_at
   FROM (
-    SELECT MAX(u.created_at) AS created_at
-    FROM usage_logs u
-    WHERE (
-      u.account_id = a.id
-      OR (
-        u.account_id IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM groups probe_group
-          WHERE probe_group.id = u.group_id
-            AND probe_group.deleted_at IS NULL
-            AND probe_group.platform = a.platform
-            AND probe_group.name IN (
-              CONCAT('api2business-probe-', a.id::text),
-              CONCAT('api2business-probe-', a.platform, '-', a.id::text)
-            )
-        )
-      )
-    )
+    SELECT account_id, created_at FROM usage_events
     UNION ALL
-    SELECT MAX(o.created_at) AS created_at
-    FROM ops_error_logs o
-    WHERE (
-      o.account_id = a.id
-      OR (
-        o.account_id IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM groups probe_group
-          WHERE probe_group.id = o.group_id
-            AND probe_group.deleted_at IS NULL
-            AND probe_group.platform = a.platform
-            AND probe_group.name IN (
-              CONCAT('api2business-probe-', a.id::text),
-              CONCAT('api2business-probe-', a.platform, '-', a.id::text)
-            )
-        )
-      )
-    )
-  ) recent
-), '-infinity'::timestamptz), a.id
+    SELECT account_id, created_at FROM error_events
+  ) all_activity
+  GROUP BY account_id
+)
+SELECT ta.account_id, ta.account_name, ta.platform, ta.priority,
+  ta.account_status, ta.schedulable, ta.rate_limit_reset_at,
+  ta.overload_until, ta.temp_unschedulable_until, ta.group_ids,
+  ta.model_mapping_keys,
+  COALESCE(sc.available_sample_count, 0)::int AS available_sample_count
+FROM target_accounts ta
+LEFT JOIN sample_counts sc ON sc.account_id = ta.account_id
+LEFT JOIN recent_usage ru ON ru.account_id = ta.account_id
+LEFT JOIN recent_errors re ON re.account_id = ta.account_id
+LEFT JOIN recent_activity ra ON ra.account_id = ta.account_id
+WHERE $6::boolean OR COALESCE(sc.available_sample_count, 0) < 100
+  OR ru.account_id IS NULL OR re.account_id IS NULL
+ORDER BY COALESCE(ra.latest_at, '-infinity'::timestamptz), ta.account_id
 LIMIT $4
 `;
 
@@ -322,7 +260,9 @@ ORDER BY (t.coverage_required AND a.latest_record_at IS NULL), a.latest_record_a
 `;
 
 export class IdleAccountProbeService {
-  private running = false;
+  // Each scheduling scope has an independent round. A slow Claude/Codex/Grok
+  // round must not make the other scopes report a false in-flight skip.
+  private readonly runningScopes = new Set<string>();
 
   constructor(
     private readonly config: AppConfig,
@@ -539,8 +479,11 @@ export class IdleAccountProbeService {
   async run(accountIds: number[] = [], rounds = 1, scopeName?: string): Promise<Record<string, unknown>> {
     if (!this.isolation) throw new Error("idle probe execution requires isolated probe API key");
     if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10) throw new Error("idle probe rounds must be an integer from 1 to 10");
-    if (this.running) return { ok: true, skipped: true, reason: "in-flight", valuesPrinted: false };
-    this.running = true;
+    const runningScope = scopeName ?? "codex";
+    if (this.runningScopes.has(runningScope)) {
+      return { ok: true, skipped: true, scope: runningScope, reason: "in-flight", valuesPrinted: false };
+    }
+    this.runningScopes.add(runningScope);
     const startedAt = Date.now();
     const policy = this.config.sub2api.idleProbe;
     const scope = scopeName ? this.config.operations.upstreamSchedulingV2?.scopes[scopeName] : undefined;
@@ -641,7 +584,7 @@ export class IdleAccountProbeService {
         valuesPrinted: false,
       };
     } finally {
-      this.running = false;
+      this.runningScopes.delete(runningScope);
     }
   }
 }
