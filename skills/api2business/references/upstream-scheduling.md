@@ -311,8 +311,8 @@
   - 启用自动探活前，先用同一作用域显式执行一次手动探活，并核对 HTTP 结果、
     `ordinaryLogRecorded` 和探活轮次记录；手动成功后才打开该作用域的 `idleProbe`。
   - 探活候选必须按作用域平台和分组查询，模型白名单动态选择
-    `sub2api.idleProbe.platformModels` 中的候选；Codex 默认按 `gpt-5.6-terra`、
-    `gpt-5.6-sol` 顺序，Grok 使用 owning YAML 声明的 Grok 模型。账号没有首选模型时，
+    `sub2api.idleProbe.platformModels` 中的候选；Codex 默认按 `gpt-6.1-sol`、
+    `gpt-5.6-terra`、`gpt-5.6-sol` 顺序，Grok 使用 owning YAML 声明的 Grok 模型。账号没有首选模型时，
     按账号真实 `model_mapping` 的原有顺序选择第一个可用模型；只有没有任何映射时才回退
     到作用域默认模型。不能因为首选模型不匹配就跳过账号，也不能临时写入映射。探活失败、
     未就绪和普通记录缺失分别保留，不把工作流 `running` 当作业务成功。探针私有分组的

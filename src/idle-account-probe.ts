@@ -134,7 +134,7 @@ export interface IdleProbeCandidate {
   probeModel?: string | null;
 }
 
-const defaultProbeModels = ["gpt-5.6-terra", "gpt-5.6-sol"] as const;
+const defaultProbeModels = ["gpt-6.1-sol", "gpt-5.6-terra", "gpt-5.6-sol"] as const;
 
 export function selectIdleProbeModel(
   modelNames: unknown,

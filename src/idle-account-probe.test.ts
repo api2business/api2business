@@ -6,7 +6,7 @@ import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 const config = {
   sub2api: {
     idleProbe: {
-      enabled: true, intervalSeconds: 60, idleSeconds: 60, model: "gpt-5.6-terra", reasoningEffort: "low",
+      enabled: true, intervalSeconds: 60, idleSeconds: 60, model: "gpt-6.1-sol", reasoningEffort: "low",
       candidateLimit: 20, concurrency: 4, accountTimeoutMs: 15000, roundTimeoutSeconds: 50,
       requestJitterMinMs: 0, requestJitterMaxMs: 0,
       provisionCandidateLimit: 1, provisionTimeoutSeconds: 120,
@@ -58,11 +58,12 @@ test("idle probe selects only normal schedulable API-key accounts", async () => 
   expect(plan.candidates).toEqual([{
     accountId: 369, accountName: "upstream plus 0.05", platform: "openai", priority: 300,
     status: "active", schedulable: true, hadRuntimeBlock: false, availableSampleCount: 4,
-    groupIds: [2, 3, 51], probeModel: "gpt-5.6-terra",
+    groupIds: [2, 3, 51], probeModel: "gpt-6.1-sol",
   }]);
 });
 
-test("idle probe prefers Terra and falls back to Sol from the account model whitelist", () => {
+test("idle probe prefers gpt-6.1-sol, then Terra, from the account model whitelist", () => {
+  expect(selectIdleProbeModel(["gpt-5.6-terra", "gpt-6.1-sol"], "gpt-6.1-sol")).toBe("gpt-6.1-sol");
   expect(selectIdleProbeModel(["gpt-5.6-sol", "gpt-5.5"], "gpt-5.6-terra")).toBe("gpt-5.6-sol");
   expect(selectIdleProbeModel(["gpt-5.6-terra", "gpt-5.6-sol"], "gpt-5.6-terra")).toBe("gpt-5.6-terra");
   expect(selectIdleProbeModel(["gpt-5.5"], "gpt-5.6-terra")).toBe("gpt-5.5");

@@ -186,9 +186,9 @@ sub2api:
   idleProbe:
     intervalSeconds: 60
     idleSeconds: 600
-    model: gpt-5.6-terra
+    model: gpt-6.1-sol
     platformModels:
-      openai: [ gpt-5.6-terra, gpt-5.6-sol ]
+      openai: [ gpt-6.1-sol, gpt-5.6-terra, gpt-5.6-sol ]
       anthropic: [ claude-sonnet-5-5 ]
       grok: [ grok-4.5 ]
     reasoningEffort: low
