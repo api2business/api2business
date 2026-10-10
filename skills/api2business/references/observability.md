@@ -29,8 +29,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `ttftBreakdown` 按模型和上游账号统计流式 TTFT 的样本数、P50、P95 和最大值，避免少量
     慢模型样本被全局 P95 隐藏。
   - 发现成功率或 TTFT 异常时先看这两个分解，再决定是下游余额、单个供应商模型还是公共运行面问题。
-  - 能明确归属到下游用户的 `insufficient_balance`、余额不足或额度不足属于业务限制，
-    不计入服务质量故障，也不降低上游账号质量；无法归属时必须保留“证据不足”，不能猜测用户或根因。
+  - 服务质量与下游账务的最终判定遵循 UniDesk 的
+    [自动巡检服务质量归因](https://github.com/pikasTech/unidesk/blob/master/docs/reference/observability.md#自动巡检的服务质量归因)。
+  - 本文只定义报告字段和 Api2Business 数据入口。
 
 ## owning YAML
 
