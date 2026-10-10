@@ -7,6 +7,7 @@ type Row=Record<string,any>;
 export const observabilityHelp={ok:true,commands:[
   'observability configure --file settings.json [--confirm] (合并所给字段，默认预览；--confirm 写入后重启 API)',
   'observability report [--start ISO --end ISO] --over-api <absolute-http(s)-URL> [--include-records] (default: last 2 hours)',
+  'observability costs [--start ISO --end ISO] --over-api <absolute-http(s)-URL> [--include-records] (默认过去七天逐日实际成本、共享钱包余额及缺失记录)',
   'observability verify --over-api <absolute-http(s)-URL> (read-only SQL fixtures, no business records)',
   'observability get --id UUID --over-api <absolute-http(s)-URL> [--include-records] (frozen report)',
   'observability check [--rounds 3] --over-api <absolute-http(s)-URL> (read-only quota/recharge/broker sampling)',
@@ -36,7 +37,7 @@ export function configureObservability(configPath:string,file:string,confirm:boo
 export function compactObservation(report:Row,full:boolean) {
   if (full) return report;
   const compact=(items:unknown) => { const rows=Array.isArray(items)?items:[];return {records:rows.slice(0,10),total:rows.length,omitted:Math.max(0,rows.length-10)}; };
-  return {...report,wallets:report.wallets?{...report.wallets,wallets:compact(report.wallets.wallets)}:undefined,
+  return {...report,wallets:Array.isArray(report.wallets)?compact(report.wallets):report.wallets?{...report.wallets,wallets:compact(report.wallets.wallets)}:undefined,
     cost:report.cost?{...report.cost,accounts:compact(report.cost.accounts)}:undefined};
 }
 export async function checkObservability(client:AdminHttpClient,rounds:number) {

@@ -6,11 +6,25 @@ import { compactObservation,checkObservability } from '../skills/api2business/sc
 import { observabilitySql } from './observability-sql';
 import type { AppConfig } from './config';
 import type { AdminHttpClient } from './admin-http-client';
+import { dailyWalletCosts } from './observability-costs';
 const settings={sub2apiSuccessPercent:95,sub2apiTtftP95Ms:30000,api2businessNon5xxPercent:99.9,api2businessLatencyP95Ms:3000,walletFreshnessSeconds:3600,retentionDays:30};
 const config={observability:settings,sub2api:{newApiCredentials:[{baseUrl:'https://alias.example',walletKey:'https://wallet.example'}]}} as AppConfig;
 const at='2026-10-07T04:00:00.000Z';
 const account=(id:number,url='https://wallet.example')=>({id,base_url:url,active:true,type:'apikey',platform:'openai'});
 const cache=(id:number,remaining:number|null,sourceAt='2026-10-07T03:30:00.000Z')=>({account_id:id,queried_at:sourceAt,last_success_at:sourceAt,last_success_result:{ok:true,quota:{remaining,unit:'USD'},billingMultiplier:{value:0.5,observedAt:'2026-10-07T00:00:00.000Z'}},result:{ok:false}});
+test('daily wallet costs retain usable partial evidence without inventing complete totals',()=>{
+ const wallets=walletGovernance([account(1),account(2,'https://alias.example')],[cache(1,5)],config,at).wallets;
+ const result=dailyWalletCosts([
+  {accountId:1,walletKey:'https://wallet.example',day:'2026-10-06',records:10,knownRecords:8,missingRecords:2,knownCostCny:20},
+  {accountId:2,walletKey:'https://wallet.example',day:'2026-10-06',records:2,knownRecords:2,missingRecords:0,knownCostCny:3},
+  {accountId:1,walletKey:'https://wallet.example',day:'2026-10-07',records:1,knownRecords:1,missingRecords:0,knownCostCny:0},
+ ],[account(1),account(2)],wallets);
+ expect(result).toHaveLength(1);
+ expect(result[0]?.daily).toEqual([
+  {day:'2026-10-06',records:12,knownRecords:10,missingRecords:2,knownCostCny:23,complete:false,totalCostCny:null},
+  {day:'2026-10-07',records:1,knownRecords:1,missingRecords:0,knownCostCny:0,complete:true,totalCostCny:0},
+ ]);
+});
 test('fixed window is half-open and never silently accepts a partial or future window',()=>{
  expect(observationWindow(null,null,Date.parse(at))).toMatchObject({start:'2026-10-07T02:00:00.000Z',end:at,seconds:7200});
  expect(()=>observationWindow(at,null)).toThrow();

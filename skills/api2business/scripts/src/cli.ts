@@ -265,7 +265,7 @@ function help(): Record<string, unknown> {
       "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api <absolute-http(s)-URL>",
       "reads status --over-api <absolute-http(s)-URL>",
-      "observability report|get|check|configure --help",
+      "observability report|costs|get|check|configure --help",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors cooldowns [--since <ISO>] [--until <ISO>] [--limit N] [--account <id-or-name>] [--model <exact-id>]",
@@ -661,9 +661,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (parsed.command[0] === "observability") {
     if (parsed.command[1] === "verify") return await verifyObservationWindow(client);
     if (parsed.command[1] === "report") return compactObservation(await client.observationReport(parsed.start,parsed.end),parsed.includeRecords);
+    if (parsed.command[1] === "costs") return compactObservation(await client.observationCosts(parsed.start,parsed.end),parsed.includeRecords);
     if (parsed.command[1] === "get" && parsed.id) return compactObservation(await client.observationGet(parsed.id),parsed.includeRecords);
     if (parsed.command[1] === "check") return await checkObservability(client,parsed.rounds ?? 3);
-    throw new Error("observability requires report, get --id, check or configure --file");
+    throw new Error("observability requires report, costs, get --id, check, verify or configure --file");
   }
   const [group, action] = parsed.command;
   if (group === "web" && action === "screenshot") return await runWebScreenshot(parsed, config, target);

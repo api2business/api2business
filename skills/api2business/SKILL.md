@@ -308,3 +308,5 @@ bun skills/api2business/scripts/api2business-cli.ts \
 
 - 两系统独立 SLO、broker 新鲜度、共享钱包与成本覆盖走
   [固定窗口巡检](references/observability.md)。
+- `observability costs --over-api <absolute-http(s)-URL>` 独立读取七天逐日成本和钱包余额。
+  - 不完整成本保留已知部分；充值风险判断边界见上述参考。

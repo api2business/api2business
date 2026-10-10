@@ -34,11 +34,16 @@ export async function verifyObservationWindow(client: AdminHttpClient) {
   ), `;
   const result=await client.sub2ApiRead<{facts:Record<string,any>}>({key:`observability-fixture:${crypto.randomUUID()}`,kind:'observability.fixture',
     sql:fixture+observabilitySql.replace(/^\s*WITH\s/u,''),parameters:['2026-01-01T00:00:00Z','2026-01-01T02:00:00Z',
-      JSON.stringify([{account_id:1,at:'2025-12-31T00:00:00Z',rate_cny:0.5}])],priority:'manual',cacheMode:'bypass-cache'});
+      JSON.stringify([
+        {account_id:1,at:'2025-12-31T00:00:00Z',rate_cny:0.5},
+        {account_id:1,at:'2026-01-01T00:15:00Z',rate_cny:0.5},
+        {account_id:1,at:'2026-01-01T00:45:00Z',rate_cny:1},
+        {account_id:1,at:'2026-01-01T03:00:00Z',rate_cny:10},
+      ])],priority:'manual',cacheMode:'bypass-cache'});
   const facts=result.rows[0]?.facts ?? {};
   const checks={uniqueSuccess: facts.succeeded===2,uniqueFinalFailures:facts.failed===2,recovered:facts.recoveredRequests===1,
     missingId:facts.missingRequestIdRecords===1,excludedProbe:facts.excludedProbeRecords===2,ttft:facts.ttftP95Ms===19500,
-    sameWindowCostRecords:facts.costAccounts?.[0]?.records===4,historicalCost:facts.costAccounts?.[0]?.historical_cost_cny===2.5,
+    sameWindowCostRecords:facts.costAccounts?.[0]?.records===4,historicalCost:facts.costAccounts?.[0]?.historical_cost_cny===4,
     unknownRetained:facts.unknownExamples?.[0]?.request_id==='r5'};
   return {ok:Object.values(checks).every(Boolean),checks,queryDurationMs:result.queryDurationMs,mutation:false,valuesPrinted:false};
 }

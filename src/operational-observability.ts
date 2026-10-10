@@ -5,6 +5,7 @@ import { observabilitySql } from "./observability-sql";
 import { configuredWalletKey, preferSharedWalletBalance } from "./upstream-wallet";
 import { readUpstreamValuationPolicy } from "./upstream-valuation";
 import { statSync } from "node:fs";
+import { dailyCostSql, dailyWalletCosts } from "./observability-costs";
 
 type Row = Record<string, any>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -104,7 +105,7 @@ export function costGovernance(facts: Row, cache: Row[], config: AppConfig, end:
     const known=valid ? Number(cost.historical_cost_cny ?? 0)+(fallback ? Number(cost.normalized_cost)*rate!*currencyRate : 0) : null;
     if (valid===Number(cost.records)) reason=null;
     records += Number(cost.records); knownRecords += valid; knownCostCny += known ?? 0;
-    return { accountId: Number(cost.account_id), walletKey: walletKey || null, records: Number(cost.records), knownRecords: valid,
+    return { accountId: Number(cost.account_id), day: cost.day ?? null, walletKey: walletKey || null, records: Number(cost.records), knownRecords: valid,
       missingRecords: Number(cost.records)-valid, knownCostCny: known, reason: reason ?? (valid < Number(cost.records) ? "billing_fields_missing" : null),
       historicalRecords: historical,firstHistoricalRateAt:cost.first_rate_at ?? null,lastHistoricalRateAt:cost.last_rate_at ?? null,
       providerRate: rate, providerRateObservedAt: observedAt, currencyRate, currencyPolicyObservedAt: valuationAt };
@@ -162,6 +163,36 @@ export class OperationalObservability {
     if (!/^[\da-f-]{36}$/u.test(id)) throw new Error("invalid report id");
     const stored=await this.store.getSnapshot(`observability:${id}`);
     return stored?.payload ?? null;
+  }
+  async costs(start?: string | null,end?: string | null) {
+    if (Boolean(start)!==Boolean(end)) throw new Error("start and end must be supplied together");
+    const until=end ?? new Date().toISOString();
+    const since=start ?? (end ? null : new Date(Date.parse(until)-168*3_600_000).toISOString());
+    const window=observationWindow(since,until);
+    const rates=await this.store.observedCostRates(window.start,window.end);
+    const query=await this.reads.query<Row>({key:`observability.costs:${window.start}:${window.end}`,
+      kind:"observability.costs",sql:dailyCostSql,
+      parameters:[window.start,window.end,JSON.stringify(rates.map((r:Row)=>({...r,at:iso(r.at)}))),this.config.monitor.timezone],
+      priority:"manual",cacheMode:"bypass-cache"});
+    const facts=row(query.rows[0]?.facts);
+    const cache=await this.store.getUpstreamUsageCache([]);
+    const capturedAt=new Date().toISOString();
+    const valuation=readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
+    const cost=costGovernance(facts,cache,this.config,window.end,valuation,statSync(this.config.operations.ledgerYamlPath).mtime.toISOString());
+    const balances=walletGovernance(facts.accounts ?? [],cache,this.config,capturedAt);
+    const wallets=dailyWalletCosts(cost.accounts,facts.accounts ?? [],balances.wallets).map(wallet=>{
+      const currencyRate=valuation.walletCnyPerApiUsd[wallet.walletKey] ?? valuation.defaultCnyPerApiUsd;
+      return {...wallet,remainingCny:wallet.remainingUsd===null?null:wallet.remainingUsd*currencyRate,
+        currencyRate,currencySource:"owning valuation policy"};
+    });
+    const id=crypto.randomUUID();
+    const payload={ok:true,id,capturedAt,window,timeZone:this.config.monitor.timezone,cost,wallets,
+      sources:{queryStartedAt:query.queryStartedAt,queryCompletedAt:query.queryCompletedAt,
+        queueDurationMs:query.queueDurationMs,queryDurationMs:query.queryDurationMs},
+      warnings:cost.complete?[]:["历史成本覆盖不完整；已知成本可用于保守估算，不能视为完整成本或续航保证。"],
+      valuesPrinted:false};
+    await this.store.completeSnapshot(`observability:${id}`,"observability.costs.v1",payload,capturedAt);
+    return payload;
   }
   async report(start?: string | null,end?: string | null) {
     if (!this.config.observability) throw new Error("observability is not configured in owning YAML");

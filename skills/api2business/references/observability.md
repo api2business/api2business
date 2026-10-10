@@ -11,6 +11,7 @@
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability --help
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability check --rounds 3 --over-api <absolute-http(s)-URL> --json
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability report --over-api <absolute-http(s)-URL> --json
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability costs --over-api <absolute-http(s)-URL> --json
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability get --id <报告ID> --over-api <absolute-http(s)-URL> --json
 ```
 
@@ -23,6 +24,12 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - `report` 保存观测结果；`get` 不重新计算历史报告。
   - 改目标后用新报告验收，不覆盖旧报告，也不使用当前规则改写旧标签。
   - 严格比较在舍入前完成；页面只负责显示报告已保存的目标与比较符。
+- `costs` 默认独立读取过去 168 小时的逐日成本与共享钱包余额。
+  - 绕开错误日志、SLO 和用户归因查询，避免服务质量长窗口失败同时阻断充值分析。
+  - 保留钱包关联账号、优先级、余额来源时间、逐日已知成本和缺失记录数。
+  - 同金额倍率的重复采样压缩为变化点，保留历史时序，不用当前倍率倒填历史。
+  - 缺失成本仍为未知；已知成本可用于保守估算，不能当作完整成本或续航保证。
+  - 完整历史不足时继续给出充值风险、估算金额或临时备付建议，不得因此结论为“无需充值”。
 - 报告同时保存 `businessLimitBreakdown` 和 `ttftBreakdown`：
   - `businessLimitBreakdown` 按下游用户、API Key、入口和模型统计余额不足请求，包含用户 ID、
     用户邮箱、Key 名称、首末时间和请求数；该字段不包含 Key 密文。

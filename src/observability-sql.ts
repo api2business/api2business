@@ -1,8 +1,18 @@
+// Keep only changes in the evidenced rate. Repeated quota samples are not new
+// billing epochs; scanning all of them for every usage row makes week-long reads slow.
+export const observedRateEventsSql = `rate_samples AS (
+  SELECT DISTINCT account_id,at,rate_cny FROM jsonb_to_recordset($3::jsonb)
+    AS r(account_id bigint,at timestamptz,rate_cny double precision)
+), rate_changes AS (
+  SELECT *,LAG(rate_cny) OVER (PARTITION BY account_id ORDER BY at,rate_cny) AS previous_rate
+  FROM rate_samples
+), rate_events AS MATERIALIZED (
+  SELECT account_id,at,rate_cny FROM rate_changes WHERE previous_rate IS DISTINCT FROM rate_cny
+)`;
+
 // Both event sources use the same half-open window. No recent-N truncation.
 export const observabilitySql = `
-WITH rate_events AS (
-  SELECT * FROM jsonb_to_recordset($3::jsonb) AS r(account_id bigint,at timestamptz,rate_cny double precision)
-), probe_keys AS (
+WITH ${observedRateEventsSql}, probe_keys AS (
   SELECT k.id FROM api_keys k LEFT JOIN users u ON u.id=k.user_id
   WHERE u.email='monitor-user@sub2api.platform-infra.local'
     OR LOWER(COALESCE(k.name,'')) LIKE 'api2business-probe-%'

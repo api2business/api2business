@@ -927,6 +927,14 @@ export function createHandler(
         try { return json(await operations.audits(pageNumber(url), 10)); }
         catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
       }
+      if (request.method === "GET" && url.pathname === "/api/observability/costs") {
+        if (!observability) return json({ok:false,error:"observability unavailable"},503);
+        try { return json(await observability.costs(url.searchParams.get("start"),url.searchParams.get("end"))); }
+        catch (error) {
+          if (error instanceof Error && /invalid observation window|start and end must/u.test(error.message)) return json({ok:false,error:error.message},400);
+          throw error;
+        }
+      }
       if (request.method === "GET" && url.pathname === "/api/observability/report") {
         if (!observability) return json({ ok:false,error:"observability unavailable" },503);
         try { return json(await observability.report(url.searchParams.get("start"),url.searchParams.get("end"))); }
