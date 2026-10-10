@@ -8,7 +8,8 @@ export const dailyCostSql = `WITH ${observedRateEventsSql}, probe_keys AS (
     OR LOWER(COALESCE(k.name,'')) LIKE 'api2business-probe-%'
 ), usage AS (
   SELECT u.account_id,u.created_at,u.actual_cost,u.rate_multiplier,
-    (u.created_at AT TIME ZONE $4)::date::text AS day
+    (u.created_at AT TIME ZONE $4)::date::text AS day,
+    u.created_at >= $2::timestamptz - INTERVAL '24 hours' AS recent_24h
   FROM usage_logs u LEFT JOIN probe_keys p ON p.id=u.api_key_id
   LEFT JOIN groups g ON g.id=u.group_id
   WHERE u.created_at >= $1::timestamptz AND u.created_at < $2::timestamptz
@@ -20,13 +21,13 @@ export const dailyCostSql = `WITH ${observedRateEventsSql}, probe_keys AS (
     ORDER BY r.at DESC LIMIT 1
   ) rate ON true
 ), costs AS (
-  SELECT day,account_id,COUNT(*)::int AS records,
+  SELECT day,account_id,recent_24h,COUNT(*)::int AS records,
     COUNT(*) FILTER (WHERE actual_cost>=0 AND rate_multiplier>0 AND rate_cny IS NULL)::int AS valid_records,
     COUNT(*) FILTER (WHERE actual_cost>=0 AND rate_multiplier>0 AND rate_cny>0)::int AS historical_records,
     SUM(actual_cost / NULLIF(rate_multiplier,0)*rate_cny) FILTER (WHERE actual_cost>=0 AND rate_multiplier>0 AND rate_cny>0)::float8 AS historical_cost_cny,
     SUM(actual_cost / NULLIF(rate_multiplier,0)) FILTER (WHERE actual_cost>=0 AND rate_multiplier>0 AND rate_cny IS NULL)::float8 AS normalized_cost,
     MIN(created_at) AS first_at,MIN(rate_at) AS first_rate_at,MAX(rate_at) AS last_rate_at
-  FROM cost_usage GROUP BY day,account_id
+  FROM cost_usage GROUP BY day,account_id,recent_24h
 ), account_rows AS (
   SELECT id,name,platform,type,RTRIM(COALESCE(credentials->>'base_url',''),'/') AS base_url,
     deleted_at IS NULL AS active,status,schedulable,priority
@@ -43,14 +44,20 @@ export function dailyWalletCosts(costAccounts: Row[], accountFacts: Row[], walle
   const byId = new Map(accountFacts.map(account => [Number(account.id),account]));
   return walletFacts.map(wallet => {
     const days = new Map<string, Row>();
-    for (const account of costAccounts.filter(a => a.walletKey === wallet.walletKey)) {
+    const matched = costAccounts.filter(a => a.walletKey === wallet.walletKey);
+    for (const account of matched) {
       const day = String(account.day);
       const item = days.get(day) ?? { day,records:0,knownRecords:0,missingRecords:0,knownCostCny:0 };
       item.records += account.records; item.knownRecords += account.knownRecords;
       item.missingRecords += account.missingRecords; item.knownCostCny += account.knownCostCny ?? 0;
       days.set(day,item);
     }
-    return {...wallet,accounts:wallet.accountIds.map((id:number) => {
+    const recent = matched.filter(a => a.recent24Hours).reduce((total, account) => ({
+      records:total.records+account.records,knownRecords:total.knownRecords+account.knownRecords,
+      missingRecords:total.missingRecords+account.missingRecords,knownCostCny:total.knownCostCny+(account.knownCostCny ?? 0),
+    }), {records:0,knownRecords:0,missingRecords:0,knownCostCny:0});
+    return {...wallet,recent24Hours:{...recent,complete:recent.records===recent.knownRecords,
+      totalCostCny:recent.records===recent.knownRecords?recent.knownCostCny:null},accounts:wallet.accountIds.map((id:number) => {
       const account=byId.get(id);
       return {accountId:id,name:account?.name,platform:account?.platform,status:account?.status,
         schedulable:account?.schedulable,priority:account?.priority};

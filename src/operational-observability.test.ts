@@ -15,11 +15,12 @@ const cache=(id:number,remaining:number|null,sourceAt='2026-10-07T03:30:00.000Z'
 test('daily wallet costs retain usable partial evidence without inventing complete totals',()=>{
  const wallets=walletGovernance([account(1),account(2,'https://alias.example')],[cache(1,5)],config,at).wallets;
  const result=dailyWalletCosts([
-  {accountId:1,walletKey:'https://wallet.example',day:'2026-10-06',records:10,knownRecords:8,missingRecords:2,knownCostCny:20},
-  {accountId:2,walletKey:'https://wallet.example',day:'2026-10-06',records:2,knownRecords:2,missingRecords:0,knownCostCny:3},
-  {accountId:1,walletKey:'https://wallet.example',day:'2026-10-07',records:1,knownRecords:1,missingRecords:0,knownCostCny:0},
+  {accountId:1,walletKey:'https://wallet.example',day:'2026-10-06',recent24Hours:false,records:10,knownRecords:8,missingRecords:2,knownCostCny:20},
+  {accountId:2,walletKey:'https://wallet.example',day:'2026-10-06',recent24Hours:true,records:2,knownRecords:2,missingRecords:0,knownCostCny:3},
+  {accountId:1,walletKey:'https://wallet.example',day:'2026-10-07',recent24Hours:true,records:1,knownRecords:1,missingRecords:0,knownCostCny:0},
  ],[account(1),account(2)],wallets);
  expect(result).toHaveLength(1);
+ expect(result[0]?.recent24Hours).toEqual({records:3,knownRecords:3,missingRecords:0,knownCostCny:3,complete:true,totalCostCny:3});
  expect(result[0]?.daily).toEqual([
   {day:'2026-10-06',records:12,knownRecords:10,missingRecords:2,knownCostCny:23,complete:false,totalCostCny:null},
   {day:'2026-10-07',records:1,knownRecords:1,missingRecords:0,knownCostCny:0,complete:true,totalCostCny:0},

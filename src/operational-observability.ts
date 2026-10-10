@@ -105,7 +105,7 @@ export function costGovernance(facts: Row, cache: Row[], config: AppConfig, end:
     const known=valid ? Number(cost.historical_cost_cny ?? 0)+(fallback ? Number(cost.normalized_cost)*rate!*currencyRate : 0) : null;
     if (valid===Number(cost.records)) reason=null;
     records += Number(cost.records); knownRecords += valid; knownCostCny += known ?? 0;
-    return { accountId: Number(cost.account_id), day: cost.day ?? null, walletKey: walletKey || null, records: Number(cost.records), knownRecords: valid,
+    return { accountId: Number(cost.account_id), day: cost.day ?? null, recent24Hours:cost.recent_24h === true, walletKey: walletKey || null, records: Number(cost.records), knownRecords: valid,
       missingRecords: Number(cost.records)-valid, knownCostCny: known, reason: reason ?? (valid < Number(cost.records) ? "billing_fields_missing" : null),
       historicalRecords: historical,firstHistoricalRateAt:cost.first_rate_at ?? null,lastHistoricalRateAt:cost.last_rate_at ?? null,
       providerRate: rate, providerRateObservedAt: observedAt, currencyRate, currencyPolicyObservedAt: valuationAt };
@@ -182,7 +182,7 @@ export class OperationalObservability {
     const balances=walletGovernance(facts.accounts ?? [],cache,this.config,capturedAt);
     const wallets=dailyWalletCosts(cost.accounts,facts.accounts ?? [],balances.wallets).map(wallet=>{
       const currencyRate=valuation.walletCnyPerApiUsd[wallet.walletKey] ?? valuation.defaultCnyPerApiUsd;
-      return {...wallet,remainingCny:wallet.remainingUsd===null?null:wallet.remainingUsd*currencyRate,
+      return {...wallet,recent24Hours:{...wallet.recent24Hours,coveredSeconds:Math.min(window.seconds,86400)},remainingCny:wallet.remainingUsd===null?null:wallet.remainingUsd*currencyRate,
         currencyRate,currencySource:"owning valuation policy"};
     });
     const id=crypto.randomUUID();
