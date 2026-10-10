@@ -4,13 +4,13 @@ import { observabilitySql } from '../../../../src/observability-sql';
 // The normal read broker executes VALUES-only fixtures; no business rows or writes.
 export async function verifyObservationWindow(client: AdminHttpClient) {
   const fixture=`WITH accounts AS (
-    SELECT 1::bigint id,'openai'::text platform,'apikey'::text type,'{"base_url":"https://fixture.example"}'::jsonb credentials,NULL::timestamptz deleted_at
+    SELECT 1::bigint id,'fixture upstream'::text name,'openai'::text platform,'apikey'::text type,'{"base_url":"https://fixture.example"}'::jsonb credentials,NULL::timestamptz deleted_at
   ), users AS (SELECT 99::bigint id,'monitor-user@sub2api.platform-infra.local'::text email),
   api_keys AS (SELECT 99::bigint id,99::bigint user_id,'api2business-probe-fixture'::text name),
   groups AS (SELECT 1::bigint id,'business'::text name),
   usage_logs AS (
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,1::bigint group_id,api_key_id,
-      true AS stream,ttft AS first_token_ms,actual_cost,rate_multiplier
+      true AS stream,'fixture-model'::text model,ttft AS first_token_ms,actual_cost,rate_multiplier
     FROM (VALUES
       (1,'r1','2026-01-01T00:00:00Z',1,5000,2::numeric,2::numeric),
       (2,'r1','2026-01-01T00:30:00Z',1,20000,2,2),
@@ -22,7 +22,9 @@ export async function verifyObservationWindow(client: AdminHttpClient) {
   ), ops_error_logs AS (
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,1::bigint group_id,api_key_id,
       status_code,NULL::int upstream_status_code,NULL::text network_error_type,false is_business_limited,
-      phase AS error_phase,kind AS error_type
+      phase AS error_phase,kind AS error_type,'fixture-model'::text model,NULL::text requested_model,
+      '/v1/responses'::text inbound_endpoint,NULL::text error_message,NULL::text error_body,
+      NULL::text upstream_error_message,NULL::text upstream_error_detail
     FROM (VALUES
       (1,'r2','2026-01-01T00:50:00Z',1,502,'upstream','gateway'),
       (2,'r3','2026-01-01T01:00:00Z',1,502,'upstream','gateway'),
