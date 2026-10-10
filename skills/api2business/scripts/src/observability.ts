@@ -10,7 +10,7 @@ export const observabilityHelp={ok:true,commands:[
   'observability verify --over-api <absolute-http(s)-URL> (read-only SQL fixtures, no business records)',
   'observability get --id UUID --over-api <absolute-http(s)-URL> [--include-records] (frozen report)',
   'observability check [--rounds 3] --over-api <absolute-http(s)-URL> (read-only quota/recharge/broker sampling)',
-], output:'Default report bounds wallet/cost details to 10 rows, with total and omitted counts. Full report remains available by id.'};
+], output:'Default report bounds wallet/cost details to 10 rows, with total and omitted counts. Full report remains available by id. For service-quality attribution, inspect businessLimitBreakdown for identifiable downstream balance limits and ttftBreakdown for model/account TTFT before judging the global SLO.'};
 export function configureObservability(configPath:string,file:string,confirm:boolean) {
   const input=JSON.parse(readFileSync(file,'utf8'));
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('settings must be a non-null object');
