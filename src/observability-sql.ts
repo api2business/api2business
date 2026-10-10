@@ -12,8 +12,11 @@ WITH rate_events AS (
   LEFT JOIN groups g ON g.id=u.group_id
   WHERE u.created_at >= $1::timestamptz AND u.created_at < $2::timestamptz
 ), error_source AS (
-  SELECT o.*, (p.id IS NOT NULL OR LOWER(COALESCE(g.name,'')) LIKE 'api2business-probe-%') AS probe
+  SELECT o.*, k.user_id AS api_user_id, k.name AS api_key_name, u.email AS api_user_email,
+    (p.id IS NOT NULL OR LOWER(COALESCE(g.name,'')) LIKE 'api2business-probe-%') AS probe
   FROM ops_error_logs o LEFT JOIN probe_keys p ON p.id=o.api_key_id
+  LEFT JOIN api_keys k ON k.id=o.api_key_id
+  LEFT JOIN users u ON u.id=k.user_id
   LEFT JOIN groups g ON g.id=o.group_id
   WHERE o.created_at >= $1::timestamptz AND o.created_at < $2::timestamptz
 ), usage AS (SELECT * FROM usage_source WHERE NOT probe),
@@ -22,12 +25,13 @@ errors AS (
     AND LOWER(COALESCE(error_type,'')) <> 'failover_event'
     AND NOT (COALESCE(status_code,upstream_status_code,0) BETWEEN 200 AND 399)
 ), success AS (
-  SELECT DISTINCT ON (request_id) request_id, account_id, stream, first_token_ms
+  SELECT DISTINCT ON (request_id) request_id, account_id, model, stream, first_token_ms
   FROM usage WHERE NULLIF(TRIM(request_id),'') IS NOT NULL
   ORDER BY request_id,created_at DESC,id DESC
 ), failure AS (
   SELECT DISTINCT ON (e.request_id) e.request_id,e.account_id,e.error_phase,e.error_type,
-    e.status_code,e.upstream_status_code,e.network_error_type,
+    e.status_code,e.upstream_status_code,e.network_error_type,e.model,e.requested_model,
+    e.inbound_endpoint,e.api_user_id,e.api_key_id,e.api_key_name,e.api_user_email,e.created_at,
     CASE
       WHEN COALESCE(e.is_business_limited,false) OR e.error_phase='business' THEN 'business_limit'
       WHEN e.error_phase='client' THEN 'client_input'
@@ -85,6 +89,31 @@ SELECT jsonb_build_object(
   'excludedProbeRecords',(SELECT COUNT(*) FROM usage_source WHERE probe)+(SELECT COUNT(*) FROM error_source WHERE probe),
   'recoveredRequests',(SELECT COUNT(DISTINCT e.request_id) FROM errors e JOIN success s USING(request_id)),
   'errorFamilies',COALESCE((SELECT jsonb_agg(t) FROM (SELECT family,COUNT(*)::int AS requests FROM failure GROUP BY family ORDER BY COUNT(*) DESC) t),'[]'::jsonb),
+  'businessLimitBreakdown',COALESCE((SELECT jsonb_agg(t) FROM (
+    SELECT api_user_id AS user_id,api_user_email AS user_email,api_key_id,api_key_name,
+      inbound_endpoint,COALESCE(requested_model,model,'unknown') AS model,
+      COALESCE(status_code,upstream_status_code,0)::int AS status_code,
+      COUNT(*)::int AS requests,MIN(created_at) AS first_at,MAX(created_at) AS last_at
+    FROM error_source
+    WHERE NOT probe AND (COALESCE(is_business_limited,false) OR error_phase='business')
+      AND LOWER(CONCAT_WS(' ',error_message,error_body,upstream_error_message,upstream_error_detail)) LIKE ANY (ARRAY[
+        '%insufficient_balance%','%insufficient account balance%','%balance is insufficient%',
+        '%user balance is insufficient%','%余额不足%','%额度不足%'
+      ])
+    GROUP BY api_user_id,api_user_email,api_key_id,api_key_name,inbound_endpoint,
+      COALESCE(requested_model,model,'unknown'),COALESCE(status_code,upstream_status_code,0)
+    ORDER BY requests DESC,user_email,api_key_id
+  ) t),'[]'::jsonb),
+  'ttftBreakdown',COALESCE((SELECT jsonb_agg(t) FROM (
+    SELECT s.model,s.account_id,a.name AS account_name,COUNT(*)::int AS samples,
+      percentile_cont(0.50) WITHIN GROUP (ORDER BY s.first_token_ms) AS p50_ms,
+      percentile_cont(0.95) WITHIN GROUP (ORDER BY s.first_token_ms) AS p95_ms,
+      MAX(s.first_token_ms) AS max_ms
+    FROM success s LEFT JOIN accounts a ON a.id=s.account_id
+    WHERE s.stream AND s.first_token_ms>=0
+    GROUP BY s.model,s.account_id,a.name
+    ORDER BY p95_ms DESC,samples DESC,s.model,s.account_id
+  ) t),'[]'::jsonb),
   'unknownExamples',COALESCE((SELECT jsonb_agg(t) FROM (SELECT request_id,error_phase,error_type,status_code,upstream_status_code,network_error_type FROM failure WHERE family='unknown' ORDER BY request_id LIMIT 10) t),'[]'::jsonb),
   'platforms',COALESCE((SELECT jsonb_agg(t) FROM platform_facts t),'[]'::jsonb),
   'costAccounts',COALESCE((SELECT jsonb_agg(t) FROM cost t),'[]'::jsonb),

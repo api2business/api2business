@@ -23,6 +23,12 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - `report` 保存观测结果；`get` 不重新计算历史报告。
   - 改目标后用新报告验收，不覆盖旧报告，也不使用当前规则改写旧标签。
   - 严格比较在舍入前完成；页面只负责显示报告已保存的目标与比较符。
+- 报告同时保存 `businessLimitBreakdown` 和 `ttftBreakdown`：
+  - `businessLimitBreakdown` 按下游用户、API Key、入口和模型统计余额不足请求，包含用户 ID、
+    用户邮箱、Key 名称、首末时间和请求数；该字段不包含 Key 密文。
+  - `ttftBreakdown` 按模型和上游账号统计流式 TTFT 的样本数、P50、P95 和最大值，避免少量
+    慢模型样本被全局 P95 隐藏。
+  - 发现成功率或 TTFT 异常时先看这两个分解，再决定是下游余额、单个供应商模型还是公共运行面问题。
 
 ## owning YAML
 

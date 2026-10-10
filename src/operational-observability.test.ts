@@ -3,6 +3,7 @@ import { observationWindow,observationPath,slo,walletGovernance,costGovernance,o
 import { parseObservabilityConfig } from './observability-config';
 import { authoritativeUsageBalance } from './operations-store';
 import { compactObservation,checkObservability } from '../skills/api2business/scripts/src/observability';
+import { observabilitySql } from './observability-sql';
 import type { AppConfig } from './config';
 import type { AdminHttpClient } from './admin-http-client';
 const settings={sub2apiSuccessPercent:95,sub2apiTtftP95Ms:30000,api2businessNon5xxPercent:99.9,api2businessLatencyP95Ms:3000,walletFreshnessSeconds:3600,retentionDays:30};
@@ -22,6 +23,12 @@ test('30-second TTFT target and incomplete or empty evidence remain distinct',()
  expect(slo(null,30000,'max').status).toBe('insufficient_data');
  expect(slo(100,99,'min',false).status).toBe('insufficient_data');
  expect(()=>parseObservabilityConfig({...settings,sub2apiTtftP95Ms:NaN})).toThrow();
+});
+test('observability report keeps user balance and TTFT attribution for diagnosis',()=>{
+ expect(observabilitySql).toContain('api_user_email');
+ expect(observabilitySql).toContain('businessLimitBreakdown');
+ expect(observabilitySql).toContain('ttftBreakdown');
+ expect(observabilitySql).toContain('percentile_cont(0.95) WITHIN GROUP (ORDER BY s.first_token_ms)');
 });
 test('shared wallets count once, preserve source and distinguish missing from zero',()=>{
  const result=walletGovernance([account(525),account(1500,'https://alias.example'),account(3,'https://missing.example'),account(4,'https://zero.example')],[cache(525,10),cache(1500,0),cache(3,null),cache(4,0)],config,at);
