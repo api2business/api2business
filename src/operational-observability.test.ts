@@ -65,6 +65,12 @@ test('actual cost uses evidenced supplier and currency rates; historical gaps ne
  expect(historical.knownRecords).toBe(0);
  expect(historical.accounts[0]?.reason).toBe('historical_provider_rate_missing');
 });
+test('non API-key usage is explicitly out of scope instead of missing reconciliation',()=>{
+ const facts={accounts:[{...account(1521),type:'oauth',platform:'antigravity'}],costAccounts:[{account_id:1521,records:1405,valid_records:1405,normalized_cost:17.70914985,first_at:'2026-10-07T02:00:00.000Z'}]};
+ const result=costGovernance(facts,[],config,at,{defaultCnyPerApiUsd:1,walletCnyPerApiUsd:{}},'2026-01-01T00:00:00.000Z');
+ expect(result).toMatchObject({records:1405,inScopeRecords:0,outOfScopeRecords:1405,knownRecords:0,missingRecords:0,coveragePercent:null,complete:false});
+ expect(result.accounts[0]).toMatchObject({accountType:'oauth',inScope:false,accountingStatus:'not_applicable',missingRecords:0,outOfScopeRecords:1405,reason:'non_apikey_not_in_scope'});
+});
 test('instrumentation excludes worker, login and itself and never stores dynamic paths',()=>{
  for(const path of ['/health','/api/login','/api/internal/execute-worker-operation','/api/observability/report','/api/admin/read-status']) expect(observationPath(path)).toBeNull();
  expect(observationPath('/api/upstreams/secret-looking-id/delete')).toBe('/api/upstreams/:operation');

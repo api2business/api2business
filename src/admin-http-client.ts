@@ -56,11 +56,11 @@ export class AdminHttpClient {
   upstreamSchedulingV2Scopes(): Promise<Record<string, unknown>> {
     return this.request("/api/v2/upstream-scheduling/scopes");
   }
-  upstreamSchedulingV2Snapshot(scope?: string | null, refresh = true): Promise<Record<string, unknown>> {
+  upstreamSchedulingV2Snapshot(scope?: string | null, refresh = false): Promise<Record<string, unknown>> {
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
-    // Freshness checks and explicit CLI snapshots kick the bounded read-model refresh.
-    // A cache-only read is reserved for a transport/process failure so a healthy
-    // last snapshot remains visible without issuing a dense refresh retry.
+    // Ordinary reads use the persisted read model and let the API refresh stale data
+    // in the background. Explicit --refresh is reserved for an operator-requested
+    // bounded refresh so the management API remains below its latency target.
     return this.request(`/api/v2/upstream-scheduling/snapshot${query}`, {
       headers: refresh ? { "x-api2business-refresh": "1", "cache-control": "no-cache" } : { "cache-control": "no-cache" },
     }, refresh ? 120000 : 30000);
