@@ -33,6 +33,12 @@
 
 ## 钱包与实际成本
 
+- 成本完整性只对当前上游管理范围内的 API-key 账号判定。
+  - OAuth、订阅和其他非 API-key 账号不属于上游管理对象，使用
+    `accountingStatus=not_applicable` 表示不需对账。
+  - 非 API-key 记录保留在原始记录总数与 `outOfScopeRecords` 中，不进入
+    `missingRecords` 和覆盖率分母；不得把它们报告为数据缺失。
+
 - 钱包身份、余额来源和币种换算复用
   [额度监控](../../skills/api2business/references/quota-monitoring.md)。
 - 同一钱包只计一次余额，账号和平台只保留关联关系。

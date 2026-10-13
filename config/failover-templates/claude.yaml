@@ -69,6 +69,11 @@ rules:
   - 'status code: 521'
   durationMinutes: 3
   description: Claude 上游 Cloudflare origin 不可达
+- errorCode: 524
+  keywords:
+  - 'The origin web server did not return a complete response within the 120-second Proxy Read Timeout window.'
+  durationMinutes: 3
+  description: Claude 上游 Cloudflare 524 响应超时
 - errorCode: 520
   keywords:
   - 'error code: 520'

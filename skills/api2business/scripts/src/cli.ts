@@ -40,6 +40,7 @@ interface Parsed {
   overApiUrl: string | null;
   json: boolean;
   cacheOnly: boolean;
+  refresh: boolean;
   id: string | null;
   requestId: string | null;
   component: NativeServiceId | "all" | null;
@@ -152,7 +153,7 @@ function parseArgs(args: string[]): Parsed {
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
   const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
-  const flags = new Set(["--confirm", "--include-records", "--json", "--cache-only", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
+  const flags = new Set(["--confirm", "--include-records", "--json", "--cache-only", "--refresh", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index]!;
@@ -194,6 +195,7 @@ function parseArgs(args: string[]): Parsed {
     overApiUrl,
     json: args.includes("--json"),
     cacheOnly: args.includes("--cache-only"),
+    refresh: args.includes("--refresh"),
     id: value(args, "--id"),
     requestId: value(args, "--request-id"),
     component,
@@ -261,7 +263,7 @@ function help(): Record<string, unknown> {
       "backend check",
       "scores get|pool-quality|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
       "upstream-scheduling-v2 scopes|plan [--scope codex|claude|grok] --over-api <absolute-http(s)-URL> (read-only; Codex phase first)",
-      "upstream-scheduling-v2 snapshot [--scope codex|claude|grok] [--cache-only] --over-api <absolute-http(s)-URL> (read-only cache/read-model query)",
+      "upstream-scheduling-v2 snapshot [--scope codex|claude|grok] [--refresh|--cache-only] --over-api <absolute-http(s)-URL> (read-only read-model query; default cache with background refresh)",
       "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api <absolute-http(s)-URL>",
       "reads status --over-api <absolute-http(s)-URL>",
@@ -1095,7 +1097,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "upstream-scheduling-v2") {
     if (action === "scopes") return await client.upstreamSchedulingV2Scopes();
-    if (action === "snapshot") return await client.upstreamSchedulingV2Snapshot(parsed.scope, !parsed.cacheOnly);
+    if (action === "snapshot") return await client.upstreamSchedulingV2Snapshot(parsed.scope, parsed.refresh && !parsed.cacheOnly);
     if (action === "plan") return await client.upstreamSchedulingV2Plan(parsed.scope);
     if (action === "priority-run") {
       const scope = parsed.scope;
@@ -1259,8 +1261,9 @@ export async function runCli(args: string[]): Promise<void> {
     if (args.includes("--help") && args.includes("observability")) return emit(observabilityHelp,wantsJson);
     if (args.includes("--help") || args.length === 0) return emit(help(), wantsJson);
     const parsed = parseArgs(args);
-    if (parsed.cacheOnly && !(parsed.command[0] === "upstream-scheduling-v2" && parsed.command[1] === "snapshot")) {
-      throw new Error("--cache-only 只适用于 upstream-scheduling-v2 snapshot");
+    if (parsed.cacheOnly && parsed.refresh) throw new Error("--refresh 与 --cache-only 不能同时使用");
+    if ((parsed.cacheOnly || parsed.refresh) && !(parsed.command[0] === "upstream-scheduling-v2" && parsed.command[1] === "snapshot")) {
+      throw new Error("--refresh/--cache-only 只适用于 upstream-scheduling-v2 snapshot");
     }
     if (parsed.command.join(" ") === "observability configure") {
       if (!parsed.file) throw new Error("observability configure requires --file");

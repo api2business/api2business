@@ -83,9 +83,11 @@ export function walletGovernance(accounts: Row[], cache: Row[], config: AppConfi
 export function costGovernance(facts: Row, cache: Row[], config: AppConfig, end: string, valuation: { defaultCnyPerApiUsd: number; walletCnyPerApiUsd: Record<string,number> }, valuationAt: string) {
   const accounts = new Map<number, Row>((facts.accounts ?? []).map((a: Row) => [Number(a.id),a]));
   const byId = new Map(cache.map(item => [Number(item.account_id), item]));
-  let knownRecords=0, records=0, knownCostCny=0;
+  let knownRecords=0, records=0, inScopeRecords=0, outOfScopeRecords=0, knownCostCny=0;
   const costs = (facts.costAccounts ?? []).map((cost: Row) => {
     const account = accounts.get(Number(cost.account_id)) ?? {};
+    const accountType = String(account.type ?? "").toLowerCase();
+    const inScope = accountType === "apikey";
     const cacheRow = byId.get(Number(cost.account_id));
     const evidence = row(cacheRow?.last_success_result ?? cacheRow?.result);
     const multiplier = row(evidence.billingMultiplier);
@@ -94,25 +96,29 @@ export function costGovernance(facts: Row, cache: Row[], config: AppConfig, end:
     const walletKey = configuredWalletKey(account.base_url, config.sub2api.newApiCredentials);
     const currencyRate = valuation.walletCnyPerApiUsd[walletKey] ?? valuation.defaultCnyPerApiUsd;
     let reason: string | null = null;
-    if (account.type !== "apikey") reason="non_apikey_cost_not_reconciled";
+    if (!inScope) reason="non_apikey_not_in_scope";
     else if (!walletKey) reason="wallet_identity_missing";
     else if (!rate || rate<=0 || !observedAt) reason="provider_rate_missing";
     else if (observedAt > end || observedAt > String(cost.first_at)) reason="historical_provider_rate_missing";
     else if (valuationAt > String(cost.first_at)) reason="historical_currency_policy_missing";
     const historical=Number(cost.historical_records ?? 0);
-    const fallback=reason ? 0 : Number(cost.valid_records);
-    const valid=historical+fallback;
+    const fallback=inScope && !reason ? Number(cost.valid_records) : 0;
+    const valid=inScope ? historical+fallback : 0;
     const known=valid ? Number(cost.historical_cost_cny ?? 0)+(fallback ? Number(cost.normalized_cost)*rate!*currencyRate : 0) : null;
-    if (valid===Number(cost.records)) reason=null;
-    records += Number(cost.records); knownRecords += valid; knownCostCny += known ?? 0;
-    return { accountId: Number(cost.account_id), day: cost.day ?? null, recent24Hours:cost.recent_24h === true, walletKey: walletKey || null, records: Number(cost.records), knownRecords: valid,
-      missingRecords: Number(cost.records)-valid, knownCostCny: known, reason: reason ?? (valid < Number(cost.records) ? "billing_fields_missing" : null),
+    if (inScope && valid===Number(cost.records)) reason=null;
+    const rowRecords = Number(cost.records);
+    records += rowRecords;
+    if (inScope) { inScopeRecords += rowRecords; knownRecords += valid; knownCostCny += known ?? 0; }
+    else outOfScopeRecords += rowRecords;
+    return { accountId: Number(cost.account_id), accountType, inScope, accountingStatus: inScope ? (valid === rowRecords ? "reconciled" : "incomplete") : "not_applicable", day: cost.day ?? null, recent24Hours:cost.recent_24h === true, walletKey: walletKey || null, records: rowRecords, knownRecords: valid,
+      missingRecords: inScope ? rowRecords-valid : 0, outOfScopeRecords: inScope ? 0 : rowRecords, knownCostCny: known, reason: inScope ? (reason ?? (valid < rowRecords ? "billing_fields_missing" : null)) : reason,
       historicalRecords: historical,firstHistoricalRateAt:cost.first_rate_at ?? null,lastHistoricalRateAt:cost.last_rate_at ?? null,
       providerRate: rate, providerRateObservedAt: observedAt, currencyRate, currencyPolicyObservedAt: valuationAt };
   });
-  return { records, knownRecords, missingRecords: records-knownRecords, coveragePercent: records ? knownRecords/records*100 : null,
-    knownCostCny, totalCostCny: records > 0 && records===knownRecords ? knownCostCny : null,
-    complete: records > 0 && records===knownRecords, accounts: costs };
+  return { records, inScopeRecords, outOfScopeRecords, knownRecords, missingRecords: inScopeRecords-knownRecords,
+    coveragePercent: inScopeRecords ? knownRecords/inScopeRecords*100 : null,
+    knownCostCny, totalCostCny: inScopeRecords > 0 && inScopeRecords===knownRecords ? knownCostCny : null,
+    complete: inScopeRecords > 0 && inScopeRecords===knownRecords, accounts: costs };
 }
 
 export function observerCoverage(instances: Row[], start: string, end: string) {

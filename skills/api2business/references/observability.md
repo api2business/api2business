@@ -32,6 +32,13 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 同金额倍率的重复采样压缩为变化点，保留历史时序，不用当前倍率倒填历史。
   - 缺失成本仍为未知；已知成本可用于保守估算，不能当作完整成本或续航保证。
   - 完整历史不足时继续给出充值风险、估算金额或临时备付建议，不得因此结论为“无需充值”。
+- 成本完整性只统计当前上游管理范围内的 API-key 账号。
+  - OAuth、订阅或其他非 API-key 账号不是上游管理对象，使用
+    `accountingStatus=not_applicable`、`reason=non_apikey_not_in_scope` 表示不需对账。
+  - 非 API-key 记录计入 `records` 与 `outOfScopeRecords`，不计入 `missingRecords` 或覆盖率分母。
+  - 只有 API-key 账号的账务字段、供应商倍率或历史币种政策缺失时，才判定为需要对账的数据缺口。
+- `upstream-scheduling-v2 snapshot` 默认读取缓存并在过期时后台刷新；需要同步等待一次有界刷新时显式追加 `--refresh`。
+  `--cache-only` 保持只读缓存语义，不能与 `--refresh` 同时使用。
 - 报告同时保存 `businessLimitBreakdown` 和 `ttftBreakdown`：
   - `businessLimitBreakdown` 按下游用户、API Key、入口和模型统计余额不足请求，包含用户 ID、
     用户邮箱、Key 名称、首末时间和请求数；该字段不包含 Key 密文。

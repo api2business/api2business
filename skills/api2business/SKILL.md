@@ -151,7 +151,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   需要刷新时使用 `scores rank --calls <N> --over-api <absolute-http(s)-URL>`。
 - V2 使用 `upstream-scheduling-v2 scopes|plan --over-api <absolute-http(s)-URL>` 或
   `upstream-scheduling-v2 snapshot --scope <scope> --over-api <absolute-http(s)-URL>` 只读查看；新鲜度告警或刷新失败
-  排查可追加 `--cache-only`，只读取最近成功的读模型缓存，不触发新的刷新请求。使用
+  排查默认读取缓存并由服务后台刷新；需要同步刷新时追加 `--refresh`，只读取最近成功的读模型缓存时追加 `--cache-only`，两者不可同时使用。使用
   `upstream-scheduling-v2 priority-run --scope <codex|claude|grok> --confirm --over-api <absolute-http(s)-URL>`
   通过原生 worker 执行一次指定作用域的手动优先级调整；作用域的
   `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和

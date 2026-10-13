@@ -56,6 +56,8 @@ export class OperationsStore {
       );
       CREATE INDEX IF NOT EXISTS api2business_http_observations_time
         ON api2business_http_observations(completed_at);
+      CREATE INDEX IF NOT EXISTS api2business_http_observations_path_time
+        ON api2business_http_observations(path, completed_at);
       CREATE TABLE IF NOT EXISTS api2business_observer_instances (
         instance_id text PRIMARY KEY, started_at timestamptz NOT NULL,
         last_seen_at timestamptz NOT NULL, failed_writes integer NOT NULL DEFAULT 0
@@ -507,10 +509,18 @@ export class OperationsStore {
       percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS latency_p95_ms,
       MIN(completed_at) AS first_request_at, MAX(completed_at) AS last_request_at
       FROM api2business_http_observations WHERE completed_at>=${start} AND completed_at<${end}`;
+    const pathBreakdown = await this.sql`SELECT path,COUNT(*)::int AS requests,
+      COUNT(*) FILTER (WHERE status>=500)::int AS failed,
+      percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms) AS latency_p50_ms,
+      percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS latency_p95_ms,
+      MAX(duration_ms) AS latency_max_ms
+      FROM api2business_http_observations
+      WHERE completed_at>=${start} AND completed_at<${end}
+      GROUP BY path ORDER BY latency_p95_ms DESC,path`;
     const instances = await this.sql`SELECT instance_id,started_at,last_seen_at,failed_writes
       FROM api2business_observer_instances WHERE started_at<${end} AND last_seen_at>=${start}
       ORDER BY started_at`;
-    return { ...row, instances: Array.from(instances) };
+    return { ...row, pathBreakdown: Array.from(pathBreakdown), instances: Array.from(instances) };
   }
 
   async getSnapshot(key: string) {
