@@ -16,18 +16,42 @@
   - `请求参数或格式不正确` 或完整英文短语
     `The request could not be processed. Please check the request parameters.`
     命中后短暂冷却 3 分钟并切换账号。
-  - 不扩展为泛化 `invalid_request_error`，不写入 Codex 或 Grok 模板。
+  - 不扩展为泛化 `invalid_request_error`，不因 Claude 证据向 Codex 或 Grok 复制规则。
+  - 同一短语在其他平台有独立证据时，由对应平台模板单独声明。
   - 这类通用拒绝没有指出具体参数；规则命中不证明客户参数错误，
     也不证明切换供应商能处理原请求。
-- 修改独立模板文件后，先确认 API 输出新的 `config-hot-reload` 证据，再执行单账号模板作业；
-  通过原 workflow 回读 `verifiedCount`、`failedCount`、`misalignedCount`，随后按账号回读
-  平台、`base_url`、状态码和精确关键词，确认没有重置上游地址或凭据字段后才扩大范围。
+- 修改独立模板文件后，先确认 API 输出新的 `config-hot-reload` 证据。
+  - 单账号试点只能作为中间验证，不能作为模板更新完成的依据。
+  - 最终应用范围和验收统一见[切号模板同平台全量同步](#切号模板同平台全量同步)。
 - HTTP 运行面必须使用 `--over-api <absolute-http(s)-URL>`。
   - URL 必须匹配 `config/api2business.yaml` 声明的唯一 HTTP target。
   - 禁止无值、布尔开关、别名和隐式回退；回执核对 `canonicalUrl`。
   - 完整入口与续查规则见 [项目技能](../SKILL.md#运行面与排队诊断)。
 - 这套顺序适用于模板、模型同步和探活等账号写入：单账号试点、workflow 终态、原生单账号回读、
   再扩大范围。详细模板算法和字段仍只维护在本文，跨仓库入口只保留链接。
+
+## 切号模板同平台全量同步
+
+- 平台模板规则新增或修订后，必须覆盖该平台全部未删除的 API-key 上游。
+  - Codex 模板对应 `platform=openai`；Claude 模板对应 `platform=anthropic`。
+  - 不能只修报错账号、试点账号、同一供应商或某个分组。
+  - 不能按当前启用、可调度、余额或近期是否报错缩小范围。
+  - 非 API-key 账号不属于上游管理范围，不参与本操作。
+- 每个平台使用自己的模板；禁止把 Codex 模板套到 Claude 或 Grok。
+  - Grok 当前没有切号模板，不从其他平台复制；未来规则必须由 Grok 自己声明。
+  - 多个平台同时更新时，分别选择全量账号、提交作业并核验，不能混成同一模板。
+- 执行入口见[项目技能](../SKILL.md#领域操作)。
+  - 通过排队 broker 按平台与账号类型取得完整 ID 集合，不依赖列表首页或 owning 分组过滤。
+  - 用完整集合传入 `upstreams template --accounts`，先查看计划，再确认提交。
+  - 未声明平台的全池模板命令会处理多个平台，不用于单平台更新。
+  - 缺少 `base_url` 等必要配置的账号必须明确列出并补齐，不能让过滤后的数量冒充全量。
+- 验收必须覆盖完整目标集合。
+  - 原 workflow 达到终态，`targetCount`、`appliedCount`、`verifiedCount` 与目标数一致。
+  - `failedCount=0`、`misalignedCount=0`，且 applied/verified ID 集合与查询结果一致。
+  - 再通过无缓存排队回读核对各账号的状态码、精确关键词及冷却时长。
+  - 复查目标集合没有遗漏，并确认其他平台的模板配置未变。
+- 仅给新建账号套用未变更的现有模板时，可只传该账号 ID。
+  - 这是新账号初始化，不适用于平台模板规则更新。
 
 ## 创建、分组与切号
 
@@ -219,15 +243,7 @@
     - 只有响应提交前未发生切号，且证据证明运行态缺少对应状态码或关键词时，才增强模板。
     - 模板增强只作用于 API-key 上游。
     - 先按文末「配置生效」确认持有规则的进程已加载新声明，再同步。
-    - 模板变更的应用范围：
-      - `upstreams template --confirm --over-api <absolute-http(s)-URL>` 只覆盖目标 OpenAI/Anthropic API-key 上游。
-      - Grok 保持不套模板；执行结果会在 `skipped[]` 和 `skippedCount` 中明确列出
-        `platform-has-no-failover-template`，不会再用 `targetCount=0` 静默表示成功或失败。
-      - 只选择 Grok 时，`appliedCount=0` 是预期结果；应检查 `skipped[]`，不能重试或把
-        Codex/Claude 模板强行写入 Grok。
-      - 只改 Claude 时，先按 `platform=anthropic` 和 owning 分组筛出账号，再传 `--accounts`。
-      - 不得把 Codex 或 Grok 混入 Claude 作业。
-    - 只给新账号套用现有模板时，加上 `--accounts <id>`，不重写全池。
+    - 模板变更必须执行[同平台全量同步](#切号模板同平台全量同步)。
     - 回读原 workflow 的 `verifiedCount`、`failedCount` 和 `misalignedCount`。
     - `verifiedCount` 只证明执行进程自校验。
     - 自校验通过后，仍用排队读取核对目标账号的状态码和精确短语。

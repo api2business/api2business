@@ -176,7 +176,13 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 按模型定位使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api <absolute-http(s)-URL>`。
 - 单请求排障使用 `errors inspect --request-id <request-id> --over-api <absolute-http(s)-URL>`。
 - 切号是否命中、候选是否耗尽、正文是否缺失，只以 `references/upstream-scheduling.md` 为准。
-- 切号模板的匹配、近义短语、热加载、分组口语、同步范围和新增上游收口，只以该参考为准。
+- 切号模板规则更新后必须覆盖同平台全部 API-key 上游，不得仅修报错账号或跨平台套用。
+  - 全量选择、分平台执行和覆盖验收只见
+    [切号模板同平台全量同步](references/upstream-scheduling.md#切号模板同平台全量同步)。
+  - 使用 `reads query --file <查询文件> --over-api <绝对 URL>` 取得同平台完整 ID 集合。
+  - 使用 `upstreams template --accounts <完整ID集合> --over-api <绝对 URL>` 查看计划。
+  - 追加 `--confirm` 提交，再用 `upstreams status --id <workflow-id>` 和相同 URL 查询终态。
+- 切号模板的匹配、近义短语、热加载、分组口语和新增上游收口，只以该参考为准。
 - `upstreams template --confirm --over-api <absolute-http(s)-URL>` 只写入 OpenAI/Anthropic；Grok 会在执行结果的
   `skipped[]` 中明确标为 `platform-has-no-failover-template`，不能把 `appliedCount=0`
   当成未执行或改用其他平台模板重试。
