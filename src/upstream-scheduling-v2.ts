@@ -11,6 +11,9 @@ import { configuredWalletKey, preferSharedWalletBalance, usageWalletKey } from "
 type Row = Record<string, unknown>;
 
 interface V2SnapshotData {
+  sectionStatus?: Record<string, { state: string; observedAt: string | null; error: string | null }>;
+  complete?: boolean;
+  lastCompleteAt?: string | null;
   refreshedAt: string | null;
   recentCallLimit: number;
   status: string;
@@ -337,7 +340,15 @@ export class UpstreamSchedulingV2Service {
   }
 
   private withCache(payload: V2SnapshotPayload, capturedAt: string, state: "hit" | "stale" | "refreshed", error: string | null = null): V2SnapshotPayload & { cache: Row } {
-    return { ...projectCachedQuotaBalances(payload, this.config), cache: this.cacheMetadata(capturedAt, state, error) };
+    const sections = payload.data.sectionStatus ?? {};
+    const failedSections = Object.entries(sections).filter(([, section]) => section.state !== "fresh").map(([name]) => name);
+    return { ...projectCachedQuotaBalances(payload, this.config), cache: {
+      ...this.cacheMetadata(capturedAt, state, error),
+      complete: payload.data.complete === true,
+      lastCompleteAt: payload.data.lastCompleteAt ?? null,
+      failedSections,
+      sections,
+    } };
   }
 
   private async persistedCache(scopeName: string): Promise<{ payload: V2SnapshotPayload; capturedAt: string } | null> {
@@ -372,6 +383,10 @@ export class UpstreamSchedulingV2Service {
         && scope.features.priorityAutomation !== true
         && scope.features.upstreamWrite !== true,
       data: {
+        sectionStatus: source.sectionStatus,
+        complete: Object.values(source.sectionStatus).every((section) => section.state === "fresh"),
+        lastCompleteAt: Object.values(source.sectionStatus).every((section) => section.state === "fresh")
+          ? new Date().toISOString() : fallbackData?.lastCompleteAt ?? null,
         refreshedAt: source.scoreSnapshot.refreshedAt == null ? null : String(source.scoreSnapshot.refreshedAt),
         recentCallLimit: Number(source.scoreSnapshot.recentCallLimit ?? this.config.monitor.recentCallLimit),
         status: source.scoreSnapshot.status == null ? "unavailable" : String(source.scoreSnapshot.status),
@@ -464,6 +479,7 @@ export class UpstreamSchedulingV2Service {
     fallbackData?: V2SnapshotData,
   ): Promise<{
     scoreSnapshot: Row;
+    sectionStatus: NonNullable<V2SnapshotData["sectionStatus"]>;
     accounts: Row[];
     quotaCoverage: Row;
     poolQuality: Row;
@@ -501,11 +517,23 @@ export class UpstreamSchedulingV2Service {
         ? this.readSection(() => this.operations.modelSyncHistory(1, 10, scopeName), "model-sync-history")
         : Promise.resolve({ ok: true, scope: scopeName, automaticEnabled: false, batchSize: this.configuration().modelSync.batchSize, intervalSeconds: this.configuration().modelSync.intervalSeconds, records: [], pagination: { page: 1, totalPages: 1, total: 0 }, valuesPrinted: false }),
     ]);
+    const sectionStatus: NonNullable<V2SnapshotData["sectionStatus"]> = {
+      scores: { state: scoreSnapshot.ok === false ? "unavailable" : "fresh",
+        observedAt: scoreSnapshot.refreshedAt == null ? null : String(scoreSnapshot.refreshedAt),
+        error: scoreSnapshot.ok === false ? String(scoreSnapshot.error ?? "score snapshot unavailable") : null },
+    };
     const section = <T>(index: number, fallback: T, name: string): T => {
       const result = results[index];
-      if (result?.status === "fulfilled") return result.value as T;
-      const reason = result?.status === "rejected" ? result.reason : new Error("missing settled result");
+      if (result?.status === "fulfilled" && object(result.value).ok !== false) {
+        sectionStatus[name] = { state: "fresh", observedAt: new Date().toISOString(), error: null };
+        return result.value as T;
+      }
+      const reason = result?.status === "rejected" ? result.reason
+        : new Error(String(object(result?.status === "fulfilled" ? result.value : {}).error ?? "missing settled result"));
       const message = reason instanceof Error ? reason.message : String(reason);
+      const previous = fallbackData?.sectionStatus?.[name];
+      sectionStatus[name] = { state: previous?.observedAt ? "stale" : "unavailable",
+        observedAt: previous?.observedAt ?? null, error: message };
       console.error(JSON.stringify({
         ok: false,
         component: "upstream-scheduling-v2-section",
@@ -537,6 +565,7 @@ export class UpstreamSchedulingV2Service {
     const quotaProjection = enrichAccountsWithQuotaCache(costAccounts, usageRows, this.config);
     return {
       scoreSnapshot,
+      sectionStatus,
       accounts: quotaProjection.accounts,
       quotaCoverage: quotaProjection.quotaCoverage,
       poolQuality,

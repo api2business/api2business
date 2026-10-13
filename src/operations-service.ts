@@ -590,7 +590,7 @@ export class OperationsService {
   }
 
   async getReadModelSnapshot(key: string) {
-    return await this.readWithConnectionRecovery(() => this.store.getSnapshot(key));
+    return await this.store.getSnapshot(key);
   }
 
   async readWithConnectionRecovery<T>(operation: () => Promise<T>): Promise<T> {
@@ -1706,6 +1706,7 @@ export class OperationsService {
     return {
       ok: true,
       readExecutor: this.reads.status(),
+      operationsDatabase: this.store.connectionStatus(),
     };
   }
 

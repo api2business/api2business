@@ -377,9 +377,22 @@
     `operations.upstreamSchedulingV2.readModelCacheSeconds` 时直接命中，过期时先返回陈旧
     快照并后台刷新。冷启动或显式刷新才等待重建；重建失败保留上一份快照，不把账号、额度
     或评分清空为零。页面通过 `cache.state` 显示命中、陈旧后台刷新或刚完成刷新。
-  - 新鲜度检查的显式刷新失败时，只允许追加一次 `--cache-only` 读取最近成功缓存；该读取
-    不重试刷新、不延长本轮间隔。缓存仍在告警阈值内时保持 ready，下一轮再按 owning YAML
-    周期刷新；缓存也不可读时才记录该作用域错误。
+  - 读模型完整性以 `cache.complete` 与 `cache.sections` 为准。
+    - `capturedAt` 仅表示快照组装时间，不证明每个分项重新读取成功。
+    - 分项返回 `state=fresh|stale|unavailable`、`observedAt` 和 `error`。
+    - 失败时保留该分项原数据与原成功时间，不把空数组、零值或新组装时间当成恢复。
+    - `failedSections` 列出当前失败分项；`lastCompleteAt` 只在全部分项成功时更新。
+  - 新鲜度检查显式使用 `--refresh`；失败后最多追加一次 `--cache-only`。
+    - 缓存读取不重试刷新、不延长本轮间隔。
+    - 部分失败的分项按原成功时间计算年龄，不能仅凭新的 `capturedAt` 解除告警。
+    - 30 秒缓存 TTL 与 owning YAML 的告警时间阈值分别判定。
+  - 经营数据库读取按 `sub2api.scoreDatabase.statementTimeoutMs` 取得有界预算。
+    - 原生 SQL 查询超时时调用 `cancel()`，回收失效主池并最多重试一次只读查询。
+    - 第二次失败返回原错误并退役失败池，不留下无期限挂起查询。
+    - 健康查询使用更短预算；主池恢复不重建持有优先级 advisory lock 的独立池。
+    - 快照持久化超时取消并返回失败，不自动重放业务写入。
+    - `reads status` 同时披露 broker 和 `operationsDatabase` 的恢复次数与读取超时。
+
   - 评分刷新失败时必须保留最后一次成功的账号数据，并让刷新作业以失败终态返回；
     不得把带旧 `refreshedAt` 的陈旧快照报告为本次刷新成功。排查停更时同时核对
     `scores rank --over-api <absolute-http(s)-URL>` 的真实 `refreshedAt`、worker 活动错误和数据库查询错误，

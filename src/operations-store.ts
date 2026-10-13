@@ -38,11 +38,14 @@ export class OperationsStore {
   private connectionGeneration = 0;
   private recyclePromise: Promise<void> | null = null;
   private closed = false;
+  private readTimeouts = 0;
+  private connectionRecycles = 0;
 
   constructor(
     private readonly databaseUrl: string,
     private readonly sqlFactory: OperationsSqlFactory = (url, max, prepare) => new SQL(url, { max, prepare }),
     private readonly prepareStatements = false,
+    private readonly readTimeoutMs = 15_000,
   ) {
     this.sql = this.createSql(4);
     this.priorityOptimizationQueueSql = this.createSql(1);
@@ -394,9 +397,7 @@ export class OperationsStore {
   }
 
   async health(): Promise<void> {
-    await this.withConnectionRecovery(async () => {
-      await this.sql`SELECT 1 AS ok`;
-    });
+    await this.readQuery(() => this.sql`SELECT 1 AS ok`, Math.min(this.readTimeoutMs, 4_000));
   }
 
   async recoverConnection(error: unknown): Promise<boolean> {
@@ -408,13 +409,11 @@ export class OperationsStore {
   }
 
   async getApiCache(key: string) {
-    return await this.withConnectionRecovery(async () => {
-      const [row] = await this.sql`
-        SELECT cache_key, status, headers, body, cached_at
-        FROM api2business_api_cache WHERE cache_key=${key}
-      `;
-      return row ?? null;
-    });
+    const [row] = await this.readQuery(() => this.sql`
+      SELECT cache_key, status, headers, body, cached_at
+      FROM api2business_api_cache WHERE cache_key=${key}
+    `);
+    return row ?? null;
   }
 
   async setApiCache(key: string, status: number, headers: Record<string, string>, body: string) {
@@ -432,8 +431,49 @@ export class OperationsStore {
     return this.sqlFactory(this.databaseUrl, max, this.prepareStatements);
   }
 
+  connectionStatus() {
+    return { generation: this.connectionGeneration, connectionRecycles: this.connectionRecycles,
+      readTimeouts: this.readTimeouts, readTimeoutMs: this.readTimeoutMs, recovering: this.recyclePromise !== null };
+  }
+
   async readWithConnectionRecovery<T>(operation: () => Promise<T>): Promise<T> {
-    return await this.withConnectionRecovery(operation);
+    return await this.withConnectionRecovery(() => this.readDeadline(operation(), this.readTimeoutMs));
+  }
+
+  private async readQuery<T>(query: () => PromiseLike<T> & { cancel?: () => void }, timeoutMs = this.readTimeoutMs): Promise<T> {
+    return await this.withConnectionRecovery(() => this.readDeadline(query(), timeoutMs));
+  }
+
+  private async persistQuery<T>(query: () => PromiseLike<T> & { cancel?: () => void }): Promise<T> {
+    const generation = this.connectionGeneration;
+    try {
+      return await this.readDeadline(query(), this.readTimeoutMs);
+    } catch (error) {
+      if (isRecoverableDatabaseConnectionError(error) || (error instanceof Error && error.name === "operations_read_timeout")) {
+        await this.recycleConnections(generation);
+      }
+      // A lost write acknowledgement is not permission to replay a business mutation.
+      throw error;
+    }
+  }
+
+  private async readDeadline<T>(query: PromiseLike<T> & { cancel?: () => void }, timeoutMs: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve(query),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            this.readTimeouts += 1;
+            const error = Object.assign(new Error(`经营库读取超过 ${timeoutMs}ms`), { name: "operations_read_timeout" });
+            reject(error);
+            try { query.cancel?.(); } catch { /* Pool retirement below also terminates the stale query. */ }
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private async withConnectionRecovery<T>(operation: () => Promise<T>): Promise<T> {
@@ -441,9 +481,17 @@ export class OperationsStore {
     try {
       return await operation();
     } catch (error) {
-      if (!isRecoverableDatabaseConnectionError(error)) throw error;
+      if (!isRecoverableDatabaseConnectionError(error) && !(error instanceof Error && error.name === "operations_read_timeout")) throw error;
       await this.recycleConnections(observedGeneration);
-      return await operation();
+      const retryGeneration = this.connectionGeneration;
+      try {
+        return await operation();
+      } catch (retryError) {
+        if (isRecoverableDatabaseConnectionError(retryError) || (retryError instanceof Error && retryError.name === "operations_read_timeout")) {
+          await this.recycleConnections(retryGeneration);
+        }
+        throw retryError;
+      }
     }
   }
 
@@ -453,15 +501,14 @@ export class OperationsStore {
     const recycle = (async () => {
       if (this.closed || observedGeneration !== this.connectionGeneration) return;
       const expiredSql = this.sql;
-      const expiredQueueSql = this.priorityOptimizationQueueSql;
+      // Main reads must not release the independent priority-operation advisory lock.
       this.sql = this.createSql(4);
-      this.priorityOptimizationQueueSql = this.createSql(1);
       this.connectionGeneration += 1;
+      this.connectionRecycles += 1;
+      console.error(JSON.stringify({ ok: true, component: "operations-database-recovery",
+        generation: this.connectionGeneration, readTimeouts: this.readTimeouts, valuesPrinted: false }));
       await Promise.race([
-        Promise.all([
-          expiredSql.close({ timeout: 1 }).catch(() => undefined),
-          expiredQueueSql.close({ timeout: 1 }).catch(() => undefined),
-        ]),
+        expiredSql.close({ timeout: 0 }).catch(() => undefined),
         Bun.sleep(1500),
       ]);
     })();
@@ -504,31 +551,31 @@ export class OperationsStore {
   }
 
   async httpObservationFacts(start: string, end: string) {
-    const [row] = await this.sql`SELECT COUNT(*)::int AS requests,
+    const [row] = await this.readQuery(() => this.sql`SELECT COUNT(*)::int AS requests,
       COUNT(*) FILTER (WHERE status>=500)::int AS failed,
       percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS latency_p95_ms,
       MIN(completed_at) AS first_request_at, MAX(completed_at) AS last_request_at
-      FROM api2business_http_observations WHERE completed_at>=${start} AND completed_at<${end}`;
-    const pathBreakdown = await this.sql`SELECT path,COUNT(*)::int AS requests,
+      FROM api2business_http_observations WHERE completed_at>=${start} AND completed_at<${end}`);
+    const pathBreakdown = await this.readQuery(() => this.sql`SELECT path,COUNT(*)::int AS requests,
       COUNT(*) FILTER (WHERE status>=500)::int AS failed,
       percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms) AS latency_p50_ms,
       percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS latency_p95_ms,
       MAX(duration_ms) AS latency_max_ms
       FROM api2business_http_observations
       WHERE completed_at>=${start} AND completed_at<${end}
-      GROUP BY path ORDER BY latency_p95_ms DESC,path`;
-    const instances = await this.sql`SELECT instance_id,started_at,last_seen_at,failed_writes
+      GROUP BY path ORDER BY latency_p95_ms DESC,path`);
+    const instances = await this.readQuery(() => this.sql`SELECT instance_id,started_at,last_seen_at,failed_writes
       FROM api2business_observer_instances WHERE started_at<${end} AND last_seen_at>=${start}
-      ORDER BY started_at`;
+      ORDER BY started_at`);
     return { ...row, pathBreakdown: Array.from(pathBreakdown), instances: Array.from(instances) };
   }
 
   async getSnapshot(key: string) {
-    const [row] = await this.sql`
+    const [row] = await this.readQuery(() => this.sql`
       SELECT snapshot_key, schema_version, payload, captured_at, refresh_started_at,
         last_error, updated_at
       FROM api2business_snapshots WHERE snapshot_key=${key}
-    `;
+    `);
     return row ?? null;
   }
 
@@ -546,7 +593,7 @@ export class OperationsStore {
   }
 
   async completeSnapshot(key: string, schemaVersion: string, payload: Record<string, unknown>, capturedAt: string) {
-    await this.sql`
+    await this.persistQuery(() => this.sql`
       INSERT INTO api2business_snapshots
         (snapshot_key, schema_version, payload, captured_at, refresh_started_at, last_error, updated_at)
       VALUES (${key}, ${schemaVersion}, ${payload}::jsonb, ${capturedAt}, NULL, NULL, now())
@@ -557,7 +604,7 @@ export class OperationsStore {
         refresh_started_at=NULL,
         last_error=NULL,
         updated_at=now()
-    `;
+    `);
   }
 
   async failSnapshotRefresh(key: string, schemaVersion: string, error: string) {
@@ -574,16 +621,16 @@ export class OperationsStore {
   }
 
   async getUpstreamUsageCache(accountIds: number[]) {
-    if (!accountIds.length) return await this.sql`
+    if (!accountIds.length) return await this.readQuery(() => this.sql`
       SELECT account_id, result, queried_at, last_success_result, last_success_at
       FROM api2business_upstream_usage_cache ORDER BY account_id
-    `;
+    `);
     const accountIdArray = postgresBigintArrayLiteral(accountIds);
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT account_id, result, queried_at, last_success_result, last_success_at
       FROM api2business_upstream_usage_cache
       WHERE account_id = ANY(${accountIdArray}::bigint[]) ORDER BY account_id
-    `;
+    `);
   }
 
   async setUpstreamUsageCache(results: Array<Record<string, unknown>>, samples: import("./upstream-quota-monitor").UpstreamQuotaSample[] = [], apiAmountUsdTotal: number | null = null) {
@@ -630,7 +677,7 @@ export class OperationsStore {
   }
 
   async getUpstreamQuotaSamples(hours: number) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT sampled_at, wallet_key, account_id, schedulable, status, provider,
         probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at,
         api_amount_usd_total, wallet_api_amount_usd_total, account_cost_inputs
@@ -653,18 +700,18 @@ export class OperationsStore {
            ) recent
          )
       ORDER BY sampled_at, wallet_key
-    `;
+    `);
   }
 
   async getLatestSuccessfulUpstreamQuotaSamples() {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT DISTINCT ON (wallet_key)
         sampled_at, wallet_key, account_id, remaining_usd, cny_per_usd,
         remaining_cny, source_queried_at, account_cost_inputs, probe_ok
       FROM api2business_upstream_quota_samples
       WHERE probe_ok=true AND remaining_cny IS NOT NULL
       ORDER BY wallet_key, sampled_at DESC
-    `;
+    `);
   }
 
   async addOAuthRuntimeSamples(samples: import("./oauth-runtime-monitor").OAuthRuntimeSample[]) {
@@ -685,7 +732,7 @@ export class OperationsStore {
   }
 
   async getOAuthRuntimeSamples(profile: "codex" | "grok", hours: number) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT sampled_at, profile, api_amount_usd_total, expected_api_amount_usd,
         remaining_expected_api_amount_usd, account_count, normal_count,
         rate_limited_count, error_count
@@ -697,7 +744,7 @@ export class OperationsStore {
             WHERE profile=${profile} ORDER BY sampled_at DESC LIMIT 13
           ))
       ORDER BY sampled_at
-    `;
+    `);
   }
 
   async addPoolQualitySample(sample: import("./pool-quality-monitor").PoolQualitySample) {
@@ -723,7 +770,7 @@ export class OperationsStore {
   }
 
   async getPoolQualitySamples(hours: number, platform = "codex") {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
         raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
         score, grade, observed_attempts, success_requests,
@@ -738,11 +785,11 @@ export class OperationsStore {
            ORDER BY sampled_at DESC LIMIT 13
          ))
       ORDER BY sampled_at
-    `;
+    `);
   }
 
   async getPoolQualitySamplesByLimit(limit: number, platform = "codex") {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
         raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
         score, grade, observed_attempts, success_requests,
@@ -762,7 +809,7 @@ export class OperationsStore {
         LIMIT ${limit}
       ) recent
       ORDER BY sampled_at
-    `;
+    `);
   }
 
   async addBugTeamCostSample(sample: import("./bugteam-cost-monitor").BugTeamCostSample) {
@@ -785,7 +832,7 @@ export class OperationsStore {
   }
 
   async getLatestSuccessfulBugTeamCostSample(product: string): Promise<import("./bugteam-cost-monitor").BugTeamCostSample | null> {
-    const rows = await this.sql`
+    const rows = await this.readQuery(() => this.sql`
       SELECT sampled_at, product, status, available, unit_price_cny,
         minimum_unit_price_cny, maximum_unit_price_cny,
         minimum_remaining_seconds, maximum_remaining_seconds,
@@ -796,7 +843,7 @@ export class OperationsStore {
       WHERE product=${product} AND status='ok'
       ORDER BY sampled_at DESC
       LIMIT 1
-    ` as Array<Record<string, unknown>>;
+    `) as Array<Record<string, unknown>>;
     const row = rows[0];
     if (!row) return null;
     const numeric = (value: unknown) => value === null || value === undefined ? null : Number(value);
@@ -819,7 +866,7 @@ export class OperationsStore {
   }
 
   async getBugTeamCostSamples(product: string, hours: number) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT sampled_at, product, status, available, unit_price_cny,
         minimum_unit_price_cny, maximum_unit_price_cny,
         minimum_remaining_seconds, maximum_remaining_seconds,
@@ -830,7 +877,7 @@ export class OperationsStore {
       WHERE product=${product}
         AND sampled_at >= now() - (${hours}::text || ' hours')::interval
       ORDER BY sampled_at
-    `;
+    `);
   }
 
   async addIdleProbeRound(input: {
@@ -863,7 +910,7 @@ export class OperationsStore {
   }
 
   async idleProbeHistoryPage(limit: number, offset: number, scope = "codex") {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT operation_id, trigger_type, started_at, completed_at, status,
         planned_count, ready_count, attempted_count, succeeded_count,
         failed_count, unready_count, duration_ms, error_summary,
@@ -872,7 +919,7 @@ export class OperationsStore {
       WHERE scope=${scope}
       ORDER BY started_at DESC, id DESC
       LIMIT ${limit} OFFSET ${offset}
-    `;
+    `);
   }
 
   async createModelSyncRound(input: {
@@ -950,7 +997,7 @@ export class OperationsStore {
   }
 
   async modelSyncHistoryPage(limit: number, offset: number, scope: string) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT id, operation_id, scope, platform, trigger_type, started_at, completed_at, status,
         batch_size, selected_count, attempted_count, succeeded_count, failed_count,
         changed_account_count, changed_model_count, cursor_before, cursor_after,
@@ -959,28 +1006,28 @@ export class OperationsStore {
       WHERE scope=${scope}
       ORDER BY started_at DESC, id DESC
       LIMIT ${limit} OFFSET ${offset}
-    `;
+    `);
   }
 
   async latestModelSyncCursor(scope: string): Promise<number | null> {
-    const [row] = await this.sql`
+    const [row] = await this.readQuery(() => this.sql`
       SELECT cursor_after
       FROM api2business_upstream_model_sync_rounds
       WHERE scope=${scope} AND status IN ('succeeded','partial','failed')
       ORDER BY completed_at DESC NULLS LAST, started_at DESC, id DESC
       LIMIT 1
-    `;
+    `);
     return row?.cursor_after == null ? null : Number(row.cursor_after);
   }
 
   async modelSyncRoundAccounts(roundId: string) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT account_id, account_name, status, model_count_before, model_count_after,
         changed_model_count, error_summary, started_at, completed_at
       FROM api2business_upstream_model_sync_accounts
       WHERE round_id=${roundId}
       ORDER BY id ASC
-    `;
+    `);
   }
 
   async latestAutomaticIdleProbeRound(): Promise<{
@@ -988,13 +1035,13 @@ export class OperationsStore {
     completed_at: string;
     status: "succeeded" | "partial" | "failed" | "skipped";
   } | null> {
-    const rows = await this.sql`
+    const rows = await this.readQuery(() => this.sql`
       SELECT operation_id, completed_at::text AS completed_at, status
       FROM api2business_idle_probe_rounds
       WHERE trigger_type = 'automatic'
       ORDER BY completed_at DESC, id DESC
       LIMIT 1
-    ` as Array<{
+    `) as Array<{
       operation_id: string;
       completed_at: string;
       status: "succeeded" | "partial" | "failed" | "skipped";
@@ -1034,44 +1081,44 @@ export class OperationsStore {
   }
 
   async latestUpstreamBenchmarks(accountIds: number[] = []) {
-    if (!accountIds.length) return await this.sql`
+    if (!accountIds.length) return await this.readQuery(() => this.sql`
       SELECT DISTINCT ON (account_id) id, account_id, provider, benchmark_version, model,
         state, score, dimensions, probes, requested_at, completed_at, duration_ms, error_summary
       FROM api2business_upstream_benchmark_runs ORDER BY account_id, requested_at DESC
-    `;
+    `);
     const values = postgresBigintArrayLiteral(accountIds);
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT DISTINCT ON (account_id) id, account_id, provider, benchmark_version, model,
         state, score, dimensions, probes, requested_at, completed_at, duration_ms, error_summary
       FROM api2business_upstream_benchmark_runs
       WHERE account_id = ANY(${values}::bigint[]) ORDER BY account_id, requested_at DESC
-    `;
+    `);
   }
 
   async upstreamBenchmarkRun(id: string) {
-    const [row] = await this.sql`
+    const [row] = await this.readQuery(() => this.sql`
       SELECT id, account_id, provider, benchmark_version, model, state, score, dimensions,
         probes, requested_at, completed_at, duration_ms, error_summary
       FROM api2business_upstream_benchmark_runs WHERE id=${id}
-    `;
+    `);
     return row ?? null;
   }
 
   async upstreamBenchmarkEvents(id: string, limit = 100) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT sequence, occurred_at, stage, probe_id, level, message, duration_ms, details
       FROM api2business_upstream_benchmark_events WHERE run_id=${id}
       ORDER BY sequence ASC LIMIT ${limit}
-    `;
+    `);
   }
 
   async upstreamBenchmarkHistory(accountId: number, limit = 20) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT id, account_id, provider, benchmark_version, model, state, score, dimensions,
         probes, requested_at, completed_at, duration_ms, error_summary
       FROM api2business_upstream_benchmark_runs WHERE account_id=${accountId}
       ORDER BY requested_at DESC LIMIT ${limit}
-    `;
+    `);
   }
 
   async restoreUpstreamUsageSuccess(accountId: number, result: Record<string, unknown>) {
@@ -1152,36 +1199,36 @@ export class OperationsStore {
   }
 
   async cashSummary(period: string) {
-    const [row] = await this.sql`
+    const [row] = await this.readQuery(() => this.sql`
       SELECT
         COUNT(*)::int AS total_count,
         COALESCE(SUM(amount_cny) FILTER (WHERE direction='income' AND voided_at IS NULL AND to_char(occurred_on, 'YYYY-MM')=${period}), 0) AS income_cny,
         COALESCE(SUM(amount_cny) FILTER (WHERE direction='expense' AND voided_at IS NULL AND to_char(occurred_on, 'YYYY-MM')=${period}), 0) AS expense_cny
       FROM api2business_cash_entries
-    `;
+    `);
     return row ?? { income_cny: 0, expense_cny: 0 };
   }
 
   async cashDaySummary(day: string) {
-    const [row] = await this.sql`
+    const [row] = await this.readQuery(() => this.sql`
       SELECT
         COUNT(*) FILTER (WHERE voided_at IS NULL)::int AS total_count,
         COALESCE(SUM(amount_cny) FILTER (WHERE direction='income' AND voided_at IS NULL), 0) AS income_cny,
         COALESCE(SUM(amount_cny) FILTER (WHERE direction='expense' AND voided_at IS NULL), 0) AS expense_cny
       FROM api2business_cash_entries
       WHERE occurred_on=${day}
-    `;
+    `);
     return row ?? { total_count: 0, income_cny: 0, expense_cny: 0 };
   }
 
   async listCashPage(limit: number, offset: number) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT id, occurred_on, direction, category, amount_cny, description,
         operator, created_at, voided_at, voided_by, void_reason,
         COUNT(*) OVER()::int AS total_count
       FROM api2business_cash_entries ORDER BY occurred_on DESC, created_at DESC
       LIMIT ${limit} OFFSET ${offset}
-    `;
+    `);
   }
 
   async createPlan(input: {
@@ -1208,12 +1255,12 @@ export class OperationsStore {
   }
 
   async getPlan(id: string) {
-    const [row] = await this.sql`
+    const [row] = await this.readQuery(() => this.sql`
       SELECT id, created_at, expires_at, created_by, status, recent_call_limit,
         priorities, result, applied_at, apply_result, trigger_type, completed_at,
         execution_started_at
       FROM api2business_priority_plans WHERE id=${id}
-    `;
+    `);
     if (!row) throw new Error("priority plan does not exist");
     const plan = row as Record<string, unknown>;
     for (const key of ["priorities", "result", "apply_result"]) {
@@ -1261,7 +1308,7 @@ export class OperationsStore {
   }
 
   async priorityHistory(limit: number) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT id, created_at, execution_started_at, completed_at, created_by,
         trigger_type, status, recent_call_limit, priorities, result, apply_result,
         CASE WHEN completed_at IS NULL THEN NULL
@@ -1271,7 +1318,7 @@ export class OperationsStore {
         END AS duration_ms
       FROM api2business_priority_plans
       ORDER BY created_at DESC LIMIT ${limit}
-    `;
+    `);
   }
 
   async audit(action: string, status: string, operator: string, input: unknown, result: unknown) {
@@ -1284,15 +1331,15 @@ export class OperationsStore {
   }
 
   async audits(limit: number, offset: number) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       SELECT id, action, status, operator, input_summary, result_summary, created_at,
         COUNT(*) OVER()::int AS total_count
       FROM api2business_operation_audit ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}
-    `;
+    `);
   }
 
   async auditCount() {
-    const [row] = await this.sql`SELECT COUNT(*)::int AS total_count FROM api2business_operation_audit`;
+    const [row] = await this.readQuery(() => this.sql`SELECT COUNT(*)::int AS total_count FROM api2business_operation_audit`);
     return Number(row?.total_count ?? 0);
   }
 }

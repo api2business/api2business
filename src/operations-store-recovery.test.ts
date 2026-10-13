@@ -64,7 +64,7 @@ test("rebuilds stale operation pools once and retries cache reads", async () => 
   expect(second?.status).toBe(200);
   expect(staleQueries).toBe(2);
   expect(mainPools).toBe(2);
-  expect(queuePools).toBe(2);
+  expect(queuePools).toBe(1);
   await store.close();
 });
 
@@ -86,4 +86,40 @@ test("does not rebuild operation pools for SQL semantic errors", async () => {
 test("recycles Bun protocol read failures", () => {
   expect(isRecoverableDatabaseConnectionError(new Error("Failed to read data"))).toBeTrue();
   expect(isRecoverableDatabaseConnectionError(Object.assign(new Error("protocol"), { code: "ERR_POSTGRES_INVALID_MESSAGE" }))).toBeTrue();
+});
+
+
+test("cancels a hung history read and recovers once without recycling the priority lock pool", async () => {
+  let pools = 0;
+  let cancellations = 0;
+  const store = new OperationsStore("postgres://fixture", (_url, max) => {
+    if (max === 1) return sqlClient(async () => []);
+    const generation = ++pools;
+    const client = (() => generation === 1
+      ? Object.assign(new Promise<unknown[]>(() => {}), { cancel: () => { cancellations += 1; } })
+      : Promise.resolve([{ id: "history" }])) as unknown as FakeSql;
+    client.close = async () => undefined;
+    return client as unknown as SQL;
+  }, false, 5);
+  try {
+    expect(await store.priorityHistory(10)).toEqual([{ id: "history" }]);
+    expect(cancellations).toBe(1);
+    expect(pools).toBe(2);
+    expect(store.connectionStatus()).toMatchObject({ readTimeouts: 1, connectionRecycles: 1 });
+    await store.health();
+  } finally { await store.close(); }
+});
+
+test("a permanently hung database returns a bounded error and retires the retry pool", async () => {
+  let pools = 0;
+  const store = new OperationsStore("postgres://fixture", (_url, max) => {
+    if (max === 1) return sqlClient(async () => []);
+    pools += 1;
+    return sqlClient(() => new Promise(() => {}));
+  }, false, 5);
+  try {
+    await expect(store.health()).rejects.toMatchObject({ name: "operations_read_timeout" });
+    expect(pools).toBe(3);
+    expect(store.connectionStatus()).toMatchObject({ readTimeouts: 2, connectionRecycles: 2 });
+  } finally { await store.close(); }
 });

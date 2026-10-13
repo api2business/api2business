@@ -346,3 +346,19 @@ describe("upstream scheduling v2", () => {
     });
   });
 });
+
+
+test("partial refresh preserves successful sections and their timestamps without reporting complete recovery", async () => {
+  const {service, operations} = fixture();
+  const first = await service.snapshot("codex");
+  expect(first.cache.complete).toBeTrue();
+  const previousErrorsAt = first.data.sectionStatus?.errors?.observedAt;
+  const previousCompleteAt = first.cache.lastCompleteAt;
+  operations.poolQualityErrors = async () => { throw new Error("fixture connection closed"); };
+  const partial = await service.snapshot("codex", true);
+  expect(partial.cache).toMatchObject({ complete: false, failedSections: ["errors"], lastCompleteAt: previousCompleteAt });
+  expect(partial.data.sectionStatus?.errors).toMatchObject({ state: "stale", observedAt: previousErrorsAt, error: "fixture connection closed" });
+  operations.poolQualityErrors = async () => ({ ok: true, total: 0, rows: [] });
+  const restored = await service.snapshot("codex", true);
+  expect(restored.cache).toMatchObject({ complete: true, failedSections: [] });
+});
