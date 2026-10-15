@@ -117,6 +117,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 按需声明 `priority`、`cacheMode` 和 `setupStatements`。
   - 查询只投影必要字段，不查询或输出 Secret、凭据和请求正文。
   - 不从人工脚本建立数据库连接。
+  - 默认人类输出直接打印投影行，最多 50 行、12 列。
+  - 零行时输出“无投影行”，不能把行数摘要当成没有查到正文。
+  - 超出上限时给出 omitted，并用 `--json` 读取全部投影行。
 
 ## 领域操作
 
@@ -182,10 +185,15 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 使用 `reads query --file <查询文件> --over-api <绝对 URL>` 取得同平台完整 ID 集合。
   - 使用 `upstreams template --accounts <完整ID集合> --over-api <绝对 URL>` 查看计划。
   - 追加 `--confirm` 提交，再用 `upstreams status --id <workflow-id>` 和相同 URL 查询终态。
+  - 人类终态直接给出 `targetCount`、`appliedCount`、`verifiedCount`、`failedCount`、`misalignedCount` 和 `skippedCount`。
+  - 这些计数只证明作业终态；完整对象用 `--json`，账号规则仍要无缓存回读。
 - 切号模板的匹配、近义短语、热加载、分组口语和新增上游收口，只以该参考为准。
-- `upstreams template --confirm --over-api <absolute-http(s)-URL>` 只写入 OpenAI/Anthropic；Grok 会在执行结果的
-  `skipped[]` 中明确标为 `platform-has-no-failover-template`，不能把 `appliedCount=0`
-  当成未执行或改用其他平台模板重试。
+- `upstreams template --confirm --over-api <absolute-http(s)-URL>` 按账号平台写入各自模板。
+  - 未传 `--accounts` 时会处理 OpenAI、Anthropic 和 Grok，不能用来更新单一平台。
+  - 单平台更新必须传入该平台全部未删除 API-key 账号 ID。
+  - Grok 只读取 `config/failover-templates/grok.yaml`。
+  - 套用 Grok 时不写 `pool_mode`，也不改写 Codex 或 Claude 规则。
+  - 没有对应模板的平台仍进入 `skipped[]`，原因是 `platform-has-no-failover-template`。
 - 新增上游省略 `--rate`；占位费率与最终费率回读也只以该参考为准。
 - 已有上游改配置使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] [--suffix <name>] [--rate <CNY/API_USD>] --confirm --over-api <absolute-http(s)-URL>`。
   - `--base-url` 只合并更新 `credentials.base_url`，不会重置 API key、模型映射、池模式或其他凭据字段。

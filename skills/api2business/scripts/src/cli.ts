@@ -540,6 +540,9 @@ export function summarizeWorkflowStatus(value: Record<string, unknown>): Record<
     summary.window = result.window;
     summary.groupCount = Array.isArray(result.groups) ? result.groups.length : null;
     summary.accountCount = Array.isArray(result.accounts) ? result.accounts.length : null;
+    for (const key of ["targetCount", "appliedCount", "verifiedCount", "failedCount", "misalignedCount", "skippedCount"]) {
+      if (key in result) summary[key] = result[key];
+    }
     summary.resultFieldCount = Object.keys(result).length;
     summary.disclosure = "add --json for the complete workflow result";
   } else if (value.result !== null && value.result !== undefined) {
@@ -770,7 +773,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       action: "upstream-template",
       accountIds,
       scope: accountIds.length ? "selected" : "all-api-key",
-      hint: "add --confirm to execute; Grok is skipped and reported in skipped[]",
+      hint: "add --confirm to execute; pass only one platform's account IDs so other platforms stay unchanged",
     };
     return await client.upstreamTemplate(accountIds, `upstream-template-${crypto.randomUUID()}`);
   }
@@ -1346,17 +1349,46 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "profit daily") emitDailyProfit(output, parsed.json);
     else if (parsed.command.join(" ") === "upstreams recharge-candidates") emitRechargeCandidates(output, parsed.json);
     else if (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle" && !parsed.json) emit(bindRuntimeCommands(summarizeLifecycleResponse(output), target.mode === "http" ? target.baseUrl : "") as Record<string, unknown>, false);
-    else if (parsed.command.join(" ") === "reads query" && !parsed.json) {
-      const rows = Array.isArray(output.rows) ? output.rows : [];
-      emit({ ok: output.ok, canonicalUrl: output.canonicalUrl, mode: output.mode,
-        rowCount: rows.length, queueDurationMs: output.queueDurationMs,
-        queryDurationMs: output.queryDurationMs, cached: output.cached,
-        disclosure: "add --json for full projected rows" }, false);
-    }
+    else if (parsed.command.join(" ") === "reads query" && !parsed.json) emitReadQuery(output);
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);
     process.exitCode = 1;
+  }
+}
+
+const readQueryRowLimit = 50;
+const readQueryColumnLimit = 12;
+
+function renderReadCell(value: unknown): string {
+  if (value === null || value === undefined) return "-";
+  const text = (typeof value === "object" ? JSON.stringify(value) : String(value)).replace(/\s+/gu, " ");
+  return text.length > 160 ? `${text.slice(0, 157)}...` : text;
+}
+
+export function emitReadQuery(value: Record<string, unknown>): void {
+  const rows = Array.isArray(value.rows) ? value.rows : [];
+  const visible = rows.slice(0, readQueryRowLimit);
+  console.log(
+    `API2BUSINESS READ QUERY ok=${String(value.ok)}`
+    + ` rows=${rows.length}`
+    + ` cached=${String(value.cached)}`
+    + ` queryMs=${String(value.queryDurationMs)}`,
+  );
+  if (visible.length === 0) {
+    console.log("无投影行");
+    return;
+  }
+  const keys = [...new Set(visible.flatMap((row) => row && typeof row === "object" ? Object.keys(row) : []))].slice(0, readQueryColumnLimit);
+  console.log(keys.join("\t"));
+  for (const row of visible) {
+    const record: Record<string, unknown> = row && typeof row === "object"
+      ? row as Record<string, unknown>
+      : { value: row };
+    console.log(keys.map((key) => renderReadCell(record[key])).join("\t"));
+  }
+  if (rows.length > visible.length) {
+    console.log(`omitted=${rows.length - visible.length} disclosure=add --json for the complete projected rows`);
   }
 }
 

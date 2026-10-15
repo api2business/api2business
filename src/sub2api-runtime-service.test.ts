@@ -480,6 +480,44 @@ test("waits for every concurrent bulk write before reporting one failure", async
   expect(slowWriteFinished).toBe(true);
 });
 
+test("applies the OpenAI template with pool mode disabled", async () => {
+  const calls: Array<{ body: Record<string, unknown> }> = [];
+  const client = { mutate: async (_method: string, _path: string, body: Record<string, unknown>) => {
+    calls.push({ body });
+    return { success: 1, failed: 0, success_ids: [478], failed_ids: [] };
+  } } as unknown as Sub2ApiClient;
+  const openaiRules = [{ error_code: 429, keywords: ["usage limit reached"], duration_minutes: 3 }];
+  const runtime = new Sub2ApiRuntimeService(client, openaiRules, { openai: openaiRules });
+  await runtime.applyApiKeyFailoverTemplates([478], 120000, "openai");
+  expect(calls[0]?.body).toEqual({
+    account_ids: [478],
+    credentials: {
+      pool_mode: false,
+      temp_unschedulable_enabled: true,
+      temp_unschedulable_rules: openaiRules,
+    },
+  });
+});
+
+test("applies the Grok template without writing pool mode", async () => {
+  const calls: Array<{ body: Record<string, unknown> }> = [];
+  const client = { mutate: async (_method: string, _path: string, body: Record<string, unknown>) => {
+    calls.push({ body });
+    return { success: 1, failed: 0, success_ids: [1530], failed_ids: [] };
+  } } as unknown as Sub2ApiClient;
+  const grokRules = [{ error_code: 502, keywords: ["Upstream service temporarily unavailable"], duration_minutes: 3 }];
+  const runtime = new Sub2ApiRuntimeService(client, [], { grok: grokRules });
+  await runtime.applyApiKeyFailoverTemplates([1530], 120000, "grok");
+  expect(calls[0]?.body).toEqual({
+    account_ids: [1530],
+    credentials: {
+      temp_unschedulable_enabled: true,
+      temp_unschedulable_rules: grokRules,
+    },
+  });
+  expect((calls[0]?.body.credentials as Record<string, unknown>).pool_mode).toBeUndefined();
+});
+
 test("applies the Claude template with pool mode and Anthropic rules", async () => {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
   const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {

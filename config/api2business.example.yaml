@@ -491,6 +491,7 @@ operations:
     templateFiles:
       codex: config/failover-templates/codex.yaml
       claude: config/failover-templates/claude.yaml
+      grok: config/failover-templates/grok.yaml
     externalCutoff:
       enabled: true
       dryRun: true

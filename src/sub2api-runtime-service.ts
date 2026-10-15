@@ -537,13 +537,15 @@ export class Sub2ApiRuntimeService {
     if (ids.length === 0 || ids.some((id) => !Number.isSafeInteger(id) || id < 1)) {
       throw new Error("bulk API-key template requires stable positive account IDs");
     }
+    const normalized = platform.toLowerCase();
+    const credentials: Record<string, unknown> = {
+      temp_unschedulable_enabled: true,
+      temp_unschedulable_rules: this.failoverRulesForPlatform(platform),
+    };
+    if (normalized !== "grok") credentials.pool_mode = normalized === "anthropic";
     const result = await this.client.mutate<Record<string, unknown>>("POST", "/admin/accounts/bulk-update", {
       account_ids: ids,
-      credentials: {
-        pool_mode: platform.toLowerCase() === "anthropic",
-        temp_unschedulable_enabled: true,
-        temp_unschedulable_rules: this.failoverRulesForPlatform(platform),
-      },
+      credentials,
     }, undefined, timeoutMs);
     return { accountIds: ids, result };
   }

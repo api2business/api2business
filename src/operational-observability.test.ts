@@ -42,6 +42,8 @@ test('30-second TTFT target and incomplete or empty evidence remain distinct',()
 test('observability report keeps user balance and TTFT attribution for diagnosis',()=>{
  expect(observabilitySql).toContain('api_user_email');
  expect(observabilitySql).toContain('businessLimitBreakdown');
+ expect(observabilitySql).toContain('%api_key_quota_exhausted%');
+ expect(observabilitySql).toContain('%api key 额度已用完%');
  expect(observabilitySql).toContain('ttftBreakdown');
  expect(observabilitySql).toContain('percentile_cont(0.95) WITHIN GROUP (ORDER BY s.first_token_ms)');
 });

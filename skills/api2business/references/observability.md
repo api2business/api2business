@@ -31,6 +31,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
     - 不把今天截至当前的日历桶当作最近 24 小时。
   - 同金额倍率的重复采样压缩为变化点，保留历史时序，不用当前倍率倒填历史。
   - 缺失成本仍为未知；已知成本可用于保守估算，不能当作完整成本或续航保证。
+  - 未来 24 小时预算的取数和余量只见
+    [运维观测规格](../../../docs/specs/operational-observability.md)，不在这里另写公式。
   - 完整历史不足时继续给出充值风险、估算金额或临时备付建议，不得因此结论为“无需充值”。
 - 成本完整性只统计当前上游管理范围内的 API-key 账号。
   - OAuth、订阅或其他非 API-key 账号不是上游管理对象，使用
@@ -42,6 +44,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 报告同时保存 `businessLimitBreakdown` 和 `ttftBreakdown`：
   - `businessLimitBreakdown` 按下游用户、API Key、入口和模型统计余额不足请求，包含用户 ID、
     用户邮箱、Key 名称、首末时间和请求数；该字段不包含 Key 密文。
+    - 包含 `API_KEY_QUOTA_EXHAUSTED` 与 `API key 额度已用完` 的明确额度限制。
+    - 用户账户余额为正不代表其 API Key 额度仍可用；两者分别披露。
   - `ttftBreakdown` 按模型和上游账号统计流式 TTFT 的样本数、P50、P95 和最大值，避免少量
     慢模型样本被全局 P95 隐藏。
   - 发现成功率或 TTFT 异常时先看这两个分解，再决定是下游余额、单个供应商模型还是公共运行面问题。

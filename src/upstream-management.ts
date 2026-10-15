@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config";
+import type { FailoverRule } from "./failover-rules";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { TemporalGateway } from "./temporal-client";
@@ -27,6 +28,15 @@ import { readNewApiCredentials } from "./secrets";
 import { configuredWalletKey } from "./upstream-wallet";
 
 type Row = Record<string, unknown>;
+
+function rulesForFailoverPlatform(
+  rulesByPlatform: AppConfig["operations"]["upstreamManagement"]["failoverRulesByPlatform"],
+  platform: string,
+): FailoverRule[] {
+  const normalized = platform.toLowerCase();
+  if (normalized === "openai" || normalized === "anthropic" || normalized === "grok") return rulesByPlatform[normalized];
+  return [];
+}
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -1223,11 +1233,11 @@ export class UpstreamManagementService {
       const accountId = Number(row.id);
       const platform = String(row.platform ?? "").toLowerCase();
       if (positiveInteger(accountId) === null) continue;
-      if (platform === "grok") {
+      const rules = rulesForFailoverPlatform(this.config.operations.upstreamManagement.failoverRulesByPlatform, platform);
+      if (rules.length === 0) {
         skipped.push({ accountId, platform, reason: "platform-has-no-failover-template" });
         continue;
       }
-      if (!["openai", "anthropic"].includes(platform)) continue;
       ids.push(accountId);
       const group = platformGroups.get(platform) ?? [];
       group.push(accountId);
@@ -1276,10 +1286,10 @@ export class UpstreamManagementService {
         try { return JSON.parse(row.temp_rules) as unknown; } catch { return []; }
       })() : row.temp_rules;
       const platform = String(query.rows.find((candidate) => Number(candidate.id) === accountId)?.platform ?? "").toLowerCase();
-      const expectedRules = expectedRulesByPlatform[platform as "openai" | "anthropic"] ?? [];
+      const expectedRules = rulesForFailoverPlatform(expectedRulesByPlatform, platform);
       const rulesAligned = canonicalJson(rawRules) === canonicalJson(expectedRules);
-      const expectedPoolMode = platform === "anthropic";
-      if (row.pool_mode === expectedPoolMode && row.temp_enabled === true && rulesAligned) verified.push(accountId);
+      const poolAligned = platform === "grok" || row.pool_mode === (platform === "anthropic");
+      if (poolAligned && row.temp_enabled === true && rulesAligned) verified.push(accountId);
       else misaligned.push({
         accountId,
         reason: "runtime-template-readback-mismatch",
@@ -1464,11 +1474,10 @@ export class UpstreamManagementService {
         if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
         const needsRuntimeSettings = resolvedAccount.priority !== priority || resolvedAccount.capacity !== capacity
           || (resolvedAccount.proxyId ?? 0) !== settings.proxyId || JSON.stringify(actualGroupIds) !== JSON.stringify(desiredGroupIds);
-        const templateRules = input.platform === "openai"
-          ? this.config.operations.upstreamManagement.failoverRulesByPlatform.openai
-          : input.platform === "anthropic"
-            ? this.config.operations.upstreamManagement.failoverRulesByPlatform.anthropic
-            : [];
+        const templateRules = rulesForFailoverPlatform(
+          this.config.operations.upstreamManagement.failoverRulesByPlatform,
+          input.platform,
+        );
         await this.runtime.configureApiKeyAccounts(
           [resolvedAccountId],
           {
@@ -1543,11 +1552,10 @@ export class UpstreamManagementService {
       if (!suffix || rate === null) throw new Error("当前账号缺少可解析的后缀或费率，请同时填写后缀和费率");
       name = formatUpstreamName(baseUrl, suffix, rate);
     }
-    const templateRules = account.platform.toLowerCase() === "openai"
-      ? this.config.operations.upstreamManagement.failoverRulesByPlatform.openai
-      : account.platform.toLowerCase() === "anthropic"
-        ? this.config.operations.upstreamManagement.failoverRulesByPlatform.anthropic
-        : [];
+    const templateRules = rulesForFailoverPlatform(
+      this.config.operations.upstreamManagement.failoverRulesByPlatform,
+      account.platform,
+    );
     const groupIds = input.groupIds === undefined ? undefined : validateGroupIds(input.groupIds);
     await this.runtime.configureApiKeyAccounts([id], {
       ...(name && name !== account.name ? { name } : {}),

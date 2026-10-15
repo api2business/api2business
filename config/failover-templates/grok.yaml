@@ -1,0 +1,48 @@
+apiVersion: api2business.pikapython.com/v1
+kind: FailoverTemplate
+name: grok-upstream-failover
+platform: grok
+rules:
+- errorCode: 401
+  keywords:
+  - API key is disabled
+  durationMinutes: 10
+  description: Grok 上游明确返回 API key 已禁用
+- errorCode: 403
+  keywords:
+  - API Key 所属分组已删除
+  - Insufficient account balance
+  durationMinutes: 10
+  description: Grok 上游账号分组已删除或余额不足
+- errorCode: 429
+  keywords:
+  - Upstream rate limit exceeded, please retry later
+  durationMinutes: 3
+  description: Grok 上游明确返回限流
+- errorCode: 502
+  keywords:
+  - The origin web server returned an invalid or incomplete response to Cloudflare.
+  - Upstream service temporarily unavailable
+  durationMinutes: 3
+  description: Grok 上游 Cloudflare 不完整响应或服务暂时不可用
+- errorCode: 503
+  keywords:
+  - 网站升级迁移中，已提交任务继续结算，请稍后访问。
+  - xAI upstream returned status 503
+  durationMinutes: 3
+  description: Grok 上游维护公告或 xAI 503
+- errorCode: 522
+  keywords:
+  - Cloudflare could not establish a TCP connection to the origin server.
+  durationMinutes: 3
+  description: Grok 上游 Cloudflare 无法连上源站
+- errorCode: 524
+  keywords:
+  - The origin web server did not return a complete response within the 120-second Proxy Read Timeout window.
+  durationMinutes: 3
+  description: Grok 上游 Cloudflare 524 读超时
+- errorCode: 530
+  keywords:
+  - The host is configured as a Cloudflare Tunnel, but Cloudflare is currently unable to reach it.
+  durationMinutes: 3
+  description: Grok 上游 Cloudflare Tunnel 不可达

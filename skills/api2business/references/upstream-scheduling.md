@@ -33,12 +33,12 @@
 ## 切号模板同平台全量同步
 
 - 平台模板规则新增或修订后，必须覆盖该平台全部未删除的 API-key 上游。
-  - Codex 模板对应 `platform=openai`；Claude 模板对应 `platform=anthropic`。
+  - Codex 模板对应 `platform=openai`；Claude 模板对应 `platform=anthropic`；Grok 模板对应 `platform=grok`。
   - 不能只修报错账号、试点账号、同一供应商或某个分组。
   - 不能按当前启用、可调度、余额或近期是否报错缩小范围。
   - 非 API-key 账号不属于上游管理范围，不参与本操作。
-- 每个平台使用自己的模板；禁止把 Codex 模板套到 Claude 或 Grok。
-  - Grok 当前没有切号模板，不从其他平台复制；未来规则必须由 Grok 自己声明。
+- 每个平台使用自己的模板；禁止把 Codex 或 Claude 模板套到 Grok。
+  - Grok 规则只来自 `config/failover-templates/grok.yaml`。
   - 多个平台同时更新时，分别选择全量账号、提交作业并核验，不能混成同一模板。
 - 执行入口见[项目技能](../SKILL.md#领域操作)。
   - 通过排队 broker 按平台与账号类型取得完整 ID 集合，不依赖列表首页或 owning 分组过滤。
@@ -114,9 +114,10 @@
   - 回写超时不重建账号，保留占位费率，交给后续采样重试。
   - 然后只对该账号执行切号模板作业。
   - 切号模板按平台分离：`config/failover-templates/codex.yaml` 只服务 OpenAI，
-    `config/failover-templates/claude.yaml` 只服务 Anthropic；Grok 保持空规则。
-    `operations.upstreamManagement.templateFiles` 是两份文件的唯一配置入口，不能把
-    Codex 规则复制到 Claude 账号。
+    `config/failover-templates/claude.yaml` 只服务 Anthropic，
+    `config/failover-templates/grok.yaml` 只服务 Grok。
+    `operations.upstreamManagement.templateFiles` 是这三份文件的唯一配置入口。
+    套用 Grok 时省略 `pool_mode`，保留账号现值。
   - 所有 API-key 创建、批量配置、费率同步和探活隔离都必须携带已回读的平台；平台缺失时
     不得猜测为 Codex。新增作用域分组时，同时更新该作用域的 V2 `eligibleGroupIds` 与
     对应优先级计划白名单，否则账号虽能探活和评分，优先级计划仍会漏选。
@@ -548,7 +549,7 @@
   - 验证已捕获页面可命中、普通模型错误与错误状态码不命中，再回读运行态并复测原会话。
 - 配置生效：
   - owning YAML 的 `operations.upstreamManagement.templateFiles` 是唯一模板声明；
-    `codex` 文件只服务 OpenAI，`claude` 文件只服务 Anthropic。
+    `codex` 文件只服务 OpenAI，`claude` 文件只服务 Anthropic，`grok` 文件只服务 Grok。
   - 执行模板写入的是持有该快照的 API 进程。
   - 只转发作业的 Temporal worker 不持有切号规则。
   - API 按主 YAML 及其 `templateFiles` 引用文件的联合指纹热加载：校验通过后替换内存配置，
@@ -614,6 +615,12 @@
   读模型。记录缺少平台时，先按原生账号平台核对后再修复，不能用 URL 或历史标签猜测归属。
 - `in-flight` 跳过属于并发保护，不是账号失败；计划中的未就绪账号不计为成功，普通请求记录、
   `ordinaryLogRecorded` 和持久化轮次终态缺一不可。
+- 上游状态码小于等于 0 的传输失败不会进入模板匹配。
+  - 不要为拨号超时、连接拒绝或 TLS 失败新增关键词。
+- 上游已经写明没有备用账号时，再加关键词不能制造候选。
+- 不要把另一个平台的短语、流中断、已写给客户端的包装文案或全局路由失败写进本平台模板。
+- 镜像构建上下文若包含其他平台未提交模板，会把那些改动一起发布。
+  - 模板热修只带目标平台文件，并且只替换持有规则的 API 进程。
 - 旧的逐账号候选扫描会在 Codex 大作用域触发 15 秒读超时，随后把下一次重叠轮次表现为
   skip；修复应保持集合聚合查询与按作用域运行锁，不能通过放宽超时掩盖根因。
 - 不要只改 Node 配置解析或只改 Go worker；API 校验、worker YAML 解析、工作流调度和运行
@@ -657,3 +664,4 @@
 - 需要有界自定义取证时，使用 Api2Business skill 的 `reads query`。
   - 复用已有只读 broker 请求字段与单连接队列。
   - 只读取必要诊断列，避免凭据、完整请求正文和用户隐私。
+  - 默认输出包含投影行；行数摘要不能代替正文，完整对象才使用 `--json`。

@@ -176,9 +176,10 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   expect(expectedModelRule?.keywords).toContain("not supported by any configured account");
   expect(expectedModelRule?.duration_minutes).toBe(3);
   expect(badResponseRule?.keywords).toContain("unknown provider for model gpt-6.1-sol");
+  expect(badResponseRule?.keywords).toContain("Model gpt-5.4-mini has not been priced by the administrator yet.");
   expect(codexTemplate).not.toContain("statusCode:");
   expect(codexTemplate).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
-  expect(codexTemplate).toContain("description: 上游明确返回 gpt-5.6-terra、gpt-5.6-sol 或 gpt-6.1-sol 的 Provider 不支持、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障");
+  expect(codexTemplate).toContain("description: 上游明确返回 gpt-5.6-terra、gpt-5.6-sol 或 gpt-6.1-sol 的 Provider 不支持、模型尚未定价、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障");
 });
 
 test("usage target discovery uses one queued database read", async () => {
@@ -229,25 +230,38 @@ test("template application verifies persisted runtime fields through the queued 
   expect(source).toContain("verifiedCount");
 });
 
-test("template application reports Grok as an explicit platform skip", async () => {
+test("template application skips a platform only when that platform has no rules", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   expect(source).toContain("LOWER(a.platform) IN ('openai', 'anthropic', 'grok')");
   expect(source).toContain('reason: "platform-has-no-failover-template"');
   expect(source).toContain("skippedCount: skipped.length");
 });
 
-test("template application does not call runtime for a Grok-only selection", async () => {
-  let runtimeCalls = 0;
+test("template application writes Grok rules without touching another platform", async () => {
+  const config = loadConfig("config/api2business.example.yaml");
+  const rules = config.operations.upstreamManagement.failoverRulesByPlatform;
+  const calls: Array<{ ids: number[]; platform?: string }> = [];
+  const readResult = {
+    queueDurationMs: 0,
+    queryDurationMs: 0,
+    totalDurationMs: 0,
+    queryStartedAt: "",
+    queryCompletedAt: "",
+    deduplicated: false,
+    cached: false,
+  };
   const reads = {
-    query: async () => ({
-      rows: [{ id: 1530, platform: "grok" }],
-      queueDurationMs: 0,
-      queryDurationMs: 0,
-      totalDurationMs: 0,
-      queryStartedAt: "",
-      queryCompletedAt: "",
-      deduplicated: false,
-      cached: false,
+    query: async (input: { kind?: string }) => ({
+      ...readResult,
+      rows: String(input.kind).includes("verify")
+        ? [
+          { id: 10, pool_mode: false, temp_enabled: true, temp_rules: rules.openai },
+          { id: 1530, pool_mode: true, temp_enabled: true, temp_rules: rules.grok },
+        ]
+        : [
+          { id: 10, platform: "openai" },
+          { id: 1530, platform: "grok" },
+        ],
     }),
     status: () => ({
       owner: "native-api",
@@ -272,25 +286,29 @@ test("template application does not call runtime for a Grok-only selection", asy
     }),
   } as const;
   const runtime = {
-    applyApiKeyFailoverTemplates: async () => {
-      runtimeCalls += 1;
-      throw new Error("Grok must not receive a failover template");
+    applyApiKeyFailoverTemplates: async (ids: number[], _timeoutMs?: number, platform?: string) => {
+      calls.push({ ids, platform });
+      return { accountIds: ids };
     },
   };
   const service = new UpstreamManagementService(
-    loadConfig("config/api2business.example.yaml"),
+    config,
     reads as unknown as Sub2ApiReadClient,
     null,
     runtime as unknown as ConstructorParameters<typeof UpstreamManagementService>[3],
   );
-  await expect(service.applyTemplate([1530])).resolves.toMatchObject({
+  await expect(service.applyTemplate([10, 1530])).resolves.toMatchObject({
     ok: true,
-    targetCount: 0,
-    appliedCount: 0,
-    skippedCount: 1,
-    skipped: [{ accountId: 1530, platform: "grok", reason: "platform-has-no-failover-template" }],
+    targetCount: 2,
+    appliedCount: 2,
+    skippedCount: 0,
+    verifiedCount: 2,
+    misalignedCount: 0,
   });
-  expect(runtimeCalls).toBe(0);
+  expect(calls).toEqual([
+    { ids: [10], platform: "openai" },
+    { ids: [1530], platform: "grok" },
+  ]);
 });
 
 test("upstream creation keeps the created account successful when post-processing is incomplete", async () => {
@@ -393,8 +411,14 @@ test("keeps Codex and Claude templates as separate platform files", () => {
   expect(claude.rules.flatMap((rule) => rule.keywords)).toContain("api is at capacity");
   expect(claude.rules.find((rule) => rule.error_code === 520)?.duration_minutes).toBe(3);
   expect(claude.rules.flatMap((rule) => rule.keywords).some((keyword) => /gpt-/u.test(keyword))).toBe(false);
+  const grok = parsed.operations.upstreamManagement.failoverTemplates.grok;
+  expect(grok.platform).toBe("grok");
+  expect(grok.rules.some((rule) => rule.error_code === 502 && rule.keywords.includes("Upstream service temporarily unavailable"))).toBe(true);
+  expect(grok.rules.flatMap((rule) => rule.keywords).some((keyword) => /gpt-/u.test(keyword))).toBe(false);
+  expect(grok.rules.flatMap((rule) => rule.keywords)).not.toContain("upstream access forbidden");
   expect(parsed.operations.upstreamManagement.templateFiles).toEqual({
     codex: "config/failover-templates/codex.yaml",
     claude: "config/failover-templates/claude.yaml",
+    grok: "config/failover-templates/grok.yaml",
   });
 });

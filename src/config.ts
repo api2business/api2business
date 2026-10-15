@@ -15,14 +15,17 @@ export interface UpstreamManagementConfig {
   templateFiles: {
     codex: string;
     claude: string;
+    grok: string;
   };
   failoverTemplates: {
     codex: FailoverTemplate;
     claude: FailoverTemplate;
+    grok: FailoverTemplate;
   };
   failoverRulesByPlatform: {
     openai: FailoverRule[];
     anthropic: FailoverRule[];
+    grok: FailoverRule[];
   };
   primaryGroupId: number;
   groupIds: number[];
@@ -58,7 +61,7 @@ export interface UpstreamManagementConfig {
 
 export interface FailoverTemplate {
   name: string;
-  platform: "openai" | "anthropic";
+  platform: "openai" | "anthropic" | "grok";
   rules: FailoverRule[];
 }
 
@@ -467,13 +470,13 @@ function strings(parent: ObjectValue, key: string, path: string): string[] {
   return value as string[];
 }
 
-function loadFailoverTemplate(rootDirectory: string, fileValue: string, templateKey: "codex" | "claude"): FailoverTemplate {
+function loadFailoverTemplate(rootDirectory: string, fileValue: string, templateKey: "codex" | "claude" | "grok"): FailoverTemplate {
   const filePath = resolve(rootDirectory, fileValue);
   const path = `operations.upstreamManagement.templateFiles.${templateKey}`;
   const raw = object(parse(readFileSync(filePath, "utf8")), path);
   const name = stringValue(raw, "name", path);
   const platform = stringValue(raw, "platform", path);
-  const expectedPlatform = templateKey === "codex" ? "openai" : "anthropic";
+  const expectedPlatform = templateKey === "codex" ? "openai" : templateKey === "claude" ? "anthropic" : "grok";
   if (platform !== expectedPlatform) throw new Error(`${path}.platform must be ${expectedPlatform}`);
   const rulesValue = raw.rules;
   if (!Array.isArray(rulesValue) || rulesValue.length === 0) throw new Error(`${path}.rules must be a non-empty array`);
@@ -756,9 +759,11 @@ export function loadConfig(path: string): AppConfig {
   const templateFiles = object(upstreamManagement.templateFiles, "operations.upstreamManagement.templateFiles");
   const codexTemplatePath = stringValue(templateFiles, "codex", "operations.upstreamManagement.templateFiles");
   const claudeTemplatePath = stringValue(templateFiles, "claude", "operations.upstreamManagement.templateFiles");
+  const grokTemplatePath = stringValue(templateFiles, "grok", "operations.upstreamManagement.templateFiles");
   const failoverTemplates = {
     codex: loadFailoverTemplate(rootDirectory, codexTemplatePath, "codex"),
     claude: loadFailoverTemplate(rootDirectory, claudeTemplatePath, "claude"),
+    grok: loadFailoverTemplate(rootDirectory, grokTemplatePath, "grok"),
   };
   const upstreamFailoverRules = failoverTemplates.codex.rules;
   const externalCutoff = object(upstreamManagement.externalCutoff, "operations.upstreamManagement.externalCutoff");
@@ -1120,11 +1125,12 @@ export function loadConfig(path: string): AppConfig {
       upstreamManagement: {
         pageSize: integerValue(upstreamManagement, "pageSize", "operations.upstreamManagement", 1, 100),
         defaultTemplate: stringValue(upstreamManagement, "defaultTemplate", "operations.upstreamManagement"),
-        templateFiles: { codex: codexTemplatePath, claude: claudeTemplatePath },
+        templateFiles: { codex: codexTemplatePath, claude: claudeTemplatePath, grok: grokTemplatePath },
         failoverTemplates,
         failoverRulesByPlatform: {
           openai: failoverTemplates.codex.rules,
           anthropic: failoverTemplates.claude.rules,
+          grok: failoverTemplates.grok.rules,
         },
         primaryGroupId: upstreamPrimaryGroupId,
         groupIds: upstreamGroupIds,
@@ -1278,6 +1284,7 @@ export function startConfigHotReload(
       configPath,
       resolve(candidate.rootDirectory, candidate.operations.upstreamManagement.templateFiles.codex),
       resolve(candidate.rootDirectory, candidate.operations.upstreamManagement.templateFiles.claude),
+      resolve(candidate.rootDirectory, candidate.operations.upstreamManagement.templateFiles.grok),
     ]);
     return [...paths].sort().map((filePath) => {
       const stat = statSync(filePath);

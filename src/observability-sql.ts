@@ -108,7 +108,8 @@ SELECT jsonb_build_object(
     WHERE NOT probe AND (COALESCE(is_business_limited,false) OR error_phase='business')
       AND LOWER(CONCAT_WS(' ',error_message,error_body,upstream_error_message,upstream_error_detail)) LIKE ANY (ARRAY[
         '%insufficient_balance%','%insufficient account balance%','%balance is insufficient%',
-        '%user balance is insufficient%','%余额不足%','%额度不足%'
+        '%user balance is insufficient%','%余额不足%','%额度不足%',
+        '%api_key_quota_exhausted%','%api key 额度已用完%'
       ])
     GROUP BY api_user_id,api_user_email,api_key_id,api_key_name,inbound_endpoint,
       COALESCE(requested_model,model,'unknown'),COALESCE(status_code,upstream_status_code,0)
