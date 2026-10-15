@@ -8,6 +8,7 @@ export interface UpstreamUsageTarget {
   baseUrl: string;
   apiKey: string;
   newApiCredentials?: { username: string; password: string };
+  credentialError?: string;
   walletKey?: string;
   status?: string;
   schedulable?: boolean;
@@ -369,6 +370,11 @@ export async function queryUpstreamUsage(
   options: { timeoutMs: number; days: number; authCache?: NewApiAuthCache; walletQuotaCache?: NewApiWalletQuotaCache },
 ): Promise<UpstreamUsageResult> {
   const startedAt = Date.now();
+  if (target.credentialError) {
+    const result = emptyResult(target, startedAt, options.days);
+    result.error = target.credentialError;
+    return result;
+  }
   const failures: string[] = [];
   try {
     const response = await requestJson(target, `/v1/usage?days=${options.days}`, options.timeoutMs);

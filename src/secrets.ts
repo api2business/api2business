@@ -37,16 +37,14 @@ function credentialBaseUrl(value: string): string {
   return value.trim().replace(/\/$/u, "").replace(/\/v1$/u, "");
 }
 
-export function readNewApiCredentials(config: AppConfig): Map<string, { username: string; password: string; walletKey: string }> {
-  const credentials = new Map<string, { username: string; password: string; walletKey: string }>();
-  for (const ref of config.sub2api.newApiCredentials ?? []) {
-    const baseUrl = credentialBaseUrl(ref.baseUrl);
-    if (credentials.has(baseUrl)) throw new Error(`duplicate sub2api.newApiCredentials baseUrl: ${baseUrl}`);
-    credentials.set(baseUrl, {
-      username: readSecret(config, ref.username),
-      password: readSecret(config, ref.password),
-      walletKey: credentialBaseUrl(ref.walletKey ?? baseUrl),
-    });
-  }
-  return credentials;
+export function readNewApiCredential(config: AppConfig, baseUrl: string): { username: string; password: string; walletKey: string } | undefined {
+  const refs = (config.sub2api.newApiCredentials ?? []).filter((ref) => credentialBaseUrl(ref.baseUrl) === credentialBaseUrl(baseUrl));
+  if (refs.length > 1) throw new Error(`duplicate sub2api.newApiCredentials baseUrl: ${baseUrl}`);
+  const ref = refs[0];
+  if (!ref) return undefined;
+  return {
+    username: readSecret(config, ref.username),
+    password: readSecret(config, ref.password),
+    walletKey: credentialBaseUrl(ref.walletKey ?? baseUrl),
+  };
 }

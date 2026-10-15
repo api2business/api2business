@@ -24,7 +24,7 @@ import {
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
 import { providerActualCostUsd, upstreamCostBasisSql } from "./upstream-cost-sql";
-import { readNewApiCredentials } from "./secrets";
+import { readNewApiCredential } from "./secrets";
 import { configuredWalletKey } from "./upstream-wallet";
 
 type Row = Record<string, unknown>;
@@ -1036,7 +1036,6 @@ export class UpstreamManagementService {
 
   async usage(accountIds: number[]): Promise<Record<string, unknown>> {
     const settings = this.config.operations.upstreamManagement;
-    const newApiCredentials = readNewApiCredentials(this.config);
     const query = await this.reads.query<Row>({
       key: `upstream-usage-targets:${accountIds.length ? accountIds.join(",") : "all"}`,
       kind: "upstream-usage-targets",
@@ -1074,14 +1073,18 @@ export class UpstreamManagementService {
     });
     const targets = query.rows.map((item): UpstreamUsageTarget => {
       const baseUrl = normalizeBaseUrl(String(item.base_url ?? ""));
-      const credentials = newApiCredentials.get(normalizeUpstreamWallet(baseUrl));
+      let credentials: ReturnType<typeof readNewApiCredential>;
+      let credentialError: string | undefined;
+      try { credentials = readNewApiCredential(this.config, baseUrl); }
+      catch { credentialError = "钱包登录凭据不可读取，请核对 owning Secret sourceRef/sourceKey 及运行面只读挂载"; }
       return {
       id: Number(item.id),
       name: String(item.name ?? ""),
       baseUrl,
       apiKey: String(item.api_key ?? ""),
       newApiCredentials: credentials,
-      walletKey: credentials?.walletKey ?? normalizeUpstreamWallet(baseUrl),
+      credentialError,
+      walletKey: configuredWalletKey(baseUrl, this.config.sub2api.newApiCredentials),
       status: String(item.status ?? "unknown"),
       schedulable: item.schedulable === true,
       apiAmountUsdTotal: Number(item.account_api_amount_usd_total ?? 0),
