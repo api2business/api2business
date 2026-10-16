@@ -86,6 +86,13 @@ description: >-
 - 发布前执行 `bun run deploy:validate`。
 - 使用镜像摘要和配置摘要确认运行版本，禁止使用运行容器作为配置真相。
 
+## 服务能力配置
+
+- `gateway service-policy [--confirm] --over-api <absolute-http(s)-URL>` 预览或异步收敛
+  Sub2API 原生模型准入；状态使用 `workflow status --id <workflow-id>`。
+- 配置、自动收敛、语音拒绝与评分排除的唯一规则见
+  [不提供语音服务](references/upstream-scheduling.md#不提供语音服务)。
+
 ## Secret
 
 - Secret 只保存在仓库外。

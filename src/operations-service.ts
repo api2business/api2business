@@ -399,7 +399,8 @@ export class OperationsService {
       errorSummary: errors.length ? errors.join("; ").slice(0, 1000) : null,
       durationMs: Date.now() - started,
     });
-    return { ok: failedCount === 0, scope: scopeName, roundId, operationId, status, selected: plan.selected, attemptedCount, succeededCount, failedCount, changedAccountCount, changedModelCount, errors, valuesPrinted: false };
+    const servicePolicy = await this.reconcileGatewayPolicyForSampling();
+    return { ok: failedCount === 0, servicePolicy, scope: scopeName, roundId, operationId, status, selected: plan.selected, attemptedCount, succeededCount, failedCount, changedAccountCount, changedModelCount, errors, valuesPrinted: false };
   }
 
   async modelSyncHistory(page = 1, pageSize = 10, scopeName = "codex") {
@@ -766,6 +767,21 @@ export class OperationsService {
     return { ok: true, sampledAt, profiles: samples.map((sample) => sample.profile), valuesPrinted: false };
   }
 
+  async gatewayServicePolicy(confirm: boolean) {
+    if (!this.runtime) throw new Error("Sub2API runtime service unavailable");
+    return await this.runtime.reconcileServicePolicy(this.reads, this.config, confirm);
+  }
+
+  private async reconcileGatewayPolicyForSampling(): Promise<Record<string, unknown> | null> {
+    if (!this.config.sub2api.gatewayServicePolicy?.denyAudio) return null;
+    try { return await this.gatewayServicePolicy(true); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(JSON.stringify({ component: "gateway.service-policy", error: message }));
+      return { ok: false, error: message };
+    }
+  }
+
   async samplePoolQuality(): Promise<Record<string, unknown>> {
     const sampledAt = new Date().toISOString();
     const usageRows = records(await this.store.getUpstreamUsageCache([]));
@@ -792,7 +808,8 @@ export class OperationsService {
       await this.store.addPoolQualitySample(sample);
       samples.push(sample);
     }
-    return { ok: true, sampledAt, profiles: samples.map((sample) => sample.platform), samples, valuesPrinted: false };
+    const servicePolicy = await this.reconcileGatewayPolicyForSampling();
+    return { ok: true, sampledAt, profiles: samples.map((sample) => sample.platform), samples, servicePolicy, valuesPrinted: false };
   }
 
   async poolQualitySummary(platform: "codex" | "claude" | "grok" = "codex") {

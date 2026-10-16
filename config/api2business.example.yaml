@@ -129,6 +129,10 @@ webProbe:
         console: 12
 
 sub2api:
+  gatewayServicePolicy:
+    denyAudio: true
+    requiredModelsByPlatform:
+      openai: [gpt-6.1-sol]
   baseUrl: https://api.example.com/api/v1
   requestTimeoutMs: 20000
   pageSize: 100

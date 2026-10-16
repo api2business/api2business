@@ -293,6 +293,7 @@ function help(): Record<string, unknown> {
       "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts status --id <job-id> --over-api <absolute-http(s)-URL>",
       "accounts inspect --accounts <id-or-range,...> [--over-api <absolute-http(s)-URL>]",
+      "gateway service-policy [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts models disable-luna --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts delete --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts economics --accounts <id-or-range,...> --cost-cny <amount> (--day YYYY-MM-DD | --start <ISO> --end <ISO>) [--over-api <absolute-http(s)-URL>]",
@@ -1091,6 +1092,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (!parsed.id) throw new Error("accounts status requires --id");
     return await client.accountImportStatus(parsed.id);
   }
+  if (group === "gateway" && action === "service-policy") return await client.gatewayServicePolicy(parsed.confirm);
   if (group === "accounts" && action === "inspect") {
     if (!parsed.accounts) throw new Error("accounts inspect requires --accounts");
     return await client.inspectAccounts(parseAccountIdSelector(parsed.accounts));
@@ -1264,6 +1266,10 @@ export async function runCli(args: string[]): Promise<void> {
   const wantsJson = args.includes("--json");
   try {
     if (args.includes("--help") && args.includes("web") && args[args.indexOf("web") + 1] === "screenshot") return emit(webScreenshotHelp(), wantsJson);
+    if (args.includes("--help") && args.includes("gateway")) return emit({ ok: true,
+      commands: ["gateway service-policy [--confirm] --over-api <absolute-http(s)-URL> [--json]"],
+      behavior: "默认预览；--confirm 提交异步作业，再用 workflow status 查询终态。--json 展开分组。",
+    }, wantsJson);
     if (args.includes("--help") && args.includes("observability")) return emit(observabilityHelp,wantsJson);
     if (args.includes("--help") || args.length === 0) return emit(help(), wantsJson);
     const parsed = parseArgs(args);
@@ -1304,6 +1310,7 @@ export async function runCli(args: string[]): Promise<void> {
       return emit(result, parsed.json);
     }
     const nativeReadCommand = (
+      parsed.command[0] === "gateway" ||
       parsed.command.join(" ") === "scores rank"
       || parsed.command[0] === "upstream-scheduling-v2"
       || parsed.command[0] === "observability"
@@ -1353,6 +1360,13 @@ export async function runCli(args: string[]): Promise<void> {
     else if (parsed.command.join(" ") === "upstreams recharge-candidates") emitRechargeCandidates(output, parsed.json);
     else if (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle" && !parsed.json) emit(bindRuntimeCommands(summarizeLifecycleResponse(output), target.mode === "http" ? target.baseUrl : "") as Record<string, unknown>, false);
     else if (parsed.command.join(" ") === "reads query" && !parsed.json) emitReadQuery(output);
+    else if (parsed.command.join(" ") === "gateway service-policy" && !parsed.json) {
+      const groups = Array.isArray(output.groups) ? output.groups as Array<Record<string, unknown>> : [];
+      emit({ ...output, groups: undefined, platforms: [...new Set(groups.map((row) => String(row.platform)))].map((platform) => ({
+        platform, groups: groups.filter((row) => row.platform === platform).length,
+        changed: groups.filter((row) => row.platform === platform && row.changed).length,
+      })) }, false);
+    }
     else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);

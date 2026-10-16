@@ -691,6 +691,12 @@ export function createHandler(
         try { return json({ ok: true, job: await lifecycle.settle(id) }, 202); }
         catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 409); }
       }
+      if (url.pathname === "/api/admin/gateway/service-policy" && request.method === "GET") return json(await operations.gatewayServicePolicy(false));
+      if (url.pathname === "/api/admin/gateway/service-policy" && request.method === "POST") {
+        const input = await body(request);
+        if (input.confirm !== true) return json(await operations.gatewayServicePolicy(false));
+        return json(await dispatcher.submit({ kind: "gateway.service-policy.apply" }), 202);
+      }
       if (request.method === "POST" && url.pathname === "/api/admin/accounts/inspect") {
         const input = await body(request);
         return json(await imports.inspect(normalizeAccountIds(input.accountIds)));

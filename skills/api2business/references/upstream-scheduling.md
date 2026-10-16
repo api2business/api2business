@@ -329,7 +329,7 @@
     `ordinaryLogRecorded` 和探活轮次记录；手动成功后才打开该作用域的 `idleProbe`。
   - 探活候选必须按作用域平台和分组查询，模型白名单动态选择
     `sub2api.idleProbe.platformModels` 中的候选；Codex 默认按 `gpt-6.1-sol`、
-    `gpt-5.6-terra`、`gpt-5.6-sol` 顺序，Grok 使用 owning YAML 声明的 Grok 模型。账号没有首选模型时，
+    以 owning YAML 的 `platformModels.openai` 顺序为准，首选 `gpt-6.1-sol`；Grok 使用自己的模型目录。账号没有首选模型时，
     按账号真实 `model_mapping` 的原有顺序选择第一个可用模型；只有没有任何映射时才回退
     到作用域默认模型。不能因为首选模型不匹配就跳过账号，也不能临时写入映射。探活失败、
     未就绪和普通记录缺失分别保留，不把工作流 `running` 当作业务成功。探针私有分组的
@@ -451,7 +451,7 @@
   - 两类候选均只分析锚点前 `lookbackHours` 小时，默认 24 小时；锚点之后的失败不进入充值价值评分。
 - 查询通过 Api2Business host PostgreSQL 最新 wallet 快照和一次 Sub2API 排队单连接查询完成；
   Sub2API 查询 authority 是 NC01 本地专用数据库，不按账号循环打数据库。
-  - 历史表现排除 monitor-user 探针、Luna、模型不存在、余额不足、failover 中间事件和非业务端点，使用与账号评分相同的可计分错误口径。
+  - 历史表现排除 monitor-user 探针、Luna、语音、模型不存在、余额不足、failover 中间事件和非业务端点，使用与账号评分相同的可计分错误口径。
   - 输出推荐分及其余额、质量、请求量、失败率、TTFT P95、API 产出和上游成本分项，推荐分只用于采购排序，不改变调度权重。
   - `retiredSuppliers` 按标准化供应商域名声明退场名单；同域名下全部现有和未来账号保留审计结果，但固定标记为 `supplier-retired`，不得进入充值推荐。
   - 排队读取超时是查询失败，不是空的欠费或低余额名单。
@@ -482,7 +482,7 @@
 - 观察窗口使用明确的开始、结束时间：
   - 按实际墙钟持续观察，结束时按固定窗口汇总，不用最近 N 条替代完整时段。
   - 错误诊断默认排除探针，但不默认排除管理员；与其他报表对比前核对口径。
-  - 质量统计继续排除 Luna；同时区分全业务流量与 API-key 通道样本。
+  - 质量统计排除 Luna 和本节定义的语音请求；同时区分全业务流量与 API-key 通道样本。
   - 采集最近 N 条错误会偏向失败；展示链还按未恢复、切号、尝试次数和时间排序。
   - 对采样或截断结果，不计算全量请求失败率；分别报告错误数、成功用量数和覆盖范围。
   - 用量可能以 `client:`、`local:` 等 ID 记录，错误使用另一请求 ID。
@@ -663,3 +663,35 @@
   - 复用已有只读 broker 请求字段与单连接队列。
   - 只读取必要诊断列，避免凭据、完整请求正文和用户隐私。
   - 默认输出包含投影行；行数摘要不能代替正文，完整对象才使用 `--json`。
+
+
+## 不提供语音服务
+
+- 网关准入和质量统计共用“不提供语音服务”的业务边界。
+  - 语音、实时语音、TTS、STT、转录和 Whisper 模型请求不参与质量评分。
+  - 判定使用请求模型、实际模型、上游模型和语音入口，不匹配用户提示词。
+  - 账号分、池级分、充值历史质量和固定窗口巡检均排除这些样本。
+  - 原始错误继续可查；历史费用仍按实际用量记账，不因排除评分而抹除。
+  - 不为不提供的语音能力增加切号模板或停用上游账号。
+- Api2Business owning YAML 的 `sub2api.gatewayServicePolicy` 声明模型准入策略。
+  - `denyAudio: true` 开启非语音白名单收敛。
+  - `requiredModelsByPlatform` 声明预期提供的精确模型名。
+  - 策略只控制准入，不表示该模型在每个上游都能调用成功。
+- CLI 使用 `gateway service-policy --over-api <absolute-http(s)-URL>` 预览。
+  - 加 `--confirm` 提交异步作业，再用 `workflow status --id <workflow-id>` 查询。
+  - 完成后再次预览，`changedCount=0` 才表示当前分组已收敛。
+  - 模型目录从排队读取的账号映射键和现有分组目录生成，不读取凭据值。
+  - 同平台全部分组共用非语音目录，禁止直接采用 `*` 等通配映射作为服务白名单。
+  - 原生写入只修改 `model_allowlist` 和 `allow_live`，逐组回读确认。
+  - 策略拥有这些分组的非语音准入目录；费用、分组归属和账号凭据保持原值。
+- 模型同步完成和定期池级采样会执行相同收敛路径。
+  - 新增文本模型会从账号模型目录进入白名单，语音模型继续排除。
+  - 不只删除模型列表条目；必须启用原生分组 `model_allowlist` 才能拒绝请求。
+  - 普通 OAuth 导入的默认映射不包含语音模型。
+- 无模型名的独立语音接口由 owning public-edge 路由直接返回 `403`。
+  - 包含 `/audio`、`/tts`、`/stt`、`/custom-voices`、`/realtime`、`/live` 及其 `/v1` 别名。
+  - Codex `/backend-api/codex/realtime` 同样关闭。
+  - 路由真相在 UniDesk `config/platform-infra/sub2api.yaml` 的 active public-edge 配置。
+  - 准入白名单检查模型名；不能把它描述成通用请求正文或模态过滤器。
+- Sub2API 原生字段、拒绝时机和版本核验依据见
+  [Sub2API 模型准入资料](https://github.com/pikasTech/unidesk/blob/master/.agents/skills/docs-sub2api/references/model-admission.md)。

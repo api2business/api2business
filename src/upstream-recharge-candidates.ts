@@ -1,3 +1,4 @@
+import { audioRequestSql } from "./scoring-error-policy";
 import type { AppConfig } from "./config";
 import { supplierIdentity } from "./account-procurement-advice";
 import { scoreRecentDatabaseRow } from "./account-score-database";
@@ -76,6 +77,7 @@ WITH low_balance AS (
   WHERE u.created_at >= c.anchor_at - ($3::int * INTERVAL '1 hour')
     AND u.created_at < c.anchor_at
     AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
+      AND NOT ${audioRequestSql("u", false)}
     AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id=u.api_key_id)
   UNION ALL
   SELECT 'error'::text, o.id, o.request_id, o.created_at, o.stream,
@@ -103,6 +105,7 @@ WITH low_balance AS (
   WHERE o.created_at >= c.anchor_at - ($3::int * INTERVAL '1 hour')
     AND o.created_at < c.anchor_at
     AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
+      AND NOT ${audioRequestSql("o", true)}
     AND LOWER(COALESCE(o.inbound_endpoint,'')) IN ('/v1/messages','/v1/responses','/responses/compact','/v1/responses/compact')
     AND (COALESCE(o.status_code,0) >= 400 OR COALESCE(o.upstream_status_code,0) >= 400 OR o.error_type='cyber_policy')
     AND NOT (COALESCE(o.status_code,o.upstream_status_code,0) BETWEEN 200 AND 399)

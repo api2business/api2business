@@ -1,3 +1,4 @@
+import { audioRequestSql } from "./scoring-error-policy";
 import type { AppConfig } from "./config";
 import { recentCallBucketWeight, scoreRecentDatabaseRow } from "./account-score-database";
 import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
@@ -56,6 +57,7 @@ WITH internal_probe_keys AS (
     WHERE u.request_id IS NOT NULL
       AND u.created_at <= $3::timestamptz
       AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
+      AND NOT ${audioRequestSql("u", false)}
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
 ), error_sources AS (
     SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at, o.account_id,
@@ -81,6 +83,7 @@ WITH internal_probe_keys AS (
       AND o.group_id = ANY(string_to_array($2, ',')::bigint[])
       AND o.created_at <= $3::timestamptz
       AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
+      AND NOT ${audioRequestSql("o", true)}
       -- 上游失败但入站已成功的 failover 中间事件不是用户错误。
       AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
       AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'

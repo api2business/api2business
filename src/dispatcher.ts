@@ -23,7 +23,8 @@ export async function dispatchDirect(services: DispatcherServices, command: AppC
   if (command.kind === "records.list") return { ok: true, records: services.lottery.listRecords(command.limit) };
   if (command.kind === "records.delete") return services.lottery.deleteRecord(command.id);
   if (command.kind === "credit.test") return await services.lottery.creditTest(command.execute);
-  if (command.kind === "upstream.operation"
+  if (command.kind === "gateway.service-policy.apply"
+    || command.kind === "upstream.operation"
     || command.kind === "upstream.quota.sample"
     || command.kind === "upstream.usage.sample"
     || command.kind === "pool.quality.sample"

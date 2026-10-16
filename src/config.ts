@@ -1,3 +1,4 @@
+import type { GatewayServicePolicy } from "./gateway-service-policy";
 import { parseObservabilityConfig, type ObservabilityConfig } from "./observability-config";
 import { readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
@@ -207,6 +208,7 @@ export interface AppConfig {
   webAuth: { username: string; cookieName: string; sessionTtlSeconds: number };
   bugTeam: BugTeamConfig;
   sub2api: {
+    gatewayServicePolicy?: GatewayServicePolicy;
     baseUrl: string;
     requestTimeoutMs: number;
     pageSize: number;
@@ -957,6 +959,7 @@ export function loadConfig(path: string): AppConfig {
       },
     },
     sub2api: {
+      ...(sub2api.gatewayServicePolicy === undefined ? {} : { gatewayServicePolicy: readGatewayServicePolicy(sub2api.gatewayServicePolicy) }),
       baseUrl: stringValue(sub2api, "baseUrl", "sub2api").replace(/\/$/u, ""),
       requestTimeoutMs: integerValue(sub2api, "requestTimeoutMs", "sub2api", 1),
       pageSize: integerValue(sub2api, "pageSize", "sub2api", 1, 100),
@@ -1314,4 +1317,18 @@ export function startConfigHotReload(
 
 export function resolveDataPath(config: AppConfig, value: string): string {
   return isAbsolute(value) ? value : resolve(config.rootDirectory, value);
+}
+
+function readGatewayServicePolicy(value: unknown): GatewayServicePolicy {
+  const path = "sub2api.gatewayServicePolicy";
+  const policy = object(value, path);
+  const required = object(policy.requiredModelsByPlatform, `${path}.requiredModelsByPlatform`);
+  const requiredModelsByPlatform: Record<string, string[]> = {};
+  for (const [platform, models] of Object.entries(required)) {
+    if (!Array.isArray(models) || !models.every((model) => typeof model === "string" && model.trim() && !model.includes("*"))) {
+      throw new Error(`${path}.requiredModelsByPlatform.${platform} must contain exact model names`);
+    }
+    requiredModelsByPlatform[platform] = models;
+  }
+  return { denyAudio: booleanValue(policy, "denyAudio", path), requiredModelsByPlatform };
 }

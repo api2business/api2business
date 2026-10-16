@@ -31,6 +31,7 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
 
   return async (operation: OperationRequest): Promise<unknown> => {
     const command = operation.command;
+    if (command.kind === "gateway.service-policy.apply") return await services.operations.gatewayServicePolicy(true);
     if (command.kind === "scores.refresh") return await services.scores.refresh();
     if (command.kind === "upstream.usage.sample") return await sampleUpstreamUsage();
     if (command.kind === "pool.quality.sample") return await services.operations.samplePoolQuality();

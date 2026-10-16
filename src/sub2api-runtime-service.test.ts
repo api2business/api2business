@@ -87,10 +87,14 @@ test("keeps OpenAI OAuth on the codex-session import endpoint", async () => {
     body: expect.objectContaining({
       update_existing: true,
       load_factor: 1000,
-      contents: [expect.stringContaining('"model_mapping":{"gpt-5.2":"gpt-5.2"')],
+      contents: [expect.any(String)],
     }),
     timeoutMs: 120000,
   }));
+  const imported = JSON.parse((calls[0]!.body.contents as string[])[0]!);
+  expect(imported.model_mapping).toMatchObject({ "gpt-5.2": "gpt-5.2", "gpt-6.1-sol": "gpt-6.1-sol" });
+  expect(imported.model_mapping).not.toHaveProperty("gpt-4o-audio-preview");
+  expect(imported.model_mapping).not.toHaveProperty("gpt-4o-realtime-preview");
   expect(calls[1]).toEqual(expect.objectContaining({
     path: "/admin/accounts/bulk-update",
     body: expect.objectContaining({ account_ids: [452] }),

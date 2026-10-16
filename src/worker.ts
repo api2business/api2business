@@ -111,6 +111,7 @@ const scores = new AccountScoreService(
 
 async function executeWorkerOperation(operation: OperationRequest): Promise<unknown> {
   const command = operation.command;
+  if (command.kind === "gateway.service-policy.apply") return await operations.gatewayServicePolicy(true);
   if (command.kind === "scores.refresh") return await scores.refresh();
   const sampleUpstreamUsage = async () => {
     const result = await upstreams.usage([]);

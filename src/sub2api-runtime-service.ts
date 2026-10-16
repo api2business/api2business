@@ -7,6 +7,10 @@ import {
   modelMappingForOpenAIOAuthAccount,
 } from "./openai-oauth-import-policy";
 
+import { reconcileGatewayServicePolicy } from "./gateway-service-policy";
+import type { AppConfig } from "./config";
+import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+
 type Row = Record<string, unknown>;
 
 interface ImportItem {
@@ -86,6 +90,10 @@ export class Sub2ApiRuntimeService {
   ) {
     this.apiKeyFailoverRules = apiKeyFailoverRules;
     this.apiKeyFailoverRulesByPlatform = { openai: apiKeyFailoverRules, ...apiKeyFailoverRulesByPlatform };
+  }
+
+  async reconcileServicePolicy(reads: Sub2ApiReadClient, config: AppConfig, confirm: boolean) {
+    return await reconcileGatewayServicePolicy(this.client, reads, config, confirm);
   }
 
   updateApiKeyFailoverRules(

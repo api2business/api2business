@@ -42,6 +42,10 @@ export class AdminHttpClient {
     return payload as T;
   }
 
+  gatewayServicePolicy(confirm: boolean): Promise<Record<string, unknown>> {
+    return this.request("/api/admin/gateway/service-policy", confirm ? { method: "POST", body: JSON.stringify({ confirm: true }) } : {} , 60000);
+  }
+
   status(): Promise<Record<string, unknown>> { return this.request("/api/admin/status"); }
   backendCheck(): Promise<Record<string, unknown>> { return this.request("/api/admin/backend-check"); }
   draw(): Promise<Record<string, unknown>> { return this.request("/api/admin/draw", { method: "POST" }); }

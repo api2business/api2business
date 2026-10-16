@@ -1,3 +1,4 @@
+import { isAudioRequest } from "./scoring-error-policy";
 import type {
   Sub2ApiAccount,
   Sub2ApiGroup,
@@ -164,9 +165,12 @@ function grade(score: number | null): string {
 }
 
 export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group: Row; accounts: Row[]; collection: Row } {
+  const audioRequests = new Set([...input.usage, ...input.requestErrors]
+    .filter((row) => isAudioRequest([row.requested_model, row.model, row.upstream_model], row.inbound_endpoint))
+    .map((row) => row.request_id).filter((id): id is string => typeof id === "string" && id.length > 0));
   const usageByAccount = new Map<number, Sub2ApiUsageRow[]>();
   for (const row of input.usage) {
-    if (row.account_id === null || isLunaModel(row.model)) continue;
+    if (row.account_id === null || isLunaModel(row.model) || isAudioRequest([row.requested_model, row.model, row.upstream_model], row.inbound_endpoint)) continue;
     usageByAccount.set(row.account_id, [...(usageByAccount.get(row.account_id) ?? []), row]);
   }
 
@@ -174,7 +178,7 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
   const excludedByAccount = new Map<number, Map<string, number>>();
   const customerErrorCount = new Map<number, Set<string>>();
   for (const row of input.requestErrors) {
-    if (isLunaModel(row.requested_model, row.model, row.upstream_model)) continue;
+    if (isLunaModel(row.requested_model, row.model, row.upstream_model) || isAudioRequest([row.requested_model, row.model, row.upstream_model], row.inbound_endpoint)) continue;
     if (row.account_id === null || row.account_id === undefined || !row.request_id) continue;
     const id = row.account_id;
     customerErrorCount.set(id, new Set([...(customerErrorCount.get(id) ?? []), row.request_id]));
@@ -195,7 +199,9 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
   const upstreamStatuses = new Map<number, Map<number, number>>();
   for (const log of input.systemLogs) {
     const metadata = extra(log);
-    if (isLunaModel(metadata.requested_model, metadata.model, metadata.upstream_model)) continue;
+    if (isLunaModel(metadata.requested_model, metadata.model, metadata.upstream_model)
+      || isAudioRequest([metadata.requested_model, metadata.model, metadata.upstream_model], metadata.inbound_endpoint ?? metadata.path)
+      || audioRequests.has(requestId(log) ?? "")) continue;
     if (!groupMatches(log, input.group.id)) continue;
     const id = accountId(log);
     const request = requestId(log);

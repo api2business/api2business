@@ -1,7 +1,8 @@
 type Row = Record<string, unknown>;
 
-// 与当前 Sub2API OpenAI 模型白名单保持一致，但刻意排除 gpt-5.6-luna。
+// 与当前 Sub2API OpenAI 模型白名单保持一致，排除 Luna 和不提供服务的语音模型。
 const defaultAllowedModels = [
+  "gpt-6.1-sol",
   "gpt-5.2",
   "gpt-5.2-2025-12-11",
   "gpt-5.2-chat-latest",
@@ -16,8 +17,6 @@ const defaultAllowedModels = [
   "gpt-5.4-2026-03-05",
   "gpt-5.3-codex-spark",
   "codex-auto-review",
-  "gpt-4o-audio-preview",
-  "gpt-4o-realtime-preview",
   "gpt-image-1",
   "gpt-image-1.5",
   "gpt-image-2",

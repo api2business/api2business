@@ -10,20 +10,22 @@ export async function verifyObservationWindow(client: AdminHttpClient) {
   groups AS (SELECT 1::bigint id,'business'::text name),
   usage_logs AS (
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,1::bigint group_id,api_key_id,
-      true AS stream,'fixture-model'::text model,ttft AS first_token_ms,actual_cost,rate_multiplier
+      true AS stream,CASE WHEN id=7 THEN 'gpt-4o-audio-preview' ELSE 'fixture-model' END::text model,
+      NULL::text requested_model,NULL::text upstream_model,ttft AS first_token_ms,actual_cost,rate_multiplier
     FROM (VALUES
       (1,'r1','2026-01-01T00:00:00Z',1,5000,2::numeric,2::numeric),
       (2,'r1','2026-01-01T00:30:00Z',1,20000,2,2),
       (3,'r2','2026-01-01T01:00:00Z',1,10000,4,2),
       (4,'probe','2026-01-01T01:00:00Z',99,10,100,1),
       (5,NULL,'2026-01-01T01:00:00Z',1,20,1,1),
-      (6,'end-boundary','2026-01-01T02:00:00Z',1,10,100,1)
+      (6,'end-boundary','2026-01-01T02:00:00Z',1,10,100,1),
+      (7,'audio-success','2026-01-01T01:00:00Z',1,999999,2,2)
     ) t(id,request_id,at,api_key_id,ttft,actual_cost,rate_multiplier)
   ), ops_error_logs AS (
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,1::bigint group_id,api_key_id,
       status_code,NULL::int upstream_status_code,NULL::text network_error_type,false is_business_limited,
-      phase AS error_phase,kind AS error_type,'fixture-model'::text model,NULL::text requested_model,
-      '/v1/responses'::text inbound_endpoint,NULL::text error_message,NULL::text error_body,
+      phase AS error_phase,kind AS error_type,'fixture-model'::text model,NULL::text requested_model,NULL::text upstream_model,
+      CASE WHEN id=7 THEN '/v1/tts' ELSE '/v1/responses' END::text inbound_endpoint,NULL::text error_message,NULL::text error_body,
       NULL::text upstream_error_message,NULL::text upstream_error_detail
     FROM (VALUES
       (1,'r2','2026-01-01T00:50:00Z',1,502,'upstream','gateway'),
@@ -31,7 +33,8 @@ export async function verifyObservationWindow(client: AdminHttpClient) {
       (3,'r3','2026-01-01T01:10:00Z',1,429,'upstream','rate_limit'),
       (4,'r4','2026-01-01T01:00:00Z',1,502,'upstream','failover_event'),
       (5,'r5','2026-01-01T01:00:00Z',1,0,NULL,NULL),
-      (6,'probe-error','2026-01-01T01:00:00Z',99,500,'internal','unknown')
+      (6,'probe-error','2026-01-01T01:00:00Z',99,500,'internal','unknown'),
+      (7,'audio-error','2026-01-01T01:00:00Z',1,502,'upstream','gateway')
     ) t(id,request_id,at,api_key_id,status_code,phase,kind)
   ), `;
   const result=await client.sub2ApiRead<{facts:Record<string,any>}>({key:`observability-fixture:${crypto.randomUUID()}`,kind:'observability.fixture',
@@ -45,7 +48,8 @@ export async function verifyObservationWindow(client: AdminHttpClient) {
   const facts=result.rows[0]?.facts ?? {};
   const checks={uniqueSuccess: facts.succeeded===2,uniqueFinalFailures:facts.failed===2,recovered:facts.recoveredRequests===1,
     missingId:facts.missingRequestIdRecords===1,excludedProbe:facts.excludedProbeRecords===2,ttft:facts.ttftP95Ms===19500,
-    sameWindowCostRecords:facts.costAccounts?.[0]?.records===4,historicalCost:facts.costAccounts?.[0]?.historical_cost_cny===4,
+    audioExcluded:facts.excludedAudioRecords===2,
+    sameWindowCostRecords:facts.costAccounts?.[0]?.records===5,historicalCost:facts.costAccounts?.[0]?.historical_cost_cny===5,
     unknownRetained:facts.unknownExamples?.[0]?.request_id==='r5'};
   return {ok:Object.values(checks).every(Boolean),checks,queryDurationMs:result.queryDurationMs,mutation:false,valuesPrinted:false};
 }

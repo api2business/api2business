@@ -1,3 +1,5 @@
+import { audioRequestSql } from "./scoring-error-policy";
+
 // Keep only changes in the evidenced rate. Repeated quota samples are not new
 // billing epochs; scanning all of them for every usage row makes week-long reads slow.
 export const observedRateEventsSql = `rate_samples AS (
@@ -31,12 +33,14 @@ WITH ${observedRateEventsSql}, probe_keys AS (
   WHERE o.created_at >= $1::timestamptz AND o.created_at < $2::timestamptz
 ), usage AS (SELECT * FROM usage_source WHERE NOT probe),
 errors AS (
-  SELECT * FROM error_source WHERE NOT probe
+  SELECT * FROM error_source e WHERE NOT probe
+    AND NOT ${audioRequestSql("e", true)}
     AND LOWER(COALESCE(error_type,'')) <> 'failover_event'
     AND NOT (COALESCE(status_code,upstream_status_code,0) BETWEEN 200 AND 399)
 ), success AS (
   SELECT DISTINCT ON (request_id) request_id, account_id, model, stream, first_token_ms
-  FROM usage WHERE NULLIF(TRIM(request_id),'') IS NOT NULL
+  FROM usage u WHERE NULLIF(TRIM(request_id),'') IS NOT NULL
+    AND NOT ${audioRequestSql("u")}
   ORDER BY request_id,created_at DESC,id DESC
 ), failure AS (
   SELECT DISTINCT ON (e.request_id) e.request_id,e.account_id,e.error_phase,e.error_type,
@@ -94,8 +98,10 @@ SELECT jsonb_build_object(
   'streaming',(SELECT COUNT(*) FROM success WHERE stream),
   'ttftKnown',(SELECT COUNT(*) FROM success WHERE stream AND first_token_ms>=0),
   'ttftP95Ms',(SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms) FROM success WHERE stream AND first_token_ms>=0),
-  'missingRequestIdRecords',(SELECT COUNT(*) FROM usage WHERE NULLIF(TRIM(request_id),'') IS NULL)
+  'missingRequestIdRecords',(SELECT COUNT(*) FROM usage u WHERE NULLIF(TRIM(request_id),'') IS NULL AND NOT ${audioRequestSql("u")})
     +(SELECT COUNT(*) FROM errors WHERE NULLIF(TRIM(request_id),'') IS NULL),
+  'excludedAudioRecords',(SELECT COUNT(*) FROM usage_source u WHERE NOT probe AND ${audioRequestSql("u")})
+    +(SELECT COUNT(*) FROM error_source e WHERE NOT probe AND ${audioRequestSql("e", true)}),
   'excludedProbeRecords',(SELECT COUNT(*) FROM usage_source WHERE probe)+(SELECT COUNT(*) FROM error_source WHERE probe),
   'recoveredRequests',(SELECT COUNT(DISTINCT e.request_id) FROM errors e JOIN success s USING(request_id)),
   'errorFamilies',COALESCE((SELECT jsonb_agg(t) FROM (SELECT family,COUNT(*)::int AS requests FROM failure GROUP BY family ORDER BY COUNT(*) DESC) t),'[]'::jsonb),

@@ -64,3 +64,23 @@ export function attributedInternalUpstreamFailureSql(alias: "o" | "source"): str
     AND LOWER(COALESCE(${alias}.error_phase, '')) = 'internal'
     AND COALESCE(${alias}.upstream_status_code, 0) BETWEEN 500 AND 599)`;
 }
+
+// 语音服务不对外提供；按结构化模型名或入口识别，不按错误正文或用户提示词猜测。
+export const audioModelPattern = "(^|[-_/])(audio|realtime|tts|stt|whisper|voice|speech|transcribe|transcription)([-_/]|$)";
+const audioModelRegex = new RegExp(audioModelPattern, "iu");
+const audioEndpointPattern = "(^|/)(audio|realtime|tts|stt|custom-voices|live)(/|$)";
+const audioEndpointRegex = new RegExp(audioEndpointPattern, "iu");
+
+export function isAudioRequest(models: unknown[], endpoint?: unknown): boolean {
+  return models.some((model) => typeof model === "string" && audioModelRegex.test(model))
+    || (typeof endpoint === "string" && audioEndpointRegex.test(endpoint.split("?")[0]!));
+}
+
+// 固定内部 alias；模型逐字段匹配，避免字段拼接改变分隔符语义。
+export function audioRequestSql(alias: string, includeEndpoint = false): string {
+  if (!/^[a-z][a-z0-9_]*$/u.test(alias)) throw new Error("invalid audio policy SQL alias");
+  const models = ["requested_model", "model", "upstream_model"]
+    .map((key) => `LOWER(COALESCE(${alias}.${key}, '')) ~ '${audioModelPattern}'`);
+  if (includeEndpoint) models.push(`LOWER(SPLIT_PART(COALESCE(${alias}.inbound_endpoint, ''), '?', 1)) ~ '${audioEndpointPattern}'`);
+  return `(${models.join(" OR ")})`;
+}

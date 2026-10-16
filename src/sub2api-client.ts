@@ -32,6 +32,10 @@ export interface Sub2ApiAccount {
 }
 
 export interface Sub2ApiUsageRow {
+  request_id?: string;
+  requested_model?: string;
+  upstream_model?: string;
+  inbound_endpoint?: string;
   id: number;
   account_id: number | null;
   group_id: number | null;
@@ -46,6 +50,7 @@ export interface Sub2ApiUsageRow {
 }
 
 export interface Sub2ApiRequestError {
+  inbound_endpoint?: string;
   id: number;
   request_id?: string;
   account_id?: number | null;

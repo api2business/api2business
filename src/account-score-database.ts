@@ -1,3 +1,4 @@
+import { audioRequestSql } from "./scoring-error-policy";
 import type { AppConfig } from "./config";
 import type {
   Sub2ApiReadClient,
@@ -165,6 +166,7 @@ account_stats AS (
         )
           AND u.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
+          AND NOT ${audioRequestSql("u", false)}
         ORDER BY u.created_at DESC
         LIMIT $1
       )
@@ -222,6 +224,7 @@ account_stats AS (
           AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
           AND o.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
+          AND NOT ${audioRequestSql("o", true)}
           AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
             '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
           )

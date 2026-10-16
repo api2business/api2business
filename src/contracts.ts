@@ -1,4 +1,5 @@
 export type AppCommand =
+  | { kind: "gateway.service-policy.apply" }
   | { kind: "backend.check" }
   | { kind: "scores.get" }
   | { kind: "scores.refresh" }
@@ -56,7 +57,8 @@ export interface ScheduledUpstreamModelSyncInput extends WorkflowOptions {
 }
 
 export function usesWorkflow(command: AppCommand): boolean {
-  return command.kind === "scores.refresh"
+  return command.kind === "gateway.service-policy.apply"
+    || command.kind === "scores.refresh"
     || command.kind === "lottery.publicDraw"
     || command.kind === "lottery.draw"
     || command.kind === "lottery.reset"
