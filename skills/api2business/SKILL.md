@@ -161,6 +161,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   需要刷新时使用 `scores rank --calls <N> --over-api <absolute-http(s)-URL>`。
 - 池级刷新使用 `scores pool-quality-refresh --over-api <absolute-http(s)-URL>`，
   跟踪原 workflow 终态与各作用域采样时间；判定只见上述调度参考。
+- 自动调度查询预算、索引优化和发布后写入核验见
+  [评分查询性能与自动调度](references/upstream-scheduling.md#评分查询性能与自动调度)。
 - V2 使用 `upstream-scheduling-v2 scopes|plan --over-api <absolute-http(s)-URL>` 或
   `upstream-scheduling-v2 snapshot --scope <scope> --over-api <absolute-http(s)-URL>` 只读查看；新鲜度告警或刷新失败
   排查默认读取缓存并由服务后台刷新；需要同步刷新时追加 `--refresh`，只读取最近成功的读模型缓存时追加 `--cache-only`，两者不可同时使用。使用

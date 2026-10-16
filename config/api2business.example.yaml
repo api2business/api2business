@@ -532,7 +532,7 @@ operations:
   priorityVerificationPollMs: 500
   automationJitterPercent: 0.1
   automationSafety:
-    maximumScoreQueryDurationMs: 3000
+    maximumScoreQueryDurationMs: 10000
   priorityWrite:
     batchSize: 3
     requestTimeoutMs: 30000

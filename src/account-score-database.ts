@@ -129,6 +129,8 @@ account_stats AS (
             PARTITION BY COALESCE(candidate.request_id::text, CONCAT('row:', candidate.id::text))
             ORDER BY (candidate.kind = 'usage') DESC, candidate.created_at DESC, candidate.id DESC
           ) AS request_rank
+        -- Disjoint ownership branches let PostgreSQL use account/group indexes.
+        -- Apply the shared filters and LIMIT after combining both sources.
         FROM (
       (
         SELECT
@@ -146,25 +148,21 @@ account_stats AS (
           NULL::int AS upstream_status_code,
           NULL::boolean AS business_limited,
           false AS scoreable
-        FROM usage_logs u
-        WHERE (
-          u.account_id = a.account_id
-          OR (
-            u.account_id IS NULL
-            AND EXISTS (
-              SELECT 1
-              FROM groups probe_group
-              WHERE probe_group.id = u.group_id
-                AND probe_group.deleted_at IS NULL
-                AND probe_group.platform = a.platform
-                AND probe_group.name IN (
-                  CONCAT('api2business-probe-', a.account_id::text),
-                  CONCAT('api2business-probe-', a.platform, '-', a.account_id::text)
-                )
+        FROM (
+          SELECT u.* FROM usage_logs u
+          WHERE u.account_id = a.account_id
+          UNION ALL
+          SELECT u.* FROM groups probe_group
+          JOIN usage_logs u ON u.group_id = probe_group.id
+          WHERE u.account_id IS NULL
+            AND probe_group.deleted_at IS NULL
+            AND probe_group.platform = a.platform
+            AND probe_group.name IN (
+              CONCAT('api2business-probe-', a.account_id::text),
+              CONCAT('api2business-probe-', a.platform, '-', a.account_id::text)
             )
-          )
-        )
-          AND u.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
+        ) u
+        WHERE u.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
           AND NOT ${audioRequestSql("u", false)}
         ORDER BY u.created_at DESC
@@ -203,25 +201,21 @@ account_stats AS (
               o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${stableUpstreamErrorPatternsSql}) THEN true
             ELSE false
           END AS scoreable
-        FROM ops_error_logs o
-        WHERE (
-          o.account_id = a.account_id
-          OR (
-            o.account_id IS NULL
-            AND EXISTS (
-              SELECT 1
-              FROM groups probe_group
-              WHERE probe_group.id = o.group_id
-                AND probe_group.deleted_at IS NULL
-                AND probe_group.platform = a.platform
-                AND probe_group.name IN (
-                  CONCAT('api2business-probe-', a.account_id::text),
-                  CONCAT('api2business-probe-', a.platform, '-', a.account_id::text)
-                )
+        FROM (
+          SELECT o.* FROM ops_error_logs o
+          WHERE o.account_id = a.account_id
+          UNION ALL
+          SELECT o.* FROM groups probe_group
+          JOIN ops_error_logs o ON o.group_id = probe_group.id
+          WHERE o.account_id IS NULL
+            AND probe_group.deleted_at IS NULL
+            AND probe_group.platform = a.platform
+            AND probe_group.name IN (
+              CONCAT('api2business-probe-', a.account_id::text),
+              CONCAT('api2business-probe-', a.platform, '-', a.account_id::text)
             )
-          )
-        )
-          AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
+        ) o
+        WHERE LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
           AND o.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
           AND NOT ${audioRequestSql("o", true)}
@@ -599,8 +593,8 @@ export async function collectRecentCallScoresFromDatabase(
     ],
     priority,
     cacheMode: "bypass-cache",
-    // PK01 的评分热数据常驻缓存；降低本事务随机页成本，避免规划器为每个
-    // 账号反复扫描全局 created_at 索引，优先使用 account_id 复合索引。
+    // NC01 的评分热数据常驻缓存；归属账号与无账号探活分别走现有复合索引。
+    // 仅调整本事务规划成本，不修改共享数据库设置。
     setupStatements: ["SET LOCAL random_page_cost = 1"],
   });
   const rows = query.rows;

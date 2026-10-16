@@ -14,6 +14,8 @@
   [额度监控](../../skills/api2business/references/quota-monitoring.md) 定义；本规格不复制
   第二套缺失数据或缓存状态机。
 - 自动优先级调度按作用域功能开关独立运行，计划生成、写入和回读分开验收。
+  - 查询预算与保持评分语义的性能验收见
+    [评分查询性能与自动调度](../../skills/api2business/references/upstream-scheduling.md#评分查询性能与自动调度)。
 
 - 不提供服务的语音请求及其历史错误不得降低账号分、池级分或优先级质量依据。
   - 结构化判定和配置准入唯一见

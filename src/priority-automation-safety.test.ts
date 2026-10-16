@@ -8,8 +8,20 @@ import {
 } from "./priority-automation-safety";
 
 const policy = {
-  maximumScoreQueryDurationMs: 3000,
+  maximumScoreQueryDurationMs: 10000,
 };
+
+test("automatic priority accepts the 10-second budget and rejects unknown or slower reads", () => {
+  for (const [queryDurationMs, allowed] of [[3318.4, true], [10000, true], [10001, false], [null, false]] as const) {
+    const result = preparePriorityAutomationBatch({
+      queryDurationMs,
+      eligibleCount: 1,
+      priorities: { "1": 100 },
+    }, policy, 3);
+    expect(result.allowed).toBe(allowed);
+    expect(result.selectedChangedCount).toBe(allowed ? 1 : 0);
+  }
+});
 
 test("automatic priority safety allows a bounded healthy plan", () => {
   expect(preparePriorityAutomationBatch({
