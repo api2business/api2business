@@ -43,7 +43,7 @@ export function carryForwardFailedQuotaBalances(
     const wallet = normalizeUpstreamWallet(result.walletKey ?? result.baseUrl);
     const quota = object(result.quota);
     const remaining = finite(quota.remaining);
-    if (wallet && result.ok === true && String(quota.unit ?? "").toUpperCase() === "USD" && remaining !== null && remaining >= 0) {
+    if (wallet && result.ok === true && String(quota.unit ?? "").toUpperCase() === "USD" && remaining !== null) {
       const sourceAt = usageBalanceSourceAt(result, row.last_success_at);
       const at = Date.parse(sourceAt ?? "") || 0;
       if (at >= (lastSuccessByWallet.get(wallet)?.at ?? -1)) {
@@ -56,7 +56,7 @@ export function carryForwardFailedQuotaBalances(
     const cached = lastSuccessByWallet.get(sample.walletKey);
     if (!cached) return sample;
     const remainingUsd = finite(object(cached.result.quota).remaining);
-    if (remainingUsd === null || remainingUsd < 0) return sample;
+    if (remainingUsd === null) return sample;
     return {
       ...sample,
       remainingUsd,

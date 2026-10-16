@@ -19,3 +19,11 @@ test("does not replace a wallet balance with New API key-only unlimited quota", 
     quota: { unlimited: false, remaining: 29.3, unit: "USD" },
   })).toBe(true);
 });
+
+test("successful provider debt is authoritative; missing or failed balances are not", () => {
+  for (const remaining of [-0.01, 0, 12]) expect(authoritativeUsageBalance({ ok: true,
+    quota: { remaining, unit: "USD" } })).toBeTrue();
+  for (const remaining of [null, undefined, "", NaN]) expect(authoritativeUsageBalance({ ok: true,
+    quota: { remaining, unit: "USD" } })).toBeFalse();
+  expect(authoritativeUsageBalance({ ok: false, quota: { remaining: -0.01, unit: "USD" } })).toBeFalse();
+});

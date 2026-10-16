@@ -1121,7 +1121,7 @@ export class OperationsService {
       const remaining = quota.unit === "USD" && quota.remaining !== null && quota.remaining !== undefined
         ? Number(quota.remaining)
         : Number.NaN;
-      if (!wallet || result.ok !== true || !Number.isFinite(remaining) || remaining < 0) continue;
+      if (!wallet || result.ok !== true || !Number.isFinite(remaining)) continue;
       const currentAt = Date.parse(usageBalanceSourceAt(result, row.last_success_at ?? row.queried_at) ?? "") || 0;
       const previous = usageByWallet.get(wallet);
       if (!previous || currentAt >= previous.observedAt) {
@@ -1140,7 +1140,7 @@ export class OperationsService {
         this.config.sub2api.newApiCredentials,
       );
       const sharedUsage = usageByWallet.get(wallet)?.result;
-      const usage = Number.isFinite(directRemaining) && directRemaining >= 0 ? directUsage : sharedUsage ?? directUsage;
+      const usage = Number.isFinite(directRemaining) ? directUsage : sharedUsage ?? directUsage;
       if (!usage || usage.ok !== true) return row;
       const quota = object((sharedUsage ?? usage).quota);
       const remaining = quota.unit === "USD" && quota.remaining !== null && quota.remaining !== undefined

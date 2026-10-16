@@ -201,7 +201,7 @@ function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], con
       && quota.remaining !== undefined
       ? Number(quota.remaining)
       : null;
-    const accountBalanceCny = remaining !== null && Number.isFinite(remaining) && remaining >= 0
+    const accountBalanceCny = remaining !== null && Number.isFinite(remaining)
       ? remaining * upstreamBalanceRateByWallet(
         configuredWalletKey(effective.result.walletKey ?? effective.result.baseUrl ?? account.accountName, refs),
         valuation.defaultCnyPerApiUsd,
@@ -258,7 +258,7 @@ function projectCachedQuotaBalances(payload: V2SnapshotPayload, config: AppConfi
     const remaining = unit === "USD" && rawRemaining !== null && rawRemaining !== undefined
       ? Number(rawRemaining)
       : null;
-    const accountBalanceCny = remaining !== null && Number.isFinite(remaining) && remaining >= 0
+    const accountBalanceCny = remaining !== null && Number.isFinite(remaining)
       ? remaining * upstreamBalanceRateByWallet(
         configuredWalletKey(usage?.walletKey ?? usage?.baseUrl ?? account.accountName, config.sub2api.newApiCredentials),
         valuation.defaultCnyPerApiUsd,

@@ -90,6 +90,16 @@ test("keeps an actual zero balance instead of treating it as a failed request", 
   expect(carried[0]).toMatchObject({ probeOk: true, remainingUsd: 0, remainingCny: 0 });
 });
 
+test("failed probes retain the latest successful debt and its original source time", () => {
+  const sourceQueriedAt = "2026-10-16T00:00:00.000Z";
+  const samples = buildQuotaSamples([{ accountId: 1, baseUrl: "https://debt.example", ok: false }],
+    "2026-10-16T01:00:00.000Z", () => 1);
+  const carried = carryForwardFailedQuotaBalances(samples, [{ account_id: 1,
+    last_success_at: "2026-10-16T00:30:00.000Z", last_success_result: { ok: true,
+      baseUrl: "https://debt.example", queriedAt: sourceQueriedAt, quota: { unit: "USD", remaining: -0.1 } } }], () => 1);
+  expect(carried[0]).toMatchObject({ probeOk: false, remainingUsd: -0.1, remainingCny: -0.1, sourceQueriedAt });
+});
+
 test("failed history points retain previous balances without using future successes", () => {
   const base = { walletKey: "https://a.test", accountId: 1, schedulable: true,
     status: "active", provider: "sub2api", cnyPerUsd: 1, sourceQueriedAt: null };

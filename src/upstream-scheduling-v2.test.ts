@@ -143,6 +143,13 @@ describe("upstream scheduling v2", () => {
     });
   });
 
+  test("keeps a successful negative wallet balance known in V2", async () => {
+    const { service } = fixture([{ account_id: 101, last_success_at: "2026-10-16T00:00:00.000Z",
+      last_success_result: { ok: true, quota: { unit: "USD", remaining: -0.1 } } }]);
+    const snapshot = await service.snapshot("codex");
+    expect(snapshot.data.accounts[0]).toMatchObject({ accountBalanceCny: -0.1, quotaCacheStatus: "cached" });
+  });
+
   test("prefers cached upstream probe cost and exposes its source", async () => {
     const { service } = fixture([{
       account_id: 101,

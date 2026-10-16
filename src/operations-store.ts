@@ -19,7 +19,7 @@ export function authoritativeUsageBalance(result: Record<string, unknown>): bool
     ? result.quota as Record<string, unknown>
     : {};
   const remaining = quota.remaining == null || quota.remaining === "" ? NaN : Number(quota.remaining);
-  if (String(quota.unit ?? "").toUpperCase() === "USD" && Number.isFinite(remaining) && remaining >= 0) return true;
+  if (String(quota.unit ?? "").toUpperCase() === "USD" && Number.isFinite(remaining)) return true;
   // New API's unlimited_quota describes the API key, not the provider wallet,
   // when account login/billing evidence is unavailable. Do not replace a
   // previously observed wallet balance with that placeholder state.
@@ -139,8 +139,7 @@ export class OperationsStore {
         AND COALESCE((result->>'ok')::boolean, false)
         AND (
           (jsonb_typeof(result->'quota'->'remaining') = 'number'
-            AND UPPER(COALESCE(result->'quota'->>'unit', '')) = 'USD'
-            AND (result->'quota'->>'remaining')::numeric >= 0)
+            AND UPPER(COALESCE(result->'quota'->>'unit', '')) = 'USD')
           OR (result->'quota'->>'unlimited' = 'true'
             AND COALESCE(result->>'warning', '') NOT LIKE '%只返回 API Key 配额%')
         );
