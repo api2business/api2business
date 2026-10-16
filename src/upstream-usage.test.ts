@@ -260,7 +260,10 @@ test("reuses a New API wallet login across sampling rounds", async () => {
   expect(second.quota.remaining).toBe(14_654_923 / 500_000);
 });
 
-test("backs off a rate-limited New API wallet login across sampling rounds", async () => {
+test.each([
+  { status: 429, code: "AUTH_SESSION_ISSUANCE_LIMIT" },
+  { status: 409, code: "AUTH_SESSION_LIMIT" },
+])("backs off a session-limited New API wallet login across sampling rounds: $code", async ({ status, code }) => {
   let loginCount = 0;
   const authCache = new Map();
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -269,7 +272,7 @@ test("backs off a rate-limited New API wallet login across sampling rounds", asy
     if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
     if (url.endsWith("/api/user/login")) {
       loginCount += 1;
-      return new Response(JSON.stringify({ code: "AUTH_SESSION_ISSUANCE_LIMIT", message: "Too Many Requests" }), { status: 429 });
+      return new Response(JSON.stringify({ code, message: "Session issuance rejected" }), { status });
     }
     if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({ data: { total_available: 1, unlimited_quota: false } }));
     if (url.endsWith("/api/log/token")) return new Response(JSON.stringify({ data: [] }));
@@ -280,8 +283,11 @@ test("backs off a rate-limited New API wallet login across sampling rounds", asy
   const first = await queryUpstreamUsage(loginTarget, { timeoutMs: 100, days: 7, authCache });
   const second = await queryUpstreamUsage(loginTarget, { timeoutMs: 100, days: 7, authCache });
   expect(loginCount).toBe(1);
-  expect(first.warning).toContain("AUTH_SESSION_ISSUANCE_LIMIT");
-  expect(second.warning).toContain("AUTH_SESSION_ISSUANCE_LIMIT");
+  expect(first.warning).toContain(code);
+  expect(second.warning).toContain(code);
+  expect(first.walletBalance).toBeUndefined();
+  expect(second.walletBalance).toBeUndefined();
+  expect([...authCache.values()][0].retryAtMs).toBeGreaterThan(Date.now());
 });
 
 test("refreshes an expired New API session without issuing another login", async () => {

@@ -21,9 +21,13 @@ export interface NewApiAuthCacheEntry {
 
 export type NewApiAuthCache = Map<string, NewApiAuthCacheEntry>;
 
-// New API rejects repeated session issuance with HTTP 429. Keep that result
+// New API rejects session issuance with HTTP 429 or AUTH_SESSION_LIMIT. Keep that result
 // for one conservative window instead of retrying on every ten-minute round.
 const AUTH_FAILURE_BACKOFF_MS = 30 * 60_000;
+
+function sessionIssuanceLimited(error: unknown): boolean {
+  return /HTTP 429\b|\bAUTH_SESSION_ISSUANCE_LIMIT\b|\bAUTH_SESSION_LIMIT\b/u.test(String(error));
+}
 
 export function newApiAuthCacheKey(target: NewApiAuthTarget): string {
   const identity = `${normalizeUpstreamWallet(target.walletKey ?? target.baseUrl)}\u0000${target.newApiCredentials?.username ?? ""}\u0000${target.newApiCredentials?.password ?? ""}`;
@@ -143,7 +147,7 @@ export async function newApiLoginSession(target: NewApiAuthTarget, timeoutMs: nu
     cache.set(key, renewalEntry);
     try { return await renewal; } catch (error) {
       // Preserve the refresh credential after network/5xx failures for next round.
-      if (/HTTP 429|AUTH_SESSION_ISSUANCE_LIMIT/u.test(String(error))) {
+      if (sessionIssuanceLimited(error)) {
         if (cache.get(key) === renewalEntry) {
           cache.set(key, { promise: renewal, retryAtMs: Date.now() + AUTH_FAILURE_BACKOFF_MS });
         }
@@ -157,7 +161,7 @@ export async function newApiLoginSession(target: NewApiAuthTarget, timeoutMs: nu
   const startedEntry: NewApiAuthCacheEntry = { promise: started };
   cache.set(key, startedEntry);
   try { return await started; } catch (error) {
-    if (/HTTP 429|AUTH_SESSION_ISSUANCE_LIMIT/u.test(String(error))) {
+    if (sessionIssuanceLimited(error)) {
       if (cache.get(key) === startedEntry) {
         cache.set(key, { promise: started, retryAtMs: Date.now() + AUTH_FAILURE_BACKOFF_MS });
       }
