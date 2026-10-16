@@ -109,6 +109,10 @@
 - 同一 `walletKey` 在一个采样轮次只读取一次账号钱包余额证据；多个 API host 和账号复用该轮次结果，账号自己的 token 用量仍按账号读取。
   New API 登录态在进程内跨轮次复用，并在 Access Token 到期后使用 Refresh Cookie 续期，不能每轮重新签发登录 Session。
 - `429 AUTH_SESSION_ISSUANCE_LIMIT` 表示上游拒绝新 Session 签发，不是余额为零；保持上一份成功钱包余额，等待既有登录态续期或上游限流窗口恢复。限流失败在进程内冷却 30 分钟，同一钱包不会在每个采样轮次重复申请登录。
+- `AUTH_CAPTCHA_REQUIRED` 表示供应商要求验证码核验，即使 HTTP 为 200 也不是登录成功。
+  - 保留余额旧来源时间；先完成供应商正常核验或使用其支持的已授权余额读取凭据。
+  - 不反复重启 Api2Business、不绕过验证码，不把 API Key 不限额当作钱包余额恢复。
+  - 同一钱包在单轮中复用成功或失败结果，其他账号别名不重复登录；下一轮仍可重新尝试。
 - 曲线读取 `/api/upstreams/quota-summary` 返回的同一缓存摘要，不另起额度拉取或缓存；前端复用
   `historyChartMarkup` 绘制 Codex 混池、不降智、Claude、Claude Kiro、Grok 五条人民币余额曲线，共用采样时间轴。
 - 曲线点来自已落库的额度样本，并按当前数据库分组映射归入五组；Claude Kiro 先于通用 Claude

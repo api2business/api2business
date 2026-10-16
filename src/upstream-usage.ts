@@ -198,12 +198,9 @@ async function queryNewApiWalletQuota(
     return { accountQuota: parseNewApiAccountQuota(selfResponse.payload, status), status, session };
   })();
   walletQuotaCache?.set(key, request);
-  try {
-    return await request;
-  } catch (error) {
-    if (walletQuotaCache?.get(key) === request) walletQuotaCache.delete(key);
-    throw error;
-  }
+  // This cache lives for one sampling round. Reuse failure as well as success
+  // so aliases do not repeatedly log into a wallet rejected by the provider.
+  return await request;
 }
 
 function emptyResult(target: UpstreamUsageTarget, startedAt: number, days: number): UpstreamUsageResult {

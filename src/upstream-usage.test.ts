@@ -174,6 +174,34 @@ test("deduplicates New API wallet login across concurrent account aliases", asyn
   expect(results.map((result) => result.quota.remaining)).toEqual([14_654_923 / 500_000, 14_654_923 / 500_000]);
 });
 
+test("captcha login rejection is shared for one round and never refreshes wallet balance", async () => {
+  let loginCount = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/user/login/encryption-key")) return new Response("{}", { status: 404 });
+    if (url.endsWith("/api/user/login")) {
+      loginCount += 1;
+      return new Response(JSON.stringify({ success: false, message: "验证码校验失败" }));
+    }
+    if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({ data: { unlimited_quota: true } }));
+    if (url.includes("/v1/usage")) return new Response("{}", { status: 404 });
+    return new Response(JSON.stringify({ data: {} }));
+  }) as typeof fetch;
+  const targets = [12, 13, 14].map((id) => ({ ...target, id, walletKey: "https://wallet.example.com",
+    newApiCredentials: { username: "test-user", password: "test-password" } }));
+  const authCache = new Map();
+  const first = await queryUpstreamUsageConcurrently(targets, { timeoutMs: 100, days: 7, concurrency: 1, authCache });
+  expect(loginCount).toBe(1);
+  for (const result of first) {
+    expect(result.warning).toContain("AUTH_CAPTCHA_REQUIRED");
+    expect(result.quota.remaining).toBeNull();
+    expect(result.quota.unit).toBeNull();
+    expect(result.warning).not.toContain("test-password");
+  }
+  await queryUpstreamUsageConcurrently(targets, { timeoutMs: 100, days: 7, concurrency: 1, authCache });
+  expect(loginCount).toBe(2);
+});
+
 test("reuses a New API wallet login across sampling rounds", async () => {
   let loginCount = 0;
   const authCache = new Map();

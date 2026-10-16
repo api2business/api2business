@@ -55,7 +55,9 @@ function session(response: Response, value: unknown, previous?: NewApiSession): 
   const token = typeof root?.access_token === "string" ? root.access_token : "";
   if (!response.ok || !token) {
     const code = value && typeof value === "object" ? (value as Record<string, unknown>).code : null;
-    const suffix = typeof code === "string" && /^[A-Z_]+$/u.test(code) ? ` ${code}` : "";
+    const message = value && typeof value === "object" ? String((value as Record<string, unknown>).message ?? "") : "";
+    const challenge = /验证码|captcha|turnstile/iu.test(message) ? " AUTH_CAPTCHA_REQUIRED" : "";
+    const suffix = challenge || (typeof code === "string" && /^[A-Z_]+$/u.test(code) ? ` ${code}` : "");
     throw new Error(`New API session request failed: HTTP ${response.status}${suffix}`);
   }
   const cookies = response.headers.getSetCookie();
