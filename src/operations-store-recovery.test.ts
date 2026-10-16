@@ -123,3 +123,41 @@ test("a permanently hung database returns a bounded error and retires the retry 
     expect(store.connectionStatus()).toMatchObject({ readTimeouts: 2, connectionRecycles: 2 });
   } finally { await store.close(); }
 });
+
+test("历史费率读取挂起后重建连接并重试，不阻断观测报告", async () => {
+  let pools = 0;
+  const store = new OperationsStore("postgres://fixture", (_url, max) => {
+    if (max === 1) return sqlClient(async () => []);
+    const generation = ++pools;
+    return sqlClient(() => generation === 1 ? new Promise(() => {}) : Promise.resolve([{ account_id: 1495, rate_cny: 0.2 }]));
+  }, false, 5);
+  try {
+    expect(await store.observedCostRates("2026-10-16T08:44:00Z", "2026-10-16T10:44:00Z")).toEqual([{ account_id: 1495, rate_cny: 0.2 }]);
+    expect(store.connectionStatus()).toMatchObject({ readTimeouts: 1, connectionRecycles: 1 });
+  } finally { await store.close(); }
+});
+
+for (const kind of ["http", "heartbeat", "retention"] as const) {
+  test(`观测${kind}写入挂起有界失败，保留未确认写入且不重放`, async () => {
+    let pools = 0;
+    let writes = 0;
+    const store = new OperationsStore("postgres://fixture", (_url, max) => {
+      if (max === 1) return sqlClient(async () => []);
+      const generation = ++pools;
+      return sqlClient(async (sql) => {
+        if (generation === 1 && ((kind === "http" && sql.includes("INSERT INTO api2business_http_observations")) || (kind === "heartbeat" && sql.includes("INSERT INTO api2business_observer_instances")) || (kind === "retention" && sql.includes("DELETE FROM api2business_http_observations")))) {
+          writes++;
+          return await new Promise(() => {});
+        }
+        return [];
+      });
+    }, false, 5);
+    try {
+      const operation = kind === "http" ? store.observeHttp("2026-10-16T10:44:00Z", "fixture", "/health", 200, 1) : store.observeInstance("fixture", "2026-10-16T10:44:00Z", 0, 7);
+      await expect(operation).rejects.toMatchObject({ name: "operations_read_timeout" });
+      expect(writes).toBe(1);
+      expect(store.connectionStatus()).toMatchObject({ readTimeouts: 1, connectionRecycles: 1 });
+      await store.health();
+    } finally { await store.close(); }
+  });
+}

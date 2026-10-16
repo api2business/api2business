@@ -521,20 +521,20 @@ export class OperationsStore {
   }
 
   async observeHttp(completedAt: string, instanceId: string, path: string, status: number, durationMs: number) {
-    await this.sql`INSERT INTO api2business_http_observations
+    await this.persistQuery(() => this.sql`INSERT INTO api2business_http_observations
       (completed_at,instance_id,path,status,duration_ms)
-      VALUES (${completedAt},${instanceId},${path},${status},${durationMs})`;
+      VALUES (${completedAt},${instanceId},${path},${status},${durationMs})`);
   }
 
   async observeInstance(instanceId: string, startedAt: string, failedWrites: number, retentionDays: number) {
-    await this.sql`INSERT INTO api2business_observer_instances (instance_id,started_at,last_seen_at,failed_writes)
+    await this.persistQuery(() => this.sql`INSERT INTO api2business_observer_instances (instance_id,started_at,last_seen_at,failed_writes)
       VALUES (${instanceId},${startedAt},now(),${failedWrites}) ON CONFLICT (instance_id)
-      DO UPDATE SET last_seen_at=now(),failed_writes=EXCLUDED.failed_writes`;
-    await this.sql`DELETE FROM api2business_http_observations WHERE completed_at < now()-${retentionDays}*interval '1 day'`;
+      DO UPDATE SET last_seen_at=now(),failed_writes=EXCLUDED.failed_writes`);
+    await this.persistQuery(() => this.sql`DELETE FROM api2business_http_observations WHERE completed_at < now()-${retentionDays}*interval '1 day'`);
   }
 
   async observedCostRates(start: string, end: string) {
-    return await this.sql`
+    return await this.readQuery(() => this.sql`
       WITH events AS MATERIALIZED (
         SELECT s.sampled_at AS at, (i->>'accountId')::bigint AS account_id,
           (i->>'costRateCnyPerApiUsd')::double precision AS rate_cny
@@ -547,7 +547,7 @@ export class OperationsStore {
         ORDER BY account_id,at DESC
       ) SELECT * FROM anchor UNION ALL SELECT * FROM events WHERE at>=${start}
       ORDER BY account_id,at
-    `;
+    `);
   }
 
   async httpObservationFacts(start: string, end: string) {
