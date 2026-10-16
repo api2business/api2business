@@ -166,7 +166,7 @@ test("deduplicates New API wallet login across concurrent account aliases", asyn
 
   const results = await queryUpstreamUsageConcurrently([
     { ...target, id: 12, walletKey: "https://www.sheapi.cc", newApiCredentials: { username: "wallet-user", password: "secret" } },
-    { ...target, id: 13, baseUrl: "https://cf.sheapi.cc/v1", walletKey: "https://www.sheapi.cc", newApiCredentials: { username: "wallet-user", password: "secret" } },
+    { ...target, id: 13, baseUrl: "https://cf.sheapi.cc/v1", walletKey: "https://www.sheapi.cc", newApiCredentials: { username: "wallet-alias", password: "secret" } },
   ], { timeoutMs: 100, days: 7, concurrency: 2 });
 
   expect(loginCount).toBe(1);
