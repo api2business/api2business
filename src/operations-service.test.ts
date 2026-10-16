@@ -26,6 +26,15 @@ test("uses a wallet-specific upstream balance conversion rate", () => {
   expect(upstreamBalanceRateByWallet("https://other.example", 1, overrides)).toBe(1);
 });
 
+test("wallet assets order actual balance observations before cache timestamps", () => {
+  const results = [1, 2].map(accountId => ({ account_id: accountId,
+    last_success_at: `2026-10-16T01:0${accountId}:00.000Z`,
+    last_success_result: { ok: true, baseUrl: "https://wallet.example", queriedAt: "2026-10-16T01:00:00.000Z",
+      walletBalance: { observedAt: `2026-10-16T00:0${3-accountId}:00.000Z`, sourceAccountId: accountId },
+      quota: { unit: "USD", remaining: accountId === 1 ? 0 : 10 } } }));
+  expect(latestSuccessfulUsageByWallet(results).get("https://wallet.example")).toMatchObject({ quota: { remaining: 0 } });
+});
+
 test("restores one operator-confirmed historical successful wallet snapshot", async () => {
   const restored: Array<Record<string, unknown>> = [];
   const store = {

@@ -1,5 +1,5 @@
 import { normalizeUpstreamWallet } from "./upstream-valuation";
-import { newApiLoginSession, newApiAuthCacheKey, type NewApiAuthCache, type NewApiSession } from "./new-api-auth";
+import { newApiLoginSession, type NewApiAuthCache, type NewApiSession } from "./new-api-auth";
 export type { NewApiAuthCache } from "./new-api-auth";
 
 export interface UpstreamUsageTarget {
@@ -55,6 +55,7 @@ export interface UpstreamUsageResult {
   };
   window: { days: number | null; records: number | null; complete: boolean };
   queriedAt: string;
+  walletBalance?: { observedAt: string; sourceAccountId: number };
   durationMs: number;
   warning: string | null;
   error: string | null;
@@ -62,7 +63,7 @@ export interface UpstreamUsageResult {
 
 type Row = Record<string, unknown>;
 type NewApiAccountQuota = { limit: number | null; used: number | null; remaining: number | null };
-type NewApiWalletQuota = { accountQuota: NewApiAccountQuota | null; status: Row | null; session: NewApiSession };
+type NewApiWalletQuota = { accountQuota: NewApiAccountQuota | null; status: Row | null; session: NewApiSession; observedAt: string; sourceAccountId: number };
 type NewApiWalletQuotaCache = Map<string, Promise<NewApiWalletQuota>>;
 
 function row(value: unknown): Row | null {
@@ -70,6 +71,7 @@ function row(value: unknown): Row | null {
 }
 
 function finite(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
   const parsed = typeof value === "string" && value.trim() === "" ? Number.NaN : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -178,7 +180,7 @@ async function queryNewApiWalletQuota(
   authCache: NewApiAuthCache | undefined,
   walletQuotaCache: NewApiWalletQuotaCache | undefined,
 ): Promise<NewApiWalletQuota> {
-  const key = newApiAuthCacheKey(target);
+  const key = normalizeUpstreamWallet(target.walletKey ?? target.baseUrl);
   const existing = walletQuotaCache?.get(key);
   if (existing) return await existing;
   const request = (async () => {
@@ -195,7 +197,8 @@ async function queryNewApiWalletQuota(
     if (selfResponse.status < 200 || selfResponse.status >= 300) {
       throw new Error(`New API 登录成功但 /api/user/self HTTP ${selfResponse.status}`);
     }
-    return { accountQuota: parseNewApiAccountQuota(selfResponse.payload, status), status, session };
+    return { accountQuota: parseNewApiAccountQuota(selfResponse.payload, status), status, session,
+      observedAt: new Date().toISOString(), sourceAccountId: target.id };
   })();
   walletQuotaCache?.set(key, request);
   // This cache lives for one sampling round. Reuse failure as well as success
@@ -287,6 +290,10 @@ function parseSub2Api(target: UpstreamUsageTarget, payload: unknown, startedAt: 
     unlimited: root.mode === "unrestricted" && quotaRemaining === null ? null : false,
     unit: typeof quota?.unit === "string" ? quota.unit : typeof root.unit === "string" ? root.unit : "USD",
   };
+  if (root.mode === "quota_limited") {
+    result.quota = { limit: null, used: null, remaining: null, unlimited: null, unit: null };
+    result.warning = "Sub2API 只返回 API Key 配额，不能证明账号钱包余额";
+  }
   result.usage = {
     inputTokens,
     outputTokens,
@@ -399,11 +406,13 @@ export async function queryUpstreamUsage(
 
   let accountQuota: { limit: number | null; used: number | null; remaining: number | null } | null = null;
   let accountStatus: Row | null = null;
+  let walletBalance: UpstreamUsageResult["walletBalance"];
   if (target.newApiCredentials) {
     try {
       const wallet = await queryNewApiWalletQuota(target, options.timeoutMs, options.authCache, options.walletQuotaCache);
       accountQuota = wallet.accountQuota;
       accountStatus = wallet.status;
+      if (accountQuota) walletBalance = { observedAt: wallet.observedAt, sourceAccountId: wallet.sourceAccountId };
       if (!accountQuota) failures.push("New API 登录成功但 /api/user/self 未返回可换算额度");
     } catch (error) {
       failures.push(`New API 账号密码登录 ${safeError(error)}`);
@@ -418,6 +427,7 @@ export async function queryUpstreamUsage(
       const result = emptyResult(target, startedAt, options.days);
       result.ok = true;
       result.provider = "new-api";
+      result.walletBalance = walletBalance;
       let status = accountStatus;
       if (!status) {
         try {
@@ -531,5 +541,24 @@ export async function queryUpstreamUsageConcurrently(
     }
   });
   await Promise.all(workers);
+  // /v1/usage also carries API-key-specific token usage. Keep those account
+  // reads, but consume only one wallet balance observation for the round.
+  // Never copy one key's usage, billing multiplier or failure to another key.
+  const balances = new Map<string, UpstreamUsageResult>();
+  for (const result of results) {
+    if (!result.ok || result.quota.unit !== "USD" || result.quota.remaining === null
+      || !Number.isFinite(result.quota.remaining)) continue;
+    const key = normalizeUpstreamWallet(result.walletKey);
+    const previous = balances.get(key);
+    const observedAt = result.walletBalance?.observedAt ?? result.queriedAt;
+    if (!previous || observedAt < (previous.walletBalance?.observedAt ?? previous.queriedAt)) balances.set(key, result);
+  }
+  for (const result of results) {
+    const source = balances.get(normalizeUpstreamWallet(result.walletKey));
+    if (!source) continue;
+    result.quota = { ...source.quota };
+    result.walletBalance = { observedAt: source.walletBalance?.observedAt ?? source.queriedAt,
+      sourceAccountId: source.walletBalance?.sourceAccountId ?? source.accountId };
+  }
   return results;
 }

@@ -1,5 +1,5 @@
 import { normalizeUpstreamWallet } from "./upstream-valuation";
-import { preferSharedWalletBalance } from "./upstream-wallet";
+import { preferSharedWalletBalance, usageBalanceSourceAt } from "./upstream-wallet";
 
 type Row = Record<string, unknown>;
 
@@ -44,9 +44,10 @@ export function carryForwardFailedQuotaBalances(
     const quota = object(result.quota);
     const remaining = finite(quota.remaining);
     if (wallet && result.ok === true && String(quota.unit ?? "").toUpperCase() === "USD" && remaining !== null && remaining >= 0) {
-      const at = Date.parse(String(row.last_success_at ?? result.queriedAt ?? "")) || 0;
+      const sourceAt = usageBalanceSourceAt(result, row.last_success_at);
+      const at = Date.parse(sourceAt ?? "") || 0;
       if (at >= (lastSuccessByWallet.get(wallet)?.at ?? -1)) {
-        lastSuccessByWallet.set(wallet, { result, at, queriedAt: result.queriedAt == null ? null : String(result.queriedAt) });
+        lastSuccessByWallet.set(wallet, { result, at, queriedAt: sourceAt });
       }
     }
   }
@@ -328,7 +329,7 @@ export function buildQuotaSamples(
       remainingUsd,
       cnyPerUsd,
       remainingCny: remainingUsd === null ? null : remainingUsd * cnyPerUsd,
-      sourceQueriedAt: typeof result.queriedAt === "string" ? result.queriedAt : null,
+      sourceQueriedAt: usageBalanceSourceAt(result),
       walletApiAmountUsdTotal: finite(result.apiAmountUsdTotal),
       accountCostInputs,
     };

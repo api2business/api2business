@@ -11,11 +11,8 @@ export interface SharedWalletBalanceCandidate {
 /**
  * Pick one cached balance for a shared wallet.
  *
- * A zero returned by one account is weaker evidence than a positive cached
- * value from another account of the same wallet: NewAPI can report a
- * per-account failure as a successful zero while the wallet still has funds.
- * Positive values therefore win over zero values; equal kinds keep the newest
- * observation. No network request is made by this policy.
+ * Observation time, rather than cache-write time, orders wallet facts.
+ * A later successful zero is valid depletion; a failed/missing read is not.
  */
 export function preferSharedWalletBalance(
   previous: SharedWalletBalanceCandidate | undefined,
@@ -24,6 +21,7 @@ export function preferSharedWalletBalance(
   if (!previous) return true;
   if (previous.remaining !== null && candidate.remaining === null) return false;
   if (previous.remaining === null && candidate.remaining !== null) return true;
+  if (candidate.timestamp !== previous.timestamp) return candidate.timestamp > previous.timestamp;
   if (previous.remaining !== null && candidate.remaining !== null) {
     if (previous.remaining === 0 && candidate.remaining > 0) return true;
     if (previous.remaining > 0 && candidate.remaining === 0) return false;
@@ -54,6 +52,14 @@ function object(value: unknown): Row {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 }
 
+export function usageBalanceSourceAt(result: Row, fallback?: unknown): string | null {
+  for (const value of [object(result.walletBalance).observedAt, result.queriedAt, fallback]) {
+    const at = value instanceof Date ? value.getTime() : Date.parse(String(value ?? ""));
+    if (Number.isFinite(at)) return new Date(at).toISOString();
+  }
+  return null;
+}
+
 function cachedResult(row: Row): Row {
   return object(row.last_success_result ?? row.result);
 }
@@ -82,7 +88,7 @@ export function projectSharedWalletUsageRows(rows: Row[], refs: NewApiCredential
     const walletKey = usageWalletKey(result, refs);
     if (!quota || !walletKey) continue;
     const remaining = quota.remaining == null || quota.remaining === "" ? NaN : Number(quota.remaining);
-    const timestamp = Date.parse(String(row.last_success_at ?? row.queried_at ?? result.queriedAt ?? "")) || 0;
+    const timestamp = Date.parse(usageBalanceSourceAt(result, row.last_success_at ?? row.queried_at) ?? "") || 0;
     const previous = shared.get(walletKey);
     if (preferSharedWalletBalance(previous, { remaining, timestamp })) {
       shared.set(walletKey, { result, timestamp, remaining });
@@ -101,6 +107,10 @@ export function projectSharedWalletUsageRows(rows: Row[], refs: NewApiCredential
       accountId: result.accountId ?? row.account_id,
       walletKey,
       quota: { ...quota },
+      walletBalance: sourceQuota?.walletBalance ?? (shared.get(walletKey)!.timestamp ? {
+        observedAt: new Date(shared.get(walletKey)!.timestamp).toISOString(),
+        sourceAccountId: sourceQuota?.accountId,
+      } : undefined),
       ok: true,
     };
   };

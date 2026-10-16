@@ -42,6 +42,9 @@
 - 钱包身份、余额来源和币种换算复用
   [额度监控](../../skills/api2business/references/quota-monitoring.md)。
 - 同一钱包只计一次余额，账号和平台只保留关联关系。
+  - 共享来源、单轮读取和冲突修复以
+    [额度监控](../../skills/api2business/references/quota-monitoring.md#共享钱包别名与跨作用域读取)
+    为唯一权威；成本报告和定时巡检复用同一证据。
   - 显示最近尝试、最近成功、成功来源账号及新鲜度。
   - 首次缺失、沿用旧成功、无限额和真实零分别呈现。
 - 实际成本逐条使用 `actual_cost / rate_multiplier`，再按有证据的供应商倍率换算。

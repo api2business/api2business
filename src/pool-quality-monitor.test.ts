@@ -106,9 +106,9 @@ test("pool quality uses the Claude whitelist and platform predicate", async () =
     },
     status() { throw new Error("not used"); },
   } as unknown as Sub2ApiReadClient;
-  const config = loadConfig("config/api2business.yaml");
+  const config = loadConfig("config/api2business.example.yaml");
   const sample = await collectPoolQualitySample(config, reads, "2026-08-03T00:00:00.000Z", "claude");
-  expect(parameters).toEqual([1000, "119,161", "2026-08-03T00:00:00.000Z", "claude"]);
+  expect(parameters).toEqual([1000, "119", "2026-08-03T00:00:00.000Z", "claude"]);
   expect(sample.platform).toBe("claude");
   expect(poolQualitySql).toContain("CASE $4::text WHEN 'codex' THEN 'openai' WHEN 'claude' THEN 'anthropic'");
 });
@@ -125,7 +125,7 @@ test("pool quality uses the Grok whitelist and platform predicate", async () => 
     },
     status() { throw new Error("not used"); },
   } as unknown as Sub2ApiReadClient;
-  const config = loadConfig("config/api2business.yaml");
+  const config = loadConfig("config/api2business.example.yaml");
   const sample = await collectPoolQualitySample(config, reads, "2026-08-03T00:00:00.000Z", "grok");
   expect(parameters).toEqual([1000, "62", "2026-08-03T00:00:00.000Z", "grok"]);
   expect(sample.platform).toBe("grok");
@@ -171,7 +171,7 @@ test("pool quality errors use the same bounded window and expose paginated model
     },
     status() { throw new Error("not used"); },
   } as unknown as Sub2ApiReadClient;
-  const result = await collectPoolQualityErrors(loadConfig("config/api2business.yaml"), reads, {
+  const result = await collectPoolQualityErrors(loadConfig("config/api2business.example.yaml"), reads, {
     sampledAt: "2026-08-05T22:12:43Z", page: 2, pageSize: 20, filter: "scoreable",
   });
   expect(request?.parameters).toEqual([1000, "2,3", "2026-08-05T22:12:43.000Z", "codex", "scoreable", 20, 20]);
@@ -186,7 +186,7 @@ test("pool quality errors use the same bounded window and expose paginated model
 });
 
 test("pool quality has an independent YAML score policy without failover points", () => {
-  const config = loadConfig("config/api2business.yaml");
+  const config = loadConfig("config/api2business.example.yaml");
   expect(config.sub2api.poolScorePolicy.failoverWeight).toBe(0);
   expect(config.sub2api.poolScorePolicy.reliabilityWeight).toBe(58);
   expect(config.sub2api.scorePolicy.failoverWeight).toBe(10);

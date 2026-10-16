@@ -2,7 +2,7 @@ import type { AppConfig } from "./config";
 import type { OperationsStore } from "./operations-store";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 import { observabilitySql } from "./observability-sql";
-import { configuredWalletKey, preferSharedWalletBalance } from "./upstream-wallet";
+import { configuredWalletKey, preferSharedWalletBalance, usageBalanceSourceAt } from "./upstream-wallet";
 import { readUpstreamValuationPolicy } from "./upstream-valuation";
 import { statSync } from "node:fs";
 import { dailyCostSql, dailyWalletCosts } from "./observability-costs";
@@ -39,6 +39,7 @@ export function slo(value: number | null, target: number | undefined, direction:
 export function walletGovernance(accounts: Row[], cache: Row[], config: AppConfig, capturedAt: string) {
   const byId = new Map(cache.map(item => [Number(item.account_id), item]));
   const wallets = new Map<string, Row>();
+  const observations = new Map<string, Array<{ accountId: number; remainingUsd: number; sourceAt: string }>>();
   for (const account of accounts.filter(a => a.active && a.type === "apikey")) {
     const walletKey = configuredWalletKey(account.base_url, config.sub2api.newApiCredentials) || `unknown-account:${account.id}`;
     let wallet = wallets.get(walletKey);
@@ -55,20 +56,31 @@ export function walletGovernance(accounts: Row[], cache: Row[], config: AppConfi
       wallet.lastAttemptAt = attemptedAt; wallet.lastAttemptOk = row(item.result).ok === true;
     }
     const evidence = row(item.last_success_result ?? item.result);
-    const sourceAt = iso(item.last_success_at ?? item.queried_at);
+    const sourceAt = usageBalanceSourceAt(evidence, item.last_success_at ?? item.queried_at);
     const quota = row(evidence.quota);
     const value = evidence.ok === true && quota.unit === "USD" ? finite(quota.remaining) : null;
     if (value !== null && sourceAt) {
       const previous = wallet.sourceAt ? { remaining: wallet.remainingUsd, timestamp: Date.parse(wallet.sourceAt) } : undefined;
-      if (previous && previous.remaining !== value) wallet.conflictingBalances = true;
+      const values = observations.get(walletKey) ?? [];
+      const sourceAccountId = Number(row(evidence.walletBalance).sourceAccountId ?? account.id);
+      if (!values.some(item => item.accountId === sourceAccountId && item.sourceAt === sourceAt && item.remainingUsd === value)) {
+        values.push({ accountId: sourceAccountId, remainingUsd: value, sourceAt });
+      }
+      observations.set(walletKey, values);
       if (preferSharedWalletBalance(previous, { remaining: value, timestamp: Date.parse(sourceAt) })) {
-        Object.assign(wallet, { remainingUsd: value, sourceAt, sourceAccountId: Number(account.id), state: value < 0 ? "debt" : value === 0 ? "zero" : "known" });
+        Object.assign(wallet, { remainingUsd: value, sourceAt, sourceAccountId: row(evidence.walletBalance).sourceAccountId ?? Number(account.id), state: value < 0 ? "debt" : value === 0 ? "zero" : "known" });
       }
     } else if (!wallet.sourceAt && evidence.ok === true && quota.unlimited === true && !String(evidence.warning ?? "").includes("只返回 API Key 配额")) {
       Object.assign(wallet, { state: "unlimited", sourceAt, sourceAccountId: Number(account.id) });
     }
   }
   const results = [...wallets.values()].map((wallet): Row => {
+    const values = observations.get(wallet.walletKey) ?? [];
+    const latestAt = values.reduce((latest, value) => value.sourceAt > latest ? value.sourceAt : latest, "");
+    const latest = values.filter(value => value.sourceAt === latestAt);
+    wallet.conflictingBalances = new Set(latest.map(value => value.remainingUsd)).size > 1;
+    wallet.balanceObservations = latest;
+    wallet.supersededBalanceObservationCount = values.length - latest.length;
     const ageSeconds = wallet.sourceAt ? Math.max(0, (Date.parse(capturedAt) - Date.parse(wallet.sourceAt)) / 1000) : null;
     const stale = ageSeconds !== null && config.observability ? ageSeconds > config.observability.walletFreshnessSeconds : null;
     return { ...wallet, ageSeconds, freshness: stale === null ? "unknown" : stale ? "stale" : "fresh" };

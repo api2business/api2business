@@ -1,5 +1,6 @@
 import { SQL } from "bun";
 import { isRecoverableDatabaseConnectionError } from "./database-connection";
+import { usageBalanceSourceAt } from "./upstream-wallet";
 
 export type CashDirection = "income" | "expense";
 
@@ -645,7 +646,7 @@ export class OperationsStore {
           ) VALUES (
             ${accountId}, ${result}::jsonb, now(),
             ${hasAuthoritativeBalance ? result : null}::jsonb,
-            ${hasAuthoritativeBalance ? new Date().toISOString() : null}::timestamptz
+            ${hasAuthoritativeBalance ? usageBalanceSourceAt(result, new Date()) : null}::timestamptz
           )
           ON CONFLICT (account_id) DO UPDATE SET
             result=EXCLUDED.result,
@@ -655,7 +656,7 @@ export class OperationsStore {
               ELSE api2business_upstream_usage_cache.last_success_result
             END,
             last_success_at=CASE
-              WHEN ${hasAuthoritativeBalance} THEN now()
+              WHEN ${hasAuthoritativeBalance} THEN EXCLUDED.last_success_at
               ELSE api2business_upstream_usage_cache.last_success_at
             END
         `;
@@ -1125,10 +1126,10 @@ export class OperationsStore {
     await this.sql`
       INSERT INTO api2business_upstream_usage_cache (
         account_id, result, queried_at, last_success_result, last_success_at
-      ) VALUES (${accountId}, ${result}::jsonb, now(), ${result}::jsonb, now())
+      ) VALUES (${accountId}, ${result}::jsonb, now(), ${result}::jsonb, ${usageBalanceSourceAt(result)}::timestamptz)
       ON CONFLICT (account_id) DO UPDATE SET
         last_success_result=EXCLUDED.last_success_result,
-        last_success_at=now()
+        last_success_at=EXCLUDED.last_success_at
     `;
   }
 

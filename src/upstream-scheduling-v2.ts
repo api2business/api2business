@@ -6,7 +6,7 @@ import {
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
-import { configuredWalletKey, preferSharedWalletBalance, usageWalletKey } from "./upstream-wallet";
+import { configuredWalletKey, preferSharedWalletBalance, usageBalanceSourceAt, usageWalletKey } from "./upstream-wallet";
 
 type Row = Record<string, unknown>;
 
@@ -161,9 +161,7 @@ function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], con
     const cached = {
       result,
       status,
-      cachedAt: row.last_success_at == null
-        ? row.queried_at == null ? null : String(row.queried_at)
-        : String(row.last_success_at),
+      cachedAt: usageBalanceSourceAt(result, row.last_success_at ?? row.queried_at),
       walletKey,
     };
     cachedByAccount.set(accountId, cached);

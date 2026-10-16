@@ -58,6 +58,23 @@ test('stale successful balance stays visible and marked stale after failed attem
  const result=walletGovernance([account(1)],[cache(1,12,'2026-10-07T00:00:00.000Z')],config,at);
  expect(result.wallets[0]).toMatchObject({remainingUsd:12,freshness:'stale',lastAttemptOk:false});
 });
+test('normal wallet consumption at different observation times is not a conflict despite batch cache timestamps',()=>{
+ const rows=[cache(1,10),cache(2,9)].map((item,i)=>({...item,last_success_at:at,
+  last_success_result:{...item.last_success_result,queriedAt:`2026-10-07T03:3${i}:00.000Z`}}));
+ for(const ordered of [rows,[...rows].reverse()]) {
+  const result=walletGovernance([account(1),account(2)],ordered,config,at);
+  expect(result.wallets[0]).toMatchObject({remainingUsd:9,sourceAt:'2026-10-07T03:31:00.000Z',
+   sourceAccountId:2,conflictingBalances:false,supersededBalanceObservationCount:1});
+ }
+});
+test('shared source metadata survives later token reads and failed attempts without refreshing the balance',()=>{
+ const observedAt='2026-10-07T00:00:00.000Z';
+ const rows=[cache(1,10),cache(2,10)].map(item=>({...item,last_success_at:at,
+  last_success_result:{...item.last_success_result,queriedAt:at,walletBalance:{observedAt,sourceAccountId:1}}}));
+ const wallet=walletGovernance([account(1),account(2)],rows,config,at).wallets[0];
+ expect(wallet).toMatchObject({sourceAt:observedAt,sourceAccountId:1,conflictingBalances:false,freshness:'stale',lastAttemptOk:false});
+ expect(wallet.balanceObservations).toHaveLength(1);
+});
 test('actual cost uses evidenced supplier and currency rates; historical gaps never become zero',()=>{
  const facts={accounts:[account(1),account(2)],costAccounts:[{account_id:1,records:3,valid_records:2,normalized_cost:10,first_at:'2026-10-07T02:00:00.000Z'},{account_id:2,records:1,valid_records:1,normalized_cost:50,first_at:'2026-10-07T02:00:00.000Z'}]};
  const result=costGovernance(facts,[cache(1,10)],config,at,{defaultCnyPerApiUsd:2,walletCnyPerApiUsd:{}},'2026-01-01T00:00:00.000Z');

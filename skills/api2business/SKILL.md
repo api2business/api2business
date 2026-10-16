@@ -246,6 +246,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   只有完成语义合并并通过对应验证后才清理。
 - 读取失败、共享钱包回退和缺失状态的唯一口径见 [额度监控](references/quota-monitoring.md)；
   本技能不另定义缓存状态机。
+- 共享钱包单轮余额采集、真实来源时间与冲突自动修复也只见
+  [额度监控](references/quota-monitoring.md#共享钱包别名与跨作用域读取)。
 - Sub2API 业务查询统一通过 Api2Business 排队 broker 读取 NC01 本地专用库；
   CLI、Web、worker 和人工脚本不得直连旧 PK01 数据库。
 - 账号级代理默认策略：OAuth 导入、Plus/Team 账号和 API-key 上游默认直连，不绑定

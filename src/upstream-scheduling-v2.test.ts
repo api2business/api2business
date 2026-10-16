@@ -111,7 +111,7 @@ describe("upstream scheduling v2", () => {
     expect(snapshot.readOnly).toBeTrue();
   });
 
-  test("reuses the positive shared wallet cache when one account reports zero", async () => {
+  test("uses the newer successful shared wallet zero instead of stale positive balance", async () => {
     const { service } = fixture([
       {
         account_id: 101,
@@ -137,8 +137,8 @@ describe("upstream scheduling v2", () => {
     const snapshot = await service.snapshot("codex");
 
     expect(snapshot.data.accounts[0]).toMatchObject({
-      quota: { unit: "USD", remaining: 20.5 },
-      accountBalanceCny: 20.5,
+      quota: { unit: "USD", remaining: 0 },
+      accountBalanceCny: 0,
       quotaCacheStatus: "cached",
     });
   });

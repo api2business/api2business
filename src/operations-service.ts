@@ -73,7 +73,7 @@ import type { ProbeIsolationService } from "./probe-isolation";
 import { UpstreamBenchmarkService } from "./upstream-benchmark";
 import { collectRechargeCandidates } from "./upstream-recharge-candidates";
 import { collectCooldownDiagnosisFromDatabase } from "./cooldown-diagnose-database";
-import { configuredWalletKey, usageWalletKey } from "./upstream-wallet";
+import { configuredWalletKey, usageBalanceSourceAt, usageWalletKey } from "./upstream-wallet";
 // @ts-expect-error Shared browser/server module is JavaScript by design.
 import { quotaMemberships } from "../static/quota-grouping.js";
 
@@ -104,7 +104,7 @@ export function latestSuccessfulUsageByWallet(
     const remaining = rawRemaining === null || rawRemaining === undefined ? Number.NaN : Number(rawRemaining);
     const unit = String(object(result.quota).unit ?? "");
     if (!wallet || result.ok !== true || unit !== "USD" || !Number.isFinite(remaining)) continue;
-    const queriedAt = Date.parse(String(row.last_success_at ?? row.queried_at ?? result.queriedAt ?? ""));
+    const queriedAt = Date.parse(usageBalanceSourceAt(result, row.last_success_at ?? row.queried_at) ?? "");
     const timestamp = Number.isFinite(queriedAt) ? queriedAt : 0;
     const previous = selected.get(wallet);
     if (!previous || timestamp >= previous.queriedAt) selected.set(wallet, { result, queriedAt: timestamp });
@@ -1122,7 +1122,7 @@ export class OperationsService {
         ? Number(quota.remaining)
         : Number.NaN;
       if (!wallet || result.ok !== true || !Number.isFinite(remaining) || remaining < 0) continue;
-      const currentAt = Date.parse(String(row.last_success_at ?? row.queried_at ?? result.queriedAt ?? "")) || 0;
+      const currentAt = Date.parse(usageBalanceSourceAt(result, row.last_success_at ?? row.queried_at) ?? "") || 0;
       const previous = usageByWallet.get(wallet);
       if (!previous || currentAt >= previous.observedAt) {
         usageByWallet.set(wallet, { result, observedAt: currentAt });
@@ -1142,7 +1142,7 @@ export class OperationsService {
       const sharedUsage = usageByWallet.get(wallet)?.result;
       const usage = Number.isFinite(directRemaining) && directRemaining >= 0 ? directUsage : sharedUsage ?? directUsage;
       if (!usage || usage.ok !== true) return row;
-      const quota = object(usage.quota);
+      const quota = object((sharedUsage ?? usage).quota);
       const remaining = quota.unit === "USD" && quota.remaining !== null && quota.remaining !== undefined
         ? Number(quota.remaining)
         : Number.NaN;

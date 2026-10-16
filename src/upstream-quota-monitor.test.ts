@@ -40,7 +40,7 @@ test("keeps cumulative output when the account cost rate is unknown", () => {
   expect(quotaSamplesForAccounts(samples, [1], ["https://a.test"])[0]!.apiAmountUsdTotal).toBe(7);
 });
 
-test("shared wallet samples prefer positive cached balance over a zero account result", () => {
+test("shared wallet samples use the newest successful balance including zero", () => {
   const samples = buildQuotaSamples([
     {
       accountId: 1522,
@@ -65,7 +65,7 @@ test("shared wallet samples prefer positive cached balance over a zero account r
   ], "2026-10-05T10:02:00.000Z", () => 1);
 
   expect(samples).toHaveLength(1);
-  expect(samples[0]).toMatchObject({ remainingUsd: 20.5, remainingCny: 20.5, accountId: 1523 });
+  expect(samples[0]).toMatchObject({ remainingUsd: 0, remainingCny: 0, accountId: 1522 });
 });
 
 test("carries forward the last successful balance when a quota request fails", () => {

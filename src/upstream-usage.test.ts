@@ -172,6 +172,40 @@ test("deduplicates New API wallet login across concurrent account aliases", asyn
   expect(loginCount).toBe(1);
   expect(selfCount).toBe(1);
   expect(results.map((result) => result.quota.remaining)).toEqual([14_654_923 / 500_000, 14_654_923 / 500_000]);
+  expect(results[0]!.walletBalance).toEqual(results[1]!.walletBalance);
+  expect(results[0]!.walletBalance?.sourceAccountId).toBe(12);
+});
+
+test("one shared wallet fact per round preserves each Sub2API key's usage and billing", async () => {
+  let round = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const second = new Headers(init?.headers).get("authorization") === "Bearer key-two";
+    if (String(input).includes("/v1/usage?")) return Response.json({ mode: "unrestricted",
+      balance: 50 - round - (second ? 1 : 0), unit: "USD",
+      usage: { total: { total_tokens: second ? 200 : 100, actual_cost: second ? 4 : 2 } } });
+    return Response.json({ object: "sub2api.key_billing", schema_version: 1, effective_rate_multiplier: second ? 0.2 : 0.1 });
+  }) as typeof fetch;
+  const targets = [target, { ...target, id: 13, apiKey: "key-two" }];
+  for (round = 0; round < 2; round++) {
+    const results = await queryUpstreamUsageConcurrently(targets, { timeoutMs: 100, days: 7, concurrency: 1 });
+    expect(results.map(item => item.quota.remaining)).toEqual([50 - round, 50 - round]);
+    expect(results.map(item => item.usage.totalTokens)).toEqual([100, 200]);
+    expect(results.map(item => item.billingMultiplier.value)).toEqual([0.1, 0.2]);
+    expect(results[0]!.walletBalance).toEqual(results[1]!.walletBalance);
+    expect(results[0]!.walletBalance?.sourceAccountId).toBe(12);
+  }
+});
+
+test("Sub2API key quotas cannot become shared wallet balances", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => Response.json(String(input).includes("/v1/usage?")
+    ? { mode: "quota_limited", quota: { remaining: 0, unit: "USD" }, usage: { total: { total_tokens: 17 } } }
+    : {})) as typeof fetch;
+  const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 7 });
+  expect(result.ok).toBeTrue();
+  expect(result.quota.remaining).toBeNull();
+  expect(result.quota.unit).toBeNull();
+  expect(result.usage.totalTokens).toBe(17);
+  expect(result.warning).toContain("只返回 API Key 配额");
 });
 
 test("captcha login rejection is shared for one round and never refreshes wallet balance", async () => {

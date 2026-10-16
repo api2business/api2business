@@ -36,7 +36,7 @@ test("shared wallet projection makes aliases display one latest finite balance",
   expect(projected.results[1]).toMatchObject({ accountId: 1488, walletKey: "https://www.sheapi.cc", quota: { remaining: 29.1 } });
 });
 
-test("shared wallet projection keeps positive cached balance when a later account reports zero", () => {
+test("shared wallet projection respects a newer successful zero balance", () => {
   const projected = projectSharedWalletUsageRows([
     {
       account_id: 1522,
@@ -60,5 +60,19 @@ test("shared wallet projection keeps positive cached balance when a later accoun
     },
   ]);
 
-  expect(projected.results.map((row) => (row.quota as { remaining: number }).remaining)).toEqual([20.5, 20.5]);
+  expect(projected.results.map((row) => (row.quota as { remaining: number }).remaining)).toEqual([0, 0]);
+});
+
+test("shared wallet projection uses the physical observation rather than later cache writes", () => {
+  const rows = [1, 2].map((id) => ({ account_id: id,
+    last_success_at: `2026-10-16T01:0${id}:00.000Z`,
+    last_success_result: { ok: true, accountId: id, baseUrl: "https://wallet.example",
+      queriedAt: `2026-10-16T01:0${id}:00.000Z`,
+      walletBalance: { observedAt: `2026-10-16T00:0${3 - id}:00.000Z`, sourceAccountId: id },
+      quota: { unit: "USD", remaining: id === 1 ? 0 : 10 } } }));
+  for (const ordered of [rows, [...rows].reverse()]) {
+    const projected = projectSharedWalletUsageRows(ordered);
+    for (const result of projected.results) expect(result).toMatchObject({ quota: { remaining: 0 },
+      walletBalance: { observedAt: "2026-10-16T00:02:00.000Z", sourceAccountId: 1 } });
+  }
 });
