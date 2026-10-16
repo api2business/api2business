@@ -21,7 +21,7 @@ export interface PoolParticipation {
   costSource: "detected" | "manual" | null;
 }
 
-const poolQualityEventsSql = `
+function poolQualityEventsSql(bounded = false): string { return `
 WITH internal_probe_keys AS (
   SELECT k.id
   FROM api_keys k
@@ -40,7 +40,7 @@ WITH internal_probe_keys AS (
       SELECT 1 FROM account_groups ag
       WHERE ag.account_id = a.id AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
     )
-), eligible_usage AS (
+), eligible_usage AS NOT MATERIALIZED (
   SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at
   FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
     WHERE u.request_id IS NOT NULL
@@ -48,7 +48,7 @@ WITH internal_probe_keys AS (
       AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
       AND NOT ${audioRequestSql("u", false)}
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
-), eligible_errors AS (
+), eligible_errors AS NOT MATERIALIZED (
   SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at
   FROM ops_error_logs o
     WHERE (
@@ -69,7 +69,14 @@ WITH internal_probe_keys AS (
       )
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = o.api_key_id)
 ), raw_requests AS (
-  SELECT * FROM eligible_usage UNION ALL SELECT * FROM eligible_errors
+  SELECT * FROM eligible_usage ${bounded ? "WHERE created_at >= $8::timestamptz" : ""}
+  UNION ALL SELECT * FROM eligible_errors e ${bounded ? `
+  WHERE e.created_at >= $8::timestamptz
+    -- A success before the fast-path boundary still supersedes a later error.
+    AND NOT EXISTS (
+      SELECT 1 FROM eligible_usage u
+      WHERE u.request_id = e.request_id AND u.created_at < $8::timestamptz
+    )` : ""}
 ), final_requests AS (
   SELECT event.*, ROW_NUMBER() OVER (
     PARTITION BY event.request_id
@@ -147,9 +154,9 @@ WITH internal_probe_keys AS (
       upstream_error_message, upstream_error_detail
     FROM error_events
 )
-`;
+`; }
 
-export const poolQualitySql = `${poolQualityEventsSql}
+export const poolQualitySql = `${poolQualityEventsSql()}
 SELECT e.*,
   EXISTS (
     SELECT 1 FROM ops_system_logs s
@@ -161,7 +168,7 @@ FROM recent_events e ORDER BY e.created_at DESC, e.id DESC
 
 export type PoolQualityErrorFilter = "scoreable" | "excluded" | "all";
 
-export const poolQualityErrorsSql = `${poolQualityEventsSql}, filtered_errors AS (
+function poolQualityErrorsQuery(bounded = false): string { return `${poolQualityEventsSql(bounded)}, filtered_errors AS (
   SELECT e.*,
     EXISTS (
       SELECT 1 FROM ops_system_logs s
@@ -179,6 +186,7 @@ export const poolQualityErrorsSql = `${poolQualityEventsSql}, filtered_errors AS
   FROM filtered_errors e
 )
 SELECT
+  (SELECT COUNT(*)::int FROM recent_requests) AS recent_count,
   COUNT(*)::int AS total_count,
   COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
     'requestId', request_id,
@@ -215,7 +223,10 @@ SELECT
     ) distribution
   ), '[]'::jsonb) AS model_distribution
 FROM numbered_errors
-`;
+`; }
+
+export const poolQualityErrorsSql = poolQualityErrorsQuery();
+export const boundedPoolQualityErrorsSql = poolQualityErrorsQuery(true);
 
 function percentile(values: number[], ratio: number): number | null {
   if (!values.length) return null;
@@ -413,14 +424,30 @@ export async function collectPoolQualityErrors(
       : config.sub2api.priorityPlan;
   const groupIds = [...new Set(policy.eligibleGroupIds)].sort((a, b) => a - b);
   const offset = (input.page - 1) * input.pageSize;
-  const query = await reads.query<Row>({
-    key: JSON.stringify(["pool-quality-errors", platform, recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize]),
+  const parameters = [recentCallLimit, groupIds.join(","), sampledAt, platform, input.filter, input.pageSize, offset];
+  let query = await reads.query<Row>({
+    key: JSON.stringify(["pool-quality-errors-bounded", platform, recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize]),
     kind: "pool-quality-errors",
     priority: input.priority ?? "manual",
     cacheMode: "prefer-cache",
-    sql: poolQualityErrorsSql,
-    parameters: [recentCallLimit, groupIds.join(","), sampledAt, platform, input.filter, input.pageSize, offset],
+    sql: boundedPoolQualityErrorsSql,
+    parameters: [...parameters, new Date(sampledAtMs - 86_400_000).toISOString()],
   });
+  let databaseQueries = query.cached ? 0 : 1;
+  let queueDurationMs = query.queueDurationMs;
+  let queryDurationMs = query.queryDurationMs;
+  // Only use the fast path when it proves the full latest-N request window.
+  // Sparse scopes fall back to the original unbounded history, never a shorter sample.
+  if (Number(query.rows[0]?.recent_count ?? 0) < recentCallLimit) {
+    query = await reads.query<Row>({
+      key: JSON.stringify(["pool-quality-errors", platform, recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize]),
+      kind: "pool-quality-errors", priority: input.priority ?? "manual", cacheMode: "prefer-cache",
+      sql: poolQualityErrorsSql, parameters,
+    });
+    databaseQueries += query.cached ? 0 : 1;
+    queueDurationMs += query.queueDurationMs;
+    queryDurationMs += query.queryDurationMs;
+  }
   const result = query.rows[0] ?? {};
   const total = Number(result.total_count ?? 0);
   const rows = Array.isArray(result.rows) ? result.rows : [];
@@ -440,9 +467,9 @@ export async function collectPoolQualityErrors(
       total,
       totalPages: Math.max(1, Math.ceil(total / input.pageSize)),
     },
-    databaseQueries: query.cached ? 0 : 1,
-    queueDurationMs: query.queueDurationMs,
-    queryDurationMs: query.queryDurationMs,
+    databaseQueries,
+    queueDurationMs,
+    queryDurationMs,
     valuesPrinted: false,
   };
 }

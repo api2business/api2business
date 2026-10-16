@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { collectPoolQualityErrors, collectPoolQualitySample, poolQualityErrorsSql, poolQualityHistory, poolQualitySql } from "./pool-quality-monitor";
+import { boundedPoolQualityErrorsSql, collectPoolQualityErrors, collectPoolQualitySample, poolQualityErrorsSql, poolQualityHistory, poolQualitySql } from "./pool-quality-monitor";
 import { loadConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -164,7 +164,7 @@ test("pool quality errors use the same bounded window and expose paginated model
     async query(input: { parameters: unknown[]; sql: string }) {
       request = input;
       return {
-        rows: [{ total_count: 107, rows: [{ requestId: "r1", model: "gpt-5.6-sol" }], model_distribution: [{ model: "gpt-5.6-sol", count: 107 }] }],
+        rows: [{ recent_count: 1000, total_count: 107, rows: [{ requestId: "r1", model: "gpt-5.6-sol" }], model_distribution: [{ model: "gpt-5.6-sol", count: 107 }] }],
         cached: false, deduplicated: false, queueDurationMs: 1, queryDurationMs: 2,
         totalDurationMs: 3, queryStartedAt: new Date().toISOString(), queryCompletedAt: new Date().toISOString(),
       };
@@ -174,7 +174,7 @@ test("pool quality errors use the same bounded window and expose paginated model
   const result = await collectPoolQualityErrors(loadConfig("config/api2business.example.yaml"), reads, {
     sampledAt: "2026-08-05T22:12:43Z", page: 2, pageSize: 20, filter: "scoreable",
   });
-  expect(request?.parameters).toEqual([1000, "2,3", "2026-08-05T22:12:43.000Z", "codex", "scoreable", 20, 20]);
+  expect(request?.parameters).toEqual([1000, "2,3", "2026-08-05T22:12:43.000Z", "codex", "scoreable", 20, 20, "2026-08-04T22:12:43.000Z"]);
   expect(request?.sql).toContain("PARTITION BY event.request_id");
   expect(request?.sql).toContain("requested_model");
   expect(request?.sql).toContain("requester.email AS user_email");
@@ -183,6 +183,30 @@ test("pool quality errors use the same bounded window and expose paginated model
   expect(request?.sql).toContain("AND NOT (COALESCE(e.client_status_code, e.upstream_status_code, 0) BETWEEN 200 AND 399)");
   expect(result.pagination).toEqual({ page: 2, pageSize: 20, total: 107, totalPages: 6 });
   expect(result.modelDistribution).toEqual([{ model: "gpt-5.6-sol", count: 107 }]);
+  expect(result.databaseQueries).toBe(1);
+});
+
+test("pool error fast path preserves old success precedence and falls back for sparse scopes", async () => {
+  const requests: { sql: string; parameters: unknown[] }[] = [];
+  const reads = { async query(input: { sql: string; parameters: unknown[] }) {
+    requests.push(input);
+    return { rows: [{ recent_count: requests.length === 1 ? 999 : 1000,
+      total_count: requests.length === 1 ? 1 : 2, rows: [], model_distribution: [] }],
+      cached: false, queueDurationMs: 1, queryDurationMs: 2 };
+  } } as unknown as Sub2ApiReadClient;
+  const result = await collectPoolQualityErrors(loadConfig("config/api2business.example.yaml"), reads, {
+    sampledAt: "2026-08-05T22:12:43Z", page: 1, pageSize: 20, filter: "all",
+  });
+  expect(requests).toHaveLength(2);
+  expect(requests[0]!.sql).toBe(boundedPoolQualityErrorsSql);
+  expect(requests[0]!.sql).toContain("u.request_id = e.request_id AND u.created_at < $8::timestamptz");
+  expect(requests[0]!.sql).toContain("eligible_usage AS NOT MATERIALIZED");
+  expect(requests[1]!.sql).toBe(poolQualityErrorsSql);
+  expect(requests[1]!.parameters).toHaveLength(7);
+  expect(result.pagination.total).toBe(2);
+  expect(result.databaseQueries).toBe(2);
+  expect(result.queryDurationMs).toBe(4);
+  expect(result.queueDurationMs).toBe(2);
 });
 
 test("pool quality has an independent YAML score policy without failover points", () => {
