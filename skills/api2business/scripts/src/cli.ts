@@ -23,6 +23,7 @@ import { emitDailyProfit } from "./daily-profit-output";
 import { parseAccountIdSelector } from "../../../../src/account-batch-economics";
 import { runBoundedProcess } from "../../../../src/bounded-process";
 import { readSecret } from "../../../../src/secrets";
+import { balanceNumber } from "../../../../static/balance-format.js";
 import { BugTeamClient } from "./bugteam-client";
 import { PublicRecoveryClient } from "./public-recovery-client";
 import { PublicRecoveryJobManager, type RecoveryStage } from "./public-recovery-job";
@@ -73,6 +74,7 @@ interface Parsed {
   burstCount: number | null;
   burstInterval: string | null;
   manifest: string | null;
+  clickSelector: string | null;
   model: string | null;
   day: string | null;
   period: string | null;
@@ -152,7 +154,7 @@ export function parseArgs(args: string[]): Parsed {
   }
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
+  const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--click-selector", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
   const flags = new Set(["--confirm", "--include-records", "--json", "--cache-only", "--refresh", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -223,6 +225,7 @@ export function parseArgs(args: string[]): Parsed {
     burstCount: integer("--burst-count"),
     burstInterval: value(args, "--burst-interval"),
     manifest: value(args, "--manifest"),
+    clickSelector: value(args, "--click-selector"),
     model: value(args, "--model"),
     affectedOnly: args.includes("--affected-only"),
     file: value(args, "--file"), priority: integer("--priority"), capacity: integer("--capacity"),
@@ -1432,7 +1435,7 @@ function emitRechargeCandidates(value: Record<string, unknown>, json: boolean): 
       (typeof row.recommendationScore === "number" ? row.recommendationScore.toFixed(1) : "-").padStart(6),
       String(row.recommendation ?? "-").padEnd(22),
       String(row.reason ?? "-").padEnd(28),
-      (typeof row.balanceCny === "number" ? `¥${row.balanceCny.toFixed(2)}` : "-").padStart(8),
+      (typeof row.balanceCny === "number" ? `¥${balanceNumber(row.balanceCny, 2)}` : "-").padStart(8),
       anchor.padEnd(22), String(row.observedAttempts ?? 0).padStart(3), rate.padStart(6),
       (typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-").padStart(9),
       (typeof row.usage === "object" && row.usage !== null ? Number((row.usage as Record<string, unknown>).apiAmountUsd ?? 0).toFixed(4) : "0").padStart(8),

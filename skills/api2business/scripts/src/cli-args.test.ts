@@ -13,4 +13,7 @@ test("historical balance CLI accepts signed USD without consuming the next optio
     expect(() => parseArgs([...args, "--remaining-usd", invalid])).toThrow();
   }
   expect(() => parseArgs([...args, "--over-api", "--confirm"])).toThrow();
+  const screenshot = parseArgs(["--config", "config/api2business.yaml", "web", "screenshot", "--click-selector", "th[data-sort-key=remaining]"]);
+  expect(screenshot.clickSelector).toBe("th[data-sort-key=remaining]");
+  expect(screenshot.command).toEqual(["web", "screenshot"]);
 });

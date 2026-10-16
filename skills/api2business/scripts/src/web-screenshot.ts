@@ -21,6 +21,7 @@ export function webScreenshotHelp(): Record<string, unknown> {
       "--burst-count": "同页截图 1..30 帧；多帧使用 profile 的桌面视口",
       "--burst-interval": "帧间隔 200ms..10s；默认 1s",
       "--manifest": "完整原始事件的绝对文件路径",
+      "--click-selector": "截图前点击排序、分页等现有控件；仅辅助取景，不判定业务通过",
       "--json": "结构化回执；Cookie 和 Secret 不输出",
     },
     evidence: "默认回执保留有界失败请求；截图与原始事件不自动判定业务成功",
@@ -33,6 +34,7 @@ export async function runWebScreenshot(
     id?: string | null; account?: string | null;
     sessionTtlSeconds?: number | null; burstCount?: number | null;
     burstInterval?: string | null; manifest?: string | null;
+    clickSelector?: string | null;
   },
   config: ReturnType<typeof loadConfig>,
   target: HttpCliTarget,
@@ -124,6 +126,7 @@ export async function runWebScreenshot(
     ...(burstCount > 1 ? ["--viewport", viewportValue, "--burst-count", String(burstCount), "--burst-interval", burstInterval]
       : ["--viewports", `${viewportValue},${mobileViewportValue}`]),
     ...(parsed.manifest ? ["--manifest", parsed.manifest] : []),
+    ...(parsed.clickSelector ? ["--click-selector", parsed.clickSelector] : []),
     "--settle-ms", String(settleMs),
     ...(Number.isSafeInteger(profile.commandTimeoutSeconds)
       ? ["--command-timeout-seconds", String(profile.commandTimeoutSeconds)] : []),
