@@ -24,6 +24,7 @@ test("the Vite production entry also disables immutable module caching", async (
 
 test("persistent snapshot APIs bypass the generic response cache", () => {
   for (const pathname of [
+    "/api/admin/gateway/service-policy",
     "/api/admin/read-status",
     "/api/observability/report",
     "/api/observability/reports/123",

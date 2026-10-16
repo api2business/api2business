@@ -36,6 +36,7 @@ import {
 const staticRoot = resolve(import.meta.dir, "../static");
 
 const persistentSnapshotApiPaths = [
+  /^\/api\/admin\/gateway\/service-policy$/u,
   /^\/api\/admin\/read-status$/u,
   /^\/api\/observability(?:\/|$)/u,
   /^\/api\/upstreams(?:\/|$)/u,
