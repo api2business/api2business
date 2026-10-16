@@ -6,6 +6,19 @@ const refs = [
   { baseUrl: "https://cf.sheapi.cc", walletKey: "https://www.sheapi.cc" },
 ] as never;
 
+test("wallet diagnostics retain the actual failed attempt beside the old successful balance", () => {
+  const attempt = { ok: false, accountId: 1, baseUrl: "https://wallet.example", error: "HTTP 401",
+    queriedAt: "2026-10-16T10:00:00Z" };
+  const projected = projectSharedWalletUsageRows([{ account_id: 1, result: attempt,
+    last_success_at: "2026-10-15T10:00:00Z", last_success_result: {
+      ok: true, accountId: 1, baseUrl: "https://wallet.example", queriedAt: "2026-10-15T10:00:00Z",
+      quota: { unit: "USD", remaining: -0.001 },
+    } }]);
+  expect(projected.lastAttemptResults).toEqual([attempt]);
+  expect(projected.results[0]).toMatchObject({ ok: true, quota: { remaining: -0.001 },
+    walletBalance: { observedAt: "2026-10-15T10:00:00.000Z", sourceAccountId: 1 } });
+});
+
 test("shared wallet projection makes aliases display one latest finite balance", () => {
   const projected = projectSharedWalletUsageRows([
     {

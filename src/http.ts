@@ -389,6 +389,7 @@ export function createHandler(
           results: projected.results,
           cachedAt: rows.map((row) => row.queried_at),
           lastSuccessfulResults: projected.lastSuccessfulResults,
+          lastAttemptResults: projected.lastAttemptResults,
           lastSuccessfulAt: rows.map((row) => row.last_success_at),
         });
       }

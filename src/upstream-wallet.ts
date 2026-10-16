@@ -80,6 +80,7 @@ function numericQuota(result: Row): Row | null {
 export function projectSharedWalletUsageRows(rows: Row[], refs: NewApiCredentialRef[] = []): {
   results: Row[];
   lastSuccessfulResults: Array<Row | null>;
+  lastAttemptResults: Row[];
 } {
   const shared = new Map<string, { result: Row; timestamp: number; remaining: number }>();
   for (const row of rows) {
@@ -118,5 +119,7 @@ export function projectSharedWalletUsageRows(rows: Row[], refs: NewApiCredential
   return {
     results: rows.map((row) => project(row, row.last_success_result ?? row.result) ?? {}),
     lastSuccessfulResults: rows.map((row) => project(row, row.last_success_result)),
+    // Do not project a successful shared balance over the actual attempt failure.
+    lastAttemptResults: rows.map((row) => object(row.result)),
   };
 }
