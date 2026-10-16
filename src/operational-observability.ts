@@ -142,8 +142,12 @@ export function observerCoverage(instances: Row[], start: string, end: string) {
     cursor=Math.max(cursor,right);
     const lifetime=Number(instance.failed_writes ?? 0);
     lifetimeFailedWrites+=lifetime;
-    if (Array.isArray(instance.failed_write_times)) {
-      failedWrites+=instance.failed_write_times.filter((at:unknown)=>typeof at==='string'&&Date.parse(at)>=from&&Date.parse(at)<until).length;
+    let times=instance.failed_write_times;
+    if (typeof times==='string') {
+      try { times=JSON.parse(times); } catch { times=null; }
+    }
+    if (Array.isArray(times)) {
+      failedWrites+=times.filter((at:unknown)=>typeof at==='string'&&Date.parse(at)>=from&&Date.parse(at)<until).length;
     } else {
       // Legacy counters have no timestamps: retain uncertainty, never invent a clean window.
       unlocatedFailedWrites+=lifetime;

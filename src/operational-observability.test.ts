@@ -57,6 +57,12 @@ test('observer failures are scoped to the half-open window without erasing legac
   .toMatchObject({failedWrites:0,lifetimeFailedWrites:3,unlocatedFailedWrites:0,complete:true});
  expect(observerCoverage([{...base,failed_write_times:[start]}],start,end))
   .toMatchObject({failedWrites:1,complete:false});
+ expect(observerCoverage([{...base,failed_write_times:JSON.stringify(['2026-10-07T01:59:59Z',end])}],start,end))
+  .toMatchObject({failedWrites:0,unlocatedFailedWrites:0,complete:true});
+ expect(observerCoverage([{...base,failed_write_times:JSON.stringify([start])}],start,end))
+  .toMatchObject({failedWrites:1,complete:false});
+ expect(observerCoverage([{...base,failed_write_times:'invalid-json'}],start,end))
+  .toMatchObject({unlocatedFailedWrites:3,complete:false});
  expect(observerCoverage([base],start,end))
   .toMatchObject({unlocatedFailedWrites:3,complete:false});
 });
