@@ -139,6 +139,7 @@ rules:
 - errorCode: 503
   keywords:
   - upstream service temporarily unavailable
+  - 服务暂时繁忙，请稍后重试
   - overloaded
   - origin web server returned an invalid or incomplete response
   - our servers are currently overloaded
