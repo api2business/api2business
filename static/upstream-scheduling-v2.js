@@ -128,7 +128,7 @@ function renderScopeSwitch() {
 
 function renderQuality(quality, scope) {
   const score = Number(quality?.score); const grade = String(quality?.grade ?? 'insufficient'); const label = scopeLabel(scope)
-  $('#v2-quality-title').textContent = `${label} 综合质量`; $('#v2-quality-state').textContent = `最近 ${number(quality?.recentCallLimit)} 次被动调用`
+  $('#v2-quality-title').textContent = `${label} 综合质量`; $('#v2-quality-state').textContent = `最近 ${number(quality?.recentCallLimit)} 次被动调用 · 评分采样 ${time(quality?.sampledAt)}${quality?.sampleStale ? '（陈旧）' : ''} · 排除语音和内部探活`
   $('#v2-quality-score').textContent = Number.isFinite(score) ? score.toFixed(1) : '—'; $('#v2-quality-grade').textContent = grade === 'insufficient' ? '证据不足' : `${grade} 级`; $('#v2-quality-score').closest('.pool-quality-score').dataset.grade = grade
   $('#v2-quality-outcomes').textContent = `${number(quality?.rawSuccessRequests ?? quality?.successRequests)} / ${number(quality?.rawFailureRequests ?? quality?.failureRequests)}`; $('#v2-quality-failure-rate').textContent = `失败率 ${percent(quality?.failureRate)}`
   $('#v2-quality-failover').textContent = `${number(quality?.rawFailoverRecovered ?? quality?.failoverRecovered)} / ${number(quality?.rawFailoverRequests ?? quality?.failoverRequests)}`; $('#v2-quality-ttft').textContent = quality?.ttftP95Ms == null ? '—' : `${number(Math.round(Number(quality.ttftP95Ms)))} ms`; $('#v2-quality-ttft-samples').textContent = `首 token 样本 ${number(quality?.rawFirstTokenSamples ?? quality?.firstTokenSamples)}`

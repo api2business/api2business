@@ -1,8 +1,10 @@
 import type { AdminHttpClient } from '../../../../src/admin-http-client';
+import type { AppConfig } from '../../../../src/config';
+import { verifyPoolQualityWindow } from './pool-quality-fixture';
 import { observabilitySql } from '../../../../src/observability-sql';
 
-// The normal read broker executes VALUES-only fixtures; no business rows or writes.
-export async function verifyObservationWindow(client: AdminHttpClient) {
+// 正式只读 broker 执行 CTE 夹具，不读取业务行或写表。
+export async function verifyObservationWindow(client: AdminHttpClient, config: AppConfig) {
   const fixture=`WITH accounts AS (
     SELECT 1::bigint id,'fixture upstream'::text name,'openai'::text platform,'apikey'::text type,'{"base_url":"https://fixture.example"}'::jsonb credentials,NULL::timestamptz deleted_at
   ), users AS (SELECT 99::bigint id,'monitor-user@sub2api.platform-infra.local'::text email),
@@ -51,5 +53,6 @@ export async function verifyObservationWindow(client: AdminHttpClient) {
     audioExcluded:facts.excludedAudioRecords===2,
     sameWindowCostRecords:facts.costAccounts?.[0]?.records===5,historicalCost:facts.costAccounts?.[0]?.historical_cost_cny===5,
     unknownRetained:facts.unknownExamples?.[0]?.request_id==='r5'};
-  return {ok:Object.values(checks).every(Boolean),checks,queryDurationMs:result.queryDurationMs,mutation:false,valuesPrinted:false};
+  const poolQuality = await verifyPoolQualityWindow(client, config);
+  return {ok:Object.values(checks).every(Boolean) && poolQuality.ok,checks,poolQuality,queryDurationMs:result.queryDurationMs,mutation:false,valuesPrinted:false};
 }

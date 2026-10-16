@@ -40,40 +40,17 @@ WITH internal_probe_keys AS (
       SELECT 1 FROM account_groups ag
       WHERE ag.account_id = a.id AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
     )
-), usage_events AS (
-    SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at, u.account_id,
-      u.user_id, requester.email AS user_email,
-      a.name AS account_name, a.base_url, u.stream, u.first_token_ms::bigint AS first_token_ms,
-      u.duration_ms::bigint, false AS scoreable, NULL::text AS exclusion_reason,
-      COALESCE(u.requested_model, u.model, 'unknown') AS model,
-      u.upstream_model, NULL::text AS inbound_endpoint, NULL::text AS upstream_endpoint,
-      NULL::text AS error_phase, NULL::text AS error_type,
-      NULL::boolean AS business_limited,
-      NULL::int AS client_status_code, NULL::int AS upstream_status_code,
-      NULL::text AS error_message, NULL::text AS upstream_error_message,
-      NULL::text AS upstream_error_detail
-    FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
-    LEFT JOIN users requester ON requester.id = u.user_id
+), eligible_usage AS (
+  SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at
+  FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
     WHERE u.request_id IS NOT NULL
       AND u.created_at <= $3::timestamptz
       AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
       AND NOT ${audioRequestSql("u", false)}
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
-), error_sources AS (
-    SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at, o.account_id,
-      o.user_id, requester.email AS user_email,
-      a.name AS account_name, a.base_url, o.stream,
-      o.time_to_first_token_ms::bigint AS first_token_ms,
-      o.duration_ms::bigint, COALESCE(o.requested_model, o.model, 'unknown') AS model,
-      o.upstream_model, o.inbound_endpoint, o.upstream_endpoint, o.error_phase, o.error_type,
-      o.status_code::int AS client_status_code, o.upstream_status_code::int AS upstream_status_code,
-      o.is_business_limited AS business_limited,
-      o.error_message, o.upstream_error_message, o.upstream_error_detail,
-      LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
-        o.upstream_error_message, o.upstream_error_detail)) AS message_text
-    FROM ops_error_logs o
-    LEFT JOIN target_accounts a ON a.id = o.account_id
-    LEFT JOIN users requester ON requester.id = o.user_id
+), eligible_errors AS (
+  SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at
+  FROM ops_error_logs o
     WHERE (
       COALESCE(o.status_code, 0) >= 400
       OR COALESCE(o.upstream_status_code, 0) >= 400
@@ -91,6 +68,46 @@ WITH internal_probe_keys AS (
         '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
       )
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = o.api_key_id)
+), raw_requests AS (
+  SELECT * FROM eligible_usage UNION ALL SELECT * FROM eligible_errors
+), final_requests AS (
+  SELECT event.*, ROW_NUMBER() OVER (
+    PARTITION BY event.request_id
+    ORDER BY (event.kind = 'usage') DESC, event.created_at DESC, event.id DESC
+  ) AS request_rank FROM raw_requests event
+), recent_requests AS MATERIALIZED (
+  SELECT * FROM final_requests WHERE request_rank = 1
+  ORDER BY created_at DESC, id DESC LIMIT $1
+), usage_events AS (
+    SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at, u.account_id,
+      u.user_id, requester.email AS user_email,
+      a.name AS account_name, a.base_url, u.stream, u.first_token_ms::bigint AS first_token_ms,
+      u.duration_ms::bigint, false AS scoreable, NULL::text AS exclusion_reason,
+      COALESCE(u.requested_model, u.model, 'unknown') AS model,
+      u.upstream_model, NULL::text AS inbound_endpoint, NULL::text AS upstream_endpoint,
+      NULL::text AS error_phase, NULL::text AS error_type,
+      NULL::boolean AS business_limited,
+      NULL::int AS client_status_code, NULL::int AS upstream_status_code,
+      NULL::text AS error_message, NULL::text AS upstream_error_message,
+      NULL::text AS upstream_error_detail
+    FROM recent_requests r JOIN usage_logs u ON r.kind = 'usage' AND u.id = r.id
+    JOIN target_accounts a ON a.id = u.account_id
+    LEFT JOIN users requester ON requester.id = u.user_id
+), error_sources AS (
+    SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at, o.account_id,
+      o.user_id, requester.email AS user_email,
+      a.name AS account_name, a.base_url, o.stream,
+      o.time_to_first_token_ms::bigint AS first_token_ms,
+      o.duration_ms::bigint, COALESCE(o.requested_model, o.model, 'unknown') AS model,
+      o.upstream_model, o.inbound_endpoint, o.upstream_endpoint, o.error_phase, o.error_type,
+      o.status_code::int AS client_status_code, o.upstream_status_code::int AS upstream_status_code,
+      o.is_business_limited AS business_limited,
+      o.error_message, o.upstream_error_message, o.upstream_error_detail,
+      LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
+        o.upstream_error_message, o.upstream_error_detail)) AS message_text
+    FROM recent_requests r JOIN ops_error_logs o ON r.kind = 'error' AND o.id = r.id
+    LEFT JOIN target_accounts a ON a.id = o.account_id
+    LEFT JOIN users requester ON requester.id = o.user_id
 ), error_events AS (
     SELECT source.*,
       CASE
@@ -120,7 +137,7 @@ WITH internal_probe_keys AS (
         ELSE 'unscored_error'
       END AS exclusion_reason
     FROM error_sources source
-), raw_events AS (
+), recent_events AS (
     SELECT * FROM usage_events
     UNION ALL
     SELECT kind, id, request_id, created_at, account_id, user_id, user_email, account_name, base_url,
@@ -129,18 +146,6 @@ WITH internal_probe_keys AS (
       client_status_code, upstream_status_code, error_message,
       upstream_error_message, upstream_error_detail
     FROM error_events
-), final_events AS (
-  SELECT event.*,
-    ROW_NUMBER() OVER (
-      PARTITION BY event.request_id
-      ORDER BY (event.kind = 'usage') DESC, event.created_at DESC, event.id DESC
-    ) AS request_rank
-  FROM raw_events event
-), recent_events AS (
-  SELECT * FROM final_events
-  WHERE request_rank = 1
-  ORDER BY created_at DESC, id DESC
-  LIMIT $1
 )
 `;
 

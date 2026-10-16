@@ -104,8 +104,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 
 ## 验收
 
-- `observability verify --over-api <absolute-http(s)-URL>` 经正式 broker 执行 VALUES 夹具。
+- `observability verify --over-api <absolute-http(s)-URL>` 经正式 broker 执行只读 CTE 夹具。
   - 不读取业务记录、不写表；覆盖窗口边界、重复 ID、重试恢复、探活与历史成本。
+  - 同时运行真实池级 SQL，验证大量语音样本不挤占文本窗口、不影响分数或延迟。
+  - 还核对成功优先去重、切号恢复、错误窗口和模型字段边界。
+  - 排除范围与刷新终态只见 [不提供语音服务](upstream-scheduling.md#不提供语音服务)。
 
 ```bash
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml web screenshot --profile observability --id <报告ID> --over-api <absolute-http(s)-URL> --json

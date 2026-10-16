@@ -817,6 +817,9 @@ export class OperationsService {
     const rows = await this.store.getPoolQualitySamplesByLimit(rollingWindowPoints * 2 - 1, platform) as Array<Record<string, unknown>>;
     const history = poolQualityHistory(rows, rollingWindowPoints).slice(-rollingWindowPoints);
     const latest = rows.at(-1) ?? null;
+    const sampledAt = latest ? new Date(String(latest.sampled_at)).toISOString() : null;
+    const samplingBudgetMs = (this.config.operations.upstreamManagement.quotaSampleIntervalSeconds
+      + 3 * this.config.operations.upstreamManagement.quotaSampleTimeoutSeconds) * 1000;
     return {
       ok: true,
       recentCallLimit: 1000,
@@ -827,7 +830,8 @@ export class OperationsService {
         : platform === "grok"
           ? this.config.sub2api.grokPriorityPlan
           : this.config.sub2api.priorityPlan).eligibleGroupIds,
-      sampledAt: latest ? new Date(String(latest.sampled_at)).toISOString() : null,
+      sampledAt,
+      sampleStale: sampledAt === null || Date.now() - Date.parse(sampledAt) > samplingBudgetMs,
       score: latest?.score == null ? null : Number(latest.score),
       rollingScore: history.at(-1)?.rollingScore ?? null,
       rollingWindowPoints,
