@@ -8,10 +8,11 @@ export function quotaAccountAvailable(state, now = Date.now()) {
 }
 
 export function quotaAvailabilityTotals(rows, group) {
-  const total = rows.reduce((sum, row) => sum + Math.max(0, row.remaining ?? 0), 0)
+  const total = rows.reduce((sum, row) => sum + (row.remaining ?? 0), 0)
+  const positive = rows.reduce((sum, row) => sum + Math.max(0, row.remaining ?? 0), 0)
   const available = rows.reduce((sum, row) => {
     const scoped = row.availableRemainingByGroup?.[group]
     return sum + Math.max(0, scoped ?? (row.availableGroups?.includes(group) ? row.remaining ?? 0 : 0))
   }, 0)
-  return { total, available, unavailable: total - available, ratio: total > 0 ? available / total : 0 }
+  return { total, available, unavailable: total - available, ratio: positive > 0 ? available / positive : 0 }
 }

@@ -5,6 +5,19 @@ const costInputs = (apiAmountUsdTotal: number, costRateCnyPerApiUsd: number, acc
   accountId, apiAmountUsdTotal, costRateCnyPerApiUsd, source: "detected" as const,
 }]);
 
+test("summaries and history retain debts without treating them as spendable funds", () => {
+  const samples = buildQuotaSamples([10, -2, 0].map((remaining, index) => ({
+    accountId: index + 1, baseUrl: `https://${index}.test`, ok: true, schedulable: true,
+    status: "active", quota: { unit: "USD", remaining },
+  })), "2026-08-02T00:00:00Z", () => 1);
+  const summary = summarizeQuotaSamples(samples);
+  expect(summary).toMatchObject({ totalRemainingCny: 8, schedulableRemainingCny: 10, unschedulableRemainingCny: -2, knownWallets: 3 });
+  expect(summary.walletDistribution.find(row => row.remainingUsd === -2)).toMatchObject({ remainingCny: -2, ratio: 0 });
+  expect(summary.walletDistribution.reduce((sum, row) => sum + row.ratio, 0)).toBe(1);
+  expect(quotaHistory(samples)[0]!.totalRemainingCny).toBe(8);
+  expect(summarizeQuotaSamples(samples.slice(1))).toMatchObject({ totalRemainingCny: -2, schedulableRemainingCny: 0, knownWallets: 2 });
+});
+
 test("keeps shared wallet balance while scoping output and cost inputs to selected accounts", () => {
   const samples = [
     { walletKey: "wallet", accountId: 1, sampledAt: "2026-08-02T00:00:00Z", sourceQueriedAt: null, schedulable: true, status: "active", provider: "sub2api", probeOk: true, remainingUsd: 10, cnyPerUsd: 1, remainingCny: 10, apiAmountUsdTotal: 10, accountCostInputs: costInputs(4, 0.1, 1) },

@@ -131,15 +131,15 @@ export function retirementSelectionMode(selection: string | null, scope: string,
   return selected === "all" ? "database-all" : "database-dead";
 }
 
-function value(args: string[], name: string): string | null {
+function value(args: string[], name: string, signedNumber = false): string | null {
   const index = args.indexOf(name);
   if (index < 0) return null;
   const result = args[index + 1];
-  if (!result || result.startsWith("-")) throw new Error(`${name} requires a value`);
+  if (!result || (result.startsWith("-") && !(signedNumber && Number.isFinite(Number(result))))) throw new Error(`${name} requires a value`);
   return result;
 }
 
-function parseArgs(args: string[]): Parsed {
+export function parseArgs(args: string[]): Parsed {
   const overApiUrl = value(args, "--over-api");
   if (value(args, "--target") !== null) throw new Error("--target 已退役；使用 --over-api <绝对 http(s) URL>");
   if (overApiUrl !== null) {
@@ -178,11 +178,11 @@ function parseArgs(args: string[]): Parsed {
     if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} must be a positive number`);
     return parsed;
   };
-  const nonNegativeDecimal = (name: string): number | null => {
-    const raw = value(args, name);
+  const finiteDecimal = (name: string): number | null => {
+    const raw = value(args, name, true);
     if (raw === null) return null;
     const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${name} must be a non-negative number`);
+    if (raw.trim() === "" || !Number.isFinite(parsed)) throw new Error(`${name} must be a finite number`);
     return parsed;
   };
   return {
@@ -237,7 +237,7 @@ function parseArgs(args: string[]): Parsed {
     rate: decimal("--rate"), rechargeCny: decimal("--recharge-cny"),
     amountCny: decimal("--amount-cny"), direction: value(args, "--direction"),
     category: value(args, "--category"), description: value(args, "--description"),
-    remainingUsd: nonNegativeDecimal("--remaining-usd"),
+    remainingUsd: finiteDecimal("--remaining-usd"),
     rounds: integer("--rounds"),
     windowMinutes: integer("--window-minutes"),
     page: integer("--page"), search: value(args, "--search"), apiKeyStdin: args.includes("--api-key-stdin"),

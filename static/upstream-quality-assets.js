@@ -32,10 +32,10 @@ export function buildSupplierQualityAssets({
     const scores = scoresByWallet.get(wallet) ?? []
     // Asset quality is eligible when any account in the wallet clears the threshold.
     const score = scores.length > 0 ? Math.max(...scores) : null
-    const remainingCny = Math.max(0, finite(row.remainingCny) ?? 0)
+    const remainingCny = finite(row.remainingCny) ?? 0
     const schedulable = row.schedulable === true || row.schedulable === 1 || String(row.schedulable).toLowerCase() === 'true'
-    const good = score !== null && score > goodScoreThreshold && schedulable
-    const band = !schedulable || score === null
+    const good = remainingCny > 0 && score !== null && score > goodScoreThreshold && schedulable
+    const band = remainingCny <= 0 || !schedulable || score === null
       ? 'risk'
       : score > goodScoreThreshold
         ? 'good'
@@ -43,18 +43,19 @@ export function buildSupplierQualityAssets({
           ? 'mid'
           : 'risk'
     return { wallet, score, remainingCny, remainingUsd: finite(row.remainingUsd), schedulable, good, band, ratio: 0 }
-  }).filter((row) => row.wallet && row.remainingCny > 0)
+  }).filter((row) => row.wallet && row.remainingCny !== 0)
 
   const totalBalanceCny = items.reduce((sum, row) => sum + row.remainingCny, 0)
+  const positiveBalanceCny = items.reduce((sum, row) => sum + Math.max(0, row.remainingCny), 0)
   const goodBalanceCny = items.filter((row) => row.good).reduce((sum, row) => sum + row.remainingCny, 0)
-  for (const item of items) item.ratio = totalBalanceCny > 0 ? item.remainingCny / totalBalanceCny : 0
+  for (const item of items) item.ratio = positiveBalanceCny > 0 ? Math.max(0, item.remainingCny) / positiveBalanceCny : 0
   const qualityBands = ['good', 'mid', 'risk'].map((band) => {
     const members = items.filter((item) => item.band === band)
     const remainingCny = members.reduce((sum, item) => sum + item.remainingCny, 0)
     return {
       band,
       remainingCny,
-      ratio: totalBalanceCny > 0 ? remainingCny / totalBalanceCny : 0,
+      ratio: positiveBalanceCny > 0 ? members.reduce((sum, item) => sum + Math.max(0, item.remainingCny), 0) / positiveBalanceCny : 0,
       supplierCount: members.length,
     }
   })
@@ -73,7 +74,7 @@ export function buildSupplierQualityAssets({
     qualityBands,
     totalBalanceCny,
     goodBalanceCny,
-    goodBalanceRatio: totalBalanceCny > 0 ? goodBalanceCny / totalBalanceCny : null,
+    goodBalanceRatio: positiveBalanceCny > 0 ? goodBalanceCny / positiveBalanceCny : null,
     estimatedGoodAvailableHours,
     scoredWallets: items.filter((row) => row.score !== null).length,
     unknownScoreWallets: items.filter((row) => row.score === null).length,

@@ -1,7 +1,5 @@
 function escapeHtml(value) {
-  const node = document.createElement('span')
-  node.textContent = String(value ?? '')
-  return node.innerHTML
+  return String(value ?? '').replace(/[&<>"']/gu, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]))
 }
 
 function number(value, digits = 0) {
@@ -27,7 +25,7 @@ export function historyChartMarkup(points, { series, valueFormatter, unit = '', 
   const lowerBound = yMin !== null && Number.isFinite(configuredMin) ? configuredMin : null
   const upperBound = yMax !== null && Number.isFinite(configuredMax) ? configuredMax : null
   const padding = Math.max((rawMax - rawMin) * 0.08, Math.abs(rawMax) * 0.02, 0.001)
-  const min = lowerBound ?? Math.max(0, rawMin - padding)
+  const min = lowerBound ?? (rawMin < 0 ? rawMin - padding : Math.max(0, rawMin - padding))
   const max = upperBound ?? rawMax + padding
   const span = Math.max(max - min, 0.001)
   const requestedLeft = Number(requestedPlotLeft), requestedRight = Number(requestedPlotRight)

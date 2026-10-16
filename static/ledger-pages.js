@@ -1,4 +1,5 @@
-import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js'
+import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=signed-balance-v1'
+import { balanceNumber } from './balance-format.js?v=signed-balance-v1'
 import {
   $,
   applyUpstreamValuationPolicy,
@@ -24,7 +25,7 @@ import {
   usd,
   usdText,
   waitUpstreamJob,
-} from './app.js'
+} from './app.js?v=signed-balance-v1'
 
 let oauthPage = 1
 let oauthArchivedPage = 1
@@ -937,7 +938,7 @@ export async function upstreamsPage() {
         ring: $('#quota-ring'), detail: $('#quota-ring-detail'), items: walletDistribution,
         center: known ? cny(total) : '—', centerLabel: '总余额', emptyDetail: '暂无可用余额明细',
         itemLabel: (item) => item.wallet,
-        itemDetail: (item) => `${percent(item.ratio)} · ${cny(item.remainingCny)}${item.remainingUsd == null ? '' : ` · $${number(item.remainingUsd, 2)}`}${item.schedulable ? '' : ' · 不可调度'}`,
+        itemDetail: (item) => `${percent(item.ratio)} · ${cny(item.remainingCny)}${item.remainingUsd == null ? '' : ` · $${balanceNumber(item.remainingUsd, 2)}`}${item.schedulable ? '' : ' · 不可调度'}`,
       })
       $('#quota-monitor-state').textContent = `${summary.sampledAt ? time(summary.sampledAt) : '尚无采样'} · ${number(summary.knownWallets)} 个已知 wallet${summary.warning ? ` · ${summary.warning}` : ''}`
       renderQuotaCharts(points)

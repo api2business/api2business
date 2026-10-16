@@ -577,9 +577,7 @@
   一个有效样本即可计算 P95 并参与延迟分，没有证据才回退 YAML prior。
 - 手动探活先验证 HTTP 结果、模型白名单、`ordinaryLogRecorded` 和轮次汇总，成功后才
   打开该作用域的 `features.idleProbe`。
-- 探活模型从作用域平台白名单动态选择；Codex/OpenAI 固定按 Terra 后 Sol，Grok 和其他
-  平台按各自 owning YAML 顺序；缺少成本时使用当前候选集合的平均成本并标记
-  `imputed-average`。
+- 探活模型选择与成本补齐统一见本参考的作用域探活配置，不另维护候选顺序。
 - 生产调度由 Go Temporal worker 执行；评分、池分和优先级分保持独立，所有工作流均带有
   V2 作用域身份。
 - 调整作用域探活周期时必须让旧工作流退出并启动带有新输入的工作流，不能只重启业务 API；

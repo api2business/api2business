@@ -1,6 +1,7 @@
 import { renderDonut, poolParticipationColors } from './score-visuals.js'
-import { buildSupplierQualityAssets } from './upstream-quality-assets.js'
-import { bindHistoryChartTooltip, historyChartMarkup } from './history-chart.js'
+import { buildSupplierQualityAssets } from './upstream-quality-assets.js?v=signed-balance-v1'
+import { balanceNumber } from './balance-format.js?v=signed-balance-v1'
+import { bindHistoryChartTooltip, historyChartMarkup } from './history-chart.js?v=signed-balance-v1'
 import { sampleTimeDisplay } from './sample-time.js'
 import { bindTableSortHeaders, sortTableRows, updateTableSortHeaders } from './table-sort.js?v=table-sort-v1'
 
@@ -28,8 +29,8 @@ function externalUpstreamUrl(row) {
 }
 function number(value, digits = 0) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed.toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits }) : '—' }
 function percent(value, digits = 1) { const parsed = Number(value); return Number.isFinite(parsed) ? `${(parsed * 100).toFixed(digits)}%` : '—' }
-function money(value) { const parsed = Number(value); return Number.isFinite(parsed) ? `¥${number(parsed, 2)}` : '—' }
-function cny(value) { const parsed = Number(value); return Number.isFinite(parsed) ? `¥${number(parsed, 3)}` : '—' }
+function money(value) { return value == null ? '—' : `¥${balanceNumber(value, 2)}` }
+function cny(value) { return value == null ? '—' : `¥${balanceNumber(value, 3)}` }
 function time(value) { if (!value) return '—'; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : '—' }
 function scopeLabel(scope) { return scope === 'claude' ? 'Claude' : scope === 'codex' ? 'Codex' : String(scope ?? '') }
 function enabledScope(scope) { return state.scopes.find((item) => item.enabled && item.name === scope)?.name ?? null }
@@ -164,7 +165,8 @@ function renderQuota(summary = {}, accounts = [], usage = []) {
   const quality = buildSupplierQualityAssets({ walletDistribution: wallets, scoreRows: accounts, upstreamAccounts: usage, consumedCny: summary.consumedCny, burnWindowHours: summary.burnWindowHours })
   renderDonut({ ring: $('#v2-supplier-quality-ring'), detail: $('#v2-supplier-quality-detail'), items: quality.qualityBands, center: money(quality.goodBalanceCny), centerLabel: quality.goodBalanceRatio == null ? '优质余额' : `优质 ${percent(quality.goodBalanceRatio)}`, emptyDetail: '暂无可计算的供应商余额', itemColor: (item) => ({ good: 'var(--signal)', mid: 'var(--warning)', risk: 'var(--line)' })[item.band], itemLabel: (item) => ({ good: '优质', mid: '一般', risk: '不良' })[item.band], itemDetail: (item) => `${money(item.remainingCny)} · ${percent(item.ratio)} · ${number(item.supplierCount)} 个供应商` })
   $('#v2-quota-quality-estimated-hours').textContent = availabilityDuration(quality.estimatedGoodAvailableHours)
-  $('#v2-quota-quality-balance').textContent = `评分 >80 · 优质余额 ${money(quality.goodBalanceCny)} · ${number(quality.scoredWallets)} 个已评分`
+  const debts = quality.items.filter((item) => item.remainingCny < 0)
+  $('#v2-quota-quality-balance').textContent = `评分 >80 · 优质余额 ${money(quality.goodBalanceCny)} · ${number(quality.scoredWallets)} 个已评分${debts.length ? ` · ${debts.length} 个欠费钱包 ${money(debts.reduce((sum, item) => sum + item.remainingCny, 0))}` : ''}`
   $('#v2-quota-balance-chart').innerHTML = historyChartMarkup(points, { series: [{ key: 'sampleApiAmountUsdPerHour', className: 'chart-sample-speed', label: '当前采样' }, { key: 'rollingApiAmountUsdPerHour', className: 'chart-rolling-speed', label: '一小时滚动' }], valueFormatter: (value) => cny(value), unit: '人民币 / 小时', ariaLabel: '作用域上游最近八小时消耗速率', yMin: 0 })
   $('#v2-quota-cost-chart').innerHTML = historyChartMarkup(points, { series: [{ key: 'sampleRealtimeCostCnyPerApiUsd', className: 'chart-cost', label: '当前采样' }, { key: 'realtimeCostCnyPerApiUsd', className: 'chart-rolling-cost', label: '一小时滚动' }], valueFormatter: (value) => `¥${number(value, 4)}`, unit: '人民币 / 刀', ariaLabel: '作用域上游实时成本' })
   bindHistoryChartTooltip($('#v2-quota-balance-chart')); bindHistoryChartTooltip($('#v2-quota-cost-chart'))

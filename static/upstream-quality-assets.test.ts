@@ -1,6 +1,19 @@
 import { expect, test } from "bun:test";
 import { buildSupplierQualityAssets, normalizeSupplierWallet } from "./upstream-quality-assets.js";
 
+test("keeps debt wallets in assets and out of good spendable balances", () => {
+  const result = buildSupplierQualityAssets({
+    walletDistribution: [10, -20].map((remainingCny, id) => ({ wallet: `https://${id}.test`, remainingCny, schedulable: true })),
+    upstreamAccounts: [0, 1].map(id => ({ id, baseUrl: `https://${id}.test` })),
+    scoreRows: [0, 1].map(accountId => ({ accountId, score: 99 })),
+  });
+  expect(result.totalBalanceCny).toBe(-10);
+  expect(result.goodBalanceCny).toBe(10);
+  expect(result.goodBalanceRatio).toBe(1);
+  expect(result.items.find(row => row.remainingCny < 0)).toMatchObject({ remainingCny: -20, good: false, band: "risk", ratio: 0 });
+  expect(result.qualityBands.find(row => row.band === "risk")).toMatchObject({ remainingCny: -20, ratio: 0, supplierCount: 1 });
+});
+
 test("normalizes supplier wallets consistently with quota accounting", () => {
   expect(normalizeSupplierWallet("https://a.test/v1/")).toBe("https://a.test");
   expect(normalizeSupplierWallet("https://a.test/")).toBe("https://a.test");

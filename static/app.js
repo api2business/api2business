@@ -1,5 +1,6 @@
-import { quotaAccountAvailable, quotaAvailabilityTotals } from './quota-availability.js'
-import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=quota-monitor-v18'
+import { quotaAccountAvailable, quotaAvailabilityTotals } from './quota-availability.js?v=signed-balance-v1'
+import { balanceNumber } from './balance-format.js?v=signed-balance-v1'
+import { bindHistoryChartTooltip, finiteChartValue, historyChartMarkup } from './history-chart.js?v=signed-balance-v1'
 import { quotaGroup, quotaMemberships } from './quota-grouping.js'
 import { bindTableSortHeaders, sortTableRows, updateTableSortHeaders } from './table-sort.js?v=table-sort-v1'
 
@@ -328,7 +329,7 @@ function quotaRemaining(result) {
   return Number.isFinite(value) ? value : null
 }
 
-function quotaDisplay(value) { return value === null ? '—' : `¥${number(value, 2)}` }
+function quotaDisplay(value) { return value == null ? '—' : cny(value) }
 
 function externalUpstreamUrl(value) {
   const text = String(value ?? '').trim()
@@ -382,7 +383,7 @@ function refreshQuotaConsumption() {
 function quotaPieMarkup(group, rows) {
   const { total, available, unavailable, ratio } = quotaAvailabilityTotals(rows, group)
   const labels = { 'codex-mix': 'Codex 混池', 'no-degrade': '不降智分组', claude: 'Claude', 'claude-kiro': 'Claude Kiro', grok: 'Grok' }
-  return `<article class="quota-group-card"><div class="quota-group-card-head"><div><p class="eyebrow">${labels[group]}</p><h3>${quotaDisplay(total)}</h3></div><span>${number(rows.length)} 个上游钱包</span></div><div class="quota-pie" style="--quota-pie:${ratio * 360}deg"><strong>${number(ratio * 100, 0)}%</strong><small>可用额度占比</small></div><dl><div><dt>可用额度</dt><dd>${quotaDisplay(available)}</dd></div><div><dt>不可用额度</dt><dd>${quotaDisplay(unavailable)}</dd></div></dl></article>`
+  return `<article class="quota-group-card"><div class="quota-group-card-head"><div><p class="eyebrow">${labels[group]}</p><h3>${quotaDisplay(total)}</h3></div><span>${number(rows.length)} 个上游钱包</span></div><div class="quota-pie" style="--quota-pie:${ratio * 360}deg"><strong>${number(ratio * 100, 0)}%</strong><small>正余额中可用占比</small></div><dl><div><dt>可用额度</dt><dd>${quotaDisplay(available)}</dd></div><div><dt>不可用 / 欠费</dt><dd>${quotaDisplay(unavailable)}</dd></div></dl></article>`
 }
 
 function renderQuotaMonitor() {
@@ -449,7 +450,6 @@ function renderQuotaGroupHistory(points) {
     chartWidth,
     chartHeight,
     plotRight: chartWidth - 12,
-    yMin: 0,
     plotLeft: 0,
   })
   bindHistoryChartTooltip(chart)
@@ -554,7 +554,7 @@ async function quotaMonitorPage() {
   const remainingByWallet = new Map((summary.walletDistribution ?? []).map((row) => [String(row.wallet), Number(row.remainingCny)]))
   const walletRateByWallet = new Map((summary.walletDistribution ?? []).map((row) => {
     const usd = Number(row.remainingUsd), cny = Number(row.remainingCny)
-    return [String(row.wallet), Number.isFinite(usd) && usd > 0 && Number.isFinite(cny) && cny > 0 ? cny / usd : 1]
+    return [String(row.wallet), Number.isFinite(usd) && usd !== 0 && Number.isFinite(cny) && cny / usd > 0 ? cny / usd : upstreamWalletCnyRate(row.wallet)]
   }))
   const usageById = new Map()
   renderQuotaGroupHistory(summary.groupHistory)
@@ -637,7 +637,7 @@ async function lotteryPage() {
 }
 
 export function cny(value) {
-  return `¥${number(value, 2)}`
+  return `¥${balanceNumber(value, 2)}`
 }
 
 export function operatingDay() {
@@ -809,11 +809,10 @@ export function upstreamBalancePresentation(result) {
   if (quota.unit !== 'USD' || quota.remaining == null || !Number.isFinite(remaining)) {
     return { primary: '账号余额未知', secondary: '未取得账号级 USD 余额', known: false }
   }
-  const rate = upstreamWalletCnyRate(result.baseUrl)
-  const safeRemaining = Math.max(0, remaining)
+  const rate = upstreamWalletCnyRate(result.walletKey ?? result.baseUrl)
   return {
-    primary: cny(safeRemaining * rate),
-    secondary: `$${number(safeRemaining, 2)} · ${number(rate, 2)} 元/$`,
+    primary: cny(remaining * rate),
+    secondary: `$${balanceNumber(remaining, 2)} · ${number(rate, 2)} 元/$${remaining < 0 ? ' · 欠费' : ''}`,
     known: true,
   }
 }
@@ -926,7 +925,7 @@ async function boot() {
   if (page === 'login') return await loginPage()
   await shell()
   if (page === 'upstream-scheduling-v2') {
-    const v2 = await import('./upstream-scheduling-v2.js?v=v2-links-2')
+    const v2 = await import('./upstream-scheduling-v2.js?v=signed-balance-v1')
     return await v2.upstreamSchedulingV2Page()
   }
   if (page === 'quota-monitor') return await quotaMonitorPage()
@@ -934,7 +933,7 @@ async function boot() {
   if (page === 'lottery') return await lotteryPage()
   if (page === 'operations') return await operationsPage()
   if (page === 'oauth-cost' || page === 'account-import' || page === 'upstreams') {
-    const pages = await import('./ledger-pages.js')
+    const pages = await import('./ledger-pages.js?v=signed-balance-v1')
     if (page === 'oauth-cost') return await pages.oauthCostPage()
     if (page === 'account-import') return await pages.accountImportPage()
     return await pages.upstreamsPage()

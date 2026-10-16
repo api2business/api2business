@@ -376,15 +376,16 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
     .filter((row) => Date.parse(row.sampledAt) === latestAt)
     .map((row) => [row.walletKey, row])).values()];
   const known = latestRows.filter((row) => row.remainingCny !== null);
-  const total = known.reduce((sum, row) => sum + Math.max(0, row.remainingCny!), 0);
+  const total = known.reduce((sum, row) => sum + row.remainingCny!, 0);
+  const positive = known.reduce((sum, row) => sum + Math.max(0, row.remainingCny!), 0);
   const schedulable = known.filter((row) => row.schedulable)
     .reduce((sum, row) => sum + Math.max(0, row.remainingCny!), 0);
   const walletDistribution = known.map((row) => ({
     wallet: row.walletKey,
-    remainingCny: Math.max(0, row.remainingCny!),
+    remainingCny: row.remainingCny!,
     remainingUsd: row.remainingUsd,
     schedulable: row.schedulable,
-    ratio: total > 0 ? Math.round(Math.max(0, row.remainingCny!) / total * 1_000_000) / 1_000_000 : 0,
+    ratio: positive > 0 ? Math.round(Math.max(0, row.remainingCny!) / positive * 1_000_000) / 1_000_000 : 0,
   })).sort((left, right) => right.remainingCny - left.remainingCny || left.wallet.localeCompare(right.wallet));
   const byWallet = new Map<string, UpstreamQuotaSample[]>();
   for (const sample of samples) {
@@ -452,7 +453,7 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
     sampledAt: new Date(latestAt).toISOString(),
     totalRemainingCny: total,
     schedulableRemainingCny: schedulable,
-    unschedulableRemainingCny: Math.max(0, total - schedulable),
+    unschedulableRemainingCny: total - schedulable,
     knownWallets: known.length,
     unknownWallets: latestRows.length - known.length,
     consumedCny: burnKnown ? consumed : null,

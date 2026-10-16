@@ -469,7 +469,7 @@ export async function queryUpstreamUsage(
             result.quota = {
               limit: limitUsd,
               used: usedUsd,
-              remaining: Math.max(0, limitUsd - usedUsd),
+              remaining: limitUsd - usedUsd,
               unlimited,
               unit: "USD",
             };

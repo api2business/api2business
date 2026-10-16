@@ -51,6 +51,9 @@ test("restores one operator-confirmed historical successful wallet snapshot", as
   });
   expect(result).toMatchObject({ mutation: true, accountId: 49, baseUrl: "https://wallet.example.com", remainingUsd: 13.95879651 });
   expect(restored[0]).toMatchObject({ accountId: 49, result: { ok: true, provider: "operator-confirmed-history" } });
+  await service.restoreUpstreamUsageSuccess({ accountId: 49, baseUrl: "https://wallet.example.com", remainingUsd: -0.00203599, confirm: true });
+  expect(restored[1]).toMatchObject({ result: { ok: true, quota: { remaining: -0.00203599 } } });
+  await expect(service.restoreUpstreamUsageSuccess({ accountId: 49, baseUrl: "https://wallet.example.com", remainingUsd: null, confirm: true })).rejects.toThrow("有限 USD");
 });
 
 test("plan type refunds make group weighted cost equal the net total", () => {

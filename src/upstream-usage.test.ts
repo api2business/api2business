@@ -370,7 +370,7 @@ test("does not treat a fieldless unrestricted response as usage data", async () 
   expect(result.quota.remaining).toBeNull();
 });
 
-test("queries account billing for an unlimited New API token", async () => {
+test.each([4.5, 24.5])("queries signed account billing balance for an unlimited New API token (used %s)", async (used) => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/v1/usage?days=30")) return new Response("not found", { status: 404 });
@@ -384,13 +384,13 @@ test("queries account billing for an unlimited New API token", async () => {
       return new Response(JSON.stringify({ hard_limit_usd: 20 }));
     }
     if (url.endsWith("/dashboard/billing/usage")) {
-      return new Response(JSON.stringify({ total_usage: 450 }));
+      return new Response(JSON.stringify({ total_usage: used * 100 }));
     }
     return new Response(JSON.stringify({ data: [] }));
   }) as typeof fetch;
 
   const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 30 });
-  expect(result.quota).toEqual({ limit: 20, used: 4.5, remaining: 15.5, unlimited: true, unit: "USD" });
+  expect(result.quota).toEqual({ limit: 20, used, remaining: 20 - used, unlimited: true, unit: "USD" });
   expect(result.warning).toContain("账号级证据");
 });
 

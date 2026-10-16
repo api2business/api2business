@@ -610,7 +610,7 @@ export class OperationsService {
     const remainingUsd = Number(input.remainingUsd);
     const baseUrl = normalizeUpstreamWallet(input.baseUrl);
     if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error("上游账号 ID 无效");
-    if (!Number.isFinite(remainingUsd) || remainingUsd < 0) throw new Error("历史成功余额必须是非负 USD 数值");
+    if (input.remainingUsd == null || String(input.remainingUsd).trim() === "" || typeof input.remainingUsd === "boolean" || !Number.isFinite(remainingUsd)) throw new Error("历史成功余额必须是有限 USD 数值，允许欠费负数");
     if (!baseUrl.startsWith("https://")) throw new Error("历史成功快照 base_url 无效");
     if (input.confirm !== true) throw new Error("历史成功快照回填必须显式确认");
     const result = {
@@ -736,7 +736,7 @@ export class OperationsService {
         };
         const groups = new Set<HistoryKey>(walletAccounts.flatMap((meta) => [...quotaMemberships({ groupNames: meta.names, platform: meta.platform, baseUrl: meta.walletKey })].map((group: unknown) => groupLabels[String(group)]).filter((group): group is HistoryKey => Boolean(group))));
         if (!groups.size) groups.add("codexMix");
-        for (const key of groups) point[key] = Number(point[key]) + Math.max(0, row.remainingCny ?? 0);
+        for (const key of groups) point[key] = Number(point[key]) + (row.remainingCny ?? 0);
       }
       return point;
     });
@@ -1154,7 +1154,7 @@ export class OperationsService {
       const multiplier = Number(object(usage.billingMultiplier).value);
       return {
         ...row,
-        accountBalanceCny: Number.isFinite(remaining) ? Math.max(0, remaining) * walletRate : null,
+        accountBalanceCny: Number.isFinite(remaining) ? remaining * walletRate : null,
         detectedCostRateCnyPerApiUsd: Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null,
       };
     });
