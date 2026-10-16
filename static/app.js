@@ -444,7 +444,7 @@ function renderQuotaGroupHistory(points) {
       { key: 'claudeKiro', className: 'chart-quota-claude-kiro', label: 'Claude Kiro' },
       { key: 'grok', className: 'chart-quota-grok', label: 'Grok' },
     ],
-    valueFormatter: (value) => `¥${number(value, 2)}`,
+    valueFormatter: (value) => cny(value),
     unit: '人民币余额',
     ariaLabel: '五个额度分组人民币余额趋势',
     chartWidth,
