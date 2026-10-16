@@ -3,6 +3,8 @@
 - 本文件定义上游资产管理的边界和权威入口；可执行算法、配置字段、作用域终态、
   错误阶段与验收顺序唯一见
   [上游与调度](../../skills/api2business/references/upstream-scheduling.md)。
+- 页面金额、API 美元与人民币估值的区别统一见
+  [金额与币种展示规格](monetary-units.md)。
 - 运行事实使用完整 authority tuple：
   - owning YAML 负责平台、分组、功能开关、周期和模板文件；
   - V2 作用域负责账号范围、评分、优先级、探活和深链；

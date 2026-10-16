@@ -925,7 +925,7 @@ async function boot() {
   if (page === 'login') return await loginPage()
   await shell()
   if (page === 'upstream-scheduling-v2') {
-    const v2 = await import('./upstream-scheduling-v2.js?v=signed-balance-v1')
+    const v2 = await import('./upstream-scheduling-v2.js?v=currency-semantics-v1')
     return await v2.upstreamSchedulingV2Page()
   }
   if (page === 'quota-monitor') return await quotaMonitorPage()

@@ -29,8 +29,8 @@ function externalUpstreamUrl(row) {
 }
 function number(value, digits = 0) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed.toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits }) : '—' }
 function percent(value, digits = 1) { const parsed = Number(value); return Number.isFinite(parsed) ? `${(parsed * 100).toFixed(digits)}%` : '—' }
-function money(value) { return value == null ? '—' : `¥${balanceNumber(value, 2)}` }
-function cny(value) { return value == null ? '—' : `¥${balanceNumber(value, 3)}` }
+function cny(value) { return value == null ? '—' : `¥${balanceNumber(value, 2)}` }
+function usd(value) { return value == null ? '—' : `$${balanceNumber(value, 3)}` }
 function time(value) { if (!value) return '—'; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : '—' }
 function scopeLabel(scope) { return scope === 'claude' ? 'Claude' : scope === 'codex' ? 'Codex' : String(scope ?? '') }
 function enabledScope(scope) { return state.scopes.find((item) => item.enabled && item.name === scope)?.name ?? null }
@@ -149,26 +149,26 @@ function availabilityDuration(value) {
 function renderQuota(summary = {}, accounts = [], usage = []) {
   const points = Array.isArray(summary.history) ? summary.history : []
   const last = points.at(-1) ?? {}
-  const costText = (value) => value == null ? '暂不可计算' : `¥${number(value, 4)}/刀`
-  $('#v2-quota-total').textContent = summary.totalRemainingCny == null ? '—' : money(summary.totalRemainingCny)
-  $('#v2-quota-schedulable').textContent = summary.schedulableRemainingCny == null ? '—' : money(summary.schedulableRemainingCny)
-  $('#v2-quota-consumed').textContent = summary.consumedCny == null ? '暂不可计算' : money(summary.consumedCny)
-  $('#v2-quota-output').textContent = summary.apiAmountUsd == null ? '暂不可计算' : cny(summary.apiAmountUsd)
+  const costText = (value) => value == null ? '暂不可计算' : `¥${number(value, 4)}/API 美元`
+  $('#v2-quota-total').textContent = summary.totalRemainingCny == null ? '—' : cny(summary.totalRemainingCny)
+  $('#v2-quota-schedulable').textContent = summary.schedulableRemainingCny == null ? '—' : cny(summary.schedulableRemainingCny)
+  $('#v2-quota-consumed').textContent = summary.consumedCny == null ? '暂不可计算' : cny(summary.consumedCny)
+  $('#v2-quota-output').textContent = summary.apiAmountUsd == null ? '暂不可计算' : usd(summary.apiAmountUsd)
   $('#v2-quota-realtime-cost').textContent = costText(summary.realtimeCostCnyPerApiUsd)
   $('#v2-quota-estimated-hours').textContent = availabilityDuration(summary.estimatedAvailableHours)
-  $('#v2-quota-sample-speed').textContent = last.sampleApiAmountUsdPerHour == null ? '暂不可计算' : cny(last.sampleApiAmountUsdPerHour)
-  $('#v2-quota-rolling-speed').textContent = last.rollingApiAmountUsdPerHour == null ? '暂不可计算' : cny(last.rollingApiAmountUsdPerHour)
+  $('#v2-quota-sample-speed').textContent = last.sampleApiAmountUsdPerHour == null ? '暂不可计算' : usd(last.sampleApiAmountUsdPerHour)
+  $('#v2-quota-rolling-speed').textContent = last.rollingApiAmountUsdPerHour == null ? '暂不可计算' : usd(last.rollingApiAmountUsdPerHour)
   $('#v2-quota-sample-cost').textContent = costText(summary.sampleRealtimeCostCnyPerApiUsd)
   const wallets = Array.isArray(summary.walletDistribution) ? summary.walletDistribution : []
-  renderDonut({ ring: $('#v2-quota-ring'), detail: $('#v2-quota-ring-detail'), items: wallets, center: summary.totalRemainingCny == null ? '—' : money(summary.totalRemainingCny), centerLabel: '总余额', emptyDetail: '暂无可用余额明细', itemLabel: (item) => item.wallet, itemDetail: (item) => `${percent(item.ratio)} · ${money(item.remainingCny)}${item.schedulable ? '' : ' · 不可调度'}` })
+  renderDonut({ ring: $('#v2-quota-ring'), detail: $('#v2-quota-ring-detail'), items: wallets, center: summary.totalRemainingCny == null ? '—' : cny(summary.totalRemainingCny), centerLabel: '总余额', emptyDetail: '暂无可用余额明细', itemLabel: (item) => item.wallet, itemDetail: (item) => `${percent(item.ratio)} · ${cny(item.remainingCny)}${item.schedulable ? '' : ' · 不可调度'}` })
   $('#v2-quota-monitor-state').textContent = `${scopeLabel(state.activeScope)} · ${time(summary.sampledAt)} · ${number(summary.knownWallets)} 个钱包${summary.warning ? ` · ${summary.warning}` : ''}`
   const quality = buildSupplierQualityAssets({ walletDistribution: wallets, scoreRows: accounts, upstreamAccounts: usage, consumedCny: summary.consumedCny, burnWindowHours: summary.burnWindowHours })
-  renderDonut({ ring: $('#v2-supplier-quality-ring'), detail: $('#v2-supplier-quality-detail'), items: quality.qualityBands, center: money(quality.goodBalanceCny), centerLabel: quality.goodBalanceRatio == null ? '优质余额' : `优质 ${percent(quality.goodBalanceRatio)}`, emptyDetail: '暂无可计算的供应商余额', itemColor: (item) => ({ good: 'var(--signal)', mid: 'var(--warning)', risk: 'var(--line)' })[item.band], itemLabel: (item) => ({ good: '优质', mid: '一般', risk: '不良' })[item.band], itemDetail: (item) => `${money(item.remainingCny)} · ${percent(item.ratio)} · ${number(item.supplierCount)} 个供应商` })
+  renderDonut({ ring: $('#v2-supplier-quality-ring'), detail: $('#v2-supplier-quality-detail'), items: quality.qualityBands, center: cny(quality.goodBalanceCny), centerLabel: quality.goodBalanceRatio == null ? '优质余额' : `优质 ${percent(quality.goodBalanceRatio)}`, emptyDetail: '暂无可计算的供应商余额', itemColor: (item) => ({ good: 'var(--signal)', mid: 'var(--warning)', risk: 'var(--line)' })[item.band], itemLabel: (item) => ({ good: '优质', mid: '一般', risk: '不良' })[item.band], itemDetail: (item) => `${cny(item.remainingCny)} · ${percent(item.ratio)} · ${number(item.supplierCount)} 个供应商` })
   $('#v2-quota-quality-estimated-hours').textContent = availabilityDuration(quality.estimatedGoodAvailableHours)
   const debts = quality.items.filter((item) => item.remainingCny < 0)
-  $('#v2-quota-quality-balance').textContent = `评分 >80 · 优质余额 ${money(quality.goodBalanceCny)} · ${number(quality.scoredWallets)} 个已评分${debts.length ? ` · ${debts.length} 个欠费钱包 ${money(debts.reduce((sum, item) => sum + item.remainingCny, 0))}` : ''}`
-  $('#v2-quota-balance-chart').innerHTML = historyChartMarkup(points, { series: [{ key: 'sampleApiAmountUsdPerHour', className: 'chart-sample-speed', label: '当前采样' }, { key: 'rollingApiAmountUsdPerHour', className: 'chart-rolling-speed', label: '一小时滚动' }], valueFormatter: (value) => cny(value), unit: '人民币 / 小时', ariaLabel: '作用域上游最近八小时消耗速率', yMin: 0 })
-  $('#v2-quota-cost-chart').innerHTML = historyChartMarkup(points, { series: [{ key: 'sampleRealtimeCostCnyPerApiUsd', className: 'chart-cost', label: '当前采样' }, { key: 'realtimeCostCnyPerApiUsd', className: 'chart-rolling-cost', label: '一小时滚动' }], valueFormatter: (value) => `¥${number(value, 4)}`, unit: '人民币 / 刀', ariaLabel: '作用域上游实时成本' })
+  $('#v2-quota-quality-balance').textContent = `评分 >80 · 优质余额 ${cny(quality.goodBalanceCny)} · ${number(quality.scoredWallets)} 个已评分${debts.length ? ` · ${debts.length} 个欠费钱包 ${cny(debts.reduce((sum, item) => sum + item.remainingCny, 0))}` : ''}`
+  $('#v2-quota-balance-chart').innerHTML = historyChartMarkup(points, { series: [{ key: 'sampleApiAmountUsdPerHour', className: 'chart-sample-speed', label: '当前采样' }, { key: 'rollingApiAmountUsdPerHour', className: 'chart-rolling-speed', label: '一小时滚动' }], valueFormatter: (value) => usd(value), unit: 'API 美元 / 小时', ariaLabel: '作用域上游最近八小时消耗速率', yMin: 0 })
+  $('#v2-quota-cost-chart').innerHTML = historyChartMarkup(points, { series: [{ key: 'sampleRealtimeCostCnyPerApiUsd', className: 'chart-cost', label: '当前采样' }, { key: 'realtimeCostCnyPerApiUsd', className: 'chart-rolling-cost', label: '一小时滚动' }], valueFormatter: (value) => `¥${number(value, 4)}`, unit: '人民币 / API 美元', ariaLabel: '作用域上游实时成本' })
   bindHistoryChartTooltip($('#v2-quota-balance-chart')); bindHistoryChartTooltip($('#v2-quota-cost-chart'))
 }
 
@@ -210,7 +210,7 @@ function renderAccounts() {
       ? '不限额'
       : row.quotaCacheStatus === 'unavailable'
         ? '缓存不可用'
-        : row.quota?.remaining == null ? '—' : cny(row.quota.remaining)
+        : row.quota?.remaining == null ? '—' : usd(row.quota.remaining)
     const quotaLabel = row.quotaCacheStatus === 'cached'
       ? `额度缓存 · ${escapeHtml(quotaSample.label)}`
       : row.quotaCacheStatus === 'unlimited'
@@ -224,7 +224,7 @@ function renderAccounts() {
     const accountMarkup = upstreamUrl
       ? `<a class="upstream-account-link" href="${escapeHtml(upstreamUrl)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开上游页面">${accountLabel}</a>`
       : `<strong>${accountLabel}</strong>`
-    return `<tr><td>${accountMarkup}<small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td title="${escapeHtml(costTitle)}">${cost == null ? '—' : `¥${number(cost, 4)}/刀`}<small>${escapeHtml(costSource)}</small></td><td>${cny(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td><td>${percent(row.failureRate)}<small>${number(attempts)} 次尝试</small></td><td>${row.ttftP95Ms == null ? '—' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`}</td><td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
+    return `<tr><td>${accountMarkup}<small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td title="${escapeHtml(costTitle)}">${cost == null ? '—' : `¥${number(cost, 4)}/API 美元`}<small>${escapeHtml(costSource)}</small></td><td>${usd(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td><td>${percent(row.failureRate)}<small>${number(attempts)} 次尝试</small></td><td>${row.ttftP95Ms == null ? '—' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`}</td><td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
   }).join('') : '<tr><td colspan="13" class="empty">当前作用域没有评分账号</td></tr>'
   updateTableSortHeaders($('#v2-account-table'), state.accountSort)
   $('#v2-account-page').textContent = rows.length ? `${state.accountPage} / ${pages} · 共 ${number(rows.length)} 条` : '0 条'; $('#v2-account-prev').disabled = state.accountPage <= 1; $('#v2-account-next').disabled = state.accountPage >= pages
