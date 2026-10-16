@@ -76,11 +76,11 @@ export function isAudioRequest(models: unknown[], endpoint?: unknown): boolean {
     || (typeof endpoint === "string" && audioEndpointRegex.test(endpoint.split("?")[0]!));
 }
 
-// 固定内部 alias；模型逐字段匹配，避免字段拼接改变分隔符语义。
+// 使用正则本来就认可的斜线边界分隔字段，保持逐字段语义，避免历史扫描重复跑三次正则。
 export function audioRequestSql(alias: string, includeEndpoint = false): string {
   if (!/^[a-z][a-z0-9_]*$/u.test(alias)) throw new Error("invalid audio policy SQL alias");
-  const models = ["requested_model", "model", "upstream_model"]
-    .map((key) => `LOWER(COALESCE(${alias}.${key}, '')) ~ '${audioModelPattern}'`);
+  const fields = ["requested_model", "model", "upstream_model"].map((key) => `${alias}.${key}`);
+  const models = [`LOWER(CONCAT_WS('/', ${fields.join(", ")})) ~ '${audioModelPattern}'`];
   if (includeEndpoint) models.push(`LOWER(SPLIT_PART(COALESCE(${alias}.inbound_endpoint, ''), '?', 1)) ~ '${audioEndpointPattern}'`);
   return `(${models.join(" OR ")})`;
 }

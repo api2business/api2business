@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { isAudioRequest, audioRequestSql } from "./scoring-error-policy";
+import { isAudioRequest, audioRequestSql, audioModelPattern } from "./scoring-error-policy";
 import { aggregateNativeGroupScore } from "./account-score-native";
 import { defaultOpenAIOAuthModelMapping } from "./openai-oauth-import-policy";
 
@@ -9,6 +9,20 @@ test("audio policy recognizes model variants and endpoints without matching ordi
   for (const model of ["gpt-6.1-sol", "gpt-image-2", "grok-4.7", "claude-sonnet-4-6", "audiovisual-text"]) expect(isAudioRequest([model], "/v1/responses")).toBe(false);
   expect(Object.keys(defaultOpenAIOAuthModelMapping()).some((model) => isAudioRequest([model]))).toBe(false);
   expect(audioRequestSql("u")).toContain("u.upstream_model");
+});
+
+test("one SQL model regex preserves per-field boundaries and prevents repeated historical regex scans", () => {
+  const sql = audioRequestSql("u");
+  expect(sql.match(/ ~ /gu)).toHaveLength(1);
+  expect(sql).toContain("CONCAT_WS('/', u.requested_model, u.model, u.upstream_model)");
+  expect(audioRequestSql("o", true).match(/ ~ /gu)).toHaveLength(2);
+  const combined = new RegExp(audioModelPattern, "iu");
+  const values = [null, "", "audio", "tts-1", "whisper", "GPT-4O-AUDIO-preview", "x/audio", "speech/x", "x_audio_y", "audioish", "audiovisual-text", "au", "dio", "gpt-6.1-sol", "a audio b", "realtimeX"];
+  for (const a of values) for (const b of values) for (const c of values) {
+    const fields = [a, b, c];
+    expect(combined.test(fields.filter((v) => v !== null).join("/"))).toBe(isAudioRequest(fields));
+  }
+  expect(() => audioRequestSql("u; DROP TABLE usage_logs")).toThrow("invalid audio policy SQL alias");
 });
 
 test("historical audio errors and model-less switch events cannot lower text account quality", () => {
