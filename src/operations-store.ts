@@ -66,6 +66,8 @@ export class OperationsStore {
         instance_id text PRIMARY KEY, started_at timestamptz NOT NULL,
         last_seen_at timestamptz NOT NULL, failed_writes integer NOT NULL DEFAULT 0
       );
+      ALTER TABLE api2business_observer_instances
+        ADD COLUMN IF NOT EXISTS failed_write_times jsonb;
       CREATE TABLE IF NOT EXISTS api2business_cash_entries (
         id uuid PRIMARY KEY,
         occurred_on date NOT NULL,
@@ -526,10 +528,10 @@ export class OperationsStore {
       VALUES (${completedAt},${instanceId},${path},${status},${durationMs})`);
   }
 
-  async observeInstance(instanceId: string, startedAt: string, failedWrites: number, retentionDays: number) {
-    await this.persistQuery(() => this.sql`INSERT INTO api2business_observer_instances (instance_id,started_at,last_seen_at,failed_writes)
-      VALUES (${instanceId},${startedAt},now(),${failedWrites}) ON CONFLICT (instance_id)
-      DO UPDATE SET last_seen_at=now(),failed_writes=EXCLUDED.failed_writes`);
+  async observeInstance(instanceId: string, startedAt: string, failedWrites: number, retentionDays: number, failedWriteTimes: string[] | null = null) {
+    await this.persistQuery(() => this.sql`INSERT INTO api2business_observer_instances (instance_id,started_at,last_seen_at,failed_writes,failed_write_times)
+      VALUES (${instanceId},${startedAt},now(),${failedWrites},${failedWriteTimes===null?null:JSON.stringify(failedWriteTimes)}::jsonb) ON CONFLICT (instance_id)
+      DO UPDATE SET last_seen_at=now(),failed_writes=EXCLUDED.failed_writes,failed_write_times=EXCLUDED.failed_write_times`);
     await this.persistQuery(() => this.sql`DELETE FROM api2business_http_observations WHERE completed_at < now()-${retentionDays}*interval '1 day'`);
   }
 
@@ -564,7 +566,7 @@ export class OperationsStore {
       FROM api2business_http_observations
       WHERE completed_at>=${start} AND completed_at<${end}
       GROUP BY path ORDER BY latency_p95_ms DESC,path`);
-    const instances = await this.readQuery(() => this.sql`SELECT instance_id,started_at,last_seen_at,failed_writes
+    const instances = await this.readQuery(() => this.sql`SELECT instance_id,started_at,last_seen_at,failed_writes,failed_write_times
       FROM api2business_observer_instances WHERE started_at<${end} AND last_seen_at>=${start}
       ORDER BY started_at`);
     return { ...row, pathBreakdown: Array.from(pathBreakdown), instances: Array.from(instances) };

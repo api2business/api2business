@@ -42,6 +42,16 @@ errors AS (
   FROM usage u WHERE NULLIF(TRIM(request_id),'') IS NOT NULL
     AND NOT ${audioRequestSql("u")}
   ORDER BY request_id,created_at DESC,id DESC
+), customer_billing AS (
+  SELECT DISTINCT ON (e.request_id) e.* FROM errors e
+  WHERE e.api_user_id IS NOT NULL AND NULLIF(TRIM(e.request_id),'') IS NOT NULL
+    AND (COALESCE(e.is_business_limited,false) OR e.error_phase='business')
+    AND LOWER(CONCAT_WS(' ',e.error_message,e.error_body,e.upstream_error_message,e.upstream_error_detail)) LIKE ANY (ARRAY[
+      '%insufficient_balance%','%insufficient account balance%','%balance is insufficient%',
+      '%user balance is insufficient%','%余额不足%','%额度不足%',
+      '%api_key_quota_exhausted%','%api key 额度已用完%'
+    ])
+  ORDER BY e.request_id,e.created_at DESC,e.id DESC
 ), failure AS (
   SELECT DISTINCT ON (e.request_id) e.request_id,e.account_id,e.error_phase,e.error_type,
     e.status_code,e.upstream_status_code,e.network_error_type,e.model,e.requested_model,
@@ -59,6 +69,7 @@ errors AS (
       ELSE 'unknown' END AS family
   FROM errors e WHERE NULLIF(TRIM(e.request_id),'') IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM success s WHERE s.request_id=e.request_id)
+    AND NOT EXISTS (SELECT 1 FROM customer_billing b WHERE b.request_id=e.request_id)
   ORDER BY e.request_id,e.created_at DESC,e.id DESC
 ), cost_usage AS (
   SELECT u.*, rate.rate_cny,rate.at AS rate_at FROM usage u
@@ -95,6 +106,7 @@ errors AS (
 SELECT jsonb_build_object(
   'succeeded',(SELECT COUNT(*) FROM success),
   'failed',(SELECT COUNT(*) FROM failure),
+  'excludedBusinessLimitRecords',(SELECT COUNT(*) FROM customer_billing),
   'streaming',(SELECT COUNT(*) FROM success WHERE stream),
   'ttftKnown',(SELECT COUNT(*) FROM success WHERE stream AND first_token_ms>=0),
   'ttftP95Ms',(SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms) FROM success WHERE stream AND first_token_ms>=0),
@@ -110,13 +122,7 @@ SELECT jsonb_build_object(
       inbound_endpoint,COALESCE(requested_model,model,'unknown') AS model,
       COALESCE(status_code,upstream_status_code,0)::int AS status_code,
       COUNT(*)::int AS requests,MIN(created_at) AS first_at,MAX(created_at) AS last_at
-    FROM error_source
-    WHERE NOT probe AND (COALESCE(is_business_limited,false) OR error_phase='business')
-      AND LOWER(CONCAT_WS(' ',error_message,error_body,upstream_error_message,upstream_error_detail)) LIKE ANY (ARRAY[
-        '%insufficient_balance%','%insufficient account balance%','%balance is insufficient%',
-        '%user balance is insufficient%','%余额不足%','%额度不足%',
-        '%api_key_quota_exhausted%','%api key 额度已用完%'
-      ])
+    FROM customer_billing
     GROUP BY api_user_id,api_user_email,api_key_id,api_key_name,inbound_endpoint,
       COALESCE(requested_model,model,'unknown'),COALESCE(status_code,upstream_status_code,0)
     ORDER BY requests DESC,user_email,api_key_id

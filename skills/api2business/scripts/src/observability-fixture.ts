@@ -7,8 +7,8 @@ import { observabilitySql } from '../../../../src/observability-sql';
 export async function verifyObservationWindow(client: AdminHttpClient, config: AppConfig) {
   const fixture=`WITH accounts AS (
     SELECT 1::bigint id,'fixture upstream'::text name,'openai'::text platform,'apikey'::text type,'{"base_url":"https://fixture.example"}'::jsonb credentials,NULL::timestamptz deleted_at
-  ), users AS (SELECT 99::bigint id,'monitor-user@sub2api.platform-infra.local'::text email),
-  api_keys AS (SELECT 99::bigint id,99::bigint user_id,'api2business-probe-fixture'::text name),
+  ), users AS (SELECT * FROM (VALUES (99::bigint,'monitor-user@sub2api.platform-infra.local'::text),(1,'fixture-user@example.invalid')) t(id,email)),
+  api_keys AS (SELECT * FROM (VALUES (99::bigint,99::bigint,'api2business-probe-fixture'::text),(1,1,'fixture-customer')) t(id,user_id,name)),
   groups AS (SELECT 1::bigint id,'business'::text name),
   usage_logs AS (
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,1::bigint group_id,api_key_id,
@@ -25,9 +25,9 @@ export async function verifyObservationWindow(client: AdminHttpClient, config: A
     ) t(id,request_id,at,api_key_id,ttft,actual_cost,rate_multiplier)
   ), ops_error_logs AS (
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,1::bigint group_id,api_key_id,
-      status_code,NULL::int upstream_status_code,NULL::text network_error_type,false is_business_limited,
+      status_code,NULL::int upstream_status_code,NULL::text network_error_type,(id=8) is_business_limited,
       phase AS error_phase,kind AS error_type,'fixture-model'::text model,NULL::text requested_model,NULL::text upstream_model,
-      CASE WHEN id=7 THEN '/v1/tts' ELSE '/v1/responses' END::text inbound_endpoint,NULL::text error_message,NULL::text error_body,
+      CASE WHEN id=7 THEN '/v1/tts' ELSE '/v1/responses' END::text inbound_endpoint,CASE WHEN id=8 THEN 'insufficient_balance' ELSE NULL END::text error_message,NULL::text error_body,
       NULL::text upstream_error_message,NULL::text upstream_error_detail
     FROM (VALUES
       (1,'r2','2026-01-01T00:50:00Z',1,502,'upstream','gateway'),
@@ -36,7 +36,8 @@ export async function verifyObservationWindow(client: AdminHttpClient, config: A
       (4,'r4','2026-01-01T01:00:00Z',1,502,'upstream','failover_event'),
       (5,'r5','2026-01-01T01:00:00Z',1,0,NULL,NULL),
       (6,'probe-error','2026-01-01T01:00:00Z',99,500,'internal','unknown'),
-      (7,'audio-error','2026-01-01T01:00:00Z',1,502,'upstream','gateway')
+      (7,'audio-error','2026-01-01T01:00:00Z',1,502,'upstream','gateway'),
+      (8,'customer-billing','2026-01-01T01:00:00Z',1,403,'business','api_error')
     ) t(id,request_id,at,api_key_id,status_code,phase,kind)
   ), `;
   const result=await client.sub2ApiRead<{facts:Record<string,any>}>({key:`observability-fixture:${crypto.randomUUID()}`,kind:'observability.fixture',
@@ -50,7 +51,8 @@ export async function verifyObservationWindow(client: AdminHttpClient, config: A
   const facts=result.rows[0]?.facts ?? {};
   const checks={uniqueSuccess: facts.succeeded===2,uniqueFinalFailures:facts.failed===2,recovered:facts.recoveredRequests===1,
     missingId:facts.missingRequestIdRecords===1,excludedProbe:facts.excludedProbeRecords===2,ttft:facts.ttftP95Ms===19500,
-    audioExcluded:facts.excludedAudioRecords===2,
+    audioExcluded:facts.excludedAudioRecords===2,customerBillingExcluded:facts.excludedBusinessLimitRecords===1,
+    customerBillingAttributed:facts.businessLimitBreakdown?.[0]?.user_id===1,
     sameWindowCostRecords:facts.costAccounts?.[0]?.records===5,historicalCost:facts.costAccounts?.[0]?.historical_cost_cny===5,
     unknownRetained:facts.unknownExamples?.[0]?.request_id==='r5'};
   const poolQuality = await verifyPoolQualityWindow(client, config);

@@ -135,20 +135,30 @@ export function costGovernance(facts: Row, cache: Row[], config: AppConfig, end:
 
 export function observerCoverage(instances: Row[], start: string, end: string) {
   const from=Date.parse(start), until=Date.parse(end);
-  let cursor=from, coveredMs=0, failedWrites=0;
+  let cursor=from, coveredMs=0, failedWrites=0, unlocatedFailedWrites=0, lifetimeFailedWrites=0;
   for (const instance of instances) {
     const left=Math.max(from,Date.parse(iso(instance.started_at) ?? "")), right=Math.min(until,Date.parse(iso(instance.last_seen_at) ?? ""));
     if (right>Math.max(left,cursor)) coveredMs += right-Math.max(left,cursor);
-    cursor=Math.max(cursor,right); failedWrites+=Number(instance.failed_writes ?? 0);
+    cursor=Math.max(cursor,right);
+    const lifetime=Number(instance.failed_writes ?? 0);
+    lifetimeFailedWrites+=lifetime;
+    if (Array.isArray(instance.failed_write_times)) {
+      failedWrites+=instance.failed_write_times.filter((at:unknown)=>typeof at==='string'&&Date.parse(at)>=from&&Date.parse(at)<until).length;
+    } else {
+      // Legacy counters have no timestamps: retain uncertainty, never invent a clean window.
+      unlocatedFailedWrites+=lifetime;
+    }
   }
   return { coveredSeconds: coveredMs/1000, windowSeconds: (until-from)/1000, failedWrites,
-    complete: coveredMs >= until-from && failedWrites===0, instances };
+    lifetimeFailedWrites,unlocatedFailedWrites,
+    complete: coveredMs >= until-from && failedWrites===0 && unlocatedFailedWrites===0, instances };
 }
 
 export class OperationalObservability {
   readonly instanceId = crypto.randomUUID();
   readonly startedAt = new Date().toISOString();
   private failedWrites = 0;
+  private failedWriteTimes: string[] = [];
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private pending = new Set<Promise<void>>();
   private beat: Promise<void> | null = null;
@@ -162,8 +172,10 @@ export class OperationalObservability {
   private async touch() {
     if (!this.config.observability) return;
     if (this.beat) return this.beat;
-    this.beat=this.store.observeInstance(this.instanceId,this.startedAt,this.failedWrites,this.config.observability.retentionDays)
-      .catch(() => { this.failedWrites++; console.error(JSON.stringify({ observedAt:new Date().toISOString(), component:"observability",error:"heartbeat_write_failed" })); })
+    const oldest=Date.now()-this.config.observability.retentionDays*86400000;
+    this.failedWriteTimes=this.failedWriteTimes.filter(at=>Date.parse(at)>=oldest);
+    this.beat=this.store.observeInstance(this.instanceId,this.startedAt,this.failedWrites,this.config.observability.retentionDays,[...this.failedWriteTimes])
+      .catch(() => { this.failedWrites++; this.failedWriteTimes.push(new Date().toISOString()); console.error(JSON.stringify({ observedAt:new Date().toISOString(), component:"observability",error:"heartbeat_write_failed" })); })
       .finally(() => { this.beat=null; });
     return this.beat;
   }
@@ -172,7 +184,7 @@ export class OperationalObservability {
     if (!path || !this.config.observability) return;
     const completedAt=new Date().toISOString();
     const write=this.store.observeHttp(completedAt,this.instanceId,path,response.status,durationMs)
-      .catch(() => { this.failedWrites++; console.error(JSON.stringify({ observedAt:completedAt, component:"observability",error:"http_observation_write_failed" })); })
+      .catch(() => { this.failedWrites++; this.failedWriteTimes.push(completedAt); console.error(JSON.stringify({ observedAt:completedAt, component:"observability",error:"http_observation_write_failed" })); })
       .finally(() => this.pending.delete(write));
     this.pending.add(write);
   }

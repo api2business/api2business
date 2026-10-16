@@ -42,10 +42,23 @@ test('30-second TTFT target and incomplete or empty evidence remain distinct',()
 test('observability report keeps user balance and TTFT attribution for diagnosis',()=>{
  expect(observabilitySql).toContain('api_user_email');
  expect(observabilitySql).toContain('businessLimitBreakdown');
+ expect(observabilitySql).toContain('excludedBusinessLimitRecords');
+ expect(observabilitySql).toContain('e.api_user_id IS NOT NULL');
+ expect(observabilitySql).toContain('NOT EXISTS (SELECT 1 FROM customer_billing b WHERE b.request_id=e.request_id)');
  expect(observabilitySql).toContain('%api_key_quota_exhausted%');
  expect(observabilitySql).toContain('%api key 额度已用完%');
  expect(observabilitySql).toContain('ttftBreakdown');
  expect(observabilitySql).toContain('percentile_cont(0.95) WITHIN GROUP (ORDER BY s.first_token_ms)');
+});
+test('observer failures are scoped to the half-open window without erasing legacy uncertainty',()=>{
+ const start='2026-10-07T02:00:00Z',end='2026-10-07T04:00:00Z';
+ const base={started_at:start,last_seen_at:end,failed_writes:3};
+ expect(observerCoverage([{...base,failed_write_times:['2026-10-07T01:59:59Z',end]}],start,end))
+  .toMatchObject({failedWrites:0,lifetimeFailedWrites:3,unlocatedFailedWrites:0,complete:true});
+ expect(observerCoverage([{...base,failed_write_times:[start]}],start,end))
+  .toMatchObject({failedWrites:1,complete:false});
+ expect(observerCoverage([base],start,end))
+  .toMatchObject({unlocatedFailedWrites:3,complete:false});
 });
 test('shared wallets count once, preserve source and distinguish missing from zero',()=>{
  const result=walletGovernance([account(525),account(1500,'https://alias.example'),account(3,'https://missing.example'),account(4,'https://zero.example')],[cache(525,10),cache(1500,0),cache(3,null),cache(4,0)],config,at);
