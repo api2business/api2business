@@ -332,6 +332,9 @@ bun skills/api2business/scripts/api2business-cli.ts \
 
 - CLI 通过 `/api/login` 获取 Cookie，并只在内存中传给 WebProbe；WebProbe 不填写登录表单，Cookie 不进入 argv、日志、报告或磁盘。
 - 需要把负余额或分页结果移入截图时，用 `--click-selector` 点击既有排序或分页控件。
+  - V2 排序表头须带 `[data-sort-bound="1"]`，等待交互绑定后再点。
+  - 例如人民币余额排序使用 `'#v2-account-table [data-sort-key="balance"][data-sort-bound="1"]'`。
+  - 静态表头先于脚本出现，过早点中不会改变排序；采集成功不代表点击生效。
   - 此参数只辅助取景，是否符合验收目标仍须人工看图。
 - 验证重启后账本、缓存、采样和作业状态仍可读取。
 - 失败时按配置、Secret、网络、数据库、worker 和外部 API 的顺序定位首个断点。
