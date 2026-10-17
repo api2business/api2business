@@ -20,10 +20,9 @@ export function authoritativeUsageBalance(result: Record<string, unknown>): bool
     : {};
   const remaining = quota.remaining == null || quota.remaining === "" ? NaN : Number(quota.remaining);
   if (String(quota.unit ?? "").toUpperCase() === "USD" && Number.isFinite(remaining)) return true;
-  // New API's unlimited_quota describes the API key, not the provider wallet,
-  // when account login/billing evidence is unavailable. Do not replace a
-  // previously observed wallet balance with that placeholder state.
-  return quota.unlimited === true && !String(result.warning ?? "").includes("只返回 API Key 配额");
+  // Key-level unlimited quota is not a numeric wallet observation. Warning
+  // wording varies across login/billing failures and must not grant authority.
+  return false;
 }
 
 export function postgresBigintArrayLiteral(values: number[]): string {
@@ -142,8 +141,6 @@ export class OperationsStore {
         AND (
           (jsonb_typeof(result->'quota'->'remaining') = 'number'
             AND UPPER(COALESCE(result->'quota'->>'unit', '')) = 'USD')
-          OR (result->'quota'->>'unlimited' = 'true'
-            AND COALESCE(result->>'warning', '') NOT LIKE '%只返回 API Key 配额%')
         );
       UPDATE api2business_upstream_usage_cache
       SET last_success_result=NULL, last_success_at=NULL

@@ -181,6 +181,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   回退到 `sub2api.idleProbe.intervalSeconds`，具体生效与工作流替换规则见
   `references/upstream-scheduling.md`。
 - 充值候选使用 `upstreams recharge-candidates --over-api <absolute-http(s)-URL>`。
+- 历史钱包回填使用 `upstreams usage-cache restore`，必须以 `--since <ISO时间>` 提供原观测时刻。
+  - 完整参数见操作帮助；只恢复已核实的旧值，不把回填时间作为余额新鲜度。
 - 欠费、低余额和查询超时的判定见 `references/upstream-scheduling.md`。
 - 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api <absolute-http(s)-URL>`；
   同一充值地址只记账一次并恢复该地址账号。余额读取的跨 host `walletKey`、缓存和失败

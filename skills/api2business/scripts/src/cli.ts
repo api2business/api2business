@@ -320,7 +320,7 @@ function help(): Record<string, unknown> {
       "upstreams benchmark [--id <account-id> --model <id> --confirm] --over-api <absolute-http(s)-URL>",
       "upstreams benchmark-status --id <benchmark-run-id> --over-api <absolute-http(s)-URL>",
       "upstreams benchmark-history --id <account-id> [--limit 20] --over-api <absolute-http(s)-URL>",
-      "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api <absolute-http(s)-URL>",
+      "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --since <original-observed-ISO-time> --confirm --over-api <absolute-http(s)-URL>",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams create --platform openai|grok|anthropic --base-url <https-url> --suffix <name> --groups <id,id,...> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api <absolute-http(s)-URL>",
@@ -740,6 +740,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       }
       return await client.upstreamUsageCacheRestore({
         accountId, baseUrl: parsed.baseUrl, remainingUsd: parsed.remainingUsd, confirm: parsed.confirm,
+        observedAt: parsed.since,
       });
     }
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
