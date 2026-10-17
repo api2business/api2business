@@ -14,6 +14,24 @@ function sqlClient(query: (sql: string) => Promise<unknown[]>): SQL {
   return client as unknown as SQL;
 }
 
+test("额度历史以时间索引回读完整窗口、锚点和最近轮次，不扫描全部历史正文", async () => {
+  let queryText = "";
+  const store = new OperationsStore("postgres://fixture", () => sqlClient(async sql => {
+    queryText = sql;
+    return [];
+  }));
+  try {
+    await store.getUpstreamQuotaSamples(9);
+    expect(queryText).toContain("JOIN (");
+    expect(queryText).toContain("selected_rounds USING (sampled_at)");
+    expect(queryText).toContain("SELECT DISTINCT ON (wallet_key) sampled_at");
+    expect(queryText).toContain("WHERE probe_ok=true AND remaining_usd IS NOT NULL");
+    expect(queryText).toContain("ORDER BY sampled_at DESC LIMIT 13");
+    expect(queryText.match(/\bUNION\b/gu)).toHaveLength(2);
+    expect(queryText).not.toContain("OR sampled_at IN");
+  } finally { await store.close(); }
+});
+
 test("成功钱包投影保留probe_ok，低余额候选可以消费真实store返回值", async () => {
   let queryText = "";
   const store = new OperationsStore("postgres://fixture", () => sqlClient(async (sql) => {

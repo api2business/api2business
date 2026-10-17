@@ -172,6 +172,9 @@ export class OperationsStore {
         ADD COLUMN IF NOT EXISTS account_cost_inputs jsonb NOT NULL DEFAULT '[]'::jsonb;
       CREATE INDEX IF NOT EXISTS api2business_upstream_quota_samples_wallet_time_idx
         ON api2business_upstream_quota_samples(wallet_key, sampled_at DESC);
+      CREATE INDEX IF NOT EXISTS api2business_upstream_quota_samples_success_wallet_time_idx
+        ON api2business_upstream_quota_samples(wallet_key, sampled_at DESC)
+        WHERE probe_ok=true AND remaining_usd IS NOT NULL;
       CREATE TABLE IF NOT EXISTS api2business_oauth_runtime_samples (
         sampled_at timestamptz NOT NULL,
         profile text NOT NULL CHECK (profile IN ('codex','grok')),
@@ -681,23 +684,27 @@ export class OperationsStore {
         probe_ok, remaining_usd, cny_per_usd, remaining_cny, source_queried_at,
         api_amount_usd_total, wallet_api_amount_usd_total, account_cost_inputs
       FROM api2business_upstream_quota_samples
-      WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
-         -- A carry-forward anchor must include the entire sampling round.
-         -- A wallet-only row makes scoped cumulative output an incomplete
-         -- baseline and inflates the first one-hour rolling rate.
-         OR sampled_at IN (
+      JOIN (
+        SELECT DISTINCT sampled_at FROM api2business_upstream_quota_samples
+        WHERE sampled_at >= now() - (${hours}::text || ' hours')::interval
+        UNION
+        -- Select entire anchor rounds, but do not OR them into a full-table
+        -- scan of the historical JSON payloads. The time PK serves this join.
+        (
            SELECT DISTINCT ON (wallet_key) sampled_at
            FROM api2business_upstream_quota_samples
            WHERE probe_ok=true AND remaining_usd IS NOT NULL
              AND sampled_at < now() - (${hours}::text || ' hours')::interval
            ORDER BY wallet_key, sampled_at DESC
-         )
-         OR sampled_at IN (
+        )
+        UNION
+        (
            SELECT sampled_at FROM (
              SELECT DISTINCT sampled_at FROM api2business_upstream_quota_samples
              ORDER BY sampled_at DESC LIMIT 13
            ) recent
-         )
+        )
+      ) selected_rounds USING (sampled_at)
       ORDER BY sampled_at, wallet_key
     `);
   }
