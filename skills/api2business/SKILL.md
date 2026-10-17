@@ -218,6 +218,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   [新上游初始化](references/upstream-scheduling.md#新上游初始化)。
   - 创建自动执行；补齐使用 `upstreams initialize --accounts <id,id,...> [--confirm]`。
   - 两者都显式携带 `--over-api <绝对 http(s) URL>`；终态使用 `upstreams status`。
+  - 状态默认显示配置与探活摘要；追加 `--json` 查看完整结果。
 - 新增上游省略 `--rate`；占位费率与最终费率回读也只以该参考为准。
 - 已有上游改配置使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] [--suffix <name>] [--rate <CNY/API_USD>] --confirm --over-api <absolute-http(s)-URL>`。
   - `--base-url` 只合并更新 `credentials.base_url`，不会重置 API key、模型映射、池模式或其他凭据字段。

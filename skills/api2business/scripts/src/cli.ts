@@ -1404,7 +1404,7 @@ export async function runCli(args: string[]): Promise<void> {
         changed: groups.filter((row) => row.platform === platform && row.changed).length,
       })) }, false);
     }
-    else emit(parsed.command.join(" ") === "workflow status" && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
+    else emit(["workflow status", "upstreams status"].includes(parsed.command.join(" ")) && !parsed.json ? summarizeWorkflowStatus(output) : output, parsed.json);
   } catch (error) {
     emit({ ok: false, error: error instanceof Error ? error.message : String(error), valuesPrinted: false }, wantsJson);
     process.exitCode = 1;
