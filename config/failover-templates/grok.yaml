@@ -3,6 +3,11 @@ kind: FailoverTemplate
 name: grok-upstream-failover
 platform: grok
 rules:
+- errorCode: 400
+  keywords:
+  - unknown provider for model grok-4.7
+  durationMinutes: 3
+  description: Grok 上游明确拒绝 grok-4.7 Provider 时短暂冷却并切号
 - errorCode: 401
   keywords:
   - API key is disabled
