@@ -101,6 +101,9 @@ description: >-
 
 ## 生命周期
 
+- `native start|stop|status|logs --help` 直接显示对应操作帮助。
+  - 查看帮助不要求配置存在，不启动服务，也不重印整个业务目录。
+
 ```bash
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml native start --component all
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml native status --component all
@@ -182,7 +185,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   `references/upstream-scheduling.md`。
 - 充值候选使用 `upstreams recharge-candidates --over-api <absolute-http(s)-URL>`。
 - 历史钱包回填使用 `upstreams usage-cache restore`，必须以 `--since <ISO时间>` 提供原观测时刻。
-  - 完整参数见操作帮助；只恢复已核实的旧值，不把回填时间作为余额新鲜度。
+  - `upstreams usage-cache restore --help` 提供独立参数帮助，无需读取配置或连接运行面。
+  - 只恢复已核实的旧值，不把回填时间作为余额新鲜度。
 - 欠费、低余额和查询超时的判定见 `references/upstream-scheduling.md`。
 - 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api <absolute-http(s)-URL>`；
   同一充值地址只记账一次并恢复该地址账号。余额读取的跨 host `walletKey`、缓存和失败

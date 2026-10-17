@@ -1,6 +1,7 @@
 import { verifyObservationWindow } from "./observability-fixture";
 import { observabilityHelp, configureObservability, compactObservation, checkObservability } from "./observability";
 import { runWebScreenshot, webScreenshotHelp } from "./web-screenshot";
+import { historicalBalanceHelp, nativeHelp } from "./operation-help";
 import { measureQuotaMonitor } from './quota-monitor-measure';
 import { randomUUID } from "node:crypto";
 import { AdminHttpClient } from "../../../../src/admin-http-client";
@@ -1266,6 +1267,8 @@ function aggregateSmoke(): Record<string, unknown> {
 export async function runCli(args: string[]): Promise<void> {
   const wantsJson = args.includes("--json");
   try {
+    if (args.includes("--help") && args.includes("native")) return emit(nativeHelp(args[args.indexOf("native") + 1]), wantsJson);
+    if (args.includes("--help") && args.some((item, index) => item === "upstreams" && args[index + 1] === "usage-cache" && args[index + 2] === "restore")) return emit(historicalBalanceHelp(), wantsJson);
     if (args.includes("--help") && args.includes("web") && args[args.indexOf("web") + 1] === "screenshot") return emit(webScreenshotHelp(), wantsJson);
     if (args.includes("--help") && args.includes("gateway")) return emit({ ok: true,
       commands: ["gateway service-policy [--confirm] --over-api <absolute-http(s)-URL> [--json]"],
