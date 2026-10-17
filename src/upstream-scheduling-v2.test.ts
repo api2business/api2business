@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config";
-import { UpstreamSchedulingV2Service } from "./upstream-scheduling-v2";
+import { UpstreamSchedulingV2Error, UpstreamSchedulingV2Service } from "./upstream-scheduling-v2";
 
 function fixture(usageRows: unknown[] = [{
   account_id: 101,
@@ -87,6 +87,33 @@ function fixture(usageRows: unknown[] = [{
 }
 
 describe("upstream scheduling v2", () => {
+  for (const operation of ["modelSyncPlan", "modelSyncRun"] as const) {
+    test(`${operation} reports an out-of-scope account as a client error`, async () => {
+      const { service, operations } = fixture();
+      Object.assign(operations, {
+        modelSyncPlan: async () => { throw new Error("指定账号不属于目标作用域"); },
+        runModelSync: async () => { throw new Error("指定账号不属于目标作用域"); },
+      });
+      try {
+        await service[operation]("codex", [303]);
+        throw new Error("expected account validation failure");
+      } catch (error) {
+        expect(error).toBeInstanceOf(UpstreamSchedulingV2Error);
+        expect(error).toMatchObject({ status: 400, code: "account_outside_scope", message: "指定账号不属于目标作用域" });
+      }
+    });
+
+    test(`${operation} preserves unexpected service failures`, async () => {
+      const { service, operations } = fixture();
+      const failure = new Error("ranking query failed");
+      Object.assign(operations, {
+        modelSyncPlan: async () => { throw failure; },
+        runModelSync: async () => { throw failure; },
+      });
+      await expect(service[operation]("codex", [101])).rejects.toBe(failure);
+    });
+  }
+
   test("projects Codex data and reports a matching read-only boundary", async () => {
     const { service, row } = fixture();
     const snapshot = await service.snapshot("codex");

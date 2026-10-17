@@ -458,12 +458,26 @@ export class UpstreamSchedulingV2Service {
 
   async modelSyncPlan(scopeName?: string | null, accountIds: number[] = []) {
     const selected = this.scope(scopeName).name;
-    return await this.operations.modelSyncPlan(selected, accountIds);
+    try {
+      return await this.operations.modelSyncPlan(selected, accountIds);
+    } catch (error) {
+      if (error instanceof Error && error.message === "指定账号不属于目标作用域") {
+        throw new UpstreamSchedulingV2Error(400, "account_outside_scope", error.message);
+      }
+      throw error;
+    }
   }
 
   async modelSyncRun(scopeName?: string | null, accountIds: number[] = []) {
     const selected = this.scope(scopeName).name;
-    return await this.operations.runModelSync(selected, "manual", accountIds);
+    try {
+      return await this.operations.runModelSync(selected, "manual", accountIds);
+    } catch (error) {
+      if (error instanceof Error && error.message === "指定账号不属于目标作用域") {
+        throw new UpstreamSchedulingV2Error(400, "account_outside_scope", error.message);
+      }
+      throw error;
+    }
   }
 
   async modelSyncHistory(scopeName?: string | null, page = 1) {
