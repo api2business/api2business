@@ -19,11 +19,11 @@ async function renderer() {
     renderDonut: () => {}, bindHistoryChartTooltip: () => {}, updateTableSortHeaders: () => {},
   };
   runInNewContext(source.replace(/^import .*$/gm, "").replace("export async function", "async function")
-    + "\nthis.render = { state, renderQuota, renderAccounts };", context);
+    + "\nthis.render = { state, renderQuota, renderAccounts, accountSortValue };", context);
   return { node, ...context.render };
 }
 
-test("V2 renders original USD and converted CNY separately, including hourly chart units", async () => {
+test("V2 renders converted CNY balances while output and hourly usage remain USD", async () => {
   const view = await renderer();
   // A non-unit valuation makes a relabelled dollar value distinguishable from CNY.
   view.renderQuota({
@@ -51,27 +51,47 @@ test("V2 renders original USD and converted CNY separately, including hourly cha
     usage: { apiAmountUsd: 42, costRateCnyPerApiUsd: 0.2 } }];
   view.renderAccounts();
   const cells = view.node("#v2-account-body").innerHTML.split("<td");
-  expect(cells[5]).toContain("$10.000");
-  expect(cells[5]).not.toContain("¥");
+  expect(cells[5]).toContain("¥70.00");
+  expect(cells[5]).not.toContain("$10.000");
   expect(cells[6]).toContain("¥0.2000/API 美元");
   expect(cells[7]).toContain("$42.000");
 });
 
-test("V2 preserves USD debt precision and distinguishes zero from missing money", async () => {
+test("V2 preserves converted CNY debt precision and distinguishes zero from missing money", async () => {
   const view = await renderer();
   view.state.accounts = [-0.000004, 0, null].map((remaining, index) => ({
     accountId: index + 1, quotaCacheStatus: "cached", quota: { unit: "USD", remaining },
+    accountBalanceCny: remaining === null ? null : remaining * 7,
     usage: { apiAmountUsd: remaining },
   }));
   view.renderAccounts();
   const rows = view.node("#v2-account-body").innerHTML.split("<tr>").slice(1);
-  expect(rows[0]).toContain("$-0.000004");
-  expect(rows[0]).not.toContain("$-0.000<");
-  expect(rows[1]).toContain("$0.000");
-  expect(rows[2]).not.toContain("$0.000");
-  expect(rows[2]).toContain("—");
+  const cells = rows.map((row: string) => row.split("<td")[5]);
+  expect(cells[0]).toContain("¥-0.000028");
+  expect(cells[0]).not.toContain("¥-0.00<");
+  expect(cells[1]).toContain("¥0.00");
+  expect(cells[2]).not.toContain("¥0.00");
+  expect(cells[2]).toContain("—");
   view.renderQuota({ totalRemainingCny: -0.000004, consumedCny: 0, apiAmountUsd: null });
   expect(view.node("#v2-quota-total").textContent).toBe("¥-0.000004");
   expect(view.node("#v2-quota-consumed").textContent).toBe("¥0.00");
   expect(view.node("#v2-quota-output").textContent).toBe("暂不可计算");
+});
+
+test("V2 sorts by converted balances and keeps missing valuation distinct from raw dollars", async () => {
+  const view = await renderer();
+  view.state.accountSort = { key: "balance", direction: "desc" };
+  view.state.accounts = [
+    { accountId: 1, accountName: "higher-raw-usd", quota: { remaining: 100 }, accountBalanceCny: 10 },
+    { accountId: 2, accountName: "higher-cny-value", quota: { remaining: 20 }, accountBalanceCny: 40 },
+    { accountId: 3, accountName: "missing-valuation", quota: { remaining: 1000 }, accountBalanceCny: null },
+  ].map(row => ({ ...row, quotaCacheStatus: "cached" }));
+  view.renderAccounts();
+  const html = view.node("#v2-account-body").innerHTML;
+  expect(html.indexOf("higher-cny-value")).toBeLessThan(html.indexOf("higher-raw-usd"));
+  expect(html.indexOf("higher-raw-usd")).toBeLessThan(html.indexOf("missing-valuation"));
+  const missingBalance = html.split("<tr>")[3].split("<td")[5];
+  expect(missingBalance).toContain("—");
+  expect(missingBalance).not.toContain("1,000");
+  expect(view.accountSortValue(view.state.accounts[0], "balance")).toBe(10);
 });

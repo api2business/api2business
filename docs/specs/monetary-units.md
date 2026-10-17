@@ -13,7 +13,7 @@
 
 | 页面或数据 | 来源与换算 | 展示单位 |
 | --- | --- | --- |
-| V2 账号原始额度 | `quota.remaining`，`quota.unit=USD` | 美元 |
+| V2 账号余额 | 服务端按钱包估值规则换算的 `accountBalanceCny` | 人民币 |
 | V2、上游与 OAuth 的 API 产出、消耗额度、剩余预期 | `apiAmountUsd`、`consumedApiAmountUsd`、`remainingExpectedApiAmountUsd` 等 | API 美元 |
 | API 产出与消耗速率图、指标及提示 | `sampleApiAmountUsdPerHour`、`rollingApiAmountUsdPerHour` 等 | API 美元/小时 |
 | 钱包汇总、可调度余额、质量资产与余额趋势 | 已按钱包估值规则换算的 `remainingCny`、`totalRemainingCny` 等 | 人民币 |
@@ -24,7 +24,8 @@
 | 用户实际充值、采购退款、上游充值、经营收支及预算 | 人民币交易或账本中的 `*Cny` | 人民币 |
 
 - 同一页面可同时出现上述单位，表头、指标辅助文字和图表提示必须与实际值一致。
-  - V2 的账号原始美元额度与页面上方人民币钱包汇总是两种不同口径。
+  - V2 账号余额的展示和排序均使用人民币估值，与页面上方钱包汇总保持同一换算口径。
+  - 原始美元额度保留在数据层，不在人民币余额缺失时直接改符号或作为同列回退值。
   - 单位成本的分子是人民币，分母是 API 美元，不得仅写成美元金额。
   - 负余额及小额欠费精度继续遵循
     [额度监控](../../skills/api2business/references/quota-monitoring.md#数据口径)。

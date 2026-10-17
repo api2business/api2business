@@ -111,6 +111,8 @@
 
 ## 缓存与刷新
 
+- 自动巡检的修复与外协例外见
+  [巡检处置范围](../../../docs/specs/operational-observability.md#巡检处置范围)。
 - 余额陈旧先核对最近成功来源时间、最近尝试和原刷新作业错误。
   - `upstreams usage-cache` 的 `results` 保留共享钱包最近成功余额；
     `lastAttemptResults` 单独披露最近尝试及失败原因，不用成功投影覆盖失败。

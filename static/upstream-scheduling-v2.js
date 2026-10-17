@@ -190,7 +190,7 @@ function accountSortValue(row, key) {
     status: row.currentStatus ?? row.status,
     score: row.score,
     priority: row.priority,
-    balance: row.quota?.remaining,
+    balance: row.accountBalanceCny,
     cost: accountCost(row),
     output: row.usage?.apiAmountUsd,
     sample: row.latestSampleAt,
@@ -210,7 +210,7 @@ function renderAccounts() {
       ? '不限额'
       : row.quotaCacheStatus === 'unavailable'
         ? '缓存不可用'
-        : row.quota?.remaining == null ? '—' : usd(row.quota.remaining)
+        : cny(row.accountBalanceCny)
     const quotaLabel = row.quotaCacheStatus === 'cached'
       ? `额度缓存 · ${escapeHtml(quotaSample.label)}`
       : row.quotaCacheStatus === 'unlimited'

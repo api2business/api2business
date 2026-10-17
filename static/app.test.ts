@@ -35,7 +35,7 @@ test("V2 account table renders quota cache coverage", async () => {
   const source = await read("./upstream-scheduling-v2.js");
   const html = await read("./upstream-scheduling-v2.html");
   expect(source).toContain("quotaCoverage");
-  expect(source).toContain("row.quota?.remaining");
+  expect(source).toContain("cny(row.accountBalanceCny)");
   expect(source).toContain("quotaCacheStatus");
   expect(html).toContain('id="v2-scope-switch"');
   expect(html).toContain('id="v2-account-body"');
