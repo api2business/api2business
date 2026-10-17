@@ -5,6 +5,30 @@ const costInputs = (apiAmountUsdTotal: number, costRateCnyPerApiUsd: number, acc
   accountId, apiAmountUsdTotal, costRateCnyPerApiUsd, source: "detected" as const,
 }]);
 
+test("prepared chart summaries match independent prefixes across resets and incomplete counters", () => {
+  for (const incompleteRound of [-1, 0, 4]) {
+    const samples = Array.from({ length: 12 }, (_, round) =>
+      Array.from({ length: 3 }, (_, wallet) => {
+        const value = round < 6 ? 10 + round : round - 6;
+        return {
+          walletKey: `https://${wallet}.test`, accountId: wallet + 1,
+          sampledAt: new Date(Date.UTC(2026, 9, 17, 0, round * 5)).toISOString(),
+          sourceQueriedAt: null, schedulable: wallet !== 2, status: "active", provider: "sub2api", probeOk: true,
+          remainingUsd: 100 - round, remainingCny: 100 - round, cnyPerUsd: 1,
+          apiAmountUsdTotal: value * 3,
+          accountCostInputs: round === incompleteRound ? [] : costInputs(value, wallet === 1 ? 0.2 : 0.1, wallet + 1),
+        };
+      })).flat();
+    for (const point of quotaHistory(samples)) {
+      const expected = summarizeQuotaSamples(samples.filter(row => row.sampledAt <= point.sampledAt));
+      for (const key of ["totalRemainingCny", "schedulableRemainingCny", "consumedCny", "apiAmountUsd",
+        "sampleRealtimeCostCnyPerApiUsd", "realtimeCostCnyPerApiUsd"] as const) {
+        expect(point[key]).toEqual(expected[key]);
+      }
+    }
+  }
+});
+
 test("summaries and history retain debts without treating them as spendable funds", () => {
   const samples = buildQuotaSamples([10, -2, 0].map((remaining, index) => ({
     accountId: index + 1, baseUrl: `https://${index}.test`, ok: true, schedulable: true,

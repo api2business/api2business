@@ -11,7 +11,7 @@ import { configuredWalletKey, preferSharedWalletBalance, usageBalanceSourceAt, u
 type Row = Record<string, unknown>;
 
 interface V2SnapshotData {
-  sectionStatus?: Record<string, { state: string; observedAt: string | null; error: string | null }>;
+  sectionStatus?: Record<string, { state: string; observedAt: string | null; error: string | null; durationMs?: number }>;
   complete?: boolean;
   lastCompleteAt?: string | null;
   refreshedAt: string | null;
@@ -493,7 +493,13 @@ export class UpstreamSchedulingV2Service {
     if (!scope.features.scoreRead) {
       throw new UpstreamSchedulingV2Error(409, "feature_disabled", `${scopeName}.features.scoreRead=false`);
     }
-    const scoreSnapshot = object(await this.dispatcher.dispatch({ kind: "scores.get" }));
+    const durations = new Map<string, number>();
+    const timed = async <T>(name: string, read: () => Promise<T>): Promise<T> => {
+      const started = performance.now();
+      try { return await read(); }
+      finally { durations.set(name, Math.round((performance.now() - started) * 10) / 10); }
+    };
+    const scoreSnapshot = object(await timed("scores", () => this.dispatcher.dispatch({ kind: "scores.get" })));
     const sourceAccounts = records(scoreSnapshot.accounts);
     const accounts = sourceAccounts.filter((row) => accountBelongsToScope(row, scope));
     const qualityProfile = scope.platform === "openai"
@@ -503,27 +509,27 @@ export class UpstreamSchedulingV2Service {
         : "grok";
     const accountIds = accounts.map((row) => Number(row.accountId));
     const results = await Promise.allSettled([
-      this.readSection(() => this.operations.poolQualitySummary(qualityProfile), "pool-quality"),
-      this.readSection(() => this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all", priority: "automatic" }), "errors"),
-      this.readSection(() => this.operations.priorityHistory(), "priority-history"),
-      this.readSection(() => this.operations.upstreamQuotaSummary(accountIds), "quota"),
-      this.readSection(() => accountIds.length ? this.operations.getUpstreamUsageCache([]) : Promise.resolve([]), "usage-cache"),
+      timed("pool-quality", () => this.readSection(() => this.operations.poolQualitySummary(qualityProfile), "pool-quality")),
+      timed("errors", () => this.readSection(() => this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all", priority: "automatic" }), "errors")),
+      timed("priority-history", () => this.readSection(() => this.operations.priorityHistory(), "priority-history")),
+      timed("quota", () => this.readSection(() => this.operations.upstreamQuotaSummary(accountIds), "quota")),
+      timed("usage-cache", () => this.readSection(() => accountIds.length ? this.operations.getUpstreamUsageCache([]) : Promise.resolve([]), "usage-cache")),
       scope.features.idleProbe
-        ? this.readSection(() => this.operations.idleProbeHistory(1, 10, scopeName), "probe-history")
+        ? timed("probe-history", () => this.readSection(() => this.operations.idleProbeHistory(1, 10, scopeName), "probe-history"))
         : Promise.resolve({ records: [], pagination: { page: 1, totalPages: 1, total: 0 } }),
       typeof this.operations.modelSyncHistory === "function"
-        ? this.readSection(() => this.operations.modelSyncHistory(1, 10, scopeName), "model-sync-history")
+        ? timed("model-sync-history", () => this.readSection(() => this.operations.modelSyncHistory(1, 10, scopeName), "model-sync-history"))
         : Promise.resolve({ ok: true, scope: scopeName, automaticEnabled: false, batchSize: this.configuration().modelSync.batchSize, intervalSeconds: this.configuration().modelSync.intervalSeconds, records: [], pagination: { page: 1, totalPages: 1, total: 0 }, valuesPrinted: false }),
     ]);
     const sectionStatus: NonNullable<V2SnapshotData["sectionStatus"]> = {
       scores: { state: scoreSnapshot.ok === false ? "unavailable" : "fresh",
         observedAt: scoreSnapshot.refreshedAt == null ? null : String(scoreSnapshot.refreshedAt),
-        error: scoreSnapshot.ok === false ? String(scoreSnapshot.error ?? "score snapshot unavailable") : null },
+        error: scoreSnapshot.ok === false ? String(scoreSnapshot.error ?? "score snapshot unavailable") : null, durationMs: durations.get("scores") },
     };
     const section = <T>(index: number, fallback: T, name: string): T => {
       const result = results[index];
       if (result?.status === "fulfilled" && object(result.value).ok !== false) {
-        sectionStatus[name] = { state: "fresh", observedAt: new Date().toISOString(), error: null };
+        sectionStatus[name] = { state: "fresh", observedAt: new Date().toISOString(), error: null, durationMs: durations.get(name) ?? 0 };
         return result.value as T;
       }
       const reason = result?.status === "rejected" ? result.reason
@@ -531,7 +537,7 @@ export class UpstreamSchedulingV2Service {
       const message = reason instanceof Error ? reason.message : String(reason);
       const previous = fallbackData?.sectionStatus?.[name];
       sectionStatus[name] = { state: previous?.observedAt ? "stale" : "unavailable",
-        observedAt: previous?.observedAt ?? null, error: message };
+        observedAt: previous?.observedAt ?? null, error: message, durationMs: durations.get(name) };
       console.error(JSON.stringify({
         ok: false,
         component: "upstream-scheduling-v2-section",

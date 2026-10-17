@@ -91,6 +91,8 @@ describe("upstream scheduling v2", () => {
     const { service, row } = fixture();
     const snapshot = await service.snapshot("codex");
     expect(snapshot.scope).toBe("codex");
+    expect(snapshot.data.sectionStatus?.scores?.durationMs).toBeGreaterThanOrEqual(0);
+    expect(snapshot.data.sectionStatus?.quota?.durationMs).toBeGreaterThanOrEqual(0);
     expect(snapshot.data.accounts).toHaveLength(1);
     expect(snapshot.data.accounts[0]).toMatchObject(row);
     expect(snapshot.data.accounts[0]).toMatchObject({

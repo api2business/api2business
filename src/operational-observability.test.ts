@@ -112,6 +112,10 @@ test('non API-key usage is explicitly out of scope instead of missing reconcilia
 test('instrumentation excludes worker, login and itself and never stores dynamic paths',()=>{
  for(const path of ['/health','/api/login','/api/internal/execute-worker-operation','/api/observability/report','/api/admin/read-status']) expect(observationPath(path)).toBeNull();
  expect(observationPath('/api/upstreams/secret-looking-id/delete')).toBe('/api/upstreams/:operation');
+ expect(observationPath('/api/v2/upstream-scheduling/snapshot')).toBe('/api/v2/upstream-scheduling/snapshot');
+ expect(observationPath('/api/v2/upstream-scheduling/model-sync/plan')).toBe('/api/v2/upstream-scheduling/model-sync/plan');
+ expect(observationPath('/api/v2/upstream-scheduling/secret-looking-id')).toBe('/api/v2/:operation');
+ expect(observationPath('/api/v2/upstream-scheduling/snapshot?scope=secret')).toBe('/api/v2/:operation');
 });
 test('new deployment, restart gaps and write loss cannot claim a complete SLO window',()=>{
  const start='2026-10-07T02:00:00Z',end='2026-10-07T04:00:00Z';

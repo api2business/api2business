@@ -177,7 +177,7 @@ function walletCostObservations(samples: UpstreamQuotaSample[]): WalletCostObser
  * when a complete cumulative baseline is present across two consecutive
  * sampling rounds.
  */
-function apiOutputObservations(samples: UpstreamQuotaSample[]): ApiOutputObservation[] {
+function prepareOutputObservations(samples: UpstreamQuotaSample[]) {
   const byTimestamp = new Map<string, number>();
   const accountByTimestamp = new Map<string, Map<number, number>>();
   for (const sample of samples) {
@@ -198,14 +198,22 @@ function apiOutputObservations(samples: UpstreamQuotaSample[]): ApiOutputObserva
     }
   }
   const points = [...byTimestamp.entries()].sort((left, right) => Date.parse(left[0]) - Date.parse(right[0]));
-  const completeAccountCounters = points.length > 0 && points.every(([sampledAt, aggregate]) => {
+  const incompletePoints = points.filter(([sampledAt, aggregate]) => {
     const accounts = accountByTimestamp.get(sampledAt);
-    if (!accounts || accounts.size === 0) return false;
+    if (!accounts || accounts.size === 0) return true;
     const total = [...accounts.values()].reduce((sum, value) => sum + value, 0);
-    return Math.abs(total - aggregate) <= Math.max(0.000001, Math.abs(aggregate) * 0.000000001);
+    return !(Math.abs(total - aggregate) <= Math.max(0.000001, Math.abs(aggregate) * 0.000000001));
   });
-  if (completeAccountCounters) return accountOutputObservations(points, accountByTimestamp);
-  return aggregateOutputObservations(points);
+  return {
+    firstIncompleteAt: incompletePoints.length ? Math.min(...incompletePoints.map(([at]) => Date.parse(at))) : Infinity,
+    account: accountOutputObservations(points, accountByTimestamp),
+    aggregate: aggregateOutputObservations(points),
+  };
+}
+
+function apiOutputObservations(samples: UpstreamQuotaSample[]): ApiOutputObservation[] {
+  const prepared = prepareOutputObservations(samples);
+  return prepared.firstIncompleteAt === Infinity ? prepared.account : prepared.aggregate;
 }
 
 function aggregateOutputObservations(points: Array<[string, number]>): ApiOutputObservation[] {
@@ -362,6 +370,11 @@ export function buildQuotaSamples(
 }
 
 export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHours = 1) {
+  return summarizePreparedQuotaSamples(samples, windowHours);
+}
+
+function summarizePreparedQuotaSamples(samples: UpstreamQuotaSample[], windowHours: number,
+  prepared?: { output: ApiOutputObservation[]; cost: WalletCostObservation[] }) {
   const latestAt = samples.reduce((latest, row) => Math.max(latest, Date.parse(row.sampledAt)), 0);
   if (!latestAt) return {
     sampledAt: null, totalRemainingCny: null, schedulableRemainingCny: null,
@@ -424,7 +437,7 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
       ? Math.max(0, (Date.parse(productionPoints.at(-1)![0]) - Date.parse(productionPoints[0]![0])) / 3_600_000)
       : 0;
   } else {
-    const outputWindow = apiOutputObservations(samples)
+    const outputWindow = (prepared?.output ?? apiOutputObservations(samples))
       .filter((observation) => observation.endedAt > cutoffAt && observation.endedAt <= latestAt);
     const lastOutputResetAt = Math.max(0, ...outputWindow.filter((observation) => observation.reset).map((observation) => observation.endedAt));
     const outputObservations = outputWindow.filter((observation) => !observation.reset && observation.endedAt > lastOutputResetAt);
@@ -435,7 +448,7 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
     // interval into an abnormally large first point.
     burnWindowHours = outputObservations.length > 0 ? windowHours : 0;
   }
-  const costObservations = walletCostObservations(samples)
+  const costObservations = (prepared?.cost ?? walletCostObservations(samples))
     .filter((observation) => observation.endedAt >= cutoffAt && observation.endedAt <= latestAt);
   const currentCostObservations = costObservations.filter((observation) => observation.endedAt === latestAt);
   const costConsumedCny = costObservations.reduce((sum, observation) => sum + observation.consumedCny, 0);
@@ -479,7 +492,11 @@ export function summarizeQuotaSamples(samples: UpstreamQuotaSample[], windowHour
 export function quotaHistory(samples: UpstreamQuotaSample[], windowHours = 1, displayHours = 8) {
   const timestamps = [...new Set(samples.map((row) => row.sampledAt))]
     .sort((a, b) => Date.parse(a) - Date.parse(b));
-  const outputObservations = apiOutputObservations(samples);
+  // Pair counters once, not once per chart point. Preserve the original
+  // prefix-dependent fallback when a later round has incomplete counters.
+  const prepared = prepareOutputObservations(samples);
+  const outputObservations = prepared.firstIncompleteAt === Infinity ? prepared.account : prepared.aggregate;
+  const costs = walletCostObservations(samples);
   const history = timestamps.map((sampledAt) => {
     const end = Date.parse(sampledAt);
     const currentOutput = outputObservations.filter((observation) => observation.endedAt === end);
@@ -492,7 +509,10 @@ export function quotaHistory(samples: UpstreamQuotaSample[], windowHours = 1, di
       const at = Date.parse(row.sampledAt);
       return at <= end;
     });
-    const summary = summarizeQuotaSamples(historical, windowHours);
+    const summary = summarizePreparedQuotaSamples(historical, windowHours, {
+      output: end < prepared.firstIncompleteAt ? prepared.account : prepared.aggregate,
+      cost: costs,
+    });
     return {
       sampledAt,
       totalRemainingCny: summary.totalRemainingCny,

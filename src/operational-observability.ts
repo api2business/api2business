@@ -25,6 +25,7 @@ export function observationPath(path: string): string | null {
   if (!path.startsWith("/api/") || /^\/api\/(?:internal|observability|login|logout)(?:\/|$)/u.test(path)
     || path === "/api/admin/read-status") return null;
   // Never persist free-form path segments, query strings, credentials or request bodies.
+  if (/^\/api\/v2\/upstream-scheduling\/(?:scopes|snapshot|plan|probe-history|model-sync(?:\/plan|\/run)?)$/u.test(path)) return path;
   const parts = path.split("/");
   return parts.slice(0, 3).join("/") + (parts.length > 3 ? "/:operation" : "");
 }
