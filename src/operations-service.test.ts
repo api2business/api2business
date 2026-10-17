@@ -47,13 +47,17 @@ test("restores one operator-confirmed historical successful wallet snapshot", as
     accountId: 49,
     baseUrl: "https://wallet.example.com/v1",
     remainingUsd: 13.95879651,
+    observedAt: "2026-10-04T16:24:14.958Z",
     confirm: true,
   });
   expect(result).toMatchObject({ mutation: true, accountId: 49, baseUrl: "https://wallet.example.com", remainingUsd: 13.95879651 });
   expect(restored[0]).toMatchObject({ accountId: 49, result: { ok: true, provider: "operator-confirmed-history" } });
-  await service.restoreUpstreamUsageSuccess({ accountId: 49, baseUrl: "https://wallet.example.com", remainingUsd: -0.00203599, confirm: true });
+  expect(restored[0]).toMatchObject({ result: { queriedAt: "2026-10-04T16:24:14.958Z",
+    walletBalance: { observedAt: "2026-10-04T16:24:14.958Z", sourceAccountId: 49 } } });
+  await service.restoreUpstreamUsageSuccess({ accountId: 49, baseUrl: "https://wallet.example.com", remainingUsd: -0.00203599, observedAt: "2026-10-04T16:24:14.958Z", confirm: true });
   expect(restored[1]).toMatchObject({ result: { ok: true, quota: { remaining: -0.00203599 } } });
   await expect(service.restoreUpstreamUsageSuccess({ accountId: 49, baseUrl: "https://wallet.example.com", remainingUsd: null, confirm: true })).rejects.toThrow("有限 USD");
+  await expect(service.restoreUpstreamUsageSuccess({ accountId: 49, baseUrl: "https://wallet.example.com", remainingUsd: 1, confirm: true })).rejects.toThrow("原观测时间");
 });
 
 test("plan type refunds make group weighted cost equal the net total", () => {

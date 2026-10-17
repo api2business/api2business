@@ -1,6 +1,7 @@
 import { verifyObservationWindow } from "./observability-fixture";
 import { observabilityHelp, configureObservability, compactObservation, checkObservability } from "./observability";
 import { runWebScreenshot, webScreenshotHelp } from "./web-screenshot";
+import { historicalBalanceHelp, nativeHelp } from "./operation-help";
 import { measureQuotaMonitor } from './quota-monitor-measure';
 import { randomUUID } from "node:crypto";
 import { AdminHttpClient } from "../../../../src/admin-http-client";
@@ -320,7 +321,7 @@ function help(): Record<string, unknown> {
       "upstreams benchmark [--id <account-id> --model <id> --confirm] --over-api <absolute-http(s)-URL>",
       "upstreams benchmark-status --id <benchmark-run-id> --over-api <absolute-http(s)-URL>",
       "upstreams benchmark-history --id <account-id> [--limit 20] --over-api <absolute-http(s)-URL>",
-      "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api <absolute-http(s)-URL>",
+      "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --since <original-observed-ISO-time> --confirm --over-api <absolute-http(s)-URL>",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams initialize --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL> (模板、探活及 Codex 强制 Responses)",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
@@ -755,6 +756,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       }
       return await client.upstreamUsageCacheRestore({
         accountId, baseUrl: parsed.baseUrl, remainingUsd: parsed.remainingUsd, confirm: parsed.confirm,
+        observedAt: parsed.since,
       });
     }
     const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
@@ -1298,6 +1300,8 @@ export async function runCli(args: string[]): Promise<void> {
         retry: "重试使用原账号 ID，无需供应商密钥；不会重建账号或并入默认业务分组。",
       }, wantsJson);
     }
+    if (args.includes("--help") && args.includes("native")) return emit(nativeHelp(args[args.indexOf("native") + 1]), wantsJson);
+    if (args.includes("--help") && args.some((item, index) => item === "upstreams" && args[index + 1] === "usage-cache" && args[index + 2] === "restore")) return emit(historicalBalanceHelp(), wantsJson);
     if (args.includes("--help") && args.includes("web") && args[args.indexOf("web") + 1] === "screenshot") return emit(webScreenshotHelp(), wantsJson);
     if (args.includes("--help") && args.includes("gateway")) return emit({ ok: true,
       commands: ["gateway service-policy [--confirm] --over-api <absolute-http(s)-URL> [--json]"],

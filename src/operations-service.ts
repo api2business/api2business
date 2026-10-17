@@ -614,18 +614,22 @@ export class OperationsService {
     if (input.remainingUsd == null || String(input.remainingUsd).trim() === "" || typeof input.remainingUsd === "boolean" || !Number.isFinite(remainingUsd)) throw new Error("历史成功余额必须是有限 USD 数值，允许欠费负数");
     if (!baseUrl.startsWith("https://")) throw new Error("历史成功快照 base_url 无效");
     if (input.confirm !== true) throw new Error("历史成功快照回填必须显式确认");
+    const observedMs = typeof input.observedAt === "string" ? Date.parse(input.observedAt) : NaN;
+    if (!Number.isFinite(observedMs) || observedMs > Date.now()) throw new Error("历史成功快照必须提供不晚于当前的原观测时间 observedAt");
+    const observedAt = new Date(observedMs).toISOString();
     const result = {
       ok: true,
       accountId,
       baseUrl,
       provider: "operator-confirmed-history",
       quota: { unit: "USD", remaining: remainingUsd },
-      queriedAt: new Date().toISOString(),
+      queriedAt: observedAt,
+      walletBalance: { observedAt, sourceAccountId: accountId },
       restored: true,
       valuesPrinted: false,
     };
     await this.store.restoreUpstreamUsageSuccess(accountId, result);
-    return { ok: true, mutation: true, accountId, baseUrl, remainingUsd, valuesPrinted: false };
+    return { ok: true, mutation: true, accountId, baseUrl, remainingUsd, observedAt, valuesPrinted: false };
   }
 
   async setUpstreamUsageCache(results: Array<Record<string, unknown>>, apiAmountUsdTotal: number | null = null, recordSample = false): Promise<void> {

@@ -27,3 +27,10 @@ test("successful provider debt is authoritative; missing or failed balances are 
     quota: { remaining, unit: "USD" } })).toBeFalse();
   expect(authoritativeUsageBalance({ ok: false, quota: { remaining: -0.01, unit: "USD" } })).toBeFalse();
 });
+
+test("billing timeout and key unlimited never replace numeric wallet history", () => {
+  for (const warning of [undefined, "New API 账号级 billing 查询失败：The operation timed out.", "AUTH_CAPTCHA_REQUIRED"]) {
+    expect(authoritativeUsageBalance({ ok: true, provider: "new-api", warning,
+      quota: { unit: null, remaining: null, unlimited: true } })).toBeFalse();
+  }
+});

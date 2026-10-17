@@ -13,11 +13,10 @@
 
 | 页面或数据 | 来源与换算 | 展示单位 |
 | --- | --- | --- |
-| V2 账号余额 | 服务端按钱包估值规则换算的 `accountBalanceCny` | 人民币 |
+| V2 与上游账号余额估值 | 服务端按钱包估值规则换算的 `accountBalanceCny` | 人民币 |
 | V2、上游与 OAuth 的 API 产出、消耗额度、剩余预期 | `apiAmountUsd`、`consumedApiAmountUsd`、`remainingExpectedApiAmountUsd` 等 | API 美元 |
 | API 产出与消耗速率图、指标及提示 | `sampleApiAmountUsdPerHour`、`rollingApiAmountUsdPerHour` 等 | API 美元/小时 |
 | 钱包汇总、可调度余额、质量资产与余额趋势 | 已按钱包估值规则换算的 `remainingCny`、`totalRemainingCny` 等 | 人民币 |
-| 上游账户余额的人民币估值 | `accountBalanceCny` 或美元余额乘钱包估值倍率 | 人民币；原始美元值独立标注 |
 | 上游实际支出及巡检成本 | 完成供应商倍率及人民币估值换算的 `consumedCny`、`totalCostCny` 等 | 人民币 |
 | 上游与 OAuth、BugTeam 单位成本 | `costRateCnyPerApiUsd`、`cnyPerApiUsd` 等 | 人民币/API美元 |
 | 用户用量、用户余额与抽奖额度 | 标准 API 美元用量、`balanceUsd`、`prizeAmountUsd` | 美元 |

@@ -37,7 +37,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 缺失成本仍为未知；已知成本可用于保守估算，不能当作完整成本或续航保证。
   - 未来 24 小时预算的取数和余量只见
     [运维观测规格](../../../docs/specs/operational-observability.md)，不在这里另写公式。
-  - 完整历史不足时继续给出充值风险、估算金额或临时备付建议，不得因此结论为“无需充值”。
+  - 历史不足时的估算、备付与不处置例外统一服从上述规格，不另设规则。
 - 成本范围、非 API-key 的“不需对账”和覆盖率分母只见
   [钱包与实际成本](../../../docs/specs/operational-observability.md#钱包与实际成本)。
 - `upstream-scheduling-v2 snapshot` 的缓存读取、刷新与互斥参数只见
@@ -50,8 +50,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `ttftBreakdown` 按模型和上游账号统计流式 TTFT 的样本数、P50、P95 和最大值，避免少量
     慢模型样本被全局 P95 隐藏。
   - 发现成功率或 TTFT 异常时先看这两个分解，再决定是下游余额、单个供应商模型还是公共运行面问题。
-  - 服务质量与下游账务的最终判定遵循 UniDesk 的
-    [自动巡检服务质量归因](https://github.com/pikasTech/unidesk/blob/master/docs/reference/observability.md#自动巡检的服务质量归因)。
+  - 服务质量与下游账务的最终判定只见产品规格的
+    [服务质量归因](../../../docs/specs/operational-observability.md#服务质量归因)。
   - 本文只定义报告字段和 Api2Business 数据入口。
 
 ## owning YAML

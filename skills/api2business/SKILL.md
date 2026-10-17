@@ -101,6 +101,9 @@ description: >-
 
 ## 生命周期
 
+- `native start|stop|status|logs --help` 直接显示对应操作帮助。
+  - 查看帮助不要求配置存在，不启动服务，也不重印整个业务目录。
+
 ```bash
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml native start --component all
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml native status --component all
@@ -181,6 +184,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   回退到 `sub2api.idleProbe.intervalSeconds`，具体生效与工作流替换规则见
   `references/upstream-scheduling.md`。
 - 充值候选使用 `upstreams recharge-candidates --over-api <absolute-http(s)-URL>`。
+- 历史钱包回填使用 `upstreams usage-cache restore`，必须以 `--since <ISO时间>` 提供原观测时刻。
+  - `upstreams usage-cache restore --help` 提供独立参数帮助，无需读取配置或连接运行面。
+  - 只恢复已核实的旧值，不把回填时间作为余额新鲜度。
 - 欠费、低余额和查询超时的判定见 `references/upstream-scheduling.md`。
 - 充值使用 `upstreams recharge --base-url <https-url> --recharge-cny <CNY> --confirm --over-api <absolute-http(s)-URL>`；
   同一充值地址只记账一次并恢复该地址账号。余额读取的跨 host `walletKey`、缓存和失败
@@ -336,6 +342,9 @@ bun skills/api2business/scripts/api2business-cli.ts \
 
 - CLI 通过 `/api/login` 获取 Cookie，并只在内存中传给 WebProbe；WebProbe 不填写登录表单，Cookie 不进入 argv、日志、报告或磁盘。
 - 需要把负余额或分页结果移入截图时，用 `--click-selector` 点击既有排序或分页控件。
+  - V2 排序表头须带 `[data-sort-bound="1"]`，等待交互绑定后再点。
+  - 例如人民币余额排序使用 `'#v2-account-table [data-sort-key="balance"][data-sort-bound="1"]'`。
+  - 静态表头先于脚本出现，过早点中不会改变排序；采集成功不代表点击生效。
   - 此参数只辅助取景，是否符合验收目标仍须人工看图。
 - 验证重启后账本、缓存、采样和作业状态仍可读取。
 - 失败时按配置、Secret、网络、数据库、worker 和外部 API 的顺序定位首个断点。
