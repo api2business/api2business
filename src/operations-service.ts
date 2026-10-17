@@ -673,7 +673,10 @@ export class OperationsService {
     }
     const displayHours = 8;
     const calculationWindowHours = 1;
+    const historyStarted = performance.now();
     const rows = await this.store.getUpstreamQuotaSamples(displayHours + calculationWindowHours) as Array<Record<string, unknown>>;
+    const historyQueryMs = performance.now() - historyStarted;
+    const projectionStarted = performance.now();
     let samples: import("./upstream-quota-monitor").UpstreamQuotaSample[] = rows.map((row) => ({
       sampledAt: new Date(String(row.sampled_at)).toISOString(), walletKey: normalizeUpstreamWallet(row.wallet_key), accountId: Number(row.account_id),
       schedulable: row.schedulable === true, status: String(row.status), provider: String(row.provider),
@@ -699,6 +702,8 @@ export class OperationsService {
     }));
     samples = carryForwardQuotaHistory(samples);
     const walletKeys = [...new Set(samples.map((row) => row.walletKey).filter(Boolean))];
+    const projectionMs = performance.now() - projectionStarted;
+    const groupsStarted = performance.now();
     const groupRows = walletKeys.length === 0 ? { rows: [] as Record<string, unknown>[] } : await this.reads.query<Record<string, unknown>>({
       key: `upstream-quota-history-groups:${walletKeys.join(",")}`,
       kind: "upstream-quota-history-groups",
@@ -718,6 +723,8 @@ export class OperationsService {
         GROUP BY aw.account_id, aw.wallet_key, aw.platform`,
       parameters: [walletKeys.join(",")],
     });
+    const groupsReadMs = performance.now() - groupsStarted;
+    const aggregateStarted = performance.now();
     type AccountMeta = { accountId: number; walletKey: string; platform: string; names: string[] };
     const accountsByWallet = new Map<string, AccountMeta[]>();
     for (const row of groupRows.rows) {
@@ -745,13 +752,16 @@ export class OperationsService {
       }
       return point;
     });
+    const summary = summarizeQuotaSamples(samples, calculationWindowHours);
+    const history = quotaHistory(samples, calculationWindowHours, displayHours);
     return {
       ok: true,
       windowHours: calculationWindowHours,
       displayHours,
-      ...summarizeQuotaSamples(samples, calculationWindowHours),
-      history: quotaHistory(samples, calculationWindowHours, displayHours),
+      ...summary,
+      history,
       groupHistory: groupedHistory.filter((point) => Date.parse(point.sampledAt) >= Date.now() - displayHours * 3_600_000),
+      sourceTimingsMs: { historyQueryMs, projectionMs, groupsReadMs, aggregateMs: performance.now() - aggregateStarted, sampleCount: rows.length },
       valuesPrinted: false,
     };
   }
