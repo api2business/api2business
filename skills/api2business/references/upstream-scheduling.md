@@ -105,50 +105,7 @@
   - 任何账号分组 mutation 都必须使用已经回读并明确命名的 `bindingGroupIds`；作用域探活没有业务分组时显式传空数组，不能从候选白名单推导分组。
   - 写入前后都按单账号核对平台、`base_url`、分组、模型映射和 Secret presence；单账号失败只终止该账号，不能把整组账号改成默认平台或默认地址。
   - 这条边界同时适用于创建、模板、模型同步、探活隔离和恢复；新增字段时必须补对应类型检查与回归测试。
-- 新增上游的收口顺序：
-  - 创建命令带上全部已解析的业务分组。
-  - 创建作业完成后，用稳定账号 ID 回读倍率。
-  - 返回快照里的费率可能仍是占位费率。
-  - `detectionOk=true` 只说明探测跑过，不说明快照已是最终费率。
-  - 最终费率以探测回写后的排队回读为准。
-  - 回写超时不重建账号，保留占位费率，交给后续采样重试。
-  - 然后只对该账号执行切号模板作业。
-  - 切号模板按平台分离：`config/failover-templates/codex.yaml` 只服务 OpenAI，
-    `config/failover-templates/claude.yaml` 只服务 Anthropic，
-    `config/failover-templates/grok.yaml` 只服务 Grok。
-    `operations.upstreamManagement.templateFiles` 是这三份文件的唯一配置入口。
-    套用 Grok 时省略 `pool_mode`，保留账号现值。
-  - 所有 API-key 创建、批量配置、费率同步和探活隔离都必须携带已回读的平台；平台缺失时
-    不得猜测为 Codex。新增作用域分组时，同时更新该作用域的 V2 `eligibleGroupIds` 与
-    对应优先级计划白名单，否则账号虽能探活和评分，优先级计划仍会漏选。
-  - 回读该作业的 `verifiedCount`、`failedCount` 和 `misalignedCount`。
-  - 只有 owning YAML 打开该作用域 `features.idleProbe` 时，才对该账号执行
-    `upstreams isolation --confirm --over-api <absolute-http(s)-URL>`。
-  - 启用探活时，隔离并集是当前分组、owning YAML 的
-    `operations.upstreamManagement.groupIds` 以及新建的私有探活分组；未启用探活的
-    作用域不创建私有探活分组。
-  - 比该默认集合更多的业务分组，必须在隔离前绑上，隔离后仍要回读到。
-  - 用户要的业务分组少于这个并集时，隔离完成后收回：
-    - 使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] --confirm --over-api <absolute-http(s)-URL>`；`--base-url` 只更新 `credentials.base_url`，不会覆盖其他凭据。
-    - `--groups` 整表替换；启用探活的账号保留自己的私有探活分组，其他账号只保留用户
-      指定的业务分组。
-    - 启用探活账号漏写私有探活分组会把它从账号上拆掉。
-    - 同一次更新会重写切号模板，结束后按下文模板回读再核一次。
-    - 收回后不得再执行隔离，否则默认分组会再次并入。
-  - 启用探活的账号绑定终态同时满足：
-    - 隔离作业完成。
-    - 私有分组 exclusive，且成员只有该账号。
-    - 业务分组成员与用户指定一致；未启用探活的账号不检查私有分组。
-  - 探活是否已经打过请求，见 [账号操作](account-operations.md)。
-  - `upstreams create` 必须显式带上通过实时读取解析出的 `--groups <id,id,...>`，禁止省略后
-    使用源码或 YAML 中的固定分组默认值；分组缺失时 CLI 在读取 Secret 前直接失败。
-  - `upstreams create` 即使只做预检也必须带 `--api-key-stdin`。
-    - 只有加上 `--confirm` 才读取标准输入。
-  - 账号处于 `sub2api.priorityPlan.eligibleGroupIds` 时，自动计划可能改写 `priority`。
-    - 写入范围是该计划的 `minimumPriority` 到 `maximumPriority`，数值越小越优先。
-    - 隔离若暂时并入这些分组，计划可能在收回默认分组之前写下优先级。
-    - 账号离开全部 eligible 分组后，该计划不再改写它，最后一次写入会保留。
-    - 用户未要求调整优先级时，不把该值改回创建时的占位优先级。
+- 新增上游的收口顺序只见 [新上游初始化](#新上游初始化)。
 - 同一充值 `base_url` 的多 Key 充值只提交一次 `upstreams recharge --base-url <https-url>`；
   - CLI 自动分页解析该站点全部 API-key 账号，并选择一个账本锚点。
   - 钱包账号列表只用于恢复范围，不重复记账。
@@ -695,6 +652,53 @@
 ## 额度监控交叉引用
 
 - 额度监控的状态、缓存、人民币换算和验收唯一见 [额度监控](quota-monitoring.md)。
+
+## 新上游初始化
+
+- `upstreams create` 在同一个 Temporal 作业中完成账号创建、倍率探测和初始化。
+  - CLI 必须显式传入平台、实时解析的业务分组及 `--api-key-stdin`。
+  - 预览不读取 Secret；只有 `--confirm` 才从标准输入读取密钥。
+  - 创建所需占位费率来自 owning YAML，省略 `--rate` 后自动探测并回写。
+  - 最终费率以排队回读为准，不以创建初始快照或 `detectionOk` 判定。
+- 每个新上游都要配置并核验同平台切号模板及私有探活绑定。
+  - 模板仅由 `operations.upstreamManagement.templateFiles` 声明。
+  - OpenAI、Anthropic 和 Grok 分别使用 Codex、Claude 和 Grok 模板。
+  - Codex API-key 额外写入 `extra.openai_responses_mode=force_responses`。
+  - 其他平台不写该字段；Responses 调用成功不能替代强制模式的字段回读。
+- 初始化只保留账号实际业务分组，并增加该账号自己的私有探活分组。
+  - 不把 `eligibleGroupIds`、历史默认分组或其他账号的私有分组并入账号。
+  - 隔离分组必须处于 active、exclusive，且成员只有目标账号。
+  - Secret presence、持久化探活绑定和业务分组必须分别确认。
+- 初始化后使用同作用域的普通网关路径执行一次手动探活。
+  - 终态同时展示模板、强制模式、隔离绑定和实际探活的核验结果。
+  - `verifiedCount` 是配置回读数，`probeVerifiedCount` 是本次请求验证数。
+  - `status=ready` 要求两者全部通过；失败、无候选或 `in-flight` 跳过显示 `partial`。
+  - 工作流完成、HTTP 受理和 `skipped=true` 均不能冒充实际探活成功。
+- 自动探活继续由目标作用域 owning YAML 的 `features.idleProbe` 控制。
+  - 初始化不修改其他作用域开关。
+  - 账号终态的 `automaticProbeEnabled` 披露当前自动配置。
+  - 需要启用尚未打开的作用域时，先手动通过，再修改对应 YAML 并核对自动轮次。
+- 已创建账号补齐或重试，使用同一初始化入口，不重复提供供应商密钥或重建账号：
+
+  ```bash
+  bun skills/api2business/scripts/api2business-cli.ts \
+    --config config/api2business.yaml \
+    upstreams initialize --accounts <id,id,...> \
+    --over-api https://api2business.hwpod.com
+  ```
+
+  - 先看预览，再追加 `--confirm` 提交。
+  - 用 `upstreams status --id <workflow-id>` 和同一个绝对 URL 查询终态。
+  - 已存在账号复用稳定 ID、私有分组和探活 Key；不重置优先级、钱包、业务分组或池模式。
+  - 单账号失败保留其 ID 和错误，其他账号继续执行；完整详情使用 `--json`。
+- 原生账号写入使用 bulk merge，保留 API Key、base URL 和其他现有字段。
+  - 所有平台都从排队查询回读，不猜测为 Codex。
+  - 新增业务分组同时核对作用域候选白名单及优先级计划覆盖。
+  - 自动优先级可能改写创建占位值，初始化不得把它改回。
+- 有效经验：将配置、无缓存回读和实际请求分别记录，并通过同一入口补齐。
+- 无效经验：只执行 Responses 探活就声称强制模式已开启，或在隔离时并入默认业务分组。
+  - 遇服务更新期间的 502，先检查生命周期状态与原工作流，再决定是否重试。
+  - 不因短暂接口失败重建账号、读取供应商原始密钥或手写管理请求。
 
 ## Responses 断流归因
 

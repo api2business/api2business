@@ -8,6 +8,7 @@ import type { TemporalGateway } from "./temporal-client";
 import type { UpstreamManagementService } from "./upstream-management";
 import type { UpstreamUsageResult } from "./upstream-usage";
 import type { BugTeamPurchaseImportService } from "./bugteam-purchase-import-service";
+import { finishUpstreamCreation, verifyOnboardingProbes } from "./upstream-onboarding";
 
 export interface WorkerOperationServices {
   dispatcher: ApplicationDispatcher;
@@ -157,7 +158,10 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
             ];
           }
         }
+        result = await finishUpstreamCreation(result, (ids) => services.upstreams.initialize(ids), services.operations, command.operationId);
       }
+      else if (pending.action === "initialize") result = await verifyOnboardingProbes(
+        await services.upstreams.initialize(pending.input.accountIds), services.operations, command.operationId);
       else if (pending.action === "update") result = await services.upstreams.update(pending.input.id, pending.input);
       else if (pending.action === "recharge") result = await services.upstreams.recharge(pending.input.id, pending.input);
       else if (pending.action === "recover") result = await services.upstreams.recover(pending.input.accountIds);

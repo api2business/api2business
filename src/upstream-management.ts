@@ -26,6 +26,7 @@ import {
 import { providerActualCostUsd, upstreamCostBasisSql } from "./upstream-cost-sql";
 import { readNewApiCredential } from "./secrets";
 import { configuredWalletKey } from "./upstream-wallet";
+import { initializeUpstreams } from "./upstream-onboarding";
 
 type Row = Record<string, unknown>;
 
@@ -113,6 +114,7 @@ export type UpstreamWorkerOperation =
   | { action: "recover"; input: { accountIds: number[] } }
   | { action: "isolation"; input: { accountIds: number[] } }
   | { action: "template"; input: { accountIds: number[] } }
+  | { action: "initialize"; input: { accountIds: number[] } }
   | { action: "usage"; input: { accountIds: number[] } };
 
 const accountSelect = `
@@ -636,6 +638,19 @@ export class UpstreamManagementService {
     if (ids.some((id) => !positiveInteger(id))) throw new Error("上游账号 ID 无效");
     const idempotency = operationId(operationIdValue, "upstream-template");
     return await this.submitOperation(idempotency, { action: "template", input: { accountIds: ids } });
+  }
+
+  async submitInitialization(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds.map(Number))];
+    if (!ids.length || ids.some((id) => !positiveInteger(id))) throw new Error("初始化需要有效的上游账号 ID");
+    return await this.submitOperation(operationId(operationIdValue, "upstream-initialize"), {
+      action: "initialize", input: { accountIds: ids },
+    });
+  }
+
+  async initialize(accountIds: number[]) {
+    if (!this.runtime || !this.probeIsolation) throw new Error("上游初始化需要 runtime 和探活隔离服务");
+    return await initializeUpstreams(this.config, this.reads, this.runtime, this.probeIsolation, accountIds);
   }
 
   async submitIsolation(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
@@ -1439,7 +1454,8 @@ export class UpstreamManagementService {
         const result = await this.runtime.createApiKeyAccount({
           name, platform: input.platform, type: "apikey",
           credentials: { base_url: baseUrl, api_key: input.apiKey.trim() },
-          extra: {}, priority, concurrency: capacity, proxy_id: settings.proxyId,
+          extra: input.platform === "openai" ? { openai_responses_mode: "force_responses" } : {},
+          priority, concurrency: capacity, proxy_id: settings.proxyId,
           group_ids: groupIds, auto_pause_on_expired: true, schedulable: true,
         }, operationId(input.operationId, `upstream-create-${name.replace(/[^A-Za-z0-9]+/gu, "-").slice(0, 48)}`), settings.mutationTimeoutMs);
         createResult = result;
@@ -1463,8 +1479,8 @@ export class UpstreamManagementService {
     if (createError !== null) recovered = true;
     const resolvedAccountId = account.id;
     const resolvedAccount = account;
-    // 创建终态只依赖稳定账号 ID；运行设置和模板在后台尽力完成，
-    // 避免 Sub2API 后处理超时把已经创建成功的账号伪装成导入失败。
+    // 保留稳定 ID；worker 在同一作业中初始化并核验，不把创建成功当成配置齐全。
+    const warnings: string[] = [];
     const postProcess = async () => {
       try {
         const probeBinding = this.probeIsolation?.get(resolvedAccountId) ?? null;
@@ -1500,7 +1516,7 @@ export class UpstreamManagementService {
           input.platform,
         );
       } catch (error) {
-        console.warn(`[upstream-create:${resolvedAccountId}] 后处理未完成：${safeMessage(error instanceof Error ? error.message : String(error))}`);
+        warnings.push(`账号已创建，运行设置未完成：${safeMessage(error instanceof Error ? error.message : String(error))}`);
       }
     };
     await postProcess();
@@ -1531,9 +1547,8 @@ export class UpstreamManagementService {
       operation: recovered ? "create-recovered" : "create",
       recovered,
       account,
-      template: { applied: false, verified: false, status: "pending" },
-      probeIsolation: { enabled: false, status: "pending" },
-      warnings: ["运行设置已完成；探活隔离只通过手动批量操作创建，返回账号快照可能早于最终倍率探测回写"],
+      onboarding: { status: "pending" },
+      warnings,
       accounting,
     };
   }

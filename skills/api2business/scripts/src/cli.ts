@@ -322,6 +322,7 @@ function help(): Record<string, unknown> {
       "upstreams benchmark-history --id <account-id> [--limit 20] --over-api <absolute-http(s)-URL>",
       "upstreams usage-cache restore --id <account-id> --base-url <https-url> --remaining-usd <USD> --confirm --over-api <absolute-http(s)-URL>",
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams initialize --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL> (模板、探活及 Codex 强制 Responses)",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams create --platform openai|grok|anthropic --base-url <https-url> --suffix <name> --groups <id,id,...> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams update --id <account-id> [--base-url <https-url>] [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api <absolute-http(s)-URL>",
@@ -546,6 +547,20 @@ export function summarizeWorkflowStatus(value: Record<string, unknown>): Record<
     summary.accountCount = Array.isArray(result.accounts) ? result.accounts.length : null;
     for (const key of ["targetCount", "appliedCount", "verifiedCount", "failedCount", "misalignedCount", "skippedCount"]) {
       if (key in result) summary[key] = result[key];
+    }
+    const onboarding = record(result.onboarding) ?? (result.operation === "initialize" ? result : null);
+    if (onboarding) {
+      summary.onboardingStatus = onboarding.status;
+      summary.configurationVerified = onboarding.verifiedCount;
+      summary.probeVerified = onboarding.probeVerifiedCount;
+      summary.onboardingAccounts = Array.isArray(onboarding.accounts) ? onboarding.accounts.slice(0, 20) : [];
+      summary.omittedAccounts = Array.isArray(onboarding.accounts) ? Math.max(0, onboarding.accounts.length - 20) : 0;
+      summary.probes = Array.isArray(onboarding.probes) ? onboarding.probes.map((value) => {
+        const probe = record(value);
+        return { scope: probe?.scope, verified: probe?.verified, skipped: probe?.skipped, reason: probe?.reason, error: probe?.error };
+      }) : [];
+      summary.onboardingError = onboarding.error;
+      if (onboarding.status === "partial") summary.nextAction = "配置或探活未全部完成；查看 --json，并对原账号执行 upstreams initialize，不要重复创建";
     }
     summary.resultFieldCount = Object.keys(result).length;
     summary.disclosure = "add --json for the complete workflow result";
@@ -781,6 +796,14 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     };
     return await client.upstreamTemplate(accountIds, `upstream-template-${crypto.randomUUID()}`);
   }
+  if (group === "upstreams" && action === "initialize") {
+    const accountIds = parsed.accounts ? parseAccountIdSelector(parsed.accounts) : [];
+    if (!accountIds.length) throw new Error("upstreams initialize requires --accounts");
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-initialize", accountIds,
+      plan: { failoverTemplate: "same-platform", probeIsolation: true, manualProbe: true, codexResponsesMode: "force_responses" },
+      hint: "add --confirm to execute" };
+    return await client.upstreamInitialize(accountIds, `upstream-initialize-${crypto.randomUUID()}`);
+  }
   if (group === "upstreams" && action === "isolation") {
     if (!parsed.accounts) throw new Error("upstreams isolation requires --accounts");
     const accountIds = parseAccountIdSelector(parsed.accounts);
@@ -814,6 +837,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
           ? "operations.upstreamManagement.createBootstrapRateCnyPerApiUsd; create 后自动探测并同步"
           : "explicit-temporary; create 后自动探测并同步",
         apiKey: "stdin:redacted",
+        onboarding: { failoverTemplate: "same-platform", probeIsolation: true, manualProbe: true,
+          responsesMode: parsed.platform === "openai" ? "force_responses" : "not-applicable" },
       },
       hint: "add --confirm to execute",
     };
@@ -1265,6 +1290,14 @@ function aggregateSmoke(): Record<string, unknown> {
 export async function runCli(args: string[]): Promise<void> {
   const wantsJson = args.includes("--json");
   try {
+    if (args.includes("--help") && args.some((item, index) => item === "upstreams" && args[index + 1] === "initialize")) {
+      return emit({ ok: true, command: "upstreams initialize",
+        usage: "bun skills/api2business/scripts/api2business-cli.ts --config <owning-YAML> upstreams initialize --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL> [--json]",
+        behavior: "预览不写入；确认后异步补齐同平台切号模板、私有探活及 Codex 强制 Responses，并执行一次手动探活。",
+        verification: "用 upstreams status --id <workflow-id> 和同一绝对 URL 查询终态；配置与请求分别核验，partial 不代表全部完成。",
+        retry: "重试使用原账号 ID，无需供应商密钥；不会重建账号或并入默认业务分组。",
+      }, wantsJson);
+    }
     if (args.includes("--help") && args.includes("web") && args[args.indexOf("web") + 1] === "screenshot") return emit(webScreenshotHelp(), wantsJson);
     if (args.includes("--help") && args.includes("gateway")) return emit({ ok: true,
       commands: ["gateway service-policy [--confirm] --over-api <absolute-http(s)-URL> [--json]"],

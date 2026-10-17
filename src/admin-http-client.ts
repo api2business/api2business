@@ -234,6 +234,12 @@ export class AdminHttpClient {
       body: JSON.stringify({ accountIds, operationId }),
     }, 30000);
   }
+  upstreamInitialize(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/initialize", {
+      method: "POST", headers: { "Idempotency-Key": operationId },
+      body: JSON.stringify({ accountIds, operationId }),
+    }, 30000);
+  }
   upstreamIsolation(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/isolation", {
       method: "POST",

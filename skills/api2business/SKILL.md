@@ -208,6 +208,10 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - Grok 只读取 `config/failover-templates/grok.yaml`。
   - 套用 Grok 时不写 `pool_mode`，也不改写 Codex 或 Claude 规则。
   - 没有对应模板的平台仍进入 `skipped[]`，原因是 `platform-has-no-failover-template`。
+- 新增上游、探活、切号和 Codex 强制 Responses 使用
+  [新上游初始化](references/upstream-scheduling.md#新上游初始化)。
+  - 创建自动执行；补齐使用 `upstreams initialize --accounts <id,id,...> [--confirm]`。
+  - 两者都显式携带 `--over-api <绝对 http(s) URL>`；终态使用 `upstreams status`。
 - 新增上游省略 `--rate`；占位费率与最终费率回读也只以该参考为准。
 - 已有上游改配置使用 `upstreams update --id <account-id> [--base-url <https-url>] [--groups <id,id,...>] [--suffix <name>] [--rate <CNY/API_USD>] --confirm --over-api <absolute-http(s)-URL>`。
   - `--base-url` 只合并更新 `credentials.base_url`，不会重置 API key、模型映射、池模式或其他凭据字段。

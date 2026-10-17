@@ -559,6 +559,18 @@ export function createHandler(
       if (request.method === "POST" && url.pathname === "/api/upstreams/quota-monitor/sample") {
         return json(await dispatcher.submit({ kind: "upstream.quota.sample" }), 202);
       }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/initialize") {
+        const input = await body(request);
+        try {
+          const accountIds = normalizeAccountIds(input.accountIds);
+          if (!accountIds.length) return json({ ok: false, error: "accountIds 不能为空" }, 400);
+          return json(await upstreams.submitInitialization(accountIds,
+            typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key")), 202);
+        } catch (error) {
+          if (error instanceof UpstreamManagementError) throw error;
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
       if (request.method === "POST" && url.pathname === "/api/upstreams/template") {
         const input = await body(request);
         let accountIds: number[] = [];

@@ -19,6 +19,9 @@ function services(overrides: Record<string, unknown> = {}) {
     recharge: async () => ({ ok: true }),
     ensureProbeIsolation: async () => ({ ok: true }),
     applyTemplate: async () => ({ ok: true }),
+    initialize: async () => ({ ok: true, operation: "initialize", targetCount: 1, verifiedCount: 1, failedCount: 0,
+      accounts: [{ accountId: 42, platform: "openai", scope: "codex", automaticProbeEnabled: true, ok: true,
+        templateVerified: true, responsesMode: "force_responses", responsesVerified: true, probeReady: true, groupId: 99 }] }),
     ...overrides,
   };
   const operations = {
@@ -26,6 +29,7 @@ function services(overrides: Record<string, unknown> = {}) {
     sampleOAuthRuntime: async () => ({ ok: true }),
     samplePoolQuality: async () => ({ ok: true }),
     runV2AutomaticPriorityPlan: async (scope: string, recentCallLimit: number) => ({ ok: true, scope, recentCallLimit }),
+    runIdleProbe: async () => ({ attempted: 1, succeeded: 1, failed: 0, ok: true }),
   };
   return {
     value: {
@@ -55,6 +59,7 @@ test("worker executor preserves create detection, rate synchronization, and comp
   const execute = createWorkerOperationExecutor(fixture.value as never);
   const result = await execute({ operationId: "create-1", command: { kind: "upstream.operation", operationId: "create-1" } }) as Record<string, unknown>;
   expect(result.detection).toBeTruthy();
+  expect(result).toMatchObject({ ok: true, status: "ready", onboarding: { verifiedCount: 1, probeVerifiedCount: 1 } });
   expect(fixture.synchronized).toEqual([{ fallbackRateCnyPerApiUsd: 0.1 }]);
   expect(fixture.cached).toHaveLength(1);
   expect(fixture.completed).toEqual(["create-1"]);
@@ -75,6 +80,20 @@ test("worker executor applies fallback rate when post-create detection fails", a
   expect(updates).toEqual([{ rateCnyPerApiUsd: 0.1 }]);
   expect(String((result.warnings as string[])[0])).toContain("已回退费率 0.1");
   expect(fixture.completed).toEqual(["create-2"]);
+});
+
+test("recovered creation skips quota detection but still completes initialization", async () => {
+  const fixture = services({
+    claimOperation: () => ({ action: "create", input: { rateWasSpecified: true } }),
+    create: async () => ({ ok: true, account: { id: 42 }, skipDetection: true }),
+    usage: async () => { throw new Error("recovered accounts must not repeat quota detection"); },
+  });
+  const result = await createWorkerOperationExecutor(fixture.value as never)({
+    operationId: "recovered", command: { kind: "upstream.operation", operationId: "recovered" },
+  });
+  expect(result).toMatchObject({ ok: true, status: "ready", onboarding: { probeVerifiedCount: 1 } });
+  expect(result).not.toHaveProperty("detection");
+  expect(fixture.completed).toEqual(["recovered"]);
 });
 
 test("successful OpenAI OAuth imports do not submit an automatic API Key cutoff", async () => {

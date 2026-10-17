@@ -20,6 +20,7 @@ import { ProbeIsolationService } from "./probe-isolation";
 import { scoreScheduleFreshness } from "./score-schedule-watchdog";
 import { BugTeamClient } from "./bugteam-client";
 import { BugTeamPurchaseImportService, type BugTeamPurchaseJob } from "./bugteam-purchase-import-service";
+import { finishUpstreamCreation, verifyOnboardingProbes } from "./upstream-onboarding";
 
 const config = loadConfig(requiredOption("--config"));
 const runtimeId = requiredOption("--runtime");
@@ -247,7 +248,10 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
           ];
         }
       }
-    } else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
+      result = await finishUpstreamCreation(result, (ids) => upstreams.initialize(ids), operations, command.operationId);
+    } else if (pending.action === "initialize") result = await verifyOnboardingProbes(
+      await upstreams.initialize(pending.input.accountIds), operations, command.operationId);
+    else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
     else if (pending.action === "recharge") result = await upstreams.recharge(pending.input.id, pending.input);
     else if (pending.action === "recover") result = await upstreams.recover(pending.input.accountIds);
     else if (pending.action === "isolation") result = await upstreams.ensureProbeIsolation(pending.input.accountIds);

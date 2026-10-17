@@ -108,14 +108,6 @@ test("upstream identity ignores the temporary rate for the same URL and suffix",
   expect(identityQuery).toContain("a.name LIKE RTRIM($2::text, '/') || ' ' || $3::text || ' %'");
 });
 
-test("fully configured recovered upstreams skip mutation and repeated detection", async () => {
-  const management = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
-  const worker = await Bun.file(new URL("./worker.ts", import.meta.url)).text();
-  expect(management).toContain('idempotentFastPath: true');
-  expect(management).toContain('skipDetection: true');
-  expect(worker).toContain("result.skipDetection !== true");
-});
-
 test("account imports and scheduled sampling keep independent failure boundaries", async () => {
   const source = await Bun.file(new URL("./worker.ts", import.meta.url)).text();
   const workflows = await Bun.file(new URL("./workflows.ts", import.meta.url)).text();
@@ -311,7 +303,7 @@ test("template application writes Grok rules without touching another platform",
   ]);
 });
 
-test("upstream creation keeps the created account successful when post-processing is incomplete", async () => {
+test("upstream creation preserves stable identity and exposes initialization to the worker", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   const createBody = source.slice(source.indexOf("  async create(input:"), source.indexOf("  async update(id:"));
   expect(createBody).toContain("await this.runtime.configureApiKeyAccounts(");
@@ -320,8 +312,9 @@ test("upstream creation keeps the created account successful when post-processin
   expect(createBody).toContain("const postProcess = async () =>");
   expect(createBody).toContain("settings.mutationTimeoutMs");
   expect(createBody).toContain("await postProcess();");
-  expect(createBody).toContain("探活隔离只通过手动批量操作创建");
-  expect(createBody).not.toContain("上游账号已创建，但 Codex 通用切号模板未通过校验");
+  expect(createBody).toContain('openai_responses_mode: "force_responses"');
+  expect(createBody).toContain('onboarding: { status: "pending" }');
+  expect(createBody).toContain("warnings.push");
 });
 
 test("recharge recovery covers every API-key account in the normalized wallet", async () => {
