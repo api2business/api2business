@@ -1,5 +1,20 @@
 const entry = "bun skills/api2business/scripts/api2business-cli.ts";
 
+export function priorityHistoryHelp(): Record<string, unknown> {
+  return {
+    ok: true,
+    command: "priority history",
+    usage: `${entry} --config <owning-YAML> priority history --over-api <absolute-http(s)-URL> [--json]`,
+    options: {
+      "--config": "实际查询使用的 owning YAML；查看帮助不加载配置",
+      "--over-api": "实际查询必填；owning YAML 声明的绝对 HTTP(S) URL，不接受别名或布尔开关",
+      "--json": "展开完整历史回执，包括作用域、触发方式、终态及实际变更数",
+    },
+    behavior: "只读查询原优先级执行历史，不触发评分、优先级调整或上游写入；不同作用域按记录的 profile 区分。",
+    verification: "applied 表示该轮执行结果；核对原轮次身份与时间，再独立回读原生账号，不以稍后生成的新计划替代该轮证据。",
+  };
+}
+
 export function nativeHelp(action?: string): Record<string, unknown> {
   const actions = ["start", "stop", "status", "logs"];
   const selected = !action || action.startsWith("-") ? null : action;
