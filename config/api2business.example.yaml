@@ -65,6 +65,17 @@ webProbe:
     cookieName: api2business_session
   defaultSmokeProfile: upstream-scheduling-v2
   smokeProfiles:
+    ranking:
+      path: /ranking
+      readySelector: "#ranking-body .ranking-user"
+      screenshotName: api2business-ranking-desktop.png
+      mobileScreenshotName: api2business-ranking-mobile.png
+      viewport: { width: 1440, height: 1000 }
+      mobileViewport: { width: 390, height: 844 }
+      navigationTimeoutMs: 30000
+      settleMs: 3000
+      commandTimeoutSeconds: 90
+      outputLimits: { failures: 12, network: 40, console: 12 }
     upstream-scheduling-v2:
       path: /upstream-scheduling-v2
       readySelector: "#v2-data-state"

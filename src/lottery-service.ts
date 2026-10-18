@@ -77,7 +77,7 @@ export class LotteryService {
     });
   }
 
-  async ranking(now = new Date()): Promise<{ rows: PublicRankingRow[]; totals: { actualCost: number; requests: number; tokens: number; balanceUsd: number; rechargeCny: number }; startDate: string; endDate: string; queryCompletedAt?: string; databaseQueries?: number }> {
+  async ranking(now = new Date()): Promise<{ rows: PublicRankingRow[]; activeUsers: number; pageSize: number; totals: { actualCost: number; requests: number; tokens: number; balanceUsd: number; rechargeCny: number }; startDate: string; endDate: string; queryCompletedAt?: string; databaseQueries?: number }> {
     const local = DateTime.fromJSDate(now, { zone: this.config.ranking.timezone });
     const startDate = local.minus({ days: this.config.ranking.windowDays - 1 }).toISODate();
     const endDate = local.toISODate();
@@ -86,7 +86,7 @@ export class LotteryService {
       const start = local.minus({ days: this.config.ranking.windowDays - 1 }).startOf("day").toUTC().toISO()!;
       const end = local.plus({ days: 1 }).startOf("day").toUTC().toISO()!;
       const todayStart = local.startOf("day").toUTC().toISO()!;
-      const query = await collectUserRanking(this.reads, start, end, todayStart, this.config.ranking.sourceLimit);
+      const query = await collectUserRanking(this.reads, start, end, todayStart);
       const sourceRows = query.rows.map((row) => ({
         user: {
           id: Number(row.user_id), username: String(row.username ?? ""), email: String(row.email ?? ""),
@@ -95,12 +95,12 @@ export class LotteryService {
         actualCost: Number(row.actual_cost ?? 0), requests: Number(row.requests ?? 0),
         tokens: Number(row.tokens ?? 0), rechargeCny: Number(row.recharge_cny ?? 0),
       })).filter(({ user }) => !this.excluded(user));
-      const rows = sourceRows.slice(0, this.config.ranking.displayLimit).map((row, index) => ({
+      const rows = sourceRows.map((row, index) => ({
         rank: index + 1, displayName: rankingDisplayName(row.user), actualCost: row.actualCost,
         requests: row.requests, tokens: row.tokens, balanceUsd: row.user.balance, rechargeCny: row.rechargeCny,
       }));
       return {
-        rows,
+        rows, activeUsers: rows.length, pageSize: this.config.ranking.displayLimit,
         totals: sourceRows.reduce((totals, row) => ({
           actualCost: totals.actualCost + row.actualCost,
           requests: totals.requests + row.requests,
@@ -117,7 +117,6 @@ export class LotteryService {
       .map((row) => ({ row, user: userMap.get(row.user_id) }))
       .filter((item): item is { row: typeof item.row; user: Sub2ApiUser } => Boolean(item.user) && !this.excluded(item.user!));
     const rows = filtered
-      .slice(0, this.config.ranking.displayLimit)
       .map(({ row, user }, index) => ({
         rank: index + 1,
         displayName: rankingDisplayName(user),
@@ -128,7 +127,7 @@ export class LotteryService {
         rechargeCny: 0,
       }));
     return {
-      rows,
+      rows, activeUsers: rows.length, pageSize: this.config.ranking.displayLimit,
       totals: filtered.reduce((totals, { row, user }) => ({
         actualCost: totals.actualCost + row.actual_cost,
         requests: totals.requests + row.requests,

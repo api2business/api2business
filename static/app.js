@@ -224,17 +224,43 @@ let rankingRefreshTimer = null
 let rankingRefreshCountdownTimer = null
 let rankingRefreshDueAt = null
 let rankingLoading = false
+let rankingSnapshot = null
+let rankingPageNumber = Math.max(1, Math.trunc(Number(new URLSearchParams(location.search).get('page')) || 1))
+
+function renderRankingRows() {
+  if (!rankingSnapshot) return
+  const pageSize = Math.max(1, Math.trunc(Number(rankingSnapshot.pageSize) || 20))
+  const total = rankingSnapshot.rows.length
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  rankingPageNumber = Math.min(totalPages, Math.max(1, rankingPageNumber))
+  const rows = rankingSnapshot.rows.slice((rankingPageNumber - 1) * pageSize, rankingPageNumber * pageSize)
+  renderPager('ranking', { page: rankingPageNumber, totalPages, total })
+  $('#ranking-list-state').textContent = total ? `第 ${(rankingPageNumber - 1) * pageSize + 1}–${Math.min(rankingPageNumber * pageSize, total)} 名 · 每页 ${pageSize} 人` : '当前窗口暂无活跃用户'
+  $('#ranking-body').innerHTML = rows.length ? rows.map((row) => `<tr><td class="ranking-rank">${String(row.rank).padStart(2, '0')}</td><td class="account-cell ranking-user"><b>${escapeHtml(row.displayName)}</b></td><td class="usd-cell">${usd(row.actualCost)}</td><td class="usd-cell">${usd(row.balanceUsd)}</td><td class="ranking-recharge usd-cell">${cny(row.rechargeCny)}</td><td class="ranking-number">${compact(row.requests)}</td><td class="ranking-number">${compact(row.tokens)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">当前窗口暂无用量</td></tr>'
+  const url = new URL(location.href)
+  if (rankingPageNumber > 1) url.searchParams.set('page', String(rankingPageNumber))
+  else url.searchParams.delete('page')
+  history.replaceState(null, '', url)
+}
+
+function changeRankingPage(delta) {
+  rankingPageNumber += delta
+  renderRankingRows()
+}
 
 function renderRanking(data) {
   const ranking = data.ranking
+  if (rankingSnapshot && (rankingSnapshot.startDate !== ranking.startDate || rankingSnapshot.endDate !== ranking.endDate)) rankingPageNumber = 1
+  rankingSnapshot = ranking
   $('#ranking-range').textContent = `${ranking.startDate} 至 ${ranking.endDate}`
+  $('#ranking-active-users').textContent = number(ranking.activeUsers)
   $('#ranking-cost').innerHTML = usd(ranking.totals.actualCost)
   $('#ranking-balance').innerHTML = usd(ranking.totals.balanceUsd)
   $('#ranking-recharge').textContent = cny(ranking.totals.rechargeCny)
   $('#ranking-requests').textContent = compact(ranking.totals.requests)
   $('#ranking-tokens').textContent = compact(ranking.totals.tokens)
   $('#ranking-state').textContent = `${ranking.queryCompletedAt ? `更新 ${time(ranking.queryCompletedAt)}` : '已更新'} · DB 查询 ${number(ranking.databaseQueries ?? 0)} 次`
-  $('#ranking-body').innerHTML = ranking.rows.length ? ranking.rows.map((row) => `<tr><td class="ranking-rank">${String(row.rank).padStart(2, '0')}</td><td class="account-cell ranking-user"><b>${escapeHtml(row.displayName)}</b></td><td class="usd-cell">${usd(row.actualCost)}</td><td class="usd-cell">${usd(row.balanceUsd)}</td><td class="ranking-recharge usd-cell">${cny(row.rechargeCny)}</td><td class="ranking-number">${compact(row.requests)}</td><td class="ranking-number">${compact(row.tokens)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">当前窗口暂无用量</td></tr>'
+  renderRankingRows()
 }
 
 function renderRankingRefreshCountdown() {
@@ -274,7 +300,12 @@ async function loadRanking(automatic = false, refresh = false) {
   const button = $('#ranking-refresh')
   button.disabled = true; button.classList.add('is-loading'); button.setAttribute('aria-busy', 'true')
   $('#ranking-state').textContent = automatic ? '自动刷新中，正在排队读取…' : refresh ? '正在刷新用户用量…' : '正在读取用户用量缓存…'
-  try { renderRanking(await requestJson('/api/ranking', { refresh }, 60000)) }
+  try {
+    let data = await requestJson('/api/ranking', { refresh }, 60000)
+    // 部署后旧缓存可能仍是截断榜单；只刷新一次取得完整集合。
+    if (typeof data.ranking.activeUsers !== 'number') data = await requestJson('/api/ranking', { refresh: true }, 60000)
+    renderRanking(data)
+  }
   catch (error) { $('#ranking-state').textContent = `刷新失败：${error instanceof Error ? error.message : String(error)}`; throw error }
   finally { rankingLoading = false; button.disabled = false; button.classList.remove('is-loading'); button.removeAttribute('aria-busy') }
 }
@@ -282,14 +313,16 @@ async function loadRanking(automatic = false, refresh = false) {
 async function rankingPage() {
   const select = $('#ranking-refresh-interval')
   try {
-    const stored = Number(localStorage.getItem(rankingRefreshStorageKey))
-    if (rankingRefreshIntervals.has(stored)) select.value = String(stored)
+    const stored = localStorage.getItem(rankingRefreshStorageKey)
+    if (stored !== null && rankingRefreshIntervals.has(Number(stored))) select.value = stored
   } catch { /* 当前页仍使用默认 60 秒。 */ }
   select.addEventListener('change', () => {
     try { localStorage.setItem(rankingRefreshStorageKey, select.value) } catch { /* 不影响当前刷新。 */ }
     scheduleRankingRefresh()
   })
   $('#ranking-refresh').addEventListener('click', async () => { await loadRanking(false, true); scheduleRankingRefresh() })
+  $('#ranking-prev').addEventListener('click', () => changeRankingPage(-1))
+  $('#ranking-next').addEventListener('click', () => changeRankingPage(1))
   await loadRanking()
   scheduleRankingRefresh()
 }

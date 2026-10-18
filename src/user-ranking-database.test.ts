@@ -12,9 +12,10 @@ test("loads usage, balance and today's recharge through one queued query", async
     },
     status: () => ({}),
   };
-  await collectUserRanking(reads as never, "2026-08-01T16:00:00Z", "2026-08-02T16:00:00Z", "2026-08-01T16:00:00Z", 100);
+  await collectUserRanking(reads as never, "2026-08-01T16:00:00Z", "2026-08-02T16:00:00Z", "2026-08-01T16:00:00Z");
   expect(request?.kind).toBe("users.daily-ranking");
-  expect(request?.parameters).toHaveLength(4);
+  expect(request?.parameters).toHaveLength(3);
+  expect(userRankingQuery).not.toMatch(/\bLIMIT\b/u);
   expect(userRankingQuery).toContain("u.balance");
   expect(userRankingQuery).toContain("SUM(o.pay_amount)");
   expect(userRankingQuery).toContain("LOWER(COALESCE(u.role, '')) <> 'admin'");

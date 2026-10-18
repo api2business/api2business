@@ -434,7 +434,8 @@ button:disabled { cursor: wait; opacity: .48; }
 .ranking-head { align-items: flex-end; }
 .ranking-head h1 { margin-bottom: 4px; }
 .ranking-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
-.ranking-metrics { grid-template-columns: repeat(5, minmax(130px, 1fr)); }
+.ranking-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.ranking-toolbar { flex-wrap: wrap; }
 .ranking-table { min-width: 1080px; table-layout: fixed; }
 .ranking-col-rank { width: 72px; }
 .ranking-col-user { width: 30%; }
@@ -752,7 +753,6 @@ button:disabled { cursor: wait; opacity: .48; }
   .ranking-controls { justify-content: flex-start; }
   .ranking-controls .state-badge { width: 100%; text-align: center; }
   .ranking-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ranking-metrics > div:last-child { grid-column: 1 / -1; }
   .quota-monitor { grid-template-columns: 1fr; gap: 18px; }.donut-stack { margin: 0 auto; }.quota-donut-pair { width:100%; grid-template-columns:repeat(2,minmax(0,124px)); gap:8px; }.quota-ring { margin: 0 auto; }.quota-monitor-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .quota-charts { grid-template-columns: 1fr; }.quota-charts figcaption { flex-direction: column; gap: 3px; }
   .oauth-runtime-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }

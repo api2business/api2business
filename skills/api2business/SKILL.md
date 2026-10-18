@@ -133,6 +133,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 
 ## 领域操作
 
+- 用户用量的活跃人数、完整集合和分页口径见
+  [用户用量规格](../../docs/specs/user-usage.md)。
 - 账号导入、生命周期和空闲探活读取 `references/account-operations.md`。
 - 账号导入可用历史参数名 `--rate-multiplier <正整数>` 调整负载因子；该参数在导入
   payload 中必须写入 Sub2API 原生 `load_factor`，不得写入计费倍率

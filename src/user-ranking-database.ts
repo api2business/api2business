@@ -43,7 +43,6 @@ WHERE u.deleted_at IS NULL
   AND u.email <> 'monitor-user@sub2api.platform-infra.local'
   AND u.email NOT LIKE 'api2business-probe-%@sub2api.platform-infra.local'
 ORDER BY usage.actual_cost DESC, u.id
-LIMIT $4::int
 `;
 
 export async function collectUserRanking(
@@ -51,14 +50,13 @@ export async function collectUserRanking(
   startUtc: string,
   endUtc: string,
   todayStartUtc: string,
-  limit: number,
   priority: Sub2ApiReadPriority = "manual",
 ) {
   return await reads.query<Row>({
-    key: JSON.stringify(["users.daily-ranking", startUtc, endUtc, todayStartUtc, limit]),
+    key: JSON.stringify(["users.daily-ranking", startUtc, endUtc, todayStartUtc]),
     kind: "users.daily-ranking",
     sql: userRankingSql,
-    parameters: [startUtc, endUtc, todayStartUtc, limit],
+    parameters: [startUtc, endUtc, todayStartUtc],
     priority,
     cacheMode: "bypass-cache",
   });
