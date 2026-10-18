@@ -436,7 +436,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .ranking-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .ranking-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .ranking-toolbar { flex-wrap: wrap; }
-.ranking-table-wrap { width: min(100%, 680px); }
+.ranking-table-wrap { width: 100%; }
 .ranking-table { min-width: 564px; table-layout: fixed; }
 .ranking-table th { height: 34px; padding: 0 6px; }
 .ranking-table td { height: 38px; padding: 6px; }
@@ -451,6 +451,13 @@ button:disabled { cursor: wait; opacity: .48; }
 .ranking-rank { color: var(--paper); font: 650 12px/1 var(--mono); }
 .ranking-number { text-align: right; font: 600 12px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .ranking-recharge { color: var(--signal); font: 700 12px var(--mono); }
+@media (min-width: 769px) {
+  .ranking-col-cost { width: 16%; }
+  .ranking-col-balance { width: 18%; }
+  .ranking-col-recharge { width: 14%; }
+  .ranking-col-requests { width: 10%; }
+  .ranking-col-tokens { width: 14%; }
+}
 .unified-quota-monitor { border-top: 0; }
 .donut-stack { position:relative; display:grid; justify-items:center; align-content:center; min-width:132px; }.donut-hover-detail { position:absolute; z-index:4; display:none; box-sizing:border-box; width:max-content; min-width:150px; max-width:260px; margin:0; padding:8px 10px; border:1px solid var(--muted); background:rgba(13,16,14,.97); box-shadow:0 8px 24px rgba(0,0,0,.35); color:var(--paper); font:9px/1.4 var(--mono); text-align:left; overflow-wrap:anywhere; pointer-events:none; }
 .upstream-slim-head { min-height: 112px; gap: 20px; }
