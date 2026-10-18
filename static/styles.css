@@ -436,16 +436,18 @@ button:disabled { cursor: wait; opacity: .48; }
 .ranking-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .ranking-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .ranking-toolbar { flex-wrap: wrap; }
-.ranking-table { min-width: 1080px; table-layout: fixed; }
-.ranking-col-rank { width: 72px; }
-.ranking-col-user { width: 30%; }
-.ranking-col-cost { width: 14%; }
-.ranking-col-balance { width: 17%; }
-.ranking-col-recharge { width: 13%; }
-.ranking-col-requests { width: 10%; }
-.ranking-col-tokens { width: 16%; }
+.ranking-table-wrap { width: min(100%, 680px); }
+.ranking-table { min-width: 564px; table-layout: fixed; }
+.ranking-table th { height: 34px; padding: 0 6px; }
+.ranking-table td { height: 38px; padding: 6px; }
+.ranking-col-rank { width: 36px; }
+.ranking-col-cost { width: 92px; }
+.ranking-col-balance { width: 104px; }
+.ranking-col-recharge { width: 84px; }
+.ranking-col-requests { width: 64px; }
+.ranking-col-tokens { width: 80px; }
 .ranking-user { min-width: 0; }
-.ranking-user b { max-width: none; overflow: visible; color: var(--paper); font: 650 12px/1.3 var(--mono); text-overflow: clip; }
+.ranking-user b { max-width: 100%; overflow: hidden; color: var(--paper); font: 650 12px/1.3 var(--mono); text-overflow: ellipsis; }
 .ranking-rank { color: var(--paper); font: 650 12px/1 var(--mono); }
 .ranking-number { text-align: right; font: 600 12px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .ranking-recharge { color: var(--signal); font: 700 12px var(--mono); }

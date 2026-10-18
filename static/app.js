@@ -236,7 +236,7 @@ function renderRankingRows() {
   const rows = rankingSnapshot.rows.slice((rankingPageNumber - 1) * pageSize, rankingPageNumber * pageSize)
   renderPager('ranking', { page: rankingPageNumber, totalPages, total })
   $('#ranking-list-state').textContent = total ? `第 ${(rankingPageNumber - 1) * pageSize + 1}–${Math.min(rankingPageNumber * pageSize, total)} 名 · 每页 ${pageSize} 人` : '当前窗口暂无活跃用户'
-  $('#ranking-body').innerHTML = rows.length ? rows.map((row) => `<tr><td class="ranking-rank">${String(row.rank).padStart(2, '0')}</td><td class="account-cell ranking-user"><b>${escapeHtml(row.displayName)}</b></td><td class="usd-cell">${usd(row.actualCost)}</td><td class="usd-cell">${usd(row.balanceUsd)}</td><td class="ranking-recharge usd-cell">${cny(row.rechargeCny)}</td><td class="ranking-number">${compact(row.requests)}</td><td class="ranking-number">${compact(row.tokens)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">当前窗口暂无用量</td></tr>'
+  $('#ranking-body').innerHTML = rows.length ? rows.map((row) => `<tr><td class="ranking-rank">${String(row.rank).padStart(2, '0')}</td><td class="account-cell ranking-user"><b title="${escapeHtml(row.displayName)}">${escapeHtml(row.displayName)}</b></td><td class="usd-cell">${usd(row.actualCost)}</td><td class="usd-cell">${usd(row.balanceUsd)}</td><td class="ranking-recharge usd-cell">${cny(row.rechargeCny)}</td><td class="ranking-number">${compact(row.requests)}</td><td class="ranking-number">${compact(row.tokens)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">当前窗口暂无用量</td></tr>'
   const url = new URL(location.href)
   if (rankingPageNumber > 1) url.searchParams.set('page', String(rankingPageNumber))
   else url.searchParams.delete('page')
