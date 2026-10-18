@@ -151,7 +151,8 @@ WITH internal_probe_keys AS (
     SELECT * FROM usage_events
     UNION ALL
     SELECT kind, id, request_id, created_at, account_id, user_id, user_email, account_name, base_url,
-      stream, first_token_ms, duration_ms, scoreable, exclusion_reason, model,
+      stream, first_token_ms, duration_ms, scoreable,
+      CASE WHEN scoreable THEN NULL::text ELSE exclusion_reason END AS exclusion_reason, model,
       upstream_model, inbound_endpoint, upstream_endpoint, error_phase, error_type, business_limited,
       client_status_code, upstream_status_code, error_message,
       upstream_error_message, upstream_error_detail

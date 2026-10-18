@@ -143,6 +143,7 @@ test("pool quality excludes every monitor-user key without changing account scor
   expect(poolQualitySql).toContain("'%balance is insufficient%'");
   expect(poolQualitySql).toContain("COALESCE(source.business_limited, false)");
   expect(poolQualitySql).toContain("'customer-billing'");
+  expect(poolQualitySql).toContain("CASE WHEN scoreable THEN NULL::text ELSE exclusion_reason END AS exclusion_reason");
   expect(poolQualitySql.match(/AND NOT \(source.account_id IS NOT NULL/gu)?.length).toBe(2);
   expect(poolQualitySql).toContain("AND LOWER(COALESCE(source.error_phase, '')) = 'upstream'");
   expect(poolQualitySql).toContain("AND COALESCE(source.upstream_status_code, 0) >= 400)");
