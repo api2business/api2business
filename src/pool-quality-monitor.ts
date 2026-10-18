@@ -6,6 +6,7 @@ import {
   attributedInternalUpstreamFailureSql,
   modelRoutingPatternsSql,
   nonScoreableBillingErrorPatternsSql,
+  explicitUpstreamErrorSql,
   stableUpstreamErrorPatternsSql,
 } from "./scoring-error-policy";
 type Row = Record<string, unknown>;
@@ -122,7 +123,8 @@ WITH internal_probe_keys AS (
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%context_length_exceeded%'
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%input must be a list%'
           OR COALESCE(source.business_limited, false)
-          OR source.message_text LIKE ANY (${nonScoreableBillingErrorPatternsSql})
+          OR (source.message_text LIKE ANY (${nonScoreableBillingErrorPatternsSql})
+            AND NOT ${explicitUpstreamErrorSql("source")})
           OR source.message_text LIKE ANY (${modelRoutingPatternsSql}) THEN false
         WHEN ${attributedInternalUpstreamFailureSql("source")} THEN true
         WHEN LOWER(COALESCE(source.error_phase, '')) IN ('internal', 'client', 'business') THEN false
@@ -136,7 +138,8 @@ WITH internal_probe_keys AS (
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%input must be a list%'
           THEN 'client_request'
         WHEN COALESCE(source.business_limited, false)
-          OR source.message_text LIKE ANY (${nonScoreableBillingErrorPatternsSql}) THEN 'customer-billing'
+          OR (source.message_text LIKE ANY (${nonScoreableBillingErrorPatternsSql})
+            AND NOT ${explicitUpstreamErrorSql("source")}) THEN 'customer-billing'
         WHEN source.message_text LIKE ANY (${modelRoutingPatternsSql}) THEN 'model_routing'
         WHEN ${attributedInternalUpstreamFailureSql("source")} THEN NULL
         WHEN LOWER(COALESCE(source.error_phase, '')) IN ('internal', 'client', 'business')

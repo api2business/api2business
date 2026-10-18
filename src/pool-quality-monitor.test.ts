@@ -143,6 +143,9 @@ test("pool quality excludes every monitor-user key without changing account scor
   expect(poolQualitySql).toContain("'%balance is insufficient%'");
   expect(poolQualitySql).toContain("COALESCE(source.business_limited, false)");
   expect(poolQualitySql).toContain("'customer-billing'");
+  expect(poolQualitySql.match(/AND NOT \(source.account_id IS NOT NULL/gu)?.length).toBe(2);
+  expect(poolQualitySql).toContain("AND LOWER(COALESCE(source.error_phase, '')) = 'upstream'");
+  expect(poolQualitySql).toContain("AND COALESCE(source.upstream_status_code, 0) >= 400)");
   expect(poolQualitySql).toContain("'%model_not_found%'");
   expect(poolQualitySql).toContain("'%model not found%'");
   expect(poolQualitySql).toContain("'%model_no_found%'");

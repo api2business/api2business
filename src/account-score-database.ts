@@ -9,6 +9,7 @@ import {
   attributedInternalUpstreamFailureSql,
   modelRoutingPatternsSql,
   nonScoreableBillingErrorPatternsSql,
+  explicitUpstreamErrorSql,
   stableUpstreamErrorPatternsSql,
 } from "./scoring-error-policy";
 
@@ -191,7 +192,8 @@ account_stats AS (
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%input must be a list%' THEN false
             WHEN COALESCE(o.is_business_limited, false) THEN false
             WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
-              o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${nonScoreableBillingErrorPatternsSql}) THEN false
+              o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${nonScoreableBillingErrorPatternsSql})
+              AND NOT ${explicitUpstreamErrorSql("o")} THEN false
             WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
               o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${modelRoutingPatternsSql}) THEN false
             WHEN ${attributedInternalUpstreamFailureSql("o")} THEN true
