@@ -147,7 +147,10 @@ function customerErrorAttribution(row: Sub2ApiRequestError): { scoreable: boolea
   const explicitUpstream = row.account_id != null
     && String(row.phase ?? "").toLowerCase() === "upstream"
     && Number(row.upstream_status_code ?? 0) >= 400;
-  if (nonScoreableBillingErrorPatterns.some((marker) => message.includes(marker)) && !explicitUpstream) return { scoreable: false, reason: "customer-billing" };
+  if (row.is_business_limited === true
+    || (nonScoreableBillingErrorPatterns.some((marker) => message.includes(marker)) && !explicitUpstream)) {
+    return { scoreable: false, reason: "customer-billing" };
+  }
   if (message.includes("context window") || message.includes("context_length_exceeded")) return { scoreable: false, reason: "context-window" };
   if (message.includes("input must be a list")) return { scoreable: false, reason: "invalid-client-input" };
   if (message.includes("not supported by any configured account") || message.includes("no available channel for model")) return { scoreable: false, reason: "model-route" };

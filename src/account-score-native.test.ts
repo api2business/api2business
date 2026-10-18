@@ -134,17 +134,18 @@ describe("aggregateNativeGroupScore", () => {
   });
 
   test("does not mistake an attributed upstream balance response for customer billing", () => {
-    for (const [phase, upstreamStatus, accountId, failures] of [
-      ["upstream", 403, 15, 1],
-      ["request", 403, 15, 0],
-      ["upstream", undefined, 15, 0],
+    for (const [phase, upstreamStatus, accountId, limited, failures] of [
+      ["upstream", 403, 15, false, 1],
+      ["request", 403, 15, false, 0],
+      ["upstream", undefined, 15, false, 0],
+      ["upstream", 403, 15, true, 0],
     ] as const) {
       const result = aggregateNativeGroupScore({
         group: { id: 2, name: "pool", platform: "openai", status: "active" },
         accounts: [{ id: 15, name: "primary", platform: "openai", status: "active", schedulable: true, priority: 1 }],
         usage: [],
         requestErrors: [{ id: 1, request_id: "balance", account_id: accountId,
-          status_code: 503, phase, upstream_status_code: upstreamStatus,
+          status_code: 503, phase, upstream_status_code: upstreamStatus, is_business_limited: limited,
           error_body: '{"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}' }],
         systemLogs: [], overview: {}, availability: availableOps, concurrency: availableOps,
       });

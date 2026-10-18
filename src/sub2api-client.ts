@@ -63,6 +63,7 @@ export interface Sub2ApiRequestError {
   requested_model?: string;
   upstream_model?: string;
   upstream_status_code?: number;
+  is_business_limited?: boolean;
   error_body?: string;
   upstream_error_message?: string;
   upstream_error_detail?: string;
