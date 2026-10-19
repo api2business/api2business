@@ -65,6 +65,8 @@ export default defineConfig({
     port: target.webListenPort,
     allowedHosts: target.webAllowedHosts,
     strictPort: true,
+    // The HTTP file boundary is the frontend, not the workspace containing config.
+    fs: { strict: true, allow: [resolve(process.cwd(), "static")] },
     watch: { usePolling: true, interval: 300 },
     proxy: {
       "/api": { target: target.webApiBaseUrl, changeOrigin: true },

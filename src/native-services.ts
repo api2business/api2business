@@ -9,7 +9,10 @@ const nativeComponents: NativeServiceId[] = ["api", "worker", "web"];
 function composeArgs(config: AppConfig, action: string, component?: NativeServiceId): string[] {
   const n = config.runtime.native;
   const args = ["compose", "--project-name", n.composeProject, "--file", resolve(config.rootDirectory, n.composeFile), "--env-file", resolve(config.rootDirectory, n.composeEnvFile), action];
-  if (action === "up") args.push("--detach", "--build");
+  if (action === "up") {
+    args.push("--detach", "--build");
+    if (component) args.push("--no-deps");
+  }
   if (component) args.push(component);
   return args;
 }
