@@ -62,8 +62,9 @@ WITH internal_probe_keys AS (
       AND o.created_at <= $3::timestamptz
       AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
       AND NOT ${audioRequestSql("o", true)}
-      -- 上游失败但入站已成功的 failover 中间事件不是用户错误。
-      AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
+      -- HTTP 200 不能证明流式业务成功；精确 usage 在 final_requests 中优先。
+      AND (NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
+        OR COALESCE(o.upstream_status_code, 0) >= 400)
       AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
       AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
         '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
@@ -181,7 +182,8 @@ function poolQualityErrorsQuery(bounded = false): string { return `${poolQuality
     ) AS failover_triggered
   FROM recent_events e
   WHERE e.kind = 'error'
-    AND NOT (COALESCE(e.client_status_code, e.upstream_status_code, 0) BETWEEN 200 AND 399)
+    AND (NOT (COALESCE(e.client_status_code, e.upstream_status_code, 0) BETWEEN 200 AND 399)
+      OR COALESCE(e.upstream_status_code, 0) >= 400)
     AND ($5::text = 'all'
       OR ($5::text = 'scoreable' AND e.scoreable = true)
       OR ($5::text = 'excluded' AND e.scoreable = false))

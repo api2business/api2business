@@ -32,10 +32,12 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("AND e.kind = 'usage'");
   expect(recentAccountAggregateQuery).toContain("e.kind = 'usage' AND e.first_token_ms IS NOT NULL");
   expect(recentAccountAggregateQuery).not.toContain("e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL");
-  expect(recentAccountAggregateQuery).toContain("e.client_status_code >= 400");
+  expect(recentAccountAggregateQuery).toContain("AND (e.client_status_code >= 400 OR e.upstream_status_code >= 400)");
   expect(recentAccountAggregateQuery).toContain("o.status_code::int AS client_status_code");
   expect(recentAccountAggregateQuery).toContain("o.upstream_status_code::int AS upstream_status_code");
-  expect(recentAccountAggregateQuery).toContain("AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)");
+  expect(recentAccountAggregateQuery).toContain("AND (NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)");
+  expect(recentAccountAggregateQuery).toContain("OR COALESCE(o.upstream_status_code, 0) >= 400)");
+  expect(recentAccountAggregateQuery).toContain("AND COALESCE(o.upstream_status_code, 0) < 400 THEN false");
   expect(recentAccountAggregateQuery).toContain("PARTITION BY COALESCE(candidate.request_id::text");
   expect(recentAccountAggregateQuery).toContain("ORDER BY (candidate.kind = 'usage') DESC");
   expect(recentAccountAggregateQuery).not.toContain("openai.request_completed");

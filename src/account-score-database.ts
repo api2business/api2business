@@ -80,7 +80,7 @@ account_stats AS (
         AND f.triggered
         AND e.scoreable
         AND e.kind = 'error'
-        AND e.client_status_code >= 400
+        AND (e.client_status_code >= 400 OR e.upstream_status_code >= 400)
     ), 0)::numeric AS failover_failed,
     COALESCE(SUM(e.sample_weight) FILTER (
       WHERE e.request_id IS NOT NULL AND (e.kind = 'usage' OR e.scoreable) AND f.aborted
@@ -186,7 +186,8 @@ account_stats AS (
           o.upstream_status_code::int AS upstream_status_code,
           o.is_business_limited AS business_limited,
           CASE
-            WHEN COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399 THEN false
+            WHEN COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399
+              AND COALESCE(o.upstream_status_code, 0) < 400 THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%context window%'
               OR LOWER(COALESCE(o.error_message, '')) LIKE '%context_length_exceeded%' THEN false
             WHEN LOWER(COALESCE(o.error_message, '')) LIKE '%input must be a list%' THEN false
@@ -229,7 +230,8 @@ account_stats AS (
             OR COALESCE(o.upstream_status_code, 0) >= 400
             OR o.error_type = 'cyber_policy'
           )
-          AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
+          AND (NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
+            OR COALESCE(o.upstream_status_code, 0) >= 400)
         ORDER BY o.created_at DESC
         LIMIT $1
       )

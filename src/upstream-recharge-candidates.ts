@@ -84,7 +84,8 @@ WITH low_balance AS (
     o.time_to_first_token_ms::bigint, o.duration_ms::bigint, 0::numeric,
     o.status_code::int, o.upstream_status_code::int,
     CASE
-      WHEN COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399 THEN false
+      WHEN COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399
+        AND COALESCE(o.upstream_status_code, 0) < 400 THEN false
       WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
         o.upstream_error_message, o.upstream_error_detail)) LIKE ANY(ARRAY[
           '%insufficient_balance%', '%insufficient account balance%',
@@ -108,7 +109,8 @@ WITH low_balance AS (
       AND NOT ${audioRequestSql("o", true)}
     AND LOWER(COALESCE(o.inbound_endpoint,'')) IN ('/v1/messages','/v1/responses','/responses/compact','/v1/responses/compact')
     AND (COALESCE(o.status_code,0) >= 400 OR COALESCE(o.upstream_status_code,0) >= 400 OR o.error_type='cyber_policy')
-    AND NOT (COALESCE(o.status_code,o.upstream_status_code,0) BETWEEN 200 AND 399)
+    AND (NOT (COALESCE(o.status_code,o.upstream_status_code,0) BETWEEN 200 AND 399)
+      OR COALESCE(o.upstream_status_code,0) >= 400)
     AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id=o.api_key_id)
 ), deduplicated AS (
   SELECT e.*, ROW_NUMBER() OVER (

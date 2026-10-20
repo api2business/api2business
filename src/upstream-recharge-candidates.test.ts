@@ -29,6 +29,9 @@ test("充值候选历史 SQL 保留欠费前窗口和业务错误排除口径", 
   expect(rechargeCandidatesQuery).toContain("%luna%");
   expect(rechargeCandidatesQuery).toContain("%model_not_found%");
   expect(rechargeCandidatesQuery).toContain("failover_event");
+  expect(rechargeCandidatesQuery).toContain("AND (NOT (COALESCE(o.status_code,o.upstream_status_code,0) BETWEEN 200 AND 399)");
+  expect(rechargeCandidatesQuery).toContain("OR COALESCE(o.upstream_status_code,0) >= 400)");
+  expect(rechargeCandidatesQuery).toContain("AND COALESCE(o.upstream_status_code, 0) < 400 THEN false");
   expect(rechargeCandidatesQuery).toContain("/responses/compact");
   expect(rechargeCandidatesQuery).toContain("jsonb_array_elements_text(");
   expect(rechargeCandidatesQuery).toContain("jsonb_typeof($1::jsonb)='array'");
