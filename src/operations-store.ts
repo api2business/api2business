@@ -1154,6 +1154,30 @@ export class OperationsStore {
         )
       `;
       locked = true;
+      // Every executing priority plan owns this existing global lock. Once it
+      // is acquired, started pending plans belong to interrupted executions,
+      // not live writers. Preserve partial-write uncertainty; never replay them.
+      await connection`
+        WITH interrupted AS (
+          UPDATE api2business_priority_plans
+          SET status='failed', completed_at=now(), apply_result=jsonb_build_object(
+            'writeMode', 'interrupted-execution',
+            'verification', 'unknown-partial-write',
+            'reason', 'previous-execution-ended-before-completion',
+            'reconciledAt', now(),
+            'recovery', 'next-normal-priority-cycle'
+          )
+          WHERE status='pending' AND execution_started_at IS NOT NULL
+          RETURNING id, created_by
+        )
+        INSERT INTO api2business_operation_audit
+          (id, action, status, operator, input_summary, result_summary)
+        SELECT gen_random_uuid(), 'priority.plan.interrupted', 'failed', created_by,
+          jsonb_build_object('planId', id),
+          jsonb_build_object('verification', 'unknown-partial-write',
+            'recovery', 'next-normal-priority-cycle')
+        FROM interrupted
+      `;
       const acquiredAt = new Date().toISOString();
       return await operation({
         queueName: "priority-optimization-global",

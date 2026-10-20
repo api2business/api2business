@@ -1,5 +1,28 @@
 import { expect, test } from "bun:test";
-import { authoritativeUsageBalance, postgresBigintArrayLiteral } from "./operations-store";
+import { OperationsStore, authoritativeUsageBalance, postgresBigintArrayLiteral } from "./operations-store";
+
+test("reconciles interrupted started plans only while holding the existing priority queue lock", async () => {
+  const calls: string[] = [];
+  const connection = Object.assign(async (parts: TemplateStringsArray) => {
+    calls.push(parts.join("?"));
+    return [];
+  }, { release() { calls.push("release"); }, async close() { calls.push("close"); } });
+  const sql = { async reserve() { return connection; } };
+  const store = new OperationsStore("postgres://unused", (() => sql) as never);
+  const result = await store.withPriorityOptimizationQueue(async () => {
+    calls.push("operation");
+    return "next-normal-cycle";
+  });
+  expect(result).toBe("next-normal-cycle");
+  expect(calls[0]).toContain("pg_advisory_lock(");
+  expect(calls[1]).toContain("status='pending' AND execution_started_at IS NOT NULL");
+  expect(calls[1]).toContain("unknown-partial-write");
+  expect(calls[1]).toContain("priority.plan.interrupted");
+  expect(calls[1]).not.toContain("applied_at=");
+  expect(calls[2]).toBe("operation");
+  expect(calls[3]).toContain("pg_advisory_unlock(");
+  expect(calls[4]).toBe("release");
+});
 
 test("encodes account IDs as a PostgreSQL bigint array literal", () => {
   expect(postgresBigintArrayLiteral([49, 330, 307])).toBe("{49,330,307}");
