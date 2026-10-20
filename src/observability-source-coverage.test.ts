@@ -16,6 +16,9 @@ test("source read keeps exact window, dedup, probe and audio boundaries without 
   expect(sourceCoverageSql).toContain("SELECT DISTINCT ON");
   expect(sourceCoverageSql).toContain("WHERE NOT probe AND NOT");
   expect(sourceCoverageSql).toContain("modelBreakdown");
+  expect(sourceCoverageSql).toContain('pr."clientRequestId"=l.client_request_id');
+  expect(sourceCoverageSql).toContain('pr."accountId"=l.account_id');
+  expect(sourceCoverageSql).toContain('l.created_at <= pr."completedAt"');
   expect(sourceCoverageSql).not.toContain("l.extra,");
   expect(sourceCoverageSql).not.toContain("credentials");
 });

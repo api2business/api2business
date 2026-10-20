@@ -295,6 +295,7 @@ export class OperationsService {
         unready: Number(row.unready_count),
         durationMs: Number(row.duration_ms),
         errorSummary: row.error_summary,
+        requestEvidence: row.request_evidence ?? [],
       })),
       pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
       valuesPrinted: false,
@@ -477,6 +478,13 @@ export class OperationsService {
           unreadyCount: Array.isArray(result.unreadyAccountIds) ? result.unreadyAccountIds.length : 0,
           durationMs: Number(result.durationMs ?? Date.now() - startedAt.getTime()),
           errorSummary: null,
+          requestEvidence: Array.isArray(result.results) ? result.results.flatMap((item) => {
+            const response = item?.response;
+            if (!response || typeof response !== "object") return [];
+            const { accountId, groupId, model, startedAt, completedAt, clientRequestId } = response;
+            return typeof clientRequestId === "string" && clientRequestId.trim()
+              ? [{ accountId, groupId, model, startedAt, completedAt, clientRequestId }] : [];
+          }) : [],
         });
       }
       return result;

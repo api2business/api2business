@@ -241,8 +241,10 @@ export class OperationalObservability {
     const [cache,http]=await Promise.all([this.store.getUpstreamUsageCache([]),this.store.httpObservationFacts(window.start,window.end)]);
     let sourceCoverage;
     try {
+      const probeEvidence=await this.store.idleProbeRequestEvidence(window.start,window.end);
       const sourceQuery=await this.reads.query<Row>({key:`observability.source-coverage:${window.start}:${window.end}`,
-        kind:"observability.window",sql:sourceCoverageSql,parameters:[window.start,window.end],priority:"manual",cacheMode:"bypass-cache"});
+        kind:"observability.window",sql:sourceCoverageSql,
+        parameters:[window.start,window.end,JSON.stringify(probeEvidence.map((r:Row)=>r.evidence))],priority:"manual",cacheMode:"bypass-cache"});
       sourceCoverage={...sourceCoverageFacts(sourceQuery.rows[0]?.coverage ?? null),status:"available",
         queryStartedAt:sourceQuery.queryStartedAt,queryCompletedAt:sourceQuery.queryCompletedAt,
         queueDurationMs:sourceQuery.queueDurationMs,queryDurationMs:sourceQuery.queryDurationMs};

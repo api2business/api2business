@@ -302,6 +302,8 @@ export class OperationsStore {
       );
       ALTER TABLE api2business_idle_probe_rounds
         ADD COLUMN IF NOT EXISTS scope text NOT NULL DEFAULT 'codex';
+      ALTER TABLE api2business_idle_probe_rounds
+        ADD COLUMN IF NOT EXISTS request_evidence jsonb NOT NULL DEFAULT '[]'::jsonb;
       UPDATE api2business_idle_probe_rounds
       SET status = 'failed',
           error_summary = COALESCE(error_summary, '探活计划存在未就绪账号')
@@ -901,16 +903,18 @@ export class OperationsStore {
     unreadyCount: number;
     durationMs: number;
     errorSummary: string | null;
+    requestEvidence?: Array<Record<string, unknown>>;
   }) {
     await this.sql`
       INSERT INTO api2business_idle_probe_rounds (
         id, operation_id, scope, trigger_type, started_at, completed_at, status,
         planned_count, ready_count, attempted_count, succeeded_count,
-        failed_count, unready_count, duration_ms, error_summary
+        failed_count, unready_count, duration_ms, error_summary, request_evidence
       ) VALUES (${crypto.randomUUID()}, ${input.operationId}, ${input.scope}, ${input.triggerType},
         ${input.startedAt}, ${input.completedAt}, ${input.status}, ${input.plannedCount},
         ${input.readyCount}, ${input.attemptedCount}, ${input.succeededCount},
-        ${input.failedCount}, ${input.unreadyCount}, ${input.durationMs}, ${input.errorSummary})
+        ${input.failedCount}, ${input.unreadyCount}, ${input.durationMs}, ${input.errorSummary},
+        ${JSON.stringify(input.requestEvidence ?? [])}::jsonb)
       ON CONFLICT (operation_id) DO NOTHING
     `;
   }
@@ -919,12 +923,20 @@ export class OperationsStore {
     return await this.readQuery(() => this.sql`
       SELECT operation_id, trigger_type, started_at, completed_at, status,
         planned_count, ready_count, attempted_count, succeeded_count,
-        failed_count, unready_count, duration_ms, error_summary,
+        failed_count, unready_count, duration_ms, error_summary, request_evidence,
         COUNT(*) OVER()::int AS total_count
       FROM api2business_idle_probe_rounds
       WHERE scope=${scope}
       ORDER BY started_at DESC, id DESC
       LIMIT ${limit} OFFSET ${offset}
+    `);
+  }
+
+  async idleProbeRequestEvidence(start: string, end: string) {
+    return await this.readQuery(() => this.sql`
+      SELECT evidence FROM api2business_idle_probe_rounds r,
+        LATERAL jsonb_array_elements(r.request_evidence) AS p(evidence)
+      WHERE r.started_at < ${end}::timestamptz AND r.completed_at >= ${start}::timestamptz
     `);
   }
 

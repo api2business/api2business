@@ -254,12 +254,16 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
   ) => {
     requestUrl = String(input);
     requestBody = String(init?.body ?? "");
-    return new Response(JSON.stringify({ id: "resp_probe", output: [] }), { status: 200 });
+    return new Response(JSON.stringify({ id: "resp_probe", output: [] }), {
+      status: 200, headers: { "X-Client-Request-ID": "native-probe-correlation" },
+    });
   }) as unknown as typeof fetch;
   try {
     await service.ensure(42);
     const result = await service.probe(42, "gpt-5.6-terra", 1000, "low");
     expect(result).toMatchObject({ accountId: 42, groupId: 51, classification: "alive", ordinaryLogRecorded: true });
+    expect(result).toMatchObject({ model: "gpt-5.6-terra", clientRequestId: "native-probe-correlation" });
+    expect(Date.parse(String(result.completedAt))).toBeGreaterThanOrEqual(Date.parse(String(result.startedAt)));
     expect(requestUrl).toBe("https://gateway.example.com/v1/responses");
     expect(requestUrl).not.toContain("/admin/accounts/");
     expect(JSON.parse(requestBody)).toMatchObject({
@@ -311,6 +315,7 @@ test("probe does not claim an account sample when the private group has no avail
       httpStatus: 503,
       ordinaryLogRecorded: false,
       errorMarker: "no-available-account",
+      clientRequestId: null,
     });
   } finally {
     globalThis.fetch = originalFetch;

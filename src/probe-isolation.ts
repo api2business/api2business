@@ -517,6 +517,11 @@ export class ProbeIsolationService {
     return {
       accountId,
       groupId: ensured.binding.groupId,
+      model,
+      startedAt: new Date(startedAt).toISOString(),
+      completedAt: new Date().toISOString(),
+      // This is returned by the native gateway, not a caller-selected marker.
+      clientRequestId: response.headers.get("x-client-request-id")?.trim() || null,
       classification,
       httpStatus: response.status,
       durationMs: Date.now() - startedAt,

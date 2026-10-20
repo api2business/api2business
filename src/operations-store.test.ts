@@ -1,6 +1,21 @@
 import { expect, test } from "bun:test";
 import { OperationsStore, authoritativeUsageBalance, postgresBigintArrayLiteral } from "./operations-store";
 
+test("probe correlation is persisted as JSON, including an empty legacy evidence list", async () => {
+  const calls: unknown[][] = [];
+  const sql = async (_parts: TemplateStringsArray, ...values: unknown[]) => { calls.push(values); return []; };
+  const store = new OperationsStore("postgres://unused", (() => sql) as never);
+  const input = { operationId: "original-round", scope: "grok", triggerType: "automatic" as const,
+    startedAt: "2026-01-01T01:00:00Z", completedAt: "2026-01-01T01:00:01Z", status: "succeeded" as const,
+    plannedCount: 1, readyCount: 1, attemptedCount: 1, succeededCount: 1, failedCount: 0,
+    unreadyCount: 0, durationMs: 1000, errorSummary: null };
+  await store.addIdleProbeRound(input);
+  const evidence = [{ clientRequestId: "native-id", accountId: 42 }];
+  await store.addIdleProbeRound({ ...input, requestEvidence: evidence });
+  expect(calls[0]?.at(-1)).toBe("[]");
+  expect(calls[1]?.at(-1)).toBe(JSON.stringify(evidence));
+});
+
 test("reconciles interrupted started plans only while holding the existing priority queue lock", async () => {
   const calls: string[] = [];
   const connection = Object.assign(async (parts: TemplateStringsArray) => {
