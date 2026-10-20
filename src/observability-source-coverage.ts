@@ -3,7 +3,7 @@ import { audioRequestSql } from "./scoring-error-policy";
 // Missing-usage warnings are evidence gaps, not additional successes or failures.
 // Never return the free-form extra object, request bodies, session IDs or credentials.
 export const sourceCoverageSql = `WITH probe_requests AS (
-  SELECT * FROM jsonb_to_recordset($3::jsonb) AS p("clientRequestId" text,"accountId" bigint,
+  SELECT * FROM jsonb_to_recordset($3::jsonb) AS p("clientRequestId" text,"requestId" text,"accountId" bigint,
     "startedAt" timestamptz,"completedAt" timestamptz)
 ), probe_keys AS (
   SELECT k.id FROM api_keys k LEFT JOIN users u ON u.id=k.user_id
@@ -19,9 +19,9 @@ export const sourceCoverageSql = `WITH probe_requests AS (
     l.extra->>'client_disconnected' AS client_disconnected,
     l.extra->>'suppressed_since_last' AS suppressed_since_last,
     (p.id IS NOT NULL OR LOWER(COALESCE(g.name,'')) LIKE 'api2business-probe-%'
-      OR EXISTS (SELECT 1 FROM probe_requests pr WHERE pr."clientRequestId"=l.client_request_id
-        AND pr."accountId"=l.account_id AND l.created_at >= pr."startedAt"
-        AND l.created_at <= pr."completedAt")) AS probe
+      OR EXISTS (SELECT 1 FROM probe_requests pr
+        WHERE (pr."clientRequestId"=l.client_request_id OR pr."requestId"=l.request_id)
+        AND pr."accountId"=l.account_id AND l.created_at >= pr."startedAt")) AS probe
   FROM ops_system_logs l LEFT JOIN probe_keys p ON p.id=l.api_key_id
   LEFT JOIN api_keys k ON k.id=l.api_key_id LEFT JOIN groups g ON g.id=k.group_id
   WHERE l.created_at >= $1::timestamptz AND l.created_at < $2::timestamptz

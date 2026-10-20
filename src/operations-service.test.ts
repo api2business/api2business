@@ -216,15 +216,17 @@ test("探活轮次只持久化原生关联证据，不保留自由响应字段",
   const evidence = { accountId: 42, groupId: 51, model: "grok-test",
     startedAt: "2026-01-01T01:00:00Z", completedAt: "2026-01-01T01:00:01Z",
     clientRequestId: "native-id" };
+  const timeoutEvidence = { ...evidence, accountId: 43, clientRequestId: null, requestId: "original-timeout-request" };
   let saved: Record<string, unknown> = {};
   const store = { async addIdleProbeRound(input: Record<string, unknown>) { saved = input; } } as unknown as OperationsStore;
   const service = new OperationsService({} as AppConfig, store, unusedReads);
   const probe = (service as unknown as { idleProbe: { run: () => Promise<Record<string, unknown>> } }).idleProbe;
   probe.run = async () => ({ ok: true, results: [
     { response: { ...evidence, apiKey: "must-not-persist", body: "must-not-persist" } },
+    { response: { ...timeoutEvidence, ordinaryLogRecorded: false } },
     { response: { accountId: 43, clientRequestId: null } },
   ] });
   await service.runIdleProbe([], 1, { operationId: "original-round", triggerType: "manual", scope: "grok" });
-  expect(saved.requestEvidence).toEqual([evidence]);
+  expect(saved.requestEvidence).toEqual([evidence, timeoutEvidence]);
   expect(JSON.stringify(saved)).not.toContain("must-not-persist");
 });

@@ -9,7 +9,7 @@ export async function verifySourceCoverageWindow(client: AdminHttpClient) {
   ), groups AS (SELECT 1::bigint id,'business'::text name),
   usage_logs AS (SELECT 'represented'::text request_id,'2026-01-01T01:00:00Z'::timestamptz created_at),
   ops_system_logs AS (
-    SELECT id,request_id,CASE WHEN id>=10 THEN 'native-probe' ELSE NULL END client_request_id,
+    SELECT id,request_id,CASE WHEN id BETWEEN 10 AND 12 THEN 'native-probe' ELSE NULL END client_request_id,
       at::timestamptz created_at,CASE WHEN id=11 THEN 2 ELSE 1 END::bigint account_id,api_key_id,model,
       'openai_usage.success_missing_usage'::text message,
       jsonb_build_object('inbound_endpoint','/v1/responses','terminal_event','response.completed',
@@ -26,24 +26,27 @@ export async function verifySourceCoverageWindow(client: AdminHttpClient) {
       (9,'luna','2026-01-01T01:20:00Z',1,'gpt-5.6-luna'),
       (10,'exact-probe','2026-01-01T01:00:00Z',NULL,NULL),
       (11,'wrong-account','2026-01-01T01:00:00Z',NULL,NULL),
-      (12,'outside-probe-time','2026-01-01T01:15:00Z',NULL,NULL)
+      (12,'before-probe-start','2026-01-01T00:58:00Z',NULL,NULL),
+      (13,'timed-out-probe','2026-01-01T01:15:00Z',NULL,NULL)
     ) t(id,request_id,at,api_key_id,model)
   ), `;
   const result=await client.sub2ApiRead<{coverage:Record<string,any>}>({
     key:`observability-source-fixture:${crypto.randomUUID()}`,kind:"observability.fixture",
     sql:fixture+sourceCoverageSql.replace(/^WITH\s/u,""),parameters:["2026-01-01T00:00:00Z","2026-01-01T02:00:00Z",
-      JSON.stringify([{clientRequestId:"native-probe",accountId:1,startedAt:"2026-01-01T00:59:00Z",completedAt:"2026-01-01T01:01:00Z"}])],
+      JSON.stringify([{clientRequestId:"native-probe",accountId:1,startedAt:"2026-01-01T00:59:00Z",completedAt:"2026-01-01T01:01:00Z"},
+        {requestId:"timed-out-probe",accountId:1,startedAt:"2026-01-01T01:13:00Z",completedAt:"2026-01-01T01:14:00Z"}])],
     priority:"manual",cacheMode:"bypass-cache",
   });
   const coverage=result.rows[0]?.coverage ?? {};
-  const checks={sameWindow:coverage.observedWarningRecords===10,deduplicatedUnrepresented:coverage.unrepresentedRequests===5,
-    probeExcluded:coverage.excludedProbeRecords===2,audioExcluded:coverage.excludedAudioRecords===1,
+  const checks={sameWindow:coverage.observedWarningRecords===11,deduplicatedUnrepresented:coverage.unrepresentedRequests===5,
+    probeExcluded:coverage.excludedProbeRecords===3,audioExcluded:coverage.excludedAudioRecords===1,
     suppressionRetained:coverage.suppressedWarningRecords===5,
     unknownModelRetained:coverage.modelBreakdown?.some((r:any)=>r.model===null && r.requests===3),
     rawLunaRetained:coverage.modelBreakdown?.some((r:any)=>r.model==='gpt-5.6-luna' && r.requests===1),
     exactUsageLinked:!coverage.examples?.some((r:any)=>r.request_id==='represented'),
     exactNativeProbeLinked:!coverage.examples?.some((r:any)=>r.request_id==='exact-probe'),
     wrongAccountRetained:coverage.examples?.some((r:any)=>r.request_id==='wrong-account'),
-    wrongTimeRetained:coverage.examples?.some((r:any)=>r.request_id==='outside-probe-time')};
+    beforeStartRetained:coverage.examples?.some((r:any)=>r.request_id==='before-probe-start'),
+    timedOutProbeLinked:!coverage.examples?.some((r:any)=>r.request_id==='timed-out-probe')};
   return {ok:Object.values(checks).every(Boolean),checks,queryDurationMs:result.queryDurationMs,mutation:false};
 }

@@ -481,9 +481,10 @@ export class OperationsService {
           requestEvidence: Array.isArray(result.results) ? result.results.flatMap((item) => {
             const response = item?.response;
             if (!response || typeof response !== "object") return [];
-            const { accountId, groupId, model, startedAt, completedAt, clientRequestId } = response;
-            return typeof clientRequestId === "string" && clientRequestId.trim()
-              ? [{ accountId, groupId, model, startedAt, completedAt, clientRequestId }] : [];
+            const { accountId, groupId, model, startedAt, completedAt, clientRequestId, requestId } = response;
+            return (typeof clientRequestId === "string" && clientRequestId.trim())
+              || (typeof requestId === "string" && requestId.trim())
+              ? [{ accountId, groupId, model, startedAt, completedAt, clientRequestId, requestId }] : [];
           }) : [],
         });
       }

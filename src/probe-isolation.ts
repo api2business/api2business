@@ -468,13 +468,18 @@ export class ProbeIsolationService {
       binding: { accountId, groupId: stored.groupId, keyCreated: false },
       record: stored,
     };
+    const requestId = crypto.randomUUID();
+    const requestEvidence = { accountId, groupId: ensured.binding.groupId, model,
+      startedAt: new Date(startedAt).toISOString(), requestId };
     let response: Response;
+    let body: string;
     try {
       response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}/responses`, {
         method: "POST",
         headers: {
           accept: "text/event-stream",
           "content-type": "application/json",
+          "x-request-id": requestId,
           authorization: `Bearer ${ensured.record.apiKey}`,
         },
         body: JSON.stringify({
@@ -489,10 +494,11 @@ export class ProbeIsolationService {
         }),
         signal: AbortSignal.timeout(Math.min(timeoutMs, this.remainingTimeout(deadline) ?? timeoutMs)),
       });
+      body = await response.text();
     } catch (error) {
       return {
-        accountId,
-        groupId: ensured.binding.groupId,
+        ...requestEvidence,
+        completedAt: new Date().toISOString(),
         classification: "error",
         httpStatus: null,
         durationMs: Date.now() - startedAt,
@@ -502,7 +508,6 @@ export class ProbeIsolationService {
         error: errorMessage(error),
       };
     }
-    const body = await response.text();
     const success = response.status >= 200 && response.status < 300;
     const lowered = body.toLowerCase();
     const accountRoutingFailed = !success && [
@@ -515,10 +520,7 @@ export class ProbeIsolationService {
       : response.status === 401 || response.status === 403 ? "dead"
         : response.status === 429 ? "rate-limited" : "error";
     return {
-      accountId,
-      groupId: ensured.binding.groupId,
-      model,
-      startedAt: new Date(startedAt).toISOString(),
+      ...requestEvidence,
       completedAt: new Date().toISOString(),
       // This is returned by the native gateway, not a caller-selected marker.
       clientRequestId: response.headers.get("x-client-request-id")?.trim() || null,

@@ -248,12 +248,14 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
   const originalFetch = globalThis.fetch;
   let requestUrl = "";
   let requestBody = "";
+  let sentRequestId = "";
   globalThis.fetch = (async (
     input: Parameters<typeof fetch>[0],
     init?: Parameters<typeof fetch>[1],
   ) => {
     requestUrl = String(input);
     requestBody = String(init?.body ?? "");
+    sentRequestId = new Headers(init?.headers).get("x-request-id") ?? "";
     return new Response(JSON.stringify({ id: "resp_probe", output: [] }), {
       status: 200, headers: { "X-Client-Request-ID": "native-probe-correlation" },
     });
@@ -263,6 +265,8 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     const result = await service.probe(42, "gpt-5.6-terra", 1000, "low");
     expect(result).toMatchObject({ accountId: 42, groupId: 51, classification: "alive", ordinaryLogRecorded: true });
     expect(result).toMatchObject({ model: "gpt-5.6-terra", clientRequestId: "native-probe-correlation" });
+    expect(sentRequestId).toMatch(/^[a-f0-9-]{36}$/);
+    expect(result.requestId).toBe(sentRequestId);
     expect(Date.parse(String(result.completedAt))).toBeGreaterThanOrEqual(Date.parse(String(result.startedAt)));
     expect(requestUrl).toBe("https://gateway.example.com/v1/responses");
     expect(requestUrl).not.toContain("/admin/accounts/");
@@ -295,6 +299,9 @@ test("probe reports a gateway timeout without claiming an ordinary log", async (
       ordinaryLogRecorded: false,
       errorMarker: "request-timeout",
     });
+    expect(result.requestId).toMatch(/^[a-f0-9-]{36}$/);
+    expect(result.startedAt).toBeString();
+    expect(result.completedAt).toBeString();
   } finally {
     globalThis.fetch = originalFetch;
   }

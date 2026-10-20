@@ -241,7 +241,10 @@ export class OperationalObservability {
     const [cache,http]=await Promise.all([this.store.getUpstreamUsageCache([]),this.store.httpObservationFacts(window.start,window.end)]);
     let sourceCoverage;
     try {
-      const probeEvidence=await this.store.idleProbeRequestEvidence(window.start,window.end);
+      // A native terminal log can arrive after the probing client times out.
+      // Widen only the evidence lookup, never the SLI or warning window.
+      const evidenceStart=new Date(Date.parse(window.start)-this.config.sub2api.idleProbe.roundTimeoutSeconds*1000).toISOString();
+      const probeEvidence=await this.store.idleProbeRequestEvidence(evidenceStart,window.end);
       const sourceQuery=await this.reads.query<Row>({key:`observability.source-coverage:${window.start}:${window.end}`,
         kind:"observability.window",sql:sourceCoverageSql,
         parameters:[window.start,window.end,JSON.stringify(probeEvidence.map((r:Row)=>
