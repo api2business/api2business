@@ -37,11 +37,17 @@ errors AS (
     AND NOT ${audioRequestSql("e", true)}
     AND LOWER(COALESCE(error_type,'')) <> 'failover_event'
     AND (NOT (COALESCE(status_code,upstream_status_code,0) BETWEEN 200 AND 399)
-      OR COALESCE(upstream_status_code,0)>=400)
+      OR COALESCE(upstream_status_code,0)>=400
+      OR (error_phase='request' AND error_type='cyber_policy'))
 ), success AS (
   SELECT DISTINCT ON (request_id) request_id, account_id, model, stream, first_token_ms
   FROM usage u WHERE NULLIF(TRIM(request_id),'') IS NOT NULL
     AND NOT ${audioRequestSql("u")}
+    -- Native request-level policy events are terminal, even when HTTP 200 and a
+    -- zero-token usage row were persisted. Upstream attempt errors are not final.
+    AND NOT EXISTS (SELECT 1 FROM errors terminal
+      WHERE terminal.request_id=u.request_id
+        AND terminal.error_phase='request' AND terminal.error_type='cyber_policy')
   ORDER BY request_id,created_at DESC,id DESC
 ), customer_billing AS (
   SELECT DISTINCT ON (e.request_id) e.* FROM errors e

@@ -51,9 +51,16 @@ test('observability report keeps user balance and TTFT attribution for diagnosis
  expect(observabilitySql).toContain('percentile_cont(0.95) WITHIN GROUP (ORDER BY s.first_token_ms)');
 });
 test('explicit upstream failures survive a recorded HTTP 200 without overriding exact success',()=>{
- expect(observabilitySql).toContain('OR COALESCE(upstream_status_code,0)>=400)');
+ expect(observabilitySql).toContain('OR COALESCE(upstream_status_code,0)>=400');
  expect(observabilitySql).toContain("LOWER(COALESCE(error_type,'')) <> 'failover_event'");
  expect(observabilitySql).toContain('NOT EXISTS (SELECT 1 FROM success s WHERE s.request_id=e.request_id)');
+});
+test('native terminal policy refusals do not become successes through zero-token usage',()=>{
+ expect(observabilitySql).toContain("OR (error_phase='request' AND error_type='cyber_policy')");
+ expect(observabilitySql).toContain('terminal.request_id=u.request_id');
+ expect(observabilitySql).toContain("terminal.error_phase='request' AND terminal.error_type='cyber_policy'");
+ // Attempt errors still permit a later exact success; only request-final events override it.
+ expect(observabilitySql).not.toContain("terminal.error_phase='upstream'");
 });
 test('observer failures are scoped to the half-open window without erasing legacy uncertainty',()=>{
  const start='2026-10-07T02:00:00Z',end='2026-10-07T04:00:00Z';
