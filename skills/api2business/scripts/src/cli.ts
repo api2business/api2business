@@ -271,6 +271,7 @@ function help(): Record<string, unknown> {
       "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api <absolute-http(s)-URL>",
       "reads status --over-api <absolute-http(s)-URL>",
+      "reads runtime --group <positive-id> --platform openai|anthropic|grok --over-api <absolute-http(s)-URL> (read-only live availability/concurrency)",
       "observability report|costs|get|check|configure --help",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
@@ -651,7 +652,7 @@ async function embedded(parsed: Parsed, config: ReturnType<typeof loadConfig>, t
     || (parsed.command[0] === "accounts" && parsed.command[1] === "lifecycle")
     || parsed.command.join(" ") === "payments alipay-revenue"
     || parsed.command[0] === "observability"
-    || parsed.command.join(" ") === "reads status"
+    || parsed.command[0] === "reads"
   ) {
     throw new Error("Sub2API production reads require the Native API transport");
   }
@@ -1177,6 +1178,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await client.rankScores(parsed.calls ?? config.monitor.recentCallLimit, parsed.account, parsed.group);
   }
   if (group === "reads" && action === "status") return await client.readStatus();
+  if (group === "reads" && action === "runtime") {
+    if (!parsed.group || !/^\d+$/.test(parsed.group) || !Number.isSafeInteger(Number(parsed.group)) || Number(parsed.group) < 1 || !["openai", "anthropic", "grok"].includes(parsed.platform ?? "")) {
+      throw new Error("reads runtime requires --group <positive-id> --platform openai|anthropic|grok");
+    }
+    return await client.schedulingRuntime(parsed.group, parsed.platform!);
+  }
   if (group === "reads" && action === "query") {
     if (!parsed.file) throw new Error("reads query requires --file <broker-read-request.json>");
     const request = JSON.parse(readFileSync(parsed.file, "utf8"));
@@ -1352,7 +1359,7 @@ export async function runCli(args: string[]): Promise<void> {
       parsed.command.join(" ") === "scores rank"
       || parsed.command[0] === "upstream-scheduling-v2"
       || parsed.command[0] === "observability"
-    || parsed.command.join(" ") === "reads status"
+      || parsed.command[0] === "reads"
       || parsed.command[0] === "errors"
       || parsed.command.join(" ") === "users impact"
       || parsed.command.join(" ") === "users balance-liability"

@@ -10,6 +10,7 @@ import {
 import { reconcileGatewayServicePolicy } from "./gateway-service-policy";
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
+import { collectSchedulingRuntime } from "./scheduling-runtime-evidence";
 
 type Row = Record<string, unknown>;
 
@@ -94,6 +95,10 @@ export class Sub2ApiRuntimeService {
 
   async reconcileServicePolicy(reads: Sub2ApiReadClient, config: AppConfig, confirm: boolean) {
     return await reconcileGatewayServicePolicy(this.client, reads, config, confirm);
+  }
+
+  async schedulingRuntimeEvidence(groupId: unknown, platform: unknown) {
+    return await collectSchedulingRuntime(this.client, groupId, platform);
   }
 
   updateApiKeyFailoverRules(

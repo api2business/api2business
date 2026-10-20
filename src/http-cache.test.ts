@@ -26,6 +26,7 @@ test("persistent snapshot APIs bypass the generic response cache", () => {
   for (const pathname of [
     "/api/admin/gateway/service-policy",
     "/api/admin/read-status",
+    "/api/admin/scheduling-runtime?group=3&platform=openai",
     "/api/observability/report",
     "/api/observability/reports/123",
     "/api/upstreams/pool-quality",

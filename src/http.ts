@@ -38,6 +38,7 @@ const staticRoot = resolve(import.meta.dir, "../static");
 const persistentSnapshotApiPaths = [
   /^\/api\/admin\/gateway\/service-policy$/u,
   /^\/api\/admin\/read-status$/u,
+  /^\/api\/admin\/scheduling-runtime$/u,
   /^\/api\/observability(?:\/|$)/u,
   /^\/api\/upstreams(?:\/|$)/u,
   /^\/api\/upstreams\/pool-quality(?:\/|$)/u,
@@ -706,6 +707,14 @@ export function createHandler(
         catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 409); }
       }
       if (url.pathname === "/api/admin/gateway/service-policy" && request.method === "GET") return json(await operations.gatewayServicePolicy(false));
+      if (url.pathname === "/api/admin/scheduling-runtime" && request.method === "GET") {
+        const group = url.searchParams.get("group");
+        const platform = url.searchParams.get("platform");
+        if (!group || !/^\d+$/.test(group) || !Number.isSafeInteger(Number(group)) || Number(group) < 1 || !["openai", "anthropic", "grok"].includes(platform ?? "")) {
+          return json({ ok: false, error: "requires positive group and platform openai|anthropic|grok" }, 400);
+        }
+        return json(await runtime.schedulingRuntimeEvidence(group, platform));
+      }
       if (url.pathname === "/api/admin/gateway/service-policy" && request.method === "POST") {
         const input = await body(request);
         if (input.confirm !== true) return json(await operations.gatewayServicePolicy(false));

@@ -387,6 +387,10 @@ export class AdminHttpClient {
   readStatus(): Promise<Record<string, unknown>> {
     return this.request("/api/admin/read-status");
   }
+  schedulingRuntime(group: string, platform: string): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ group, platform });
+    return this.request(`/api/admin/scheduling-runtime?${query}`);
+  }
   errorAggregate(
     limit: number,
     top: number,
