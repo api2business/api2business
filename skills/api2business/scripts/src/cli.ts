@@ -271,7 +271,7 @@ function help(): Record<string, unknown> {
       "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api <absolute-http(s)-URL>",
       "reads status --over-api <absolute-http(s)-URL>",
-      "reads runtime --group <positive-id> --platform openai|anthropic|grok --over-api <absolute-http(s)-URL> (read-only live availability/concurrency)",
+      "reads runtime --group <positive-id> --platform openai|anthropic|grok --over-api <absolute-http(s)-URL> (read-only live availability/concurrency/native version)",
       "observability report|costs|get|check|configure --help",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",

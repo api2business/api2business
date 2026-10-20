@@ -18,24 +18,29 @@ export function projectSchedulingRuntime(value: unknown): unknown {
   }));
 }
 
-export async function collectSchedulingRuntime(client: Pick<Sub2ApiClient, "getOpsAccountAvailability" | "getOpsConcurrency">, group: unknown, platform: unknown) {
+export async function collectSchedulingRuntime(client: Pick<Sub2ApiClient, "getOpsAccountAvailability" | "getOpsConcurrency" | "request">, group: unknown, platform: unknown) {
   const groupId = Number(group);
   if (!Number.isSafeInteger(groupId) || groupId < 1 || !["openai", "anthropic", "grok"].includes(String(platform))) {
     throw new Error("runtime evidence requires a positive group ID and platform openai|anthropic|grok");
   }
   const startedAt = new Date().toISOString();
-  async function read(source: string, query: () => Promise<unknown>) {
-    try { return { source, status: "available", data: projectSchedulingRuntime(await query()) }; }
+  async function read(source: string, query: () => Promise<unknown>, project = projectSchedulingRuntime) {
+    try { return { source, status: "available", data: project(await query()) }; }
     catch (error) {
       const text = error instanceof Error ? error.message : "";
       return { source, status: "unavailable", httpStatus: Number(text.match(/HTTP (\d{3})/)?.[1]) || null, data: null };
     }
   }
-  const [availability, concurrency] = await Promise.all([
+  const [availability, concurrency, nativeVersion] = await Promise.all([
     read("Sub2API /admin/ops/account-availability", () => client.getOpsAccountAvailability(groupId, String(platform))),
     read("Sub2API /admin/ops/concurrency", () => client.getOpsConcurrency(groupId, String(platform))),
+    read("Sub2API /admin/system/version", () => client.request("/admin/system/version"), (value) => {
+      const version = value && typeof value === "object" ? (value as { version?: unknown }).version : null;
+      if (typeof version !== "string" || !/^v?\d[\w.+-]{0,127}$/.test(version)) throw new Error("Native version unavailable");
+      return { version };
+    }),
   ]);
   return { ok: true, mode: "native-scheduling-runtime", groupId, platform, startedAt, sampledAt: new Date().toISOString(),
-    complete: availability.status === "available" && concurrency.status === "available", availability, concurrency,
+    complete: availability.status === "available" && concurrency.status === "available", availability, concurrency, nativeVersion,
     limitations: ["当前时点证据，不是历史窗口；不提供会话绑定或单次选路原因。", "账号group_id及分组汇总保留原生语义，可能按成员关系聚合；不能当作请求分组归因或指定模型可用性。"], valuesPrinted: false };
 }
