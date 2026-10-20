@@ -33,16 +33,18 @@ export async function verifyPoolQualityWindow(client: AdminHttpClient, config: A
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,10::bigint user_id,
       2::bigint group_id,1::bigint api_key_id,true stream,NULL::bigint time_to_first_token_ms,
       2000::bigint duration_ms,'gpt-6.1-sol'::text model,NULL::text requested_model,NULL::text upstream_model,
-      '/v1/responses'::text inbound_endpoint,NULL::text upstream_endpoint,'upstream'::text error_phase,
-      'upstream_error'::text error_type,status::int status_code,status::int upstream_status_code,
+      '/v1/responses'::text inbound_endpoint,NULL::text upstream_endpoint,
+      CASE WHEN request_id='balance' THEN 'business' ELSE 'upstream' END::text error_phase,
+      'upstream_error'::text error_type,status::int status_code,upstream_status::int upstream_status_code,
       false is_business_limited,message::text error_message,NULL::text error_body,
       NULL::text upstream_error_message,NULL::text upstream_error_detail
     FROM (VALUES
-      (1,'recovered','2026-01-01T00:05:00Z',503,'upstream failed'),
-      (2,'text-fail','2026-01-01T00:09:00Z',503,'upstream failed'),
-      (3,'text-fail','2026-01-01T00:08:00Z',503,'upstream failed'),
-      (4,'balance','2026-01-01T00:02:00Z',403,'insufficient_balance')
-    ) t(id,request_id,at,status,message)
+      (1,'recovered','2026-01-01T00:05:00Z',200,503,'upstream failed'),
+      (2,'text-fail','2026-01-01T00:09:00Z',503,503,'upstream failed'),
+      (3,'text-fail','2026-01-01T00:08:00Z',503,503,'upstream failed'),
+      (4,'balance','2026-01-01T00:02:00Z',403,NULL,'insufficient_balance'),
+      (5,'semantic-fail','2026-01-01T00:06:00Z',200,502,'upstream failed')
+    ) t(id,request_id,at,status,upstream_status,message)
     UNION ALL SELECT 100+n,'voice-error-'||n,'2026-01-01T00:30:00Z'::timestamptz,
       1,10,2,1,true,NULL,999999,'gpt-6.1-sol','VOICE',NULL,'/v1/responses',NULL,
       'upstream','upstream_error',503,503,false,'upstream failed',NULL,NULL,NULL
@@ -55,7 +57,7 @@ export async function verifyPoolQualityWindow(client: AdminHttpClient, config: A
     sub2ApiRead: (request) => client.sub2ApiRead({ ...request,
       key: `pool-quality-fixture:${crypto.randomUUID()}`, kind: 'pool-quality.fixture', priority: 'manual',
       sql: fixture(audio) + request.sql.replace(/^\s*WITH\s/u, ''),
-      parameters: [5, ...request.parameters.slice(1)],
+      parameters: [6, ...request.parameters.slice(1)],
     }),
   });
   const sampledAt = '2026-01-01T01:00:00Z';
@@ -77,12 +79,15 @@ export async function verifyPoolQualityWindow(client: AdminHttpClient, config: A
   });
   const checks = {
     audioCannotChangePoolScore: JSON.stringify(baseline) === JSON.stringify(withAudio),
-    eligibleWindowFilled: withAudio.rawCallCount === 5,
+    eligibleWindowFilled: withAudio.rawCallCount === 6,
     deduplicatedTextSuccess: withAudio.rawSuccessRequests === 3,
-    textFailureRetained: withAudio.rawFailureRequests === 1,
+    textFailureRetained: withAudio.rawFailureRequests === 2,
     onlyTextFailover: withAudio.rawFailoverRequests === 1 && withAudio.rawFailoverRecovered === 1,
     audioLatencyExcluded: withAudio.ttftP95Ms === 1500,
-    errorWindowMatchesScore: errors.pagination.total === 2,
+    errorWindowMatchesScore: errors.pagination.total === 3,
+    http200TerminalEvidence: errors.rows.some((row) => row.requestId === 'semantic-fail'
+      && row.clientStatusCode === 200 && row.upstreamStatusCode === 502 && row.scoreable === true)
+      && !errors.rows.some((row) => row.requestId === 'recovered'),
     modelBoundaryParity: matrix.rows.length === variants.length && matrix.rows.every((row) =>
       row.audio === isAudioRequest([row.requested_model, row.model, row.upstream_model], row.inbound_endpoint)),
   };
