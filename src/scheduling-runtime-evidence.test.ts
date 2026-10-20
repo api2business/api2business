@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { collectSchedulingRuntime, projectSchedulingRuntime } from "./scheduling-runtime-evidence";
 
 test("runtime evidence projects only numeric operational fields, never credentials or arbitrary strings", () => {
-  expect(projectSchedulingRuntime({ group: { "3": { current_in_use: 4, max_capacity: 16, waiting_in_queue: 2, credentials: { api_key: "SECRET" } } }, account: [{ account_id: 41, is_available: false, token: "SECRET", name: "private" }] })).toEqual({ group: { "3": { current_in_use: 4, max_capacity: 16, waiting_in_queue: 2 } }, account: [{ account_id: 41, is_available: false }] });
+  expect(projectSchedulingRuntime({ group: { "3": { current_in_use: 4, max_capacity: 16, waiting_in_queue: 2, credentials: { api_key: "SECRET" }, platform: "openai" } }, account: [{ account_id: 41, is_available: false, token: "SECRET", name: "private" }] })).toEqual({ group: { "3": { current_in_use: 4, max_capacity: 16, waiting_in_queue: 2 } }, account: [{ account_id: 41, is_available: false }] });
 });
 
 test("runtime evidence isolates a failed source and preserves successful live evidence", async () => {

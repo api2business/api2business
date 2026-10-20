@@ -5,7 +5,7 @@ const fields = new Set([
   "error_count", "is_available", "schedulable", "current_in_use", "max_capacity",
   "waiting_in_queue", "concurrency", "current_concurrency", "capacity", "in_use", "load_factor",
 ]);
-const containers = new Set(["account", "accounts", "group", "groups", "items", "platform"]);
+const containers = new Set(["account", "accounts", "group", "groups", "items"]);
 
 // Native operational responses can grow new fields; never forward credentials or arbitrary strings.
 export function projectSchedulingRuntime(value: unknown): unknown {
@@ -37,5 +37,5 @@ export async function collectSchedulingRuntime(client: Pick<Sub2ApiClient, "getO
   ]);
   return { ok: true, mode: "native-scheduling-runtime", groupId, platform, startedAt, sampledAt: new Date().toISOString(),
     complete: availability.status === "available" && concurrency.status === "available", availability, concurrency,
-    limitations: ["当前时点证据，不是历史窗口；不提供会话绑定或单次选路原因。"], valuesPrinted: false };
+    limitations: ["当前时点证据，不是历史窗口；不提供会话绑定或单次选路原因。", "账号group_id及分组汇总保留原生语义，可能按成员关系聚合；不能当作请求分组归因或指定模型可用性。"], valuesPrinted: false };
 }
