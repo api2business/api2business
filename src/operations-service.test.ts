@@ -6,6 +6,25 @@ import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 const unusedReads = {} as Sub2ApiReadClient;
 
+test("priority history preserves interrupted partial-write uncertainty and verified counts", async () => {
+  const store = { async priorityHistory() { return [
+    { id: "interrupted", status: "failed", priorities: { "41": 279 },
+      result: { changes: [{ accountId: 41, profile: "codex" }] },
+      apply_result: { writeMode: "interrupted-execution", verification: "unknown-partial-write",
+        reason: "previous-execution-ended-before-completion" } },
+    { id: "applied", status: "applied", priorities: { "41": 279 }, result: {},
+      apply_result: { writeMode: "backend-api-paced", verification: "native-api-read-broker",
+        completedChangedCount: 1, verifiedCount: 1 } },
+  ]; } } as unknown as OperationsStore;
+  const service = new OperationsService({ operations: { auditLimit: 10 } } as AppConfig, store, unusedReads);
+  const result = await service.priorityHistory();
+  expect(result.records[0]).toMatchObject({ status: "failed", profile_statuses: { codex: "failed" },
+    verification: "unknown-partial-write", verified_count: null, completed_changed_count: null,
+    failure_reason: "previous-execution-ended-before-completion" });
+  expect(result.records[1]).toMatchObject({ status: "applied", verified_count: 1,
+    completed_changed_count: 1, verification: "native-api-read-broker" });
+});
+
 test("selects the latest successful USD snapshot by normalized upstream wallet", () => {
   expect(normalizeUpstreamWallet("https://wallet.example.com/v1/")).toBe("https://wallet.example.com");
   expect(normalizeUpstreamWallet("https://billing.example.com plus 0.05")).toBe("https://billing.example.com");

@@ -1564,7 +1564,8 @@ export class OperationsService {
           let profileStatus = row.status;
           if (row.status === "failed" && profileBatches.length > 0) {
             profileStatus = profileBatches.some((batch) => batch.ok === false) ? "failed" : "applied";
-          } else if (row.status === "failed" && profileBatches.length === 0 && changedCount > 0) {
+          } else if (row.status === "failed" && profileBatches.length === 0 && changedCount > 0
+            && object(applyResult).writeMode !== "interrupted-execution") {
             profileStatus = "skipped";
           }
           profileChangedCounts[profile] = changedCount;
@@ -1579,6 +1580,11 @@ export class OperationsService {
           profile: profiles.length === 1 ? profiles[0] : "combined",
           profiles,
           status: row.status,
+          write_mode: object(applyResult).writeMode ?? null,
+          verification: object(applyResult).verification ?? null,
+          failure_reason: object(applyResult).reason ?? null,
+          completed_changed_count: object(applyResult).completedChangedCount ?? null,
+          verified_count: object(applyResult).verifiedCount ?? null,
           started_at: startedAt,
           duration_ms: durationMs,
           changed_count: priorityIds.size,
