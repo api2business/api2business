@@ -6,6 +6,7 @@ import { configuredWalletKey, preferSharedWalletBalance, usageBalanceSourceAt } 
 import { readUpstreamValuationPolicy } from "./upstream-valuation";
 import { statSync } from "node:fs";
 import { dailyCostSql, dailyWalletCosts } from "./observability-costs";
+import { sourceCoverageFacts, sourceCoverageSql } from "./observability-source-coverage";
 
 type Row = Record<string, any>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -238,6 +239,16 @@ export class OperationalObservability {
       parameters:[window.start,window.end,JSON.stringify(rates.map((r:Row)=>({...r,at:iso(r.at)})))],priority:"manual",cacheMode:"bypass-cache" });
     const facts=row(query.rows[0]?.facts);
     const [cache,http]=await Promise.all([this.store.getUpstreamUsageCache([]),this.store.httpObservationFacts(window.start,window.end)]);
+    let sourceCoverage;
+    try {
+      const sourceQuery=await this.reads.query<Row>({key:`observability.source-coverage:${window.start}:${window.end}`,
+        kind:"observability.window",sql:sourceCoverageSql,parameters:[window.start,window.end],priority:"manual",cacheMode:"bypass-cache"});
+      sourceCoverage={...sourceCoverageFacts(sourceQuery.rows[0]?.coverage ?? null),status:"available",
+        queryStartedAt:sourceQuery.queryStartedAt,queryCompletedAt:sourceQuery.queryCompletedAt,
+        queueDurationMs:sourceQuery.queueDurationMs,queryDurationMs:sourceQuery.queryDurationMs};
+    } catch {
+      sourceCoverage={...sourceCoverageFacts(null),status:"unavailable",error:"source_coverage_query_failed"};
+    }
     const capturedAt=new Date().toISOString();
     const coverage=observerCoverage(http.instances,window.start,window.end);
     const settings=this.config.observability;
@@ -248,8 +259,9 @@ export class OperationalObservability {
         walletAsOf:capturedAt,costPolicy:"recorded evidence at or before first usage; no historical backfill" },
       broker:this.reads.status(),
       sub2api:{ ...facts,accounts:undefined,costAccounts:undefined,requests:total,
-        successSlo:slo(total ? Number(facts.succeeded)/total*100 : null,settings.sub2apiSuccessPercent,"above",Number(facts.missingRequestIdRecords)===0),
-        ttftSlo:slo(finite(facts.ttftP95Ms),settings.sub2apiTtftP95Ms,"max",Number(facts.ttftKnown)===Number(facts.streaming)) },
+        sourceCoverage,
+        successSlo:slo(total ? Number(facts.succeeded)/total*100 : null,settings.sub2apiSuccessPercent,"above",Number(facts.missingRequestIdRecords)===0 && sourceCoverage.complete),
+        ttftSlo:slo(finite(facts.ttftP95Ms),settings.sub2apiTtftP95Ms,"max",Number(facts.ttftKnown)===Number(facts.streaming) && sourceCoverage.complete) },
       api2business:{ ...http,coverage,layer:"application; public edge reachability is measured separately",
         non5xxSlo:slo(http.requests ? (http.requests-http.failed)/http.requests*100 : null,settings.api2businessNon5xxPercent,"min",coverage.complete),
         latencySlo:slo(finite(http.latency_p95_ms),settings.api2businessLatencyP95Ms,"max",coverage.complete) },

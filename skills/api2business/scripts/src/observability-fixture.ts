@@ -2,6 +2,7 @@ import type { AdminHttpClient } from '../../../../src/admin-http-client';
 import type { AppConfig } from '../../../../src/config';
 import { verifyPoolQualityWindow } from './pool-quality-fixture';
 import { observabilitySql } from '../../../../src/observability-sql';
+import { verifySourceCoverageWindow } from './observability-source-fixture';
 
 // 正式只读 broker 执行 CTE 夹具，不读取业务行或写表。
 export async function verifyObservationWindow(client: AdminHttpClient, config: AppConfig) {
@@ -56,5 +57,6 @@ export async function verifyObservationWindow(client: AdminHttpClient, config: A
     sameWindowCostRecords:facts.costAccounts?.[0]?.records===5,historicalCost:facts.costAccounts?.[0]?.historical_cost_cny===5,
     unknownRetained:facts.unknownExamples?.[0]?.request_id==='r5'};
   const poolQuality = await verifyPoolQualityWindow(client, config);
-  return {ok:Object.values(checks).every(Boolean) && poolQuality.ok,checks,poolQuality,queryDurationMs:result.queryDurationMs,mutation:false,valuesPrinted:false};
+  const sourceCoverage = await verifySourceCoverageWindow(client);
+  return {ok:Object.values(checks).every(Boolean) && poolQuality.ok && sourceCoverage.ok,checks,poolQuality,sourceCoverage,queryDurationMs:result.queryDurationMs,mutation:false,valuesPrinted:false};
 }
