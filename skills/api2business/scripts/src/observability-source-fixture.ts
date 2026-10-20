@@ -13,7 +13,7 @@ export async function verifySourceCoverageWindow(client: AdminHttpClient) {
       at::timestamptz created_at,CASE WHEN id=11 THEN 2 ELSE 1 END::bigint account_id,api_key_id,model,
       'openai_usage.success_missing_usage'::text message,
       jsonb_build_object('inbound_endpoint','/v1/responses','terminal_event','response.completed',
-        'client_disconnected',false,'suppressed_since_last',CASE WHEN id=8 THEN '2' ELSE '0' END) extra
+        'client_disconnected',false,'suppressed_since_last',CASE WHEN id=8 THEN '2' WHEN id=10 THEN '3' ELSE '0' END) extra
     FROM (VALUES
       (1,'gap','2026-01-01T00:00:00Z',1::bigint,'fixture-model'),
       (2,'gap','2026-01-01T00:01:00Z',1,'fixture-model'),
@@ -38,7 +38,7 @@ export async function verifySourceCoverageWindow(client: AdminHttpClient) {
   const coverage=result.rows[0]?.coverage ?? {};
   const checks={sameWindow:coverage.observedWarningRecords===10,deduplicatedUnrepresented:coverage.unrepresentedRequests===5,
     probeExcluded:coverage.excludedProbeRecords===2,audioExcluded:coverage.excludedAudioRecords===1,
-    suppressionRetained:coverage.suppressedWarningRecords===2,
+    suppressionRetained:coverage.suppressedWarningRecords===5,
     unknownModelRetained:coverage.modelBreakdown?.some((r:any)=>r.model===null && r.requests===3),
     rawLunaRetained:coverage.modelBreakdown?.some((r:any)=>r.model==='gpt-5.6-luna' && r.requests===1),
     exactUsageLinked:!coverage.examples?.some((r:any)=>r.request_id==='represented'),

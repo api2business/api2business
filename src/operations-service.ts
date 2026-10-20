@@ -295,7 +295,7 @@ export class OperationsService {
         unready: Number(row.unready_count),
         durationMs: Number(row.duration_ms),
         errorSummary: row.error_summary,
-        requestEvidence: row.request_evidence ?? [],
+        requestEvidence: typeof row.request_evidence === "string" ? JSON.parse(row.request_evidence) : row.request_evidence ?? [],
       })),
       pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
       valuesPrinted: false,

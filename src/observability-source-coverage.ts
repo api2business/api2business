@@ -41,7 +41,7 @@ SELECT jsonb_build_object(
   'excludedAudioRecords',(SELECT COUNT(*) FROM source s WHERE NOT probe AND ${audioRequestSql("s", true)}),
   'unrepresentedRequests',(SELECT COUNT(*) FROM unresolved),
   'suppressedWarningRecords',(SELECT COALESCE(SUM(CASE WHEN suppressed_since_last ~ '^[0-9]{1,18}$'
-    THEN suppressed_since_last::numeric ELSE 0 END),0) FROM eligible),
+    THEN suppressed_since_last::numeric ELSE 0 END),0) FROM source),
   'modelBreakdown',COALESCE((SELECT jsonb_agg(t) FROM (
     SELECT requested_model,model,upstream_model,COUNT(*)::int AS requests FROM unresolved
     GROUP BY requested_model,model,upstream_model ORDER BY COUNT(*) DESC

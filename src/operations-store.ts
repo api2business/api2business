@@ -914,7 +914,7 @@ export class OperationsStore {
         ${input.startedAt}, ${input.completedAt}, ${input.status}, ${input.plannedCount},
         ${input.readyCount}, ${input.attemptedCount}, ${input.succeededCount},
         ${input.failedCount}, ${input.unreadyCount}, ${input.durationMs}, ${input.errorSummary},
-        ${JSON.stringify(input.requestEvidence ?? [])}::jsonb)
+        (${ { requests: input.requestEvidence ?? [] } }::jsonb)->'requests')
       ON CONFLICT (operation_id) DO NOTHING
     `;
   }
@@ -923,7 +923,9 @@ export class OperationsStore {
     return await this.readQuery(() => this.sql`
       SELECT operation_id, trigger_type, started_at, completed_at, status,
         planned_count, ready_count, attempted_count, succeeded_count,
-        failed_count, unready_count, duration_ms, error_summary, request_evidence,
+        failed_count, unready_count, duration_ms, error_summary,
+        CASE WHEN jsonb_typeof(request_evidence)='string' THEN (request_evidence #>> '{}')::jsonb
+          ELSE request_evidence END AS request_evidence,
         COUNT(*) OVER()::int AS total_count
       FROM api2business_idle_probe_rounds
       WHERE scope=${scope}
@@ -935,7 +937,8 @@ export class OperationsStore {
   async idleProbeRequestEvidence(start: string, end: string) {
     return await this.readQuery(() => this.sql`
       SELECT evidence FROM api2business_idle_probe_rounds r,
-        LATERAL jsonb_array_elements(r.request_evidence) AS p(evidence)
+        LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.request_evidence)='string'
+          THEN (r.request_evidence #>> '{}')::jsonb ELSE r.request_evidence END) AS p(evidence)
       WHERE r.started_at < ${end}::timestamptz AND r.completed_at >= ${start}::timestamptz
     `);
   }

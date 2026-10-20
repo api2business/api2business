@@ -12,8 +12,8 @@ test("probe correlation is persisted as JSON, including an empty legacy evidence
   await store.addIdleProbeRound(input);
   const evidence = [{ clientRequestId: "native-id", accountId: 42 }];
   await store.addIdleProbeRound({ ...input, requestEvidence: evidence });
-  expect(calls[0]?.at(-1)).toBe("[]");
-  expect(calls[1]?.at(-1)).toBe(JSON.stringify(evidence));
+  expect(calls[0]?.at(-1)).toEqual({ requests: [] });
+  expect(calls[1]?.at(-1)).toEqual({ requests: evidence });
 });
 
 test("reconciles interrupted started plans only while holding the existing priority queue lock", async () => {

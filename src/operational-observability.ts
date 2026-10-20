@@ -244,11 +244,13 @@ export class OperationalObservability {
       const probeEvidence=await this.store.idleProbeRequestEvidence(window.start,window.end);
       const sourceQuery=await this.reads.query<Row>({key:`observability.source-coverage:${window.start}:${window.end}`,
         kind:"observability.window",sql:sourceCoverageSql,
-        parameters:[window.start,window.end,JSON.stringify(probeEvidence.map((r:Row)=>r.evidence))],priority:"manual",cacheMode:"bypass-cache"});
+        parameters:[window.start,window.end,JSON.stringify(probeEvidence.map((r:Row)=>
+          typeof r.evidence === "string" ? JSON.parse(r.evidence) : r.evidence))],priority:"manual",cacheMode:"bypass-cache"});
       sourceCoverage={...sourceCoverageFacts(sourceQuery.rows[0]?.coverage ?? null),status:"available",
         queryStartedAt:sourceQuery.queryStartedAt,queryCompletedAt:sourceQuery.queryCompletedAt,
         queueDurationMs:sourceQuery.queueDurationMs,queryDurationMs:sourceQuery.queryDurationMs};
-    } catch {
+    } catch (error) {
+      console.error(JSON.stringify({component:"observability-source-coverage",error:error instanceof Error ? error.message : String(error)}));
       sourceCoverage={...sourceCoverageFacts(null),status:"unavailable",error:"source_coverage_query_failed"};
     }
     const capturedAt=new Date().toISOString();
