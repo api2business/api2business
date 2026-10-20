@@ -36,7 +36,8 @@ errors AS (
   SELECT * FROM error_source e WHERE NOT probe
     AND NOT ${audioRequestSql("e", true)}
     AND LOWER(COALESCE(error_type,'')) <> 'failover_event'
-    AND NOT (COALESCE(status_code,upstream_status_code,0) BETWEEN 200 AND 399)
+    AND (NOT (COALESCE(status_code,upstream_status_code,0) BETWEEN 200 AND 399)
+      OR COALESCE(upstream_status_code,0)>=400)
 ), success AS (
   SELECT DISTINCT ON (request_id) request_id, account_id, model, stream, first_token_ms
   FROM usage u WHERE NULLIF(TRIM(request_id),'') IS NOT NULL

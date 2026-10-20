@@ -163,7 +163,9 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   expect(codexTemplate).not.toContain("input exceeds the context window of this model");
   expect(codexTemplate).not.toContain("context_length_exceeded");
   expect(codexTemplate).not.toContain("maximum context length");
-  const expectedModelRule = parsed.operations.upstreamManagement.failoverRules.find((rule) => rule.error_code === 404);
+  const expectedModelRule = parsed.operations.upstreamManagement.failoverRules.find(
+    (rule) => rule.error_code === 404 && rule.keywords.includes("model_not_found"),
+  );
   expect(expectedModelRule?.keywords).toContain("model_not_found");
   expect(expectedModelRule?.keywords).toContain("not supported by any configured account");
   expect(expectedModelRule?.duration_minutes).toBe(3);

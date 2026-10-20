@@ -50,6 +50,11 @@ test('observability report keeps user balance and TTFT attribution for diagnosis
  expect(observabilitySql).toContain('ttftBreakdown');
  expect(observabilitySql).toContain('percentile_cont(0.95) WITHIN GROUP (ORDER BY s.first_token_ms)');
 });
+test('explicit upstream failures survive a recorded HTTP 200 without overriding exact success',()=>{
+ expect(observabilitySql).toContain('OR COALESCE(upstream_status_code,0)>=400)');
+ expect(observabilitySql).toContain("LOWER(COALESCE(error_type,'')) <> 'failover_event'");
+ expect(observabilitySql).toContain('NOT EXISTS (SELECT 1 FROM success s WHERE s.request_id=e.request_id)');
+});
 test('observer failures are scoped to the half-open window without erasing legacy uncertainty',()=>{
  const start='2026-10-07T02:00:00Z',end='2026-10-07T04:00:00Z';
  const base={started_at:start,last_seen_at:end,failed_writes:3};

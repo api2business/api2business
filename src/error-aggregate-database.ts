@@ -50,7 +50,8 @@ selected_errors AS (
     AND NOT EXISTS (
       SELECT 1 FROM internal_probe_keys probe WHERE probe.id = o.api_key_id
     )
-    AND NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
+    AND (NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
+      OR COALESCE(o.upstream_status_code, 0) >= 400)
   ORDER BY o.created_at DESC, o.id DESC
   LIMIT $1
 ),
