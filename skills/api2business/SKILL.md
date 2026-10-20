@@ -121,6 +121,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - URL 只匹配 owning YAML 中的唯一 HTTP target。
   - 不接受无值、布尔值、别名或隐式默认运行面。
   - 回执显示 `canonicalUrl`；续查命令保留该 URL。
+- `reads runtime --group <正整数> --platform openai|anthropic|grok --over-api <绝对 URL>`
+  只读返回可用性、并发及实际原生版本，边界见 [可观测性](references/observability.md#原生调度诊断补充)。
 - `reads query --file <broker-read-request.json> --over-api <绝对 http(s) URL>`：
   - 复用 `/api/internal/sub2api-read` 的排队只读通道。
   - 文件使用既有请求字段 `key`、`kind`、`sql` 和 `parameters`。
