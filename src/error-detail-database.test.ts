@@ -7,6 +7,7 @@ test("error detail queries are bounded and request scoped", () => {
   expect(errorListQuery).toContain("COALESCE(status_code, 0) >= 400");
   expect(errorListQuery).toContain("COALESCE(upstream_status_code, 0) >= 400");
   expect(errorGetQuery).toContain("WHERE request_id = $1");
+  expect(errorGetQuery).toContain('terminal.request_id=o.request_id');
   expect(errorGetQuery).toContain("'badGateway'");
   expect(errorGetQuery).toContain("'gatewayTimeout'");
   expect(errorGetQuery).toContain("'streamInterrupted'");

@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config";
+import { terminalPolicyExistsSql } from "./request-terminal-policy";
 import type {
   Sub2ApiReadClient,
   Sub2ApiReadPriority,
@@ -77,7 +78,7 @@ WITH enriched AS (
     EXISTS (
       SELECT 1 FROM usage_logs success
       WHERE success.request_id = o.request_id
-    ) AS recovered,
+    ) AND NOT ${terminalPolicyExistsSql("o.request_id")} AS recovered,
     EXISTS (
       SELECT 1 FROM ops_system_logs failover
       WHERE failover.request_id = o.request_id

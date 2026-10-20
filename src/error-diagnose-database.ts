@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config";
+import { terminalPolicyExistsSql } from "./request-terminal-policy";
 import type {
   Sub2ApiReadClient,
   Sub2ApiReadPriority,
@@ -83,7 +84,7 @@ classified AS (
     EXISTS (
       SELECT 1 FROM usage_logs u
       WHERE e.request_id IS NOT NULL AND u.request_id = e.request_id
-    ) AS recovered,
+    ) AND NOT ${terminalPolicyExistsSql("e.request_id")} AS recovered,
     EXISTS (
       SELECT 1 FROM ops_system_logs system_log
       WHERE e.request_id IS NOT NULL

@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config";
+import { terminalPolicyExistsSql } from "./request-terminal-policy";
 import type {
   Sub2ApiReadClient,
   Sub2ApiReadPriority,
@@ -51,7 +52,8 @@ selected_errors AS (
       SELECT 1 FROM internal_probe_keys probe WHERE probe.id = o.api_key_id
     )
     AND (NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
-      OR COALESCE(o.upstream_status_code, 0) >= 400)
+      OR COALESCE(o.upstream_status_code, 0) >= 400
+      OR (o.error_phase='request' AND o.error_type='cyber_policy'))
   ORDER BY o.created_at DESC, o.id DESC
   LIMIT $1
 ),
@@ -63,7 +65,7 @@ classified_errors AS (
       FROM usage_logs u
       WHERE e.request_id IS NOT NULL
         AND u.request_id = e.request_id
-    ) AS recovered,
+    ) AND NOT ${terminalPolicyExistsSql("e.request_id")} AS recovered,
     CASE
       WHEN COALESCE(e.is_business_limited, false)
         OR LOWER(COALESCE(e.error_phase, '')) = 'business' THEN 'business_limit'
