@@ -30,6 +30,10 @@ description: >-
 
 - 新部署先克隆 `https://github.com/api2business/api2business.git`，再从克隆后的仓库加载本 skill。
 - 从当前 Api2Business 仓库根目录执行命令。
+  - 相对脚本路径离开仓库根目录时，Bun 报 `Module not found`。
+  - 这表示脚本路径不存在，不表示命令未实现。
+  - 绝对脚本路径可以启动 CLI。
+  - `--config` 仍必须指向 owning YAML。
 - 使用 `config/api2business.yaml` 保存唯一 L1 的运行配置；该文件不得提交。
 - 使用 `skills/api2business/scripts/api2business-cli.ts` 执行业务和生命周期操作。
 
@@ -166,6 +170,13 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - TTFT、流式探活、缺失样本和评分参与边界只见上述参考，本技能不复制评分算法。
 - 池级质量调查使用 `scores pool-quality --over-api <absolute-http(s)-URL>`，账号评分快照使用 `scores get`，
   需要刷新时使用 `scores rank --calls <N> --over-api <absolute-http(s)-URL>`。
+  - 人类评分表同时给出窗口失败率、突发失败率和有效失败率。
+  - 只看窗口失败率不能判断可靠性分项是否已经为零。
+- 单账号优先级前后变化使用
+  `priority history --account <正整数ID> --over-api <absolute-http(s)-URL>`。
+  - 省略 `--account` 只返回轮次摘要，不能判断某个账号是否降级。
+  - 过载计入、切号抑制和证据边界只见
+    [过载扣分与优先级证据](references/upstream-scheduling.md#过载扣分与优先级证据)。
 - 池级刷新使用 `scores pool-quality-refresh --over-api <absolute-http(s)-URL>`，
   跟踪原 workflow 终态与各作用域采样时间；判定只见上述调度参考。
 - 自动调度查询预算、索引优化和发布后写入核验见

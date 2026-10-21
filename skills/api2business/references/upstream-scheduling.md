@@ -649,6 +649,40 @@
 - 不把全局选号阶段的 No available accounts 当成某个上游账号故障；只有已选账号在上游
   阶段返回该正文时，才使用对应平台模板切号。
 
+### 过载扣分与优先级证据
+
+- `error_phase=upstream` 的 overloaded 计入账号可靠性。
+  - 可靠性取窗口失败率与最近突发失败率的较大值。
+  - 达到 owning YAML 的 `failureZeroScoreRate` 后，可靠性分项为零。
+  - 该扣分不依赖切号是否触发。
+- 输出已经提交后的流式失败由网关抑制切号。
+  - 切号分项只按实际切换计算。
+  - 抑制后的客户端错误不能证明模板漏配。
+  - 增加关键词不能回放已经提交的响应。
+- 人类 `scores rank` 同时显示窗口失败率、突发失败率和有效失败率。
+  - 只看窗口失败率会漏掉突发失败已经打满可靠性分项的账号。
+  - 账号分、池分和优先级排序分仍不可互相替代。
+- 单账号优先级变化使用
+  `priority history --account <正整数ID> --over-api <absolute-http(s)-URL>`。
+  - 回执只含该账号的前后优先级、变化、模式、分数和失败率。
+  - 不返回 `priorities`、请求正文或其他账号。
+  - 省略 `--account` 时，`applied` 只证明该轮执行过。
+  - `accounts.updated_at` 不是优先级写入证据。
+  - 交叉核对使用 `scores rank --account` 与
+    `upstream-scheduling-v2 plan --scope <scope>`。
+- 原生写入证据只提取 priority 和 account id。
+  - 不查询 `request_body` 或凭据。
+- 相对脚本路径必须从仓库根目录执行。
+  - `Module not found` 表示路径不存在，不表示命令未实现。
+- 反例：
+  - 不查询 `usage_logs.extra`。
+  - 用量列是 `input_tokens`、`output_tokens`、`first_token_ms` 和 `duration_ms`。
+  - 错误日志的空 TTFT 不证明没有可见输出。
+  - 首 Token 只在转发无错误时记录。
+  - 不从脏工作区模板推断运行面已经具备某条规则。
+  - 关键词只在相同状态码下按子串匹配。
+  - 提交模板源码不等于完成同平台全量同步。
+
 ## 额度监控交叉引用
 
 - 额度监控的状态、缓存、人民币换算和验收唯一见 [额度监控](quota-monitoring.md)。

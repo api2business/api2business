@@ -942,7 +942,11 @@ export function createHandler(
         return json(await operations.voidCash(id, input.reason.trim(), config.webAuth.username));
       }
       if (request.method === "GET" && url.pathname === "/api/operations/priority-history") {
-        return json(await operations.priorityHistory());
+        const rawAccount = url.searchParams.get("account");
+        if (rawAccount === null) return json(await operations.priorityHistory());
+        const accountId = positiveInteger(rawAccount, 1);
+        if (accountId === null) return json({ ok: false, error: "account must be a positive integer" }, 400);
+        return json(await operations.priorityHistory(accountId));
       }
       if (request.method === "POST" && url.pathname === "/api/operations/procurement") {
         const input = await body(request);

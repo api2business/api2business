@@ -247,7 +247,10 @@ export class AdminHttpClient {
       body: JSON.stringify({ accountIds, operationId }),
     }, 30000);
   }
-  priorityHistory(): Promise<Record<string, unknown>> { return this.request("/api/operations/priority-history"); }
+  priorityHistory(accountId?: number | null): Promise<Record<string, unknown>> {
+    const query = accountId == null ? "" : `?account=${accountId}`;
+    return this.request(`/api/operations/priority-history${query}`);
+  }
   accountImport(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.request("/api/account-import/jobs", { method: "POST", body: JSON.stringify(input) }, 30000);
   }

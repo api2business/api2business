@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AppConfig } from "./config";
-import { applyPlanTypeRefunds, filterAutomaticPriorityPlan, latestSuccessfulUsageByWallet, normalizeUpstreamWallet, OperationsService, upstreamBalanceRateByWallet } from "./operations-service";
+import { accountPriorityTransition, applyPlanTypeRefunds, filterAutomaticPriorityPlan, latestSuccessfulUsageByWallet, normalizeUpstreamWallet, OperationsService, upstreamBalanceRateByWallet } from "./operations-service";
 import type { OperationsStore } from "./operations-store";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
@@ -23,6 +23,49 @@ test("priority history preserves interrupted partial-write uncertainty and verif
     failure_reason: "previous-execution-ended-before-completion" });
   expect(result.records[1]).toMatchObject({ status: "applied", verified_count: 1,
     completed_changed_count: 1, verification: "native-api-read-broker" });
+});
+
+test("priority history account filter returns one transition and hides other accounts", async () => {
+  const store = { async priorityHistory() { return [
+    { id: "round-1", status: "applied", created_at: "2026-10-21T08:42:00.000Z",
+      priorities: { "1534": 100, "41": 200 },
+      result: { changes: [
+        { accountId: 1534, profile: "codex", beforePriority: 132, desiredPriority: 100, change: -32, priorityMode: "dynamic", score: 80.1, failureRate: 0.02 },
+        { account_id: 41, profile: "codex", before_priority: 200, desired_priority: 210, change: 10 },
+      ] },
+      apply_result: { writeMode: "backend-api-paced", verification: "native-api-read-broker", completedChangedCount: 2, verifiedCount: 2 } },
+    { id: "round-2", status: "applied", created_at: "2026-10-21T13:53:00.000Z",
+      priorities: { "41": 210 },
+      result: { changes: [{ accountId: 41, profile: "codex", beforePriority: 200, desiredPriority: 210 }] },
+      apply_result: {} },
+  ]; } } as unknown as OperationsStore;
+  const service = new OperationsService({ operations: { auditLimit: 10 } } as AppConfig, store, unusedReads);
+  expect(accountPriorityTransition([{ account_id: "1534", before_priority: "237", desired_priority: 237, change: "noop" }], 1534))
+    .toMatchObject({ before_priority: 237, desired_priority: 237, change: "noop" });
+  expect(accountPriorityTransition([], 1534)).toBeNull();
+  const filtered = await service.priorityHistory(1534);
+  expect(filtered.account_id).toBe(1534);
+  expect(filtered.transitions).toEqual([{
+    created_at: "2026-10-21T08:42:00.000Z",
+    status: "applied",
+    profile: "codex",
+    before_priority: 132,
+    desired_priority: 100,
+    change: -32,
+    priority_mode: "dynamic",
+    score: 80.1,
+    failure_rate: 0.02,
+  }]);
+  const serialized = JSON.stringify(filtered);
+  expect(serialized).not.toContain("priorities");
+  expect(serialized).not.toContain("\"41\"");
+  expect(serialized).not.toContain("request_body");
+  const summary = await service.priorityHistory();
+  expect(summary).not.toHaveProperty("account_id");
+  expect(summary).not.toHaveProperty("transitions");
+  expect(summary.records).toHaveLength(2);
+  expect(summary.records[0]).not.toHaveProperty("priorities");
+  expect(summary.records[0]).not.toHaveProperty("account_change");
 });
 
 test("selects the latest successful USD snapshot by normalized upstream wallet", () => {

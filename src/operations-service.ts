@@ -92,6 +92,26 @@ function records(value: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
+function finiteNumber(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function accountPriorityTransition(changes: unknown, accountId: number): Record<string, unknown> | null {
+  const match = records(changes).find((change) =>
+    Number(change.accountId ?? change.account_id) === accountId);
+  if (!match) return null;
+  return {
+    profile: match.profile ?? null,
+    before_priority: finiteNumber(match.beforePriority ?? match.before_priority),
+    desired_priority: finiteNumber(match.desiredPriority ?? match.desired_priority),
+    change: match.change ?? null,
+    priority_mode: match.priorityMode ?? match.priority_mode ?? null,
+    score: finiteNumber(match.score),
+    failure_rate: finiteNumber(match.failureRate ?? match.failure_rate),
+  };
+}
+
 export function latestSuccessfulUsageByWallet(
   rows: Array<Record<string, unknown>>,
   refs: import("./config").NewApiCredentialRef[] = [],
@@ -1512,11 +1532,9 @@ export class OperationsService {
     };
   }
 
-  async priorityHistory() {
+  async priorityHistory(accountId: number | null = null) {
     const rows = await this.store.priorityHistory(this.config.operations.auditLimit) as Array<Record<string, unknown>>;
-    return {
-      ok: true,
-      records: rows.map((row) => {
+    const historyRecords: Array<Record<string, unknown>> = rows.map((row) => {
         const priorities = typeof row.priorities === "string" ? JSON.parse(row.priorities) : row.priorities;
         const result = typeof row.result === "string" ? JSON.parse(row.result) : object(row.result);
         const applyResult = typeof row.apply_result === "string"
@@ -1535,6 +1553,7 @@ export class OperationsService {
             : [],
         );
         const changes = records(object(result).changes);
+        const accountChange = accountId === null ? null : accountPriorityTransition(changes, accountId);
         const profileSummary = object(object(result).profiles);
         const discoveredProfiles = new Set([
           ...Object.keys(profileSummary),
@@ -1610,9 +1629,34 @@ export class OperationsService {
           automation_batching_reasons: automationSafety.batchingReasons ?? [],
           automation_write_batch_size: Number(automationSafety.writeBatchSize ?? 0),
           automation_write_batch_count: batches.length,
+          ...(accountChange ? { account_change: accountChange } : {}),
         };
-      }),
-    };
+      });
+    const transitions = accountId === null
+      ? []
+      : historyRecords.flatMap((record) => {
+        const change = object(record.account_change);
+        if (Object.keys(change).length === 0) return [];
+        return [{
+          created_at: record.created_at ?? null,
+          status: record.status ?? null,
+          profile: change.profile ?? null,
+          before_priority: change.before_priority ?? null,
+          desired_priority: change.desired_priority ?? null,
+          change: change.change ?? null,
+          priority_mode: change.priority_mode ?? null,
+          score: change.score ?? null,
+          failure_rate: change.failure_rate ?? null,
+        }];
+      });
+    return accountId === null
+      ? { ok: true, records: historyRecords }
+      : {
+        ok: true,
+        account_id: accountId,
+        transitions,
+        records: historyRecords.filter((record) => record.account_change),
+      };
   }
 
   async runV2AutomaticPriorityPlan(scopeName: string, recentCallLimit: number) {

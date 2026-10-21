@@ -291,7 +291,7 @@ function help(): Record<string, unknown> {
       "api smoke --over-api <absolute-http(s)-URL>",
       "web screenshot [--profile <owning smoke profile>] [--scope <enabled scope>] [--session-ttl-seconds N] [--burst-count 1..30] [--burst-interval 200ms..10s] [--manifest <absolute path>] --over-api <absolute-http(s)-URL>",
       "workflow status --id <workflow-id>",
-      "priority history --over-api <absolute-http(s)-URL>",
+      "priority history --over-api <absolute-http(s)-URL> [--account <positive-id>]",
       "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts status --id <job-id> --over-api <absolute-http(s)-URL>",
       "accounts inspect --accounts <id-or-range,...> [--over-api <absolute-http(s)-URL>]",
@@ -476,13 +476,42 @@ async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConf
   throw new Error(`unknown command: ${parsed.command.join(" ")}`);
 }
 
+function emitPriorityHistory(value: Record<string, unknown>, json: boolean): void {
+  if (json || value.account_id === undefined || value.account_id === null) return emit(value, json);
+  const transitions = Array.isArray(value.transitions)
+    ? value.transitions.map(record).filter((row): row is Record<string, unknown> => row !== null)
+    : [];
+  console.log(`API2BUSINESS PRIORITY HISTORY account=${String(value.account_id)} transitions=${transitions.length}`);
+  console.log("CREATED_AT                 STATUS    PROFILE  BEFORE  DESIRED  CHANGE  MODE        SCORE  FAIL%");
+  if (transitions.length === 0) {
+    console.log("no priority transition for this account in the retained history");
+    return;
+  }
+  for (const row of transitions) {
+    const failure = typeof row.failure_rate === "number" ? `${(row.failure_rate * 100).toFixed(1)}%` : "-";
+    const score = typeof row.score === "number" ? row.score.toFixed(1) : "-";
+    console.log([
+      String(row.created_at ?? "-").padEnd(25),
+      String(row.status ?? "-").padEnd(8),
+      String(row.profile ?? "-").padEnd(7),
+      String(row.before_priority ?? "-").padStart(6),
+      String(row.desired_priority ?? "-").padStart(7),
+      String(row.change ?? "-").padEnd(6),
+      String(row.priority_mode ?? "-").padEnd(10),
+      score.padStart(5),
+      failure.padStart(6),
+    ].join("  "));
+  }
+}
+
 function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
   if (json) return emit(value, true);
   const accounts = Array.isArray(value.accounts) ? value.accounts.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
   console.log(`API2BUSINESS ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)} totalDurationMs=${String(value.totalDurationMs)}`);
-  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%  SWITCH%  EFFECTIVE%  TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
+  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%   BURST%  SWITCH%  EFFECTIVE%  TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
   for (const row of accounts) {
     const failureRate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
+    const burstRate = typeof row.burstFailureRate === "number" ? `${(row.burstFailureRate * 100).toFixed(1)}%` : "-";
     const failoverRate = typeof row.failoverRate === "number" ? `${(row.failoverRate * 100).toFixed(1)}%` : "-";
     const effectiveFailoverRate = typeof row.effectiveFailoverRate === "number" ? `${(row.effectiveFailoverRate * 100).toFixed(1)}%` : "-";
     const ttft = typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-";
@@ -493,6 +522,7 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
       String(row.confidence ?? "-").padEnd(7),
       String(row.attemptCount ?? row.selectedCalls ?? row.observedAttempts ?? 0).padStart(8),
       failureRate.padStart(6),
+      burstRate.padStart(7),
       failoverRate.padStart(7),
       effectiveFailoverRate.padStart(10),
       ttft.padStart(9),
@@ -1129,7 +1159,11 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (!parsed.accounts) throw new Error("accounts models disable-luna requires --accounts");
     return await client.disableLunaForAccounts(parseAccountIdSelector(parsed.accounts), parsed.confirm);
   }
-  if (group === "priority" && action === "history") return await client.priorityHistory();
+  if (group === "priority" && action === "history") {
+    if (parsed.account === null) return await client.priorityHistory();
+    if (!/^[1-9]\d*$/u.test(parsed.account)) throw new Error("--account must be a positive integer account id");
+    return await client.priorityHistory(Number(parsed.account));
+  }
   if (group === "backend" && action === "check") return await client.backendCheck();
   if (group === "upstream-scheduling-v2") {
     if (action === "scopes") return await client.upstreamSchedulingV2Scopes();
@@ -1392,6 +1426,7 @@ export async function runCli(args: string[]): Promise<void> {
     const routedResult = target.mode === "http" ? bindRuntimeCommands(result, target.baseUrl) : result;
     const output: Record<string, unknown> = { target: targetId, canonicalUrl: target.mode === "http" ? target.baseUrl : null, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...routedResult as Record<string, unknown> };
     if (parsed.command.join(" ") === "scores rank") emitScoreRanking(output, parsed.json);
+    else if (parsed.command.join(" ") === "priority history") emitPriorityHistory(output, parsed.json);
     else if (parsed.command.join(" ") === "scores pool-quality") emitPoolQuality(output, parsed.json);
     else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
     else if (parsed.command.join(" ") === "errors diagnose") emitErrorDiagnosis(output, parsed.json);
