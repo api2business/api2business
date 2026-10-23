@@ -95,3 +95,36 @@ test("V2 sorts by converted balances and keeps missing valuation distinct from r
   expect(missingBalance).not.toContain("1,000");
   expect(view.accountSortValue(view.state.accounts[0], "balance")).toBe(10);
 });
+
+test("V2 makes request quality and missing TTFT evidence explicit in hover details", async () => {
+  const view = await renderer();
+  view.state.accounts = [{
+    accountId: 1502,
+    accountName: "https://example.test claude",
+    attemptCount: 63,
+    successRequests: 10,
+    failureRequests: 0,
+    failureRate: 0,
+    excludedNonUpstreamErrorRequests: 53,
+    customerErrorRequests: 53,
+    streamSuccessRequests: 0,
+    firstTokenSamples: 0,
+    firstTokenCoverage: null,
+    durationP95Ms: 3281,
+    ttftP95Ms: null,
+    failoverRequests: 0,
+    failoverRecovered: 0,
+    failoverNotTriggered: 0,
+    quotaCacheStatus: "cached",
+    usage: { apiAmountUsd: 0.016 },
+  }];
+  view.renderAccounts();
+  const html = view.node("#v2-account-body").innerHTML;
+  expect(html).toContain("成功响应 10 / 63");
+  expect(html).toContain("上游失败 0.0%");
+  expect(html).toContain("失败 / 切号 / 恢复：0 / 0 / 0");
+  expect(html).toContain("业务/余额拒绝：53");
+  expect(html).toContain("TTFT P95：无有效样本");
+  expect(html).toContain("当前成功响应无流式样本");
+  expect(html).toContain("metric-help-warning");
+});

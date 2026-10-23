@@ -494,8 +494,8 @@ button:disabled { cursor: wait; opacity: .48; }
 .score-col-cost { width: 126px; }
 .score-col-output { width: 138px; }
 .score-col-sample { width: 104px; }
-.score-col-failure { width: 108px; }
-.score-col-ttft { width: 106px; }
+.score-col-failure { width: 174px; }
+.score-col-ttft { width: 172px; }
 .score-col-failover { width: 148px; }
 .score-col-groups { width: 242px; }
 .score-col-actions { width: 116px; }
@@ -508,6 +508,21 @@ button:disabled { cursor: wait; opacity: .48; }
 .unified-upstream-table .account-cell small { max-width: 270px; overflow: hidden; text-overflow: ellipsis; }
 .unified-upstream-table .sample-time { min-width: 92px; font-family: var(--mono); }
 .unified-upstream-table .group-list { max-height: 42px; overflow: hidden; }
+.unified-upstream-table .quality-detail-cell,
+.unified-upstream-table .ttft-detail-cell { overflow: visible; }
+.quality-detail-cell strong,
+.ttft-detail-cell strong { display: block; color: var(--paper); font: 650 11px/1.25 var(--mono); white-space: nowrap; }
+.quality-detail-cell small,
+.ttft-detail-cell small { overflow: visible; white-space: nowrap; }
+.ttft-value.is-missing { color: var(--warning); }
+.metric-help { position: relative; display: inline-flex; align-items: center; vertical-align: middle; margin-left: 4px; outline: none; }
+.metric-help-icon { display: inline-grid; width: 14px; height: 14px; place-items: center; border: 1px solid currentColor; border-radius: 50%; font: 700 9px/1 var(--mono); cursor: help; }
+.metric-help-info { color: var(--info); }
+.metric-help-warning { color: var(--warning); }
+.metric-tooltip { position: absolute; z-index: 20; right: 0; top: calc(100% + 8px); display: none; width: 260px; padding: 9px 11px; border: 1px solid var(--muted); background: rgba(13,16,14,.98); box-shadow: 0 8px 24px rgba(0,0,0,.42); color: var(--paper); font: 10px/1.55 var(--mono); text-align: left; white-space: normal; pointer-events: none; }
+.metric-tooltip span { display: block; overflow-wrap: anywhere; }
+.metric-help:hover .metric-tooltip,
+.metric-help:focus-within .metric-tooltip { display: block; }
 .sample-time span { display: inline-flex; align-items: center; min-height: 24px; color: var(--muted); font-weight: 650; }
 .sample-time-fresh span, .sample-time-recent span { color: var(--signal); }
 .sample-time-aging span { color: var(--paper); }

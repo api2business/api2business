@@ -184,6 +184,54 @@ function accountCostSource(row) {
   if (row.costSource === 'manual' || (Number.isFinite(Number(row.usage?.costRateCnyPerApiUsd)) && Number(row.usage?.costRateCnyPerApiUsd) > 0)) return '手工'
   return '成本未知'
 }
+function metricHelp(lines, tone = 'info') {
+  const icon = tone === 'warning' ? '!' : 'ⓘ'
+  const detail = lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('')
+  return `<span class="metric-help metric-help-${tone}" tabindex="0" role="img" aria-label="查看详细统计"><span class="metric-help-icon" aria-hidden="true">${icon}</span><span class="metric-tooltip" role="tooltip">${detail}</span></span>`
+}
+function accountQualityDetails(row, attempts) {
+  const success = row.successRequests ?? 0
+  const upstreamFailures = row.failureRequests ?? 0
+  const excluded = row.excludedNonUpstreamErrorRequests ?? row.customerErrorRequests ?? 0
+  const effective = Number(success) + Number(upstreamFailures)
+  return [
+    '统计窗口：评分快照',
+    `总记录：${number(attempts)}`,
+    `成功响应：${number(success)}`,
+    `可计入上游失败：${number(upstreamFailures)}`,
+    `业务/余额拒绝：${number(excluded)}`,
+    `可计入上游失败率：${number(upstreamFailures)} / ${number(effective)} = ${percent(row.failureRate)}`,
+    `失败 / 切号 / 恢复：${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}`,
+  ]
+}
+function accountQualityMarkup(row, attempts) {
+  const success = row.successRequests ?? 0
+  const excluded = Number(row.excludedNonUpstreamErrorRequests ?? row.customerErrorRequests ?? 0)
+  const tone = excluded > 0 ? 'warning' : 'info'
+  return `<td class="quality-detail-cell"><strong>成功响应 ${number(success)} / ${number(attempts)}</strong><small>上游失败 ${percent(row.failureRate)} ${metricHelp(accountQualityDetails(row, attempts), tone)}</small></td>`
+}
+function accountTtftDetails(row) {
+  const ttft = row.ttftP95Ms == null ? '无有效样本' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`
+  const streamSuccess = row.streamSuccessRequests ?? 0
+  const firstTokenSamples = row.firstTokenSamples ?? 0
+  const streamState = streamSuccess > 0
+    ? firstTokenSamples > 0 ? '已捕获首 Token' : '流式响应未捕获首 Token'
+    : Number(row.successRequests ?? 0) > 0 ? '当前成功响应无流式样本' : '没有成功响应'
+  return [
+    `TTFT P95：${ttft}`,
+    `流式成功：${number(streamSuccess)} / ${number(row.successRequests ?? 0)}`,
+    `首 Token 样本：${number(firstTokenSamples)}`,
+    `首 Token 覆盖率：${percent(row.firstTokenCoverage)}`,
+    `总耗时 P95：${row.durationP95Ms == null ? '—' : `${number(Math.round(Number(row.durationP95Ms)))} ms`}`,
+    `状态：${streamState}`,
+  ]
+}
+function accountTtftMarkup(row) {
+  const observed = row.ttftP95Ms != null && Number(row.firstTokenSamples ?? 0) > 0
+  const value = observed ? `${number(Math.round(Number(row.ttftP95Ms)))} ms` : '无有效样本'
+  const tone = observed ? 'info' : 'warning'
+  return `<td class="ttft-detail-cell"><strong class="ttft-value${observed ? '' : ' is-missing'}">${value}</strong><small>${metricHelp(accountTtftDetails(row), tone)}</small></td>`
+}
 function accountSortValue(row, key) {
   return ({
     accountName: row.accountName ?? row.accountId,
@@ -224,7 +272,7 @@ function renderAccounts() {
     const accountMarkup = upstreamUrl
       ? `<a class="upstream-account-link" href="${escapeHtml(upstreamUrl)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开上游页面">${accountLabel}</a>`
       : `<strong>${accountLabel}</strong>`
-    return `<tr><td>${accountMarkup}<small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td title="${escapeHtml(costTitle)}">${cost == null ? '—' : `¥${number(cost, 4)}/API 美元`}<small>${escapeHtml(costSource)}</small></td><td>${usd(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td><td>${percent(row.failureRate)}<small>${number(attempts)} 次尝试</small></td><td>${row.ttftP95Ms == null ? '—' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`}</td><td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
+    return `<tr><td>${accountMarkup}<small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td title="${escapeHtml(costTitle)}">${cost == null ? '—' : `¥${number(cost, 4)}/API 美元`}<small>${escapeHtml(costSource)}</small></td><td>${usd(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td>${accountQualityMarkup(row, attempts)}${accountTtftMarkup(row)}<td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
   }).join('') : '<tr><td colspan="13" class="empty">当前作用域没有评分账号</td></tr>'
   updateTableSortHeaders($('#v2-account-table'), state.accountSort)
   $('#v2-account-page').textContent = rows.length ? `${state.accountPage} / ${pages} · 共 ${number(rows.length)} 条` : '0 条'; $('#v2-account-prev').disabled = state.accountPage <= 1; $('#v2-account-next').disabled = state.accountPage >= pages
