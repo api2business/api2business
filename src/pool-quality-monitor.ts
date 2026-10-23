@@ -22,7 +22,7 @@ export interface PoolParticipation {
   costSource: "detected" | "manual" | null;
 }
 
-function poolQualityEventsSql(bounded = false): string { return `
+function poolQualityEventsSql(boundParameter: number | null = null): string { return `
 WITH internal_probe_keys AS (
   SELECT k.id
   FROM api_keys k
@@ -71,14 +71,14 @@ WITH internal_probe_keys AS (
       )
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = o.api_key_id)
 ), raw_requests AS (
-  SELECT * FROM eligible_usage ${bounded ? "WHERE created_at >= $8::timestamptz" : ""}
-  UNION ALL SELECT * FROM eligible_errors e ${bounded ? `
-  WHERE e.created_at >= $8::timestamptz
+  SELECT * FROM eligible_usage ${boundParameter === null ? "" : `WHERE created_at >= $${boundParameter}::timestamptz`}
+  UNION ALL SELECT * FROM eligible_errors e ${boundParameter === null ? "" : `
+  WHERE e.created_at >= $${boundParameter}::timestamptz
     -- A success before the fast-path boundary still supersedes a later error.
     AND NOT EXISTS (
       SELECT 1 FROM eligible_usage u
-      WHERE u.request_id = e.request_id AND u.created_at < $8::timestamptz
-    )` : ""}
+      WHERE u.request_id = e.request_id AND u.created_at < $${boundParameter}::timestamptz
+    )`}
 ), final_requests AS (
   SELECT event.*, ROW_NUMBER() OVER (
     PARTITION BY event.request_id
@@ -161,7 +161,8 @@ WITH internal_probe_keys AS (
 )
 `; }
 
-export const poolQualitySql = `${poolQualityEventsSql()}
+function poolQualitySampleSql(boundParameter: number | null): string {
+  return `${poolQualityEventsSql(boundParameter)}
 SELECT e.*,
   EXISTS (
     SELECT 1 FROM ops_system_logs s
@@ -170,10 +171,14 @@ SELECT e.*,
   ) AS failover_triggered
 FROM recent_events e ORDER BY e.created_at DESC, e.id DESC
 `;
+}
+
+export const poolQualitySql = poolQualitySampleSql(null);
+export const boundedPoolQualitySql = poolQualitySampleSql(5);
 
 export type PoolQualityErrorFilter = "scoreable" | "excluded" | "all";
 
-function poolQualityErrorsQuery(bounded = false): string { return `${poolQualityEventsSql(bounded)}, filtered_errors AS (
+function poolQualityErrorsQuery(bounded = false): string { return `${poolQualityEventsSql(bounded ? 8 : null)}, filtered_errors AS (
   SELECT e.*,
     EXISTS (
       SELECT 1 FROM ops_system_logs s
@@ -273,6 +278,41 @@ export interface PoolQualitySample {
   participation: PoolParticipation[];
 }
 
+const poolQualitySampleWindowsMs = [86_400_000, 7 * 86_400_000];
+
+async function readPoolQualitySampleRows(
+  reads: Sub2ApiReadClient,
+  platform: string,
+  recentCallLimit: number,
+  groupIds: number[],
+  sampledAt: string,
+  sampledAtMs: number,
+  baseParameters: unknown[],
+): Promise<Row[]> {
+  let rows: Row[] = [];
+  for (const windowMs of poolQualitySampleWindowsMs) {
+    const query = await reads.query<Row>({
+      key: `pool-quality:${platform}:${recentCallLimit}:${groupIds.join(",")}:${sampledAt}:${windowMs}`,
+      kind: "pool-quality-sample",
+      priority: "automatic",
+      cacheMode: "bypass-cache",
+      sql: boundedPoolQualitySql,
+      parameters: [...baseParameters, new Date(sampledAtMs - windowMs).toISOString()],
+    });
+    rows = query.rows as Row[];
+    if (rows.length >= recentCallLimit) return rows;
+  }
+  const query = await reads.query<Row>({
+    key: `pool-quality:${platform}:${recentCallLimit}:${groupIds.join(",")}:${sampledAt}`,
+    kind: "pool-quality-sample",
+    priority: "automatic",
+    cacheMode: "bypass-cache",
+    sql: poolQualitySql,
+    parameters: baseParameters,
+  });
+  return query.rows as Row[];
+}
+
 export async function collectPoolQualitySample(
   config: AppConfig,
   reads: Sub2ApiReadClient,
@@ -288,15 +328,11 @@ export async function collectPoolQualitySample(
         ? (config.sub2api.deepseekPriorityPlan ?? config.sub2api.priorityPlan)
         : config.sub2api.priorityPlan;
   const groupIds = [...new Set(policy.eligibleGroupIds)].sort((a, b) => a - b);
-  const query = await reads.query<Row>({
-    key: `pool-quality:${platform}:${recentCallLimit}:${groupIds.join(",")}:${sampledAt}`,
-    kind: "pool-quality-sample",
-    priority: "automatic",
-    cacheMode: "bypass-cache",
-    sql: poolQualitySql,
-    parameters: [recentCallLimit, groupIds.join(","), sampledAt, platform],
-  });
-  const rows = query.rows as Row[];
+  const sampledAtMs = Date.parse(sampledAt);
+  if (!Number.isFinite(sampledAtMs)) throw new Error("pool quality sampledAt is invalid");
+  const normalizedSampledAt = new Date(sampledAtMs).toISOString();
+  const baseParameters = [recentCallLimit, groupIds.join(","), normalizedSampledAt, platform];
+  const rows = await readPoolQualitySampleRows(reads, platform, recentCallLimit, groupIds, normalizedSampledAt, sampledAtMs, baseParameters);
   const weightedRows: Row[] = rows.map((row, index): Row => ({
     ...row,
     sampleWeight: recentCallBucketWeight(index + 1, config.sub2api.scoreSamplePolicy),

@@ -1,14 +1,13 @@
 import { expect, test } from "bun:test";
-import { boundedPoolQualityErrorsSql, collectPoolQualityErrors, collectPoolQualitySample, poolQualityErrorsSql, poolQualityHistory, poolQualitySql } from "./pool-quality-monitor";
+import { boundedPoolQualityErrorsSql, boundedPoolQualitySql, collectPoolQualityErrors, collectPoolQualitySample, poolQualityErrorsSql, poolQualityHistory, poolQualitySql } from "./pool-quality-monitor";
 import { loadConfig } from "./config";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 test("pool quality uses one queued query and separates exact upstream accounts", async () => {
-  let queries = 0;
+  const requests: Array<{ sql: string; parameters: unknown[] }> = [];
   const reads = {
-    async query(input: { parameters: unknown[] }) {
-      queries += 1;
-      expect(input.parameters).toEqual([1000, "2,3", "2026-08-03T00:00:00.000Z", "codex"]);
+    async query(input: { sql: string; parameters: unknown[] }) {
+      requests.push(input);
       return {
         rows: [
           { id: 1, kind: "usage", request_id: "a", account_id: 10, account_name: "https://api.example.com plus 0.05", base_url: "https://api.example.com/v1", stream: true, first_token_ms: 1000, duration_ms: 2000, scoreable: false, failover_triggered: false },
@@ -22,7 +21,8 @@ test("pool quality uses one queued query and separates exact upstream accounts",
     status() { throw new Error("not used"); },
   } as unknown as Sub2ApiReadClient;
   const sample = await collectPoolQualitySample(loadConfig("config/api2business.example.yaml"), reads, "2026-08-03T00:00:00.000Z");
-  expect(queries).toBe(1);
+  expect(requests.map((request) => request.sql)).toEqual([boundedPoolQualitySql, boundedPoolQualitySql, poolQualitySql]);
+  expect(requests.at(-1)?.parameters).toEqual([1000, "2,3", "2026-08-03T00:00:00.000Z", "codex"]);
   expect(sample.rawCallCount).toBe(3);
   expect(sample.rawSuccessRequests).toBe(2);
   expect(sample.rawFailureRequests).toBe(1);
@@ -37,6 +37,74 @@ test("pool quality uses one queued query and separates exact upstream accounts",
     { accountId: 10, accountName: "https://api.example.com plus 0.05", baseUrl: "https://api.example.com/v1", attempts: 2, rawAttempts: 2, ratio: 0.666667, costRateCnyPerApiUsd: 0.05, costSource: "manual" },
     { accountId: 11, accountName: "https://api.example.com pro 0.08", baseUrl: "https://api.example.com", attempts: 1, rawAttempts: 1, ratio: 0.333333, costRateCnyPerApiUsd: 0.08, costSource: "manual" },
   ]);
+});
+
+function sampleRow(id: number) {
+  return {
+    id, kind: "usage", request_id: `r${id}`, account_id: 10, account_name: "account",
+    base_url: "https://account", stream: true, first_token_ms: 1000, duration_ms: 2000,
+    scoreable: false, failover_triggered: false,
+  };
+}
+
+function queryReceipt(rows: unknown[]) {
+  return {
+    rows, cached: false, deduplicated: false, queueDurationMs: 1, queryDurationMs: 2,
+    totalDurationMs: 3, queryStartedAt: new Date().toISOString(), queryCompletedAt: new Date().toISOString(),
+  };
+}
+
+test("pool sample keeps one query when the 24 hour window is full", async () => {
+  const requests: Array<{ sql: string; parameters: unknown[] }> = [];
+  const reads = {
+    async query(input: { sql: string; parameters: unknown[] }) {
+      requests.push(input);
+      return queryReceipt(Array.from({ length: 1000 }, (_, index) => sampleRow(index + 1)));
+    },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+  const sample = await collectPoolQualitySample(loadConfig("config/api2business.example.yaml"), reads, "2026-08-03T00:00:00.000Z");
+  expect(requests).toHaveLength(1);
+  expect(requests[0]?.sql).toBe(boundedPoolQualitySql);
+  expect(requests[0]?.parameters).toEqual([1000, "2,3", "2026-08-03T00:00:00.000Z", "codex", "2026-08-02T00:00:00.000Z"]);
+  const usageClause = boundedPoolQualitySql.slice(
+    boundedPoolQualitySql.indexOf("eligible_usage AS NOT MATERIALIZED"),
+    boundedPoolQualitySql.indexOf("eligible_errors AS NOT MATERIALIZED"),
+  );
+  expect(usageClause).not.toContain("$5");
+  expect(boundedPoolQualitySql).toContain("SELECT * FROM eligible_usage WHERE created_at >= $5::timestamptz");
+  expect(boundedPoolQualitySql).toContain("u.created_at < $5::timestamptz");
+  expect(sample.rawCallCount).toBe(1000);
+});
+
+test("pool sample widens a short window and stops after a bounded timeout", async () => {
+  const requests: Array<{ sql: string; parameters: unknown[] }> = [];
+  const reads = {
+    async query(input: { sql: string; parameters: unknown[] }) {
+      requests.push(input);
+      if (requests.length === 1) return queryReceipt([sampleRow(1)]);
+      return queryReceipt(Array.from({ length: 1000 }, (_, index) => sampleRow(index + 1)));
+    },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+  const config = loadConfig("config/api2business.example.yaml");
+  const widened = await collectPoolQualitySample(config, reads, "2026-08-03T00:00:00.000Z");
+  expect(requests.map((request) => request.parameters.at(-1))).toEqual([
+    "2026-08-02T00:00:00.000Z",
+    "2026-07-27T00:00:00.000Z",
+  ]);
+  expect(requests.every((request) => request.sql === boundedPoolQualitySql)).toBe(true);
+  expect(widened.rawCallCount).toBe(1000);
+  let timedOut = 0;
+  const failing = {
+    async query() {
+      timedOut += 1;
+      throw new Error("sub2api_read_query_timeout: query pool-quality-sample exceeded 15000ms");
+    },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+  await expect(collectPoolQualitySample(config, failing, "2026-08-03T00:00:00.000Z")).rejects.toThrow("sub2api_read_query_timeout");
+  expect(timedOut).toBe(1);
 });
 
 test("pool quality applies the same recent-call decay buckets as account scoring", async () => {

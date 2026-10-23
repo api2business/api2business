@@ -1,5 +1,6 @@
+import { writeFileSync } from "node:fs";
 import { expect, test } from "bun:test";
-import type { AppConfig } from "./config";
+import { loadConfig, type AppConfig } from "./config";
 import { accountPriorityTransition, applyPlanTypeRefunds, filterAutomaticPriorityPlan, latestSuccessfulUsageByWallet, normalizeUpstreamWallet, OperationsService, upstreamBalanceRateByWallet } from "./operations-service";
 import type { OperationsStore } from "./operations-store";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
@@ -272,4 +273,50 @@ test("探活轮次只持久化原生关联证据，不保留自由响应字段",
   await service.runIdleProbe([], 1, { operationId: "original-round", triggerType: "manual", scope: "grok" });
   expect(saved.requestEvidence).toEqual([evidence, timeoutEvidence]);
   expect(JSON.stringify(saved)).not.toContain("must-not-persist");
+});
+
+test("pool quality keeps successful scopes when one platform times out", async () => {
+  const ledgerPath = "/tmp/a2b-pool-quality-ledger.yaml";
+  writeFileSync(ledgerPath, "profit:\n  upstreamBalanceCnyPerApiUsd: 1\n");
+  const config = loadConfig("config/api2business.example.yaml");
+  config.operations.ledgerYamlPath = ledgerPath;
+  const saved: string[] = [];
+  const store = {
+    async getUpstreamUsageCache() { return []; },
+    async addPoolQualitySample(sample: { platform: string }) { saved.push(sample.platform); },
+  } as unknown as OperationsStore;
+  const usageRow = {
+    id: 1, kind: "usage", request_id: "ok", account_id: 10, account_name: "account",
+    base_url: "https://account", stream: true, first_token_ms: 1000, duration_ms: 2000,
+    scoreable: false, failover_triggered: false,
+  };
+  const reads = {
+    async query(input: { parameters: unknown[] }) {
+      if (input.parameters[3] === "codex") {
+        throw new Error("sub2api_read_query_timeout: query pool-quality-sample exceeded 15000ms");
+      }
+      return {
+        rows: Array.from({ length: 1000 }, (_, index) => ({ ...usageRow, id: index + 1, request_id: `ok-${index}` })),
+        cached: false, deduplicated: false, queueDurationMs: 0, queryDurationMs: 1,
+        totalDurationMs: 1, queryStartedAt: new Date().toISOString(), queryCompletedAt: new Date().toISOString(),
+      };
+    },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+  const service = new OperationsService(config, store, reads);
+  const partial = await service.samplePoolQuality();
+  expect(saved).toEqual(["claude", "grok", "deepseek"]);
+  expect(partial.ok).toBe(false);
+  expect(partial.failures).toEqual([{
+    platform: "codex",
+    error: "sub2api_read_query_timeout: query pool-quality-sample exceeded 15000ms",
+  }]);
+  const failingReads = {
+    async query() { throw new Error("sub2api_read_query_timeout: query pool-quality-sample exceeded 15000ms"); },
+    status() { throw new Error("not used"); },
+  } as unknown as Sub2ApiReadClient;
+  const failing = new OperationsService(config, store, failingReads);
+  saved.length = 0;
+  await expect(failing.samplePoolQuality()).rejects.toThrow("codex:");
+  expect(saved).toEqual([]);
 });

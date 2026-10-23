@@ -831,28 +831,46 @@ export class OperationsService {
     const usageById = new Map(usageRows.map((row) => [Number(row.account_id), object(row.last_success_result ?? row.result)]));
     const valuation = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
     const samples = [];
+    const failures: Array<{ platform: string; error: string }> = [];
     for (const platform of ["codex", "claude", "grok", "deepseek"] as const) {
-      const sample = await collectPoolQualitySample(this.config, this.reads, sampledAt, platform);
-      sample.participation = sample.participation.map((item) => {
-        const usage = usageById.get(item.accountId);
-        const multiplier = Number(object(usage?.billingMultiplier).value);
-        const walletRate = upstreamBalanceRateByWallet(
-          configuredWalletKey(usage?.walletKey ?? usage?.baseUrl ?? item.baseUrl, this.config.sub2api.newApiCredentials),
-          valuation.defaultCnyPerApiUsd,
-          valuation.walletCnyPerApiUsd,
-        );
-        const detected = Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null;
-        return detected === null ? item : {
-          ...item,
-          costRateCnyPerApiUsd: detected,
-          costSource: "detected" as const,
-        };
-      });
-      await this.store.addPoolQualitySample(sample);
-      samples.push(sample);
+      try {
+        const sample = await collectPoolQualitySample(this.config, this.reads, sampledAt, platform);
+        sample.participation = sample.participation.map((item) => {
+          const usage = usageById.get(item.accountId);
+          const multiplier = Number(object(usage?.billingMultiplier).value);
+          const walletRate = upstreamBalanceRateByWallet(
+            configuredWalletKey(usage?.walletKey ?? usage?.baseUrl ?? item.baseUrl, this.config.sub2api.newApiCredentials),
+            valuation.defaultCnyPerApiUsd,
+            valuation.walletCnyPerApiUsd,
+          );
+          const detected = Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null;
+          return detected === null ? item : {
+            ...item,
+            costRateCnyPerApiUsd: detected,
+            costSource: "detected" as const,
+          };
+        });
+        await this.store.addPoolQualitySample(sample);
+        samples.push(sample);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(JSON.stringify({ component: "pool.quality.sample", platform, error: message }));
+        failures.push({ platform, error: message });
+      }
     }
     const servicePolicy = await this.reconcileGatewayPolicyForSampling();
-    return { ok: true, sampledAt, profiles: samples.map((sample) => sample.platform), samples, servicePolicy, valuesPrinted: false };
+    if (samples.length === 0) {
+      throw new Error(failures.map((item) => `${item.platform}: ${item.error}`).join("; "));
+    }
+    return {
+      ok: failures.length === 0,
+      sampledAt,
+      profiles: samples.map((sample) => sample.platform),
+      samples,
+      failures,
+      servicePolicy,
+      valuesPrinted: false,
+    };
   }
 
   async poolQualitySummary(platform: "codex" | "claude" | "grok" | "deepseek" = "codex") {
