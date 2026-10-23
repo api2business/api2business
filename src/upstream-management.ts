@@ -35,7 +35,7 @@ function rulesForFailoverPlatform(
   platform: string,
 ): FailoverRule[] {
   const normalized = platform.toLowerCase();
-  if (normalized === "openai" || normalized === "anthropic" || normalized === "grok") return rulesByPlatform[normalized];
+  if (normalized === "openai" || normalized === "anthropic" || normalized === "grok" || normalized === "deepseek") return rulesByPlatform[normalized];
   return [];
 }
 
@@ -101,7 +101,7 @@ export interface UpstreamCreateInput {
   priority: number;
   capacity: number;
   groupIds: number[];
-  platform: "openai" | "grok" | "anthropic";
+  platform: "openai" | "grok" | "anthropic" | "deepseek";
   poolMode: boolean;
   operationId: string;
   description?: string;
@@ -543,8 +543,8 @@ export class UpstreamManagementService {
     const groupIds = input.groupIds === undefined || input.groupIds === null
       ? [...settings.groupIds] : validateGroupIds(input.groupIds);
     const platform = String(input.platform ?? "").trim().toLowerCase();
-    if (platform !== "openai" && platform !== "grok" && platform !== "anthropic") {
-      throw new Error("platform 必须明确填写 openai、grok 或 anthropic");
+    if (platform !== "openai" && platform !== "grok" && platform !== "anthropic" && platform !== "deepseek") {
+      throw new Error("platform 必须明确填写 openai、grok、anthropic 或 deepseek");
     }
     const poolMode = input.poolMode === undefined || input.poolMode === null || input.poolMode === ""
       ? false : input.poolMode === true || input.poolMode === "true";
@@ -1237,7 +1237,7 @@ export class UpstreamManagementService {
         FROM accounts a
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
-          AND LOWER(a.platform) IN ('openai', 'anthropic', 'grok')
+          AND LOWER(a.platform) IN ('openai', 'anthropic', 'grok', 'deepseek')
           AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
           AND ($1::text = '' OR a.id = ANY(string_to_array($1::text, $2::text)::bigint[]))
         ORDER BY a.id`,
@@ -1404,7 +1404,7 @@ export class UpstreamManagementService {
     groupIds?: unknown;
     operationId?: string | null;
     description?: string;
-    platform: "openai" | "grok" | "anthropic";
+    platform: "openai" | "grok" | "anthropic" | "deepseek";
     poolMode: boolean;
   }): Promise<Record<string, unknown>> {
     const baseUrl = normalizeBaseUrl(input.baseUrl);

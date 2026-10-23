@@ -175,6 +175,33 @@ test("probe isolation detects Grok platform without adding Codex groups", async 
   expect(secret.records["42"]).toMatchObject({ platform: "grok", ready: true });
 });
 
+test("DeepSeek probe uses Chat Completions and the configured probe model", async () => {
+  const { state, service } = fixture();
+  state.account = { id: 42, platform: "deepseek", type: "apikey", group_ids: [131] };
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestBody = "";
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    requestUrl = String(input);
+    requestBody = String(init?.body ?? "");
+    return new Response("data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  }) as unknown as typeof fetch;
+  try {
+    await service.ensure(42, { platform: "deepseek", eligibleGroupIds: [131], bindingGroupIds: [] });
+    await service.probe(42, "deepseek-flash", 1000);
+    expect(requestUrl).toBe("https://gateway.example.com/v1/chat/completions");
+    expect(JSON.parse(requestBody)).toMatchObject({
+      model: "deepseek-flash",
+      messages: [{ role: "user", content: "health probe" }],
+      max_tokens: 1,
+      stream: true,
+    });
+    expect(requestBody).not.toContain("max_output_tokens");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("probe isolation namespaces a platform after a stale cross-platform group collision", async () => {
   const { state, service } = fixture();
   state.account = { id: 42, platform: "grok", type: "apikey", group_ids: [62] };

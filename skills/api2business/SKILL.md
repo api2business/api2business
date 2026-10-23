@@ -187,10 +187,10 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - V2 使用 `upstream-scheduling-v2 scopes|plan --over-api <absolute-http(s)-URL>` 或
   `upstream-scheduling-v2 snapshot --scope <scope> --over-api <absolute-http(s)-URL>` 只读查看；新鲜度告警或刷新失败
   排查默认读取缓存并由服务后台刷新；需要同步刷新时追加 `--refresh`，只读取最近成功的读模型缓存时追加 `--cache-only`，两者不可同时使用。使用
-  `upstream-scheduling-v2 priority-run --scope <codex|claude|grok> --confirm --over-api <absolute-http(s)-URL>`
+  `upstream-scheduling-v2 priority-run --scope <codex|claude|grok|deepseek> --confirm --over-api <absolute-http(s)-URL>`
   通过原生 worker 执行一次指定作用域的手动优先级调整；作用域的
   `scoreRead`、`planRead`、`planWrite`、`priorityAutomation`、`idleProbe` 和
-  `upstreamWrite` 只认 owning YAML；Codex、Claude、Grok 使用同一套平等作用域接口。
+  `upstreamWrite` 只认 owning YAML；Codex、Claude、Grok、DeepSeek 使用同一套平等作用域接口。
   自动探活必须先完成同作用域的手动探活核验，再打开
   `features.idleProbe`。V2 是唯一调度运行面；旧全局页面、工作流、写入 API、CLI 命令和
   配置字段已经删除，配置加载会拒绝这些退役字段，禁止兼容复活。
@@ -306,7 +306,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   读取、原生 bulk merge、单账号失败边界和写后回读唯一见
   [上游与调度](references/upstream-scheduling.md)。
 - V2 作用域模型同步使用以下 CLI：
-  - `upstream-scheduling-v2 model-sync plan --scope <codex|claude|grok> --over-api <absolute-http(s)-URL>` 只读生成下一批计划；
+  - `upstream-scheduling-v2 model-sync plan --scope <codex|claude|grok|deepseek> --over-api <absolute-http(s)-URL>` 只读生成下一批计划；
   - `upstream-scheduling-v2 model-sync run --scope <scope> [--accounts <id,...>] --confirm --over-api <absolute-http(s)-URL>` 执行手动批次；
   - `upstream-scheduling-v2 model-sync history --scope <scope> --over-api <absolute-http(s)-URL>` 查询轮次和账号明细。
   - 自动批次上限和间隔由 `operations.upstreamSchedulingV2.modelSync` 配置；自动开关只认各作用域的 `features.modelSyncAutomation`，每批最多 10 个，上一批完成后开始计时。
@@ -332,7 +332,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
     --scope grok
   ```
 
-- `--scope` 可选，只接受 owning YAML 中已启用的 `codex`、`claude` 或 `grok` 作用域；CLI 将其写入
+- `--scope` 可选，只接受 owning YAML 中已启用的 `codex`、`claude`、`grok` 或 `deepseek` 作用域；CLI 将其写入
   V2 深链查询参数，并在 stderr 输出带 profile、scope 和 phase 的短进度行，避免临时脚本拼接 URL
   或长时间无输出。省略时使用配置中的默认作用域。
 - 连拍复用 `web screenshot`。

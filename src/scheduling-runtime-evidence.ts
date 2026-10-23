@@ -20,8 +20,8 @@ export function projectSchedulingRuntime(value: unknown): unknown {
 
 export async function collectSchedulingRuntime(client: Pick<Sub2ApiClient, "getOpsAccountAvailability" | "getOpsConcurrency" | "request">, group: unknown, platform: unknown) {
   const groupId = Number(group);
-  if (!Number.isSafeInteger(groupId) || groupId < 1 || !["openai", "anthropic", "grok"].includes(String(platform))) {
-    throw new Error("runtime evidence requires a positive group ID and platform openai|anthropic|grok");
+  if (!Number.isSafeInteger(groupId) || groupId < 1 || !["openai", "anthropic", "grok", "deepseek"].includes(String(platform))) {
+    throw new Error("runtime evidence requires a positive group ID and platform openai|anthropic|grok|deepseek");
   }
   const startedAt = new Date().toISOString();
   async function read(source: string, query: () => Promise<unknown>, project = projectSchedulingRuntime) {

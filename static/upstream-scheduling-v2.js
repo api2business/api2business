@@ -32,7 +32,7 @@ function percent(value, digits = 1) { const parsed = Number(value); return Numbe
 function cny(value) { return value == null ? '—' : `¥${balanceNumber(value, 2)}` }
 function usd(value) { return value == null ? '—' : `$${balanceNumber(value, 3)}` }
 function time(value) { if (!value) return '—'; const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : '—' }
-function scopeLabel(scope) { return scope === 'claude' ? 'Claude' : scope === 'codex' ? 'Codex' : String(scope ?? '') }
+function scopeLabel(scope) { return scope === 'claude' ? 'Claude' : scope === 'codex' ? 'Codex' : scope === 'grok' ? 'Grok' : scope === 'deepseek' ? 'DeepSeek' : String(scope ?? '') }
 function enabledScope(scope) { return state.scopes.find((item) => item.enabled && item.name === scope)?.name ?? null }
 function scopeFromLocation(fallback) { return enabledScope(new URLSearchParams(location.search).get('scope')) ?? fallback }
 function updateScopeDeepLink(scope, navigation = 'replace') {

@@ -266,12 +266,12 @@ function help(): Record<string, unknown> {
       "config validate",
       "backend check",
       "scores get|pool-quality|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
-      "upstream-scheduling-v2 scopes|plan [--scope codex|claude|grok] --over-api <absolute-http(s)-URL> (read-only; Codex phase first)",
-      "upstream-scheduling-v2 snapshot [--scope codex|claude|grok] [--refresh|--cache-only] --over-api <absolute-http(s)-URL> (read-only read-model query; default cache with background refresh)",
-      "upstream-scheduling-v2 priority-run --scope codex|claude|grok [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
-      "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok] [--accounts id,...] [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstream-scheduling-v2 scopes|plan [--scope codex|claude|grok|deepseek] --over-api <absolute-http(s)-URL> (read-only; Codex phase first)",
+      "upstream-scheduling-v2 snapshot [--scope codex|claude|grok|deepseek] [--refresh|--cache-only] --over-api <absolute-http(s)-URL> (read-only read-model query; default cache with background refresh)",
+      "upstream-scheduling-v2 priority-run --scope codex|claude|grok|deepseek [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
+      "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok|deepseek] [--accounts id,...] [--confirm] --over-api <absolute-http(s)-URL>",
       "reads status --over-api <absolute-http(s)-URL>",
-      "reads runtime --group <positive-id> --platform openai|anthropic|grok --over-api <absolute-http(s)-URL> (read-only live availability/concurrency/native version)",
+      "reads runtime --group <positive-id> --platform openai|anthropic|grok|deepseek --over-api <absolute-http(s)-URL> (read-only live availability/concurrency/native version)",
       "observability report|costs|get|check|configure --help",
       "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
@@ -303,11 +303,11 @@ function help(): Record<string, unknown> {
       "accounts oauth-economics [--profile codex|grok] [--over-api <absolute-http(s)-URL>]",
       "accounts oauth-runtime [--profile codex|grok] [--over-api <absolute-http(s)-URL>]",
       "accounts oauth-runtime-sample --over-api <absolute-http(s)-URL>",
-      "accounts idle-probe plan [--accounts <id-or-range,...>] [--scope codex|claude|grok] --over-api <absolute-http(s)-URL>",
-      "accounts idle-probe history [--scope codex|claude|grok] [--page N] --over-api <absolute-http(s)-URL>",
-      "accounts idle-probe coverage [--scope codex|claude|grok] [--window-minutes N] --over-api <absolute-http(s)-URL>",
-      "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--scope codex|claude|grok] [--confirm] --over-api <absolute-http(s)-URL>",
-      "accounts idle-probe run [--accounts <id-or-range,...>] [--scope codex|claude|grok] [--rounds 1..10] [--confirm] --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe plan [--accounts <id-or-range,...>] [--scope codex|claude|grok|deepseek] --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe history [--scope codex|claude|grok|deepseek] [--page N] --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe coverage [--scope codex|claude|grok|deepseek] [--window-minutes N] --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--scope codex|claude|grok|deepseek] [--confirm] --over-api <absolute-http(s)-URL>",
+      "accounts idle-probe run [--accounts <id-or-range,...>] [--scope codex|claude|grok|deepseek] [--rounds 1..10] [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] [--selection dead|all] [--unit-cost-cny CNY] --over-api <absolute-http(s)-URL>",
       "accounts lifecycle retire status --id <plan-id> --over-api <absolute-http(s)-URL>",
@@ -1171,8 +1171,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (action === "plan") return await client.upstreamSchedulingV2Plan(parsed.scope);
     if (action === "priority-run") {
       const scope = parsed.scope;
-      if (scope !== "codex" && scope !== "claude" && scope !== "grok") {
-        throw new Error("upstream-scheduling-v2 priority-run requires --scope codex|claude|grok");
+      if (scope !== "codex" && scope !== "claude" && scope !== "grok" && scope !== "deepseek") {
+        throw new Error("upstream-scheduling-v2 priority-run requires --scope codex|claude|grok|deepseek");
       }
       const recentCallLimit = config.operations.upstreamSchedulingV2?.automation.recentCallLimit
         ?? config.monitor.recentCallLimit;

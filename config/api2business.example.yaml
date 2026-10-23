@@ -144,6 +144,7 @@ sub2api:
     denyAudio: true
     requiredModelsByPlatform:
       openai: [gpt-6.1-sol]
+      deepseek: [deepseek-flash]
   baseUrl: https://api.example.com/api/v1
   requestTimeoutMs: 20000
   pageSize: 100
@@ -193,6 +194,17 @@ sub2api:
     ttftFullScoreMs: 7000
     ttftZeroScoreMs: 70000
     ttftPriorScore: 25
+  deepseekScorePolicy:
+    reliabilityWeight: 60
+    failoverWeight: 15
+    latencyWeight: 25
+    baselineWeight: 0
+    failureZeroScoreRate: 0.2
+    failureBurstCallLimit: 100
+    failoverZeroScoreRate: 0.2
+    ttftFullScoreMs: 5000
+    ttftZeroScoreMs: 60000
+    ttftPriorScore: 25
   scoreSamplePolicy:
     retentionHours: 8
     decayBucketSize: 100
@@ -206,6 +218,7 @@ sub2api:
       openai: [ gpt-6.1-sol, gpt-5.6-terra, gpt-5.6-sol ]
       anthropic: [ claude-sonnet-5-5 ]
       grok: [ grok-4.5 ]
+      deepseek: [ deepseek-flash ]
     reasoningEffort: low
     candidateLimit: 10
     concurrency: 1000
@@ -354,6 +367,50 @@ sub2api:
         - 用户额度不足
         - 预扣费额度失败
         - 欠费
+  deepseekPriorityPlan:
+    platform: deepseek
+    eligibleGroupIds: [ 131 ]
+    requiredConfidence: high
+    requireCurrentAvailable: true
+    reliabilityWeight: 70
+    latencyWeight: 30
+    costWeight: 0
+    evidenceWeight: 0
+    evidenceTargetAttempts: 50
+    evidenceTargetFirstTokenSamples: 20
+    explorationWeight: 0
+    explorationTargetAttempts: 50
+    explorationQualityPrior: 0
+    balanceWeight: 0
+    referenceScore: 80
+    pointsPerScore: 8
+    minimumChange: 5
+    normalizationTopK: 20
+    forceNormalizedTopK: true
+    minimumPriorityUniformity: 0.25
+    minimumPriority: 100
+    maximumPriority: 300
+    fixedPriorities: {}
+    reservePolicies: {}
+    procurementAdvice:
+      enabled: false
+      minimumQualityScore: 80
+      valueWeight: 80
+      redundancyWeight: 20
+      recommendationLimit: 3
+      statusAlertLimit: 20
+      maximumRecommendationsPerSupplier: 1
+      minimumSupplierCount: 4
+      maximumSupplierShare: 0.4
+      billingErrorPatterns:
+        - insufficient account balance
+        - insufficient balance
+        - payment required
+        - account balance depleted
+        - 余额不足
+        - 用户额度不足
+        - 预扣费额度失败
+        - 欠费
   adminCredentials:
     sourceRef: secrets/sub2api.env
     emailKey: ADMIN_EMAIL
@@ -456,6 +513,19 @@ operations:
           idleProbe: false
           upstreamWrite: false
           modelSyncAutomation: false
+      deepseek:
+        enabled: true
+        platform: deepseek
+        eligibleGroupIds: [ 131 ]
+        idleProbeIntervalSeconds: 60
+        features:
+          scoreRead: true
+          planRead: true
+          planWrite: false
+          priorityAutomation: true
+          idleProbe: true
+          upstreamWrite: false
+          modelSyncAutomation: true
   databaseUrlEnv: API2BUSINESS_DATABASE_URL
   databasePrepareStatements: true
   ledgerYamlPath: /var/lib/api2business/sub2api-pool.yaml
@@ -507,6 +577,7 @@ operations:
       codex: config/failover-templates/codex.yaml
       claude: config/failover-templates/claude.yaml
       grok: config/failover-templates/grok.yaml
+      deepseek: config/failover-templates/deepseek.yaml
     externalCutoff:
       enabled: true
       dryRun: true

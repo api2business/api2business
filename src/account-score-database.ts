@@ -223,7 +223,7 @@ account_stats AS (
           AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
           AND NOT ${audioRequestSql("o", true)}
           AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
-            '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
+            '/v1/messages', '/v1/responses', '/v1/chat/completions', '/responses/compact', '/v1/responses/compact'
           )
           AND (
             COALESCE(o.status_code, 0) >= 400
@@ -612,10 +612,14 @@ export async function collectRecentCallScoresFromDatabase(
       .map((row) => scoreRecentDatabaseRow(
         row,
         recentCallLimit,
-        String(row.platform) === "grok" ? config.sub2api.grokScorePolicy : config.sub2api.scorePolicy,
+        String(row.platform) === "grok" ? config.sub2api.grokScorePolicy
+          : String(row.platform) === "deepseek" ? (config.sub2api.deepseekScorePolicy ?? config.sub2api.scorePolicy)
+            : config.sub2api.scorePolicy,
         Date.now(),
         (String(row.platform) === "grok"
           ? config.sub2api.grokPriorityPlan
+          : String(row.platform) === "deepseek"
+            ? (config.sub2api.deepseekPriorityPlan ?? config.sub2api.priorityPlan)
           : String(row.platform) === "anthropic"
             ? (config.sub2api.claudePriorityPlan ?? config.sub2api.priorityPlan)
             : config.sub2api.priorityPlan).procurementAdvice.billingErrorPatterns,

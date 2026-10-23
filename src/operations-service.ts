@@ -831,7 +831,7 @@ export class OperationsService {
     const usageById = new Map(usageRows.map((row) => [Number(row.account_id), object(row.last_success_result ?? row.result)]));
     const valuation = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
     const samples = [];
-    for (const platform of ["codex", "claude", "grok"] as const) {
+    for (const platform of ["codex", "claude", "grok", "deepseek"] as const) {
       const sample = await collectPoolQualitySample(this.config, this.reads, sampledAt, platform);
       sample.participation = sample.participation.map((item) => {
         const usage = usageById.get(item.accountId);
@@ -855,7 +855,7 @@ export class OperationsService {
     return { ok: true, sampledAt, profiles: samples.map((sample) => sample.platform), samples, servicePolicy, valuesPrinted: false };
   }
 
-  async poolQualitySummary(platform: "codex" | "claude" | "grok" = "codex") {
+  async poolQualitySummary(platform: "codex" | "claude" | "grok" | "deepseek" = "codex") {
     const rollingWindowPoints = 100;
     const rows = await this.store.getPoolQualitySamplesByLimit(rollingWindowPoints * 2 - 1, platform) as Array<Record<string, unknown>>;
     const history = poolQualityHistory(rows, rollingWindowPoints).slice(-rollingWindowPoints);
@@ -872,7 +872,9 @@ export class OperationsService {
         ? (this.config.sub2api.claudePriorityPlan ?? this.config.sub2api.priorityPlan)
         : platform === "grok"
           ? this.config.sub2api.grokPriorityPlan
-          : this.config.sub2api.priorityPlan).eligibleGroupIds,
+          : platform === "deepseek"
+            ? (this.config.sub2api.deepseekPriorityPlan ?? this.config.sub2api.priorityPlan)
+            : this.config.sub2api.priorityPlan).eligibleGroupIds,
       sampledAt,
       sampleStale: sampledAt === null || Date.now() - Date.parse(sampledAt) > samplingBudgetMs,
       score: latest?.score == null ? null : Number(latest.score),
@@ -914,7 +916,7 @@ export class OperationsService {
   }
 
   async poolQualityErrors(input: {
-    platform: "codex" | "claude" | "grok";
+    platform: "codex" | "claude" | "grok" | "deepseek";
     page: number;
     pageSize: number;
     filter: PoolQualityErrorFilter;

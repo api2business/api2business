@@ -16,7 +16,14 @@ function record(value: unknown): Row {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 }
 function allowedModels(models: string[]): string[] {
-  return [...new Set(models.map((model) => model.trim()).filter((model) => model && !model.includes("*") && !isAudioRequest([model])))].sort();
+  const unique = new Map<string, string>();
+  for (const value of models) {
+    const model = value.trim();
+    if (!model || model.includes("*") || isAudioRequest([model])) continue;
+    const key = model.toLocaleLowerCase("en-US");
+    if (!unique.has(key)) unique.set(key, model);
+  }
+  return [...unique.values()].sort();
 }
 
 // 只读目录只投影模型名，不读取账号凭据；原生 PUT 只写分组准入字段。

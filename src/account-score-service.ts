@@ -234,8 +234,8 @@ export class AccountScoreService {
     return accounts.filter((row) => {
       if (isOAuthAccount(row)) return false;
       const platform = String(row.platform ?? "").trim().toLowerCase();
-      if (platform !== "openai" && platform !== "anthropic" && platform !== "grok") return false;
-      if (platform === "anthropic" || platform === "grok") return true;
+      if (platform !== "openai" && platform !== "anthropic" && platform !== "grok" && platform !== "deepseek") return false;
+      if (platform === "anthropic" || platform === "grok" || platform === "deepseek") return true;
       const eligibleGroupIds = this.config.sub2api.priorityPlan.eligibleGroupIds;
       const groupIds = Array.isArray(row.groupIds) ? row.groupIds.map(Number) : [];
       return groupIds.some((id) => eligibleGroupIds.includes(id));

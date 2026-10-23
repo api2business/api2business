@@ -5,11 +5,11 @@ import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { OperationsService } from "./operations-service";
 
 type Row = Record<string, unknown>;
-type Platform = "openai" | "anthropic" | "grok";
+type Platform = "openai" | "anthropic" | "grok" | "deepseek";
 
 function platform(value: unknown): Platform {
-  if (value === "openai" || value === "anthropic" || value === "grok") return value;
-  throw new Error("上游初始化需要已回读的 OpenAI、Anthropic 或 Grok 平台");
+  if (value === "openai" || value === "anthropic" || value === "grok" || value === "deepseek") return value;
+  throw new Error("上游初始化需要已回读的 OpenAI、Anthropic、Grok 或 DeepSeek 平台");
 }
 
 function canonical(value: unknown): string {

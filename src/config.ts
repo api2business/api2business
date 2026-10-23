@@ -17,16 +17,19 @@ export interface UpstreamManagementConfig {
     codex: string;
     claude: string;
     grok: string;
+    deepseek: string;
   };
   failoverTemplates: {
     codex: FailoverTemplate;
     claude: FailoverTemplate;
     grok: FailoverTemplate;
+    deepseek: FailoverTemplate;
   };
   failoverRulesByPlatform: {
     openai: FailoverRule[];
     anthropic: FailoverRule[];
     grok: FailoverRule[];
+    deepseek: FailoverRule[];
   };
   primaryGroupId: number;
   groupIds: number[];
@@ -62,7 +65,7 @@ export interface UpstreamManagementConfig {
 
 export interface FailoverTemplate {
   name: string;
-  platform: "openai" | "anthropic" | "grok";
+  platform: "openai" | "anthropic" | "grok" | "deepseek";
   rules: FailoverRule[];
 }
 
@@ -165,7 +168,7 @@ export interface UpstreamSchedulingV2Features {
 
 export interface UpstreamSchedulingV2Scope {
   enabled: boolean;
-  platform: "openai" | "anthropic" | "grok";
+  platform: "openai" | "anthropic" | "grok" | "deepseek";
   eligibleGroupIds: number[];
   idleProbeIntervalSeconds?: number;
   features: UpstreamSchedulingV2Features;
@@ -222,6 +225,7 @@ export interface AppConfig {
     scorePolicy: ScorePolicy;
     poolScorePolicy: ScorePolicy;
     grokScorePolicy: ScorePolicy;
+    deepseekScorePolicy: ScorePolicy;
     scoreSamplePolicy: {
       retentionHours: number;
       decayBucketSize: number;
@@ -253,6 +257,7 @@ export interface AppConfig {
     };
     priorityPlan: PriorityPlanPolicy;
     grokPriorityPlan: PriorityPlanPolicy;
+    deepseekPriorityPlan: PriorityPlanPolicy;
     claudePriorityPlan: PriorityPlanPolicy;
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
   };
@@ -472,13 +477,13 @@ function strings(parent: ObjectValue, key: string, path: string): string[] {
   return value as string[];
 }
 
-function loadFailoverTemplate(rootDirectory: string, fileValue: string, templateKey: "codex" | "claude" | "grok"): FailoverTemplate {
+function loadFailoverTemplate(rootDirectory: string, fileValue: string, templateKey: "codex" | "claude" | "grok" | "deepseek"): FailoverTemplate {
   const filePath = resolve(rootDirectory, fileValue);
   const path = `operations.upstreamManagement.templateFiles.${templateKey}`;
   const raw = object(parse(readFileSync(filePath, "utf8")), path);
   const name = stringValue(raw, "name", path);
   const platform = stringValue(raw, "platform", path);
-  const expectedPlatform = templateKey === "codex" ? "openai" : templateKey === "claude" ? "anthropic" : "grok";
+  const expectedPlatform = templateKey === "codex" ? "openai" : templateKey === "claude" ? "anthropic" : templateKey === "grok" ? "grok" : "deepseek";
   if (platform !== expectedPlatform) throw new Error(`${path}.platform must be ${expectedPlatform}`);
   const rulesValue = raw.rules;
   if (!Array.isArray(rulesValue) || rulesValue.length === 0) throw new Error(`${path}.rules must be a non-empty array`);
@@ -634,8 +639,8 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
     const scope = object(rawScope, scopePath);
     const features = object(scope.features, `${scopePath}.features`);
     const platform = stringValue(scope, "platform", scopePath);
-    if (!["openai", "anthropic", "grok"].includes(platform)) {
-      throw new Error(`${scopePath}.platform must be openai, anthropic, or grok`);
+    if (!["openai", "anthropic", "grok", "deepseek"].includes(platform)) {
+      throw new Error(`${scopePath}.platform must be openai, anthropic, grok, or deepseek`);
     }
     const eligibleGroupIds = integers(scope, "eligibleGroupIds", scopePath, 1, Number.MAX_SAFE_INTEGER);
     if (eligibleGroupIds.length === 0) throw new Error(`${scopePath}.eligibleGroupIds must not be empty`);
@@ -762,10 +767,12 @@ export function loadConfig(path: string): AppConfig {
   const codexTemplatePath = stringValue(templateFiles, "codex", "operations.upstreamManagement.templateFiles");
   const claudeTemplatePath = stringValue(templateFiles, "claude", "operations.upstreamManagement.templateFiles");
   const grokTemplatePath = stringValue(templateFiles, "grok", "operations.upstreamManagement.templateFiles");
+  const deepseekTemplatePath = stringValue(templateFiles, "deepseek", "operations.upstreamManagement.templateFiles");
   const failoverTemplates = {
     codex: loadFailoverTemplate(rootDirectory, codexTemplatePath, "codex"),
     claude: loadFailoverTemplate(rootDirectory, claudeTemplatePath, "claude"),
     grok: loadFailoverTemplate(rootDirectory, grokTemplatePath, "grok"),
+    deepseek: loadFailoverTemplate(rootDirectory, deepseekTemplatePath, "deepseek"),
   };
   const upstreamFailoverRules = failoverTemplates.codex.rules;
   const externalCutoff = object(upstreamManagement.externalCutoff, "operations.upstreamManagement.externalCutoff");
@@ -975,6 +982,7 @@ export function loadConfig(path: string): AppConfig {
       scorePolicy: readScorePolicy(sub2api.scorePolicy, "sub2api.scorePolicy"),
       poolScorePolicy: readScorePolicy(sub2api.poolScorePolicy, "sub2api.poolScorePolicy"),
       grokScorePolicy: readScorePolicy(sub2api.grokScorePolicy, "sub2api.grokScorePolicy"),
+      deepseekScorePolicy: readScorePolicy(sub2api.deepseekScorePolicy, "sub2api.deepseekScorePolicy"),
       scoreSamplePolicy: {
         retentionHours: integerValue(scoreSamplePolicy, "retentionHours", "sub2api.scoreSamplePolicy", 1, 168),
         decayBucketSize: integerValue(scoreSamplePolicy, "decayBucketSize", "sub2api.scoreSamplePolicy", 1, 1000),
@@ -1043,6 +1051,7 @@ export function loadConfig(path: string): AppConfig {
       priorityPlan: readPriorityPlanPolicy(sub2api.priorityPlan, "sub2api.priorityPlan"),
       grokPriorityPlan: readPriorityPlanPolicy(sub2api.grokPriorityPlan, "sub2api.grokPriorityPlan"),
       claudePriorityPlan: readPriorityPlanPolicy(sub2api.claudePriorityPlan, "sub2api.claudePriorityPlan"),
+      deepseekPriorityPlan: readPriorityPlanPolicy(sub2api.deepseekPriorityPlan, "sub2api.deepseekPriorityPlan"),
       adminCredentials: {
         sourceRef: stringValue(adminCredentials, "sourceRef", "sub2api.adminCredentials"),
         emailKey: stringValue(adminCredentials, "emailKey", "sub2api.adminCredentials"),
@@ -1128,12 +1137,13 @@ export function loadConfig(path: string): AppConfig {
       upstreamManagement: {
         pageSize: integerValue(upstreamManagement, "pageSize", "operations.upstreamManagement", 1, 100),
         defaultTemplate: stringValue(upstreamManagement, "defaultTemplate", "operations.upstreamManagement"),
-        templateFiles: { codex: codexTemplatePath, claude: claudeTemplatePath, grok: grokTemplatePath },
+        templateFiles: { codex: codexTemplatePath, claude: claudeTemplatePath, grok: grokTemplatePath, deepseek: deepseekTemplatePath },
         failoverTemplates,
         failoverRulesByPlatform: {
           openai: failoverTemplates.codex.rules,
           anthropic: failoverTemplates.claude.rules,
           grok: failoverTemplates.grok.rules,
+          deepseek: failoverTemplates.deepseek.rules,
         },
         primaryGroupId: upstreamPrimaryGroupId,
         groupIds: upstreamGroupIds,
@@ -1288,6 +1298,7 @@ export function startConfigHotReload(
       resolve(candidate.rootDirectory, candidate.operations.upstreamManagement.templateFiles.codex),
       resolve(candidate.rootDirectory, candidate.operations.upstreamManagement.templateFiles.claude),
       resolve(candidate.rootDirectory, candidate.operations.upstreamManagement.templateFiles.grok),
+      resolve(candidate.rootDirectory, candidate.operations.upstreamManagement.templateFiles.deepseek),
     ]);
     return [...paths].sort().map((filePath) => {
       const stat = statSync(filePath);

@@ -1,0 +1,76 @@
+apiVersion: api2business.pikapython.com/v1
+kind: FailoverTemplate
+name: deepseek-upstream-failover
+platform: deepseek
+rules:
+- errorCode: 400
+  keywords:
+  - invalid_request_error
+  - model not found
+  - model_not_found
+  - invalid model
+  - 请求参数错误
+  durationMinutes: 3
+  description: DeepSeek 请求参数或模型能力不可用时短暂切号
+- errorCode: 401
+  keywords:
+  - invalid api key
+  - invalid_api_key
+  - authentication failed
+  - unauthorized
+  - token expired
+  durationMinutes: 10
+  description: DeepSeek API key 认证失效
+- errorCode: 402
+  keywords:
+  - insufficient balance
+  - insufficient account balance
+  - balance is insufficient
+  - payment required
+  - 余额不足
+  durationMinutes: 10
+  description: DeepSeek 余额或账单不足
+- errorCode: 403
+  keywords:
+  - forbidden
+  - permission denied
+  - 余额不足
+  durationMinutes: 10
+  description: DeepSeek 权限或余额拒绝
+- errorCode: 429
+  keywords:
+  - rate limit
+  - rate_limit_exceeded
+  - too many requests
+  - request rate exceeded
+  durationMinutes: 3
+  description: DeepSeek 上游限流
+- errorCode: 500
+  keywords:
+  - internal server error
+  - service unavailable
+  - upstream service temporarily unavailable
+  durationMinutes: 3
+  description: DeepSeek 服务端故障
+- errorCode: 502
+  keywords:
+  - bad gateway
+  - upstream request failed
+  - upstream service temporarily unavailable
+  - stream disconnected
+  durationMinutes: 3
+  description: DeepSeek 网关或流式响应故障
+- errorCode: 503
+  keywords:
+  - service unavailable
+  - overloaded
+  - temporarily unavailable
+  durationMinutes: 3
+  description: DeepSeek 暂时不可用或过载
+- errorCode: 504
+  keywords:
+  - gateway timeout
+  - upstream timeout
+  - request timeout
+  durationMinutes: 3
+  description: DeepSeek 上游超时

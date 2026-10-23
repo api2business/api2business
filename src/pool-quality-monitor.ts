@@ -67,7 +67,7 @@ WITH internal_probe_keys AS (
         OR COALESCE(o.upstream_status_code, 0) >= 400)
       AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
       AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
-        '/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'
+        '/v1/messages', '/v1/responses', '/v1/chat/completions', '/responses/compact', '/v1/responses/compact'
       )
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = o.api_key_id)
 ), raw_requests AS (
@@ -244,7 +244,7 @@ function percentile(values: number[], ratio: number): number | null {
 }
 
 export interface PoolQualitySample {
-  platform: "codex" | "claude" | "grok";
+  platform: "codex" | "claude" | "grok" | "deepseek";
   sampledAt: string;
   rawCallCount: number;
   rawSuccessRequests: number;
@@ -277,14 +277,16 @@ export async function collectPoolQualitySample(
   config: AppConfig,
   reads: Sub2ApiReadClient,
   sampledAt = new Date().toISOString(),
-  platform: "codex" | "claude" | "grok" = "codex",
+  platform: "codex" | "claude" | "grok" | "deepseek" = "codex",
 ): Promise<PoolQualitySample> {
   const recentCallLimit = 1000;
   const policy = platform === "claude"
     ? (config.sub2api.claudePriorityPlan ?? config.sub2api.priorityPlan)
     : platform === "grok"
       ? config.sub2api.grokPriorityPlan
-      : config.sub2api.priorityPlan;
+      : platform === "deepseek"
+        ? (config.sub2api.deepseekPriorityPlan ?? config.sub2api.priorityPlan)
+        : config.sub2api.priorityPlan;
   const groupIds = [...new Set(policy.eligibleGroupIds)].sort((a, b) => a - b);
   const query = await reads.query<Row>({
     key: `pool-quality:${platform}:${recentCallLimit}:${groupIds.join(",")}:${sampledAt}`,
@@ -334,8 +336,8 @@ export async function collectPoolQualitySample(
   }
   const scored = scoreRecentDatabaseRow({
     account_id: 0,
-    account_name: platform === "claude" ? "Claude" : platform === "grok" ? "Grok" : "Codex",
-    platform: platform === "claude" ? "anthropic" : platform === "grok" ? "grok" : "openai",
+    account_name: platform === "claude" ? "Claude" : platform === "grok" ? "Grok" : platform === "deepseek" ? "DeepSeek" : "Codex",
+    platform: platform === "claude" ? "anthropic" : platform === "grok" ? "grok" : platform === "deepseek" ? "deepseek" : "openai",
     account_type: "apikey",
     status: "active", schedulable: true, priority: 0, group_ids: groupIds, group_names: ["混池", "自用"],
     success_requests: weightedCount(successes), failure_requests: weightedCount(failures),
@@ -404,7 +406,7 @@ export async function collectPoolQualityErrors(
   reads: Sub2ApiReadClient,
   input: {
     sampledAt: string;
-    platform?: "codex" | "claude" | "grok";
+    platform?: "codex" | "claude" | "grok" | "deepseek";
     page: number;
     pageSize: number;
     filter: PoolQualityErrorFilter;
@@ -427,7 +429,9 @@ export async function collectPoolQualityErrors(
     ? (config.sub2api.claudePriorityPlan ?? config.sub2api.priorityPlan)
     : platform === "grok"
       ? config.sub2api.grokPriorityPlan
-      : config.sub2api.priorityPlan;
+      : platform === "deepseek"
+        ? (config.sub2api.deepseekPriorityPlan ?? config.sub2api.priorityPlan)
+        : config.sub2api.priorityPlan;
   const groupIds = [...new Set(policy.eligibleGroupIds)].sort((a, b) => a - b);
   const offset = (input.page - 1) * input.pageSize;
   const parameters = [recentCallLimit, groupIds.join(","), sampledAt, platform, input.filter, input.pageSize, offset];

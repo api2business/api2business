@@ -418,7 +418,7 @@ export function createHandler(
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality") {
         const platform = url.searchParams.get("platform") ?? "codex";
-        if (platform !== "codex" && platform !== "claude" && platform !== "grok") return json({ ok: false, error: "platform must be codex, claude, or grok" }, 400);
+        if (platform !== "codex" && platform !== "claude" && platform !== "grok" && platform !== "deepseek") return json({ ok: false, error: "platform must be codex, claude, grok, or deepseek" }, 400);
         return json(await operations.poolQualitySummary(platform));
       }
       if (request.method === "GET" && url.pathname === "/api/upstreams/pool-quality/errors") {
@@ -426,11 +426,11 @@ export function createHandler(
         const pageSize = positiveInteger(url.searchParams.get("pageSize"), 20);
         const filter = url.searchParams.get("filter") ?? "scoreable";
         const platform = url.searchParams.get("platform") ?? "codex";
-        if (pageSize === null || pageSize > 100 || !["scoreable", "excluded", "all"].includes(filter) || !["codex", "claude", "grok"].includes(platform)) {
+        if (pageSize === null || pageSize > 100 || !["scoreable", "excluded", "all"].includes(filter) || !["codex", "claude", "grok", "deepseek"].includes(platform)) {
           return json({ ok: false, error: "invalid pool quality error query" }, 400);
         }
         return json(await operations.poolQualityErrors({
-          platform: platform as "codex" | "claude" | "grok",
+          platform: platform as "codex" | "claude" | "grok" | "deepseek",
           page,
           pageSize,
           filter: filter as "scoreable" | "excluded" | "all",
@@ -615,7 +615,7 @@ export function createHandler(
           priority: input.priority,
           capacity: input.capacity,
           groupIds: input.groupIds,
-          platform: typeof input.platform === "string" ? input.platform as "openai" | "grok" | "anthropic" : "openai",
+          platform: typeof input.platform === "string" ? input.platform as "openai" | "grok" | "anthropic" | "deepseek" : "openai",
           poolMode: typeof input.poolMode === "boolean" ? input.poolMode : false,
           operationId: typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key"),
           description: typeof input.description === "string" ? input.description : undefined,
@@ -710,8 +710,8 @@ export function createHandler(
       if (url.pathname === "/api/admin/scheduling-runtime" && request.method === "GET") {
         const group = url.searchParams.get("group");
         const platform = url.searchParams.get("platform");
-        if (!group || !/^\d+$/.test(group) || !Number.isSafeInteger(Number(group)) || Number(group) < 1 || !["openai", "anthropic", "grok"].includes(platform ?? "")) {
-          return json({ ok: false, error: "requires positive group and platform openai|anthropic|grok" }, 400);
+        if (!group || !/^\d+$/.test(group) || !Number.isSafeInteger(Number(group)) || Number(group) < 1 || !["openai", "anthropic", "grok", "deepseek"].includes(platform ?? "")) {
+          return json({ ok: false, error: "requires positive group and platform openai|anthropic|grok|deepseek" }, 400);
         }
         return json(await runtime.schedulingRuntimeEvidence(group, platform));
       }

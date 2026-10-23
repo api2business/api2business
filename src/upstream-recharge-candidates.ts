@@ -107,7 +107,7 @@ WITH low_balance AS (
     AND o.created_at < c.anchor_at
     AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
       AND NOT ${audioRequestSql("o", true)}
-    AND LOWER(COALESCE(o.inbound_endpoint,'')) IN ('/v1/messages','/v1/responses','/responses/compact','/v1/responses/compact')
+    AND LOWER(COALESCE(o.inbound_endpoint,'')) IN ('/v1/messages','/v1/responses','/v1/chat/completions','/responses/compact','/v1/responses/compact')
     AND (COALESCE(o.status_code,0) >= 400 OR COALESCE(o.upstream_status_code,0) >= 400 OR o.error_type='cyber_policy')
     AND (NOT (COALESCE(o.status_code,o.upstream_status_code,0) BETWEEN 200 AND 399)
       OR COALESCE(o.upstream_status_code,0) >= 400)
@@ -240,7 +240,9 @@ export async function collectRechargeCandidates(
     setupStatements: ["SET LOCAL random_page_cost = 1"],
   });
   const accounts = query.rows.map((row) => {
-    const scorePolicy = String(row.platform).toLowerCase() === "grok" ? config.sub2api.grokScorePolicy : config.sub2api.scorePolicy;
+    const scorePolicy = String(row.platform).toLowerCase() === "grok" ? config.sub2api.grokScorePolicy
+      : String(row.platform).toLowerCase() === "deepseek" ? (config.sub2api.deepseekScorePolicy ?? config.sub2api.scorePolicy)
+        : config.sub2api.scorePolicy;
     const scored = scoreRecentDatabaseRow(row, 1000, scorePolicy, Date.now(), billingPatterns(config));
     const anchorAt = new Date(String(row.anchor_at)).toISOString();
     return recommendation({

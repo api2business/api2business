@@ -56,7 +56,7 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("%model does not exist%");
   expect(recentAccountAggregateQuery.indexOf("%model_not_found%"))
     .toBeLessThan(recentAccountAggregateQuery.indexOf("WHEN o.error_phase = 'upstream'"));
-  expect(recentAccountAggregateQuery).toContain("'/v1/messages', '/v1/responses', '/responses/compact', '/v1/responses/compact'");
+  expect(recentAccountAggregateQuery).toContain("'/v1/messages', '/v1/responses', '/v1/chat/completions', '/responses/compact', '/v1/responses/compact'");
   expect(recentAccountAggregateQuery).toContain("%余额不足%");
   expect(recentAccountAggregateQuery).toContain("o.upstream_error_detail");
   expect(recentAccountAggregateQuery).toContain("currently experiencing high demand");

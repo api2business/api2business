@@ -520,7 +520,9 @@ export class UpstreamSchedulingV2Service {
       ? "codex"
       : scope.platform === "anthropic"
         ? "claude"
-        : "grok";
+        : scope.platform === "deepseek"
+          ? "deepseek"
+          : "grok";
     const accountIds = accounts.map((row) => Number(row.accountId));
     const results = await Promise.allSettled([
       timed("pool-quality", () => this.readSection(() => this.operations.poolQualitySummary(qualityProfile), "pool-quality")),

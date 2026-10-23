@@ -38,13 +38,15 @@ type LatencyNormalization = {
   maximumTtftP95Ms: number | null;
 };
 
-type PriorityProfile = "codex" | "claude" | "grok";
+type PriorityProfile = "codex" | "claude" | "grok" | "deepseek";
 
 function latencyBounds(config: AppConfig, profile: PriorityProfile): {
   minimumTtftP95Ms: number;
   maximumTtftP95Ms: number;
 } {
-  const scorePolicy = profile === "grok" ? config.sub2api.grokScorePolicy : config.sub2api.scorePolicy;
+  const scorePolicy = profile === "grok" ? config.sub2api.grokScorePolicy
+    : profile === "deepseek" ? (config.sub2api.deepseekScorePolicy ?? config.sub2api.scorePolicy)
+      : config.sub2api.scorePolicy;
   return {
     minimumTtftP95Ms: scorePolicy.ttftFullScoreMs,
     maximumTtftP95Ms: scorePolicy.ttftZeroScoreMs,
@@ -648,6 +650,13 @@ export function buildAccountPriorityPlan(
 ): Record<string, unknown> {
   const codex = buildPriorityProfile(ranking, config, "codex", config.sub2api.priorityPlan);
   const grok = buildPriorityProfile(ranking, config, "grok", config.sub2api.grokPriorityPlan);
+  const deepseek = config.sub2api.deepseekPriorityPlan
+    ? buildPriorityProfile(ranking, config, "deepseek", config.sub2api.deepseekPriorityPlan)
+    : {
+        eligibleCount: 0, fixedCount: 0, changedCount: 0, anchorScore: null,
+        observedAnchorScore: null, priorityReferenceScore: null, costRange: null,
+        priorities: {}, changes: [],
+      };
   const claudePolicy = config.sub2api.claudePriorityPlan ?? {
     ...config.sub2api.priorityPlan,
     platform: "anthropic",
@@ -668,15 +677,17 @@ export function buildAccountPriorityPlan(
     ...(codex.priorities as Record<string, number>),
     ...(claudeReadOnly.priorities as Record<string, number>),
     ...(grok.priorities as Record<string, number>),
+    ...(deepseek.priorities as Record<string, number>),
   };
   const changes = [
     ...(codex.changes as Array<Record<string, unknown>>),
     ...(claudeReadOnly.changes as Array<Record<string, unknown>>),
     ...(grok.changes as Array<Record<string, unknown>>),
+    ...(deepseek.changes as Array<Record<string, unknown>>),
   ];
   return {
     ...codex,
-    policy: { codex: config.sub2api.priorityPlan, claude: claudePolicy, grok: config.sub2api.grokPriorityPlan },
+    policy: { codex: config.sub2api.priorityPlan, claude: claudePolicy, grok: config.sub2api.grokPriorityPlan, ...(config.sub2api.deepseekPriorityPlan ? { deepseek: config.sub2api.deepseekPriorityPlan } : {}) },
     profiles: {
       codex: {
         eligibleCount: codex.eligibleCount,
@@ -706,8 +717,17 @@ export function buildAccountPriorityPlan(
         priorityReferenceScore: grok.priorityReferenceScore,
         costRange: grok.costRange,
       },
+      deepseek: {
+        eligibleCount: deepseek.eligibleCount,
+        fixedCount: deepseek.fixedCount,
+        changedCount: deepseek.changedCount,
+        anchorScore: deepseek.anchorScore,
+        observedAnchorScore: deepseek.observedAnchorScore,
+        priorityReferenceScore: deepseek.priorityReferenceScore,
+        costRange: deepseek.costRange,
+      },
     },
-    eligibleCount: Number(codex.eligibleCount) + Number(claudeReadOnly.eligibleCount) + Number(grok.eligibleCount),
+    eligibleCount: Number(codex.eligibleCount) + Number(claudeReadOnly.eligibleCount) + Number(grok.eligibleCount) + Number(deepseek.eligibleCount),
     changedCount: Object.keys(priorities).length,
     priorities,
     changes,

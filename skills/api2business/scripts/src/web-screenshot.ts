@@ -16,7 +16,7 @@ export function webScreenshotHelp(): Record<string, unknown> {
       "--profile": "owning YAML 的截图 profile；省略时使用 defaultSmokeProfile",
       "--id": "巡检页读取冻结报告 ID；用于复验同一窗口",
       "--account": "巡检页筛选包含此账号的钱包",
-      "--scope": "已启用的 codex、claude 或 grok 作用域",
+      "--scope": "已启用的 codex、claude、grok 或 deepseek 作用域",
       "--session-ttl-seconds": "独立验收会话的正整数期限，必须短于部署配置；省略时使用正式登录会话",
       "--burst-count": "同页截图 1..30 帧；多帧使用 profile 的桌面视口",
       "--burst-interval": "帧间隔 200ms..10s；默认 1s",

@@ -10,12 +10,12 @@
   - V2 作用域负责账号范围、评分、优先级、探活和深链；
   - Api2Business API/Worker 负责排队读取、长流程和最终回读；
   - Sub2API 原生接口负责账号和上游的实际写入。
-- Codex、Claude 和 Grok 是平等作用域；作用域之间不得通过历史标签、URL 或混池结果
+- Codex、Claude、Grok 和 DeepSeek 是平等作用域；作用域之间不得通过历史标签、URL 或混池结果
   互相推断账号归属。
 - 账号创建、分组、并发、优先级、成本和切号模板必须按平台作用域收口。
-  - Codex、Claude 与 Grok 各自使用独立模板文件，禁止跨平台套用。
+  - Codex、Claude、Grok 与 DeepSeek 各自使用独立模板文件，禁止跨平台套用。
 - 每个新上游在同一创建作业中完成同平台切号模板、私有探活绑定和手动探活。
-  - Codex API-key 必须强制 Responses；其他平台不套用该协议选项。
+  - Codex API-key 必须强制 Responses；DeepSeek API-key 固定使用 Chat Completions；其他平台不套用该协议选项。
   - 初始化保留用户指定业务分组，不从候选白名单推导分组写入。
   - 配置核验和实际请求核验分别披露，失败或跳过返回部分完成并保留稳定账号 ID。
   - 已创建账号可复用同一初始化操作补齐，无需再次提交供应商密钥。

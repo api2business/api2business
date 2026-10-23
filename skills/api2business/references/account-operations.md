@@ -59,7 +59,7 @@
   `workflow status --id <workflow-id> --over-api <absolute-http(s)-URL>` 查询到终态，
   只有终态中的 `succeeded` 或明确的 `partial`/`failed` 才能作为轮次证据，不能把
   `submitted` 或 `running` 当作探活成功。
-- `accounts idle-probe coverage --scope <codex|claude|grok> --window-minutes <N> --over-api <absolute-http(s)-URL>`
+- `accounts idle-probe coverage --scope <codex|claude|grok|deepseek> --window-minutes <N> --over-api <absolute-http(s)-URL>`
   只读核对指定作用域在窗口内的专用 Key 记录；省略作用域时使用 owning YAML 默认作用域。
 - 自动探活前必须先完成同作用域的手动探活，并核对 HTTP、`ordinaryLogRecorded` 和轮次
   终态；工作流 `running` 或 in-flight 跳过只表示并发保护，不是业务失败。

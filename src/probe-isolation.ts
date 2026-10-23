@@ -94,7 +94,7 @@ export interface ProbeIsolationBinding {
 }
 
 export interface ProbeIsolationScope {
-  platform: "openai" | "anthropic" | "grok";
+  platform: "openai" | "anthropic" | "grok" | "deepseek";
   eligibleGroupIds: number[];
   /**
    * 账号已经拥有的业务分组之外，需要补绑的分组。
@@ -399,7 +399,7 @@ export class ProbeIsolationService {
         throw new Error(`探活账号平台识别阶段失败：${errorMessage(error)}`);
       }
       const platform = String(account.platform ?? "").toLowerCase();
-      if (platform !== "openai" && platform !== "anthropic" && platform !== "grok") {
+      if (platform !== "openai" && platform !== "anthropic" && platform !== "grok" && platform !== "deepseek") {
         throw new Error(`账号 ${accountId} 缺少受支持的平台，不能创建探活隔离`);
       }
       if (scope && scope.platform !== platform) throw new Error(`账号 ${accountId} 的实际平台与探活作用域不一致`);
@@ -425,14 +425,17 @@ export class ProbeIsolationService {
   async request(accountId: number, input: string, model: string, maxOutputTokens: number, timeoutMs: number): Promise<Record<string, unknown>> {
     const stored = this.readFile().records[String(accountId)];
     if (!stored || !readyRecord(stored)) throw new Error(`账号 ${accountId} 的探活隔离凭据尚未就绪`);
-    const response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}/responses`, {
+    const chatCompletions = stored.platform === "deepseek";
+    const response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}${chatCompletions ? "/chat/completions" : "/responses"}`, {
       method: "POST",
       headers: {
         accept: "application/json",
         "content-type": "application/json",
         authorization: `Bearer ${stored.apiKey}`,
       },
-      body: JSON.stringify({ model, input, max_output_tokens: maxOutputTokens, stream: false }),
+      body: JSON.stringify(chatCompletions
+        ? { model, messages: [{ role: "user", content: input }], max_tokens: maxOutputTokens, stream: false }
+        : { model, input, max_output_tokens: maxOutputTokens, stream: false }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     const text = await response.text();
@@ -474,7 +477,8 @@ export class ProbeIsolationService {
     let response: Response;
     let body: string;
     try {
-      response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}/responses`, {
+      const chatCompletions = ensured.record.platform === "deepseek";
+      response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}${chatCompletions ? "/chat/completions" : "/responses"}`, {
         method: "POST",
         headers: {
           accept: "text/event-stream",
@@ -482,16 +486,18 @@ export class ProbeIsolationService {
           "x-request-id": requestId,
           authorization: `Bearer ${ensured.record.apiKey}`,
         },
-        body: JSON.stringify({
-          model,
-          input: "health probe",
-          reasoning: { effort: reasoningEffort },
-          max_output_tokens: 1,
-          // TTFT is emitted by Sub2API only for streaming responses. Keep
-          // the probe body streaming so every successful probe contributes
-          // a first-token sample to every platform scope.
-          stream: true,
-        }),
+        body: JSON.stringify(chatCompletions
+          ? { model, messages: [{ role: "user", content: "health probe" }], max_tokens: 1, stream: true }
+          : {
+              model,
+              input: "health probe",
+              reasoning: { effort: reasoningEffort },
+              max_output_tokens: 1,
+              // TTFT is emitted by Sub2API only for streaming responses. Keep
+              // the probe body streaming so every successful probe contributes
+              // a first-token sample to every platform scope.
+              stream: true,
+            }),
         signal: AbortSignal.timeout(Math.min(timeoutMs, this.remainingTimeout(deadline) ?? timeoutMs)),
       });
       body = await response.text();
