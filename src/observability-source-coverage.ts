@@ -61,3 +61,26 @@ export function sourceCoverageFacts(value: Record<string, unknown> | null) {
       "缺用量警告不加入成功、失败或TTFT样本；模型未知时不能推定为Luna或探活。"],
   };
 }
+
+export function taskScopeSourceCoverage(value: Record<string, unknown> | null) {
+  const raw: Record<string, unknown> = sourceCoverageFacts(value);
+  const models = Array.isArray(raw.modelBreakdown) ? raw.modelBreakdown as Array<Record<string, unknown>> : [];
+  const included = models.filter(model => ![model.requested_model,model.model,model.upstream_model]
+    .some(value => typeof value === "string" && value.toLowerCase().includes("luna")));
+  const unrepresentedRequests = included.reduce((total, model) => total + Number(model.requests ?? 0), 0);
+  const excludedLunaRequests = models.reduce((total, model) => total + (included.includes(model) ? 0 : Number(model.requests ?? 0)), 0);
+  const suppressed = finiteCount(raw.suppressedWarningRecords);
+  const represented = finiteCount(value?.unrepresentedRequests) !== null
+    && unrepresentedRequests + excludedLunaRequests === value?.unrepresentedRequests;
+  return { ...raw, taskScope: { excludedLunaRequests, unrepresentedRequests,
+    complete: represented && unrepresentedRequests === 0 && suppressed === 0,
+    modelBreakdown: included,
+    examples: Array.isArray(raw.examples) ? (raw.examples as Array<Record<string, unknown>>)
+      .filter(example => ![example.requested_model,example.model,example.upstream_model]
+        .some(value => typeof value === "string" && value.toLowerCase().includes("luna"))) : [],
+  } };
+}
+
+function finiteCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}

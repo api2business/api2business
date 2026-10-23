@@ -1,5 +1,5 @@
 import { expect,test } from "bun:test";
-import { sourceCoverageFacts,sourceCoverageSql } from "./observability-source-coverage";
+import { sourceCoverageFacts,sourceCoverageSql,taskScopeSourceCoverage } from "./observability-source-coverage";
 
 test("source warnings do not invent terminal or latency samples",()=>{
   expect(sourceCoverageFacts({unrepresentedRequests:0,suppressedWarningRecords:0}).complete).toBeTrue();
@@ -7,6 +7,15 @@ test("source warnings do not invent terminal or latency samples",()=>{
   expect(sourceCoverageFacts({unrepresentedRequests:0,suppressedWarningRecords:1}).complete).toBeFalse();
   expect(sourceCoverageFacts(null).complete).toBeFalse();
   expect(sourceCoverageFacts({}).complete).toBeFalse();
+});
+test('task source coverage excludes only verified Luna model rows and retains unknowns',()=>{
+ const scoped=taskScopeSourceCoverage({unrepresentedRequests:3,suppressedWarningRecords:0,modelBreakdown:[
+  {requested_model:'GPT-5.6-LUNA',model:null,upstream_model:null,requests:1},
+  {requested_model:null,model:'gpt-6.1-sol',upstream_model:null,requests:1},
+  {requested_model:null,model:null,upstream_model:null,requests:1},
+ ],examples:[]});
+ expect(scoped.taskScope).toMatchObject({excludedLunaRequests:1,unrepresentedRequests:2,complete:false});
+ expect(scoped.taskScope.modelBreakdown).toHaveLength(2);
 });
 
 test("source read keeps exact window, dedup, probe and audio boundaries without leaking extra",()=>{

@@ -13,27 +13,29 @@ export async function verifyObservationWindow(client: AdminHttpClient, config: A
   groups AS (SELECT 1::bigint id,'business'::text name),
   usage_logs AS (
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,1::bigint group_id,api_key_id,
-      true AS stream,CASE WHEN id=7 THEN 'gpt-4o-audio-preview' ELSE 'fixture-model' END::text model,
+      true AS stream,CASE WHEN id=7 THEN 'gpt-4o-audio-preview' WHEN id=9 THEN 'gpt-5.6-luna' ELSE 'fixture-model' END::text model,
       NULL::text requested_model,NULL::text upstream_model,ttft AS first_token_ms,actual_cost,rate_multiplier
     FROM (VALUES
-      (1,'r1','2026-01-01T00:00:00Z',1,5000,2::numeric,2::numeric),
+      (1,'r1','2026-01-01T00:00:00Z',1,50000,2::numeric,2::numeric),
       (2,'r1','2026-01-01T00:30:00Z',1,20000,2,2),
       (3,'r2','2026-01-01T01:00:00Z',1,10000,4,2),
       (4,'probe','2026-01-01T01:00:00Z',99,10,100,1),
       (5,NULL,'2026-01-01T01:00:00Z',1,20,1,1),
       (6,'end-boundary','2026-01-01T02:00:00Z',1,10,100,1),
       (7,'audio-success','2026-01-01T01:00:00Z',1,999999,2,2),
-      (8,'terminal-policy','2026-01-01T01:00:00Z',1,NULL,0,1)
+      (8,'terminal-policy','2026-01-01T01:00:00Z',1,NULL,0,1),
+      (9,'luna-success','2026-01-01T01:30:00Z',1,50000,2,2)
     ) t(id,request_id,at,api_key_id,ttft,actual_cost,rate_multiplier)
   ), ops_error_logs AS (
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,1::bigint group_id,api_key_id,
       status_code,NULL::int upstream_status_code,NULL::text network_error_type,(id=8) is_business_limited,
-      phase AS error_phase,kind AS error_type,'fixture-model'::text model,NULL::text requested_model,NULL::text upstream_model,
+      phase AS error_phase,kind AS error_type,CASE WHEN id=11 THEN 'gpt-5.6-luna' ELSE 'fixture-model' END::text model,
+      NULL::text requested_model,NULL::text upstream_model,
       CASE WHEN id=7 THEN '/v1/tts' ELSE '/v1/responses' END::text inbound_endpoint,CASE WHEN id=8 THEN 'insufficient_balance' ELSE NULL END::text error_message,NULL::text error_body,
       NULL::text upstream_error_message,NULL::text upstream_error_detail
     FROM (VALUES
       (1,'r2','2026-01-01T00:50:00Z',1,502,'upstream','gateway'),
-      (2,'r3','2026-01-01T01:00:00Z',1,502,'upstream','gateway'),
+      (2,'luna-fail','2026-01-01T01:00:00Z',1,502,'upstream','gateway'),
       (3,'r3','2026-01-01T01:10:00Z',1,429,'upstream','rate_limit'),
       (4,'r4','2026-01-01T01:00:00Z',1,502,'upstream','failover_event'),
       (5,'r5','2026-01-01T01:00:00Z',1,0,NULL,NULL),
@@ -41,7 +43,8 @@ export async function verifyObservationWindow(client: AdminHttpClient, config: A
       (7,'audio-error','2026-01-01T01:00:00Z',1,502,'upstream','gateway'),
       (8,'customer-billing','2026-01-01T01:00:00Z',1,403,'business','api_error'),
       (9,'terminal-policy','2026-01-01T01:00:00Z',1,200,'request','cyber_policy'),
-      (10,'r2','2026-01-01T00:49:00Z',1,200,'upstream','cyber_policy')
+      (10,'r2','2026-01-01T00:49:00Z',1,200,'upstream','cyber_policy'),
+      (11,'luna-fail','2026-01-01T01:30:00Z',1,502,'upstream','gateway')
     ) t(id,request_id,at,api_key_id,status_code,phase,kind)
   ), `;
   const result=await client.sub2ApiRead<{facts:Record<string,any>}>({key:`observability-fixture:${crypto.randomUUID()}`,kind:'observability.fixture',
@@ -53,15 +56,20 @@ export async function verifyObservationWindow(client: AdminHttpClient, config: A
         {account_id:1,at:'2026-01-01T03:00:00Z',rate_cny:10},
       ])],priority:'manual',cacheMode:'bypass-cache'});
   const facts=result.rows[0]?.facts ?? {};
-  const checks={uniqueSuccess: facts.succeeded===2,uniqueFinalFailures:facts.failed===3,recovered:facts.recoveredRequests===1,
-    terminalPolicyNotSuccess:facts.streaming===2 && facts.ttftKnown===2,
+  const checks={uniqueSuccess: facts.succeeded===3,uniqueFinalFailures:facts.failed===4,recovered:facts.recoveredRequests===1,
+    terminalPolicyNotSuccess:facts.streaming===3 && facts.ttftKnown===3,
     terminalPolicyRetained:facts.unknownExamples?.some((r:Record<string,unknown>)=>r.request_id==='terminal-policy'),
-    missingId:facts.missingRequestIdRecords===1,excludedProbe:facts.excludedProbeRecords===2,ttft:facts.ttftP95Ms===19500,
+    missingId:facts.missingRequestIdRecords===1,excludedProbe:facts.excludedProbeRecords===2,ttft:facts.ttftP95Ms===47000,
     audioExcluded:facts.excludedAudioRecords===2,customerBillingExcluded:facts.excludedBusinessLimitRecords===1,
     customerBillingAttributed:facts.businessLimitBreakdown?.[0]?.user_id===1,
-    sameWindowCostRecords:facts.costAccounts?.[0]?.records===6,historicalCost:facts.costAccounts?.[0]?.historical_cost_cny===5,
-    unknownRetained:facts.unknownExamples?.[0]?.request_id==='r5'};
+    sameWindowCostRecords:facts.costAccounts?.[0]?.records===7,historicalCost:facts.costAccounts?.[0]?.historical_cost_cny===6,
+    unknownRetained:facts.unknownExamples?.[0]?.request_id==='r5',
+    taskScope:facts.taskScope?.excludedLunaRequests===2 && facts.taskScope?.succeeded===2 && facts.taskScope?.failed===3
+      && facts.taskScope?.ttftKnown===2 && facts.taskScope?.ttftP95Ms===19500};
   const poolQuality = await verifyPoolQualityWindow(client, config);
   const sourceCoverage = await verifySourceCoverageWindow(client);
-  return {ok:Object.values(checks).every(Boolean) && poolQuality.ok && sourceCoverage.ok,checks,poolQuality,sourceCoverage,queryDurationMs:result.queryDurationMs,mutation:false,valuesPrinted:false};
+  const taskScopeEvidence={succeeded:facts.taskScope?.succeeded,failed:facts.taskScope?.failed,
+    excludedLunaRequests:facts.taskScope?.excludedLunaRequests,streaming:facts.taskScope?.streaming,
+    ttftKnown:facts.taskScope?.ttftKnown,ttftP95Ms:facts.taskScope?.ttftP95Ms};
+  return {ok:Object.values(checks).every(Boolean) && poolQuality.ok && sourceCoverage.ok,checks,taskScopeEvidence,poolQuality,sourceCoverage,queryDurationMs:result.queryDurationMs,mutation:false,valuesPrinted:false};
 }

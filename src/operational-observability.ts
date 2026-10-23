@@ -6,7 +6,7 @@ import { configuredWalletKey, preferSharedWalletBalance, usageBalanceSourceAt } 
 import { readUpstreamValuationPolicy } from "./upstream-valuation";
 import { statSync } from "node:fs";
 import { dailyCostSql, dailyWalletCosts } from "./observability-costs";
-import { sourceCoverageFacts, sourceCoverageSql } from "./observability-source-coverage";
+import { taskScopeSourceCoverage, sourceCoverageFacts, sourceCoverageSql } from "./observability-source-coverage";
 
 type Row = Record<string, any>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -249,23 +249,35 @@ export class OperationalObservability {
         kind:"observability.window",sql:sourceCoverageSql,
         parameters:[window.start,window.end,JSON.stringify(probeEvidence.map((r:Row)=>
           typeof r.evidence === "string" ? JSON.parse(r.evidence) : r.evidence))],priority:"manual",cacheMode:"bypass-cache"});
-      sourceCoverage={...sourceCoverageFacts(sourceQuery.rows[0]?.coverage ?? null),status:"available",
+      sourceCoverage={...taskScopeSourceCoverage(sourceQuery.rows[0]?.coverage ?? null),status:"available",
+        complete:sourceCoverageFacts(sourceQuery.rows[0]?.coverage ?? null).complete,
         queryStartedAt:sourceQuery.queryStartedAt,queryCompletedAt:sourceQuery.queryCompletedAt,
         queueDurationMs:sourceQuery.queueDurationMs,queryDurationMs:sourceQuery.queryDurationMs};
     } catch (error) {
       console.error(JSON.stringify({component:"observability-source-coverage",error:error instanceof Error ? error.message : String(error)}));
-      sourceCoverage={...sourceCoverageFacts(null),status:"unavailable",error:"source_coverage_query_failed"};
+      sourceCoverage={...taskScopeSourceCoverage(null),status:"unavailable",complete:false,error:"source_coverage_query_failed"};
     }
     const capturedAt=new Date().toISOString();
     const coverage=observerCoverage(http.instances,window.start,window.end);
     const settings=this.config.observability;
     const total=Number(facts.succeeded)+Number(facts.failed);
+    const taskFacts=row(facts.taskScope);
+    const taskTotal=Number(taskFacts.succeeded)+Number(taskFacts.failed);
+    const taskScope={...taskFacts,scope:"excluding-luna",modelFields:["requested_model","model","upstream_model"],
+      rawRequests:total,requests:taskTotal,ttftMissing:Number(taskFacts.streaming)-Number(taskFacts.ttftKnown),
+      sourceCoverage:sourceCoverage.taskScope,
+      successPercent:taskTotal ? Number(taskFacts.succeeded)/taskTotal*100 : null,
+      failurePercent:taskTotal ? Number(taskFacts.failed)/taskTotal*100 : null,
+      successSlo:slo(taskTotal ? Number(taskFacts.succeeded)/taskTotal*100 : null,settings.sub2apiSuccessPercent,"above",
+        Number(taskFacts.missingRequestIdRecords)===0 && sourceCoverage.taskScope.complete),
+      ttftSlo:slo(finite(taskFacts.ttftP95Ms),settings.sub2apiTtftP95Ms,"max",
+        Number(taskFacts.ttftKnown)===Number(taskFacts.streaming) && sourceCoverage.taskScope.complete)};
     const id=crypto.randomUUID();
     const payload={ ok:true,id,capturedAt,window,settings,valuesPrinted:false,
       sources:{ sub2api:{ queryStartedAt:query.queryStartedAt,queryCompletedAt:query.queryCompletedAt,queueDurationMs:query.queueDurationMs,queryDurationMs:query.queryDurationMs },
         walletAsOf:capturedAt,costPolicy:"recorded evidence at or before first usage; no historical backfill" },
       broker:this.reads.status(),
-      sub2api:{ ...facts,accounts:undefined,costAccounts:undefined,requests:total,
+      sub2api:{ ...facts,accounts:undefined,costAccounts:undefined,requests:total,taskScope,
         sourceCoverage,
         successSlo:slo(total ? Number(facts.succeeded)/total*100 : null,settings.sub2apiSuccessPercent,"above",Number(facts.missingRequestIdRecords)===0 && sourceCoverage.complete),
         ttftSlo:slo(finite(facts.ttftP95Ms),settings.sub2apiTtftP95Ms,"max",Number(facts.ttftKnown)===Number(facts.streaming) && sourceCoverage.complete) },

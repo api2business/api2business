@@ -41,7 +41,7 @@ errors AS (
       OR COALESCE(upstream_status_code,0)>=400
       OR (error_phase='request' AND error_type='cyber_policy'))
 ), success AS (
-  SELECT DISTINCT ON (request_id) request_id, account_id, model, stream, first_token_ms
+  SELECT DISTINCT ON (request_id) request_id, account_id, requested_model, model, upstream_model, stream, first_token_ms
   FROM usage u WHERE NULLIF(TRIM(request_id),'') IS NOT NULL
     AND NOT ${audioRequestSql("u")}
     -- Native request-level policy events are terminal, even when HTTP 200 and a
@@ -60,7 +60,7 @@ errors AS (
   ORDER BY e.request_id,e.created_at DESC,e.id DESC
 ), failure AS (
   SELECT DISTINCT ON (e.request_id) e.request_id,e.account_id,e.error_phase,e.error_type,
-    e.status_code,e.upstream_status_code,e.network_error_type,e.model,e.requested_model,
+    e.status_code,e.upstream_status_code,e.network_error_type,e.model,e.requested_model,e.upstream_model,
     e.inbound_endpoint,e.api_user_id,e.api_key_id,e.api_key_name,e.api_user_email,e.created_at,
     CASE
       WHEN COALESCE(e.is_business_limited,false) OR e.error_phase='business' THEN 'business_limit'
@@ -77,6 +77,20 @@ errors AS (
     AND NOT EXISTS (SELECT 1 FROM success s WHERE s.request_id=e.request_id)
     AND NOT EXISTS (SELECT 1 FROM customer_billing b WHERE b.request_id=e.request_id)
   ORDER BY e.request_id,e.created_at DESC,e.id DESC
+), task_scope_luna_requests AS (
+  SELECT DISTINCT request_id FROM (
+    SELECT request_id,requested_model,model,upstream_model FROM usage_source WHERE NOT probe
+    UNION ALL
+    SELECT request_id,requested_model,model,upstream_model FROM error_source WHERE NOT probe
+  ) models
+  WHERE NULLIF(TRIM(request_id),'') IS NOT NULL
+    AND CONCAT_WS('/',requested_model,model,upstream_model) ILIKE '%luna%'
+), task_scope_success AS (
+  SELECT s.* FROM success s
+  WHERE NOT EXISTS (SELECT 1 FROM task_scope_luna_requests l WHERE l.request_id=s.request_id)
+), task_scope_failure AS (
+  SELECT f.* FROM failure f
+  WHERE NOT EXISTS (SELECT 1 FROM task_scope_luna_requests l WHERE l.request_id=f.request_id)
 ), cost_usage AS (
   SELECT u.*, rate.rate_cny,rate.at AS rate_at FROM usage u
   LEFT JOIN LATERAL (
@@ -143,6 +157,21 @@ SELECT jsonb_build_object(
     GROUP BY s.model,s.account_id,a.name
     ORDER BY p95_ms DESC,samples DESC,s.model,s.account_id
   ) t),'[]'::jsonb),
+  'taskScope',jsonb_build_object(
+    'excludedLunaRequests',(SELECT COUNT(*) FROM success s JOIN task_scope_luna_requests l USING(request_id))
+      +(SELECT COUNT(*) FROM failure f JOIN task_scope_luna_requests l USING(request_id)),
+    'succeeded',(SELECT COUNT(*) FROM task_scope_success),
+    'failed',(SELECT COUNT(*) FROM task_scope_failure),
+    'streaming',(SELECT COUNT(*) FROM task_scope_success WHERE stream),
+    'ttftKnown',(SELECT COUNT(*) FROM task_scope_success WHERE stream AND first_token_ms>=0),
+    'ttftP95Ms',(SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms)
+      FROM task_scope_success WHERE stream AND first_token_ms>=0),
+    'missingRequestIdRecords',
+      (SELECT COUNT(*) FROM usage_source u WHERE NOT u.probe AND NULLIF(TRIM(u.request_id),'') IS NULL
+        AND NOT ${audioRequestSql("u")} AND COALESCE(CONCAT_WS('/',u.requested_model,u.model,u.upstream_model),'') NOT ILIKE '%luna%')
+      +(SELECT COUNT(*) FROM errors e WHERE NULLIF(TRIM(e.request_id),'') IS NULL
+        AND NOT ${audioRequestSql("e", true)} AND COALESCE(CONCAT_WS('/',e.requested_model,e.model,e.upstream_model),'') NOT ILIKE '%luna%')
+  ),
   'unknownExamples',COALESCE((SELECT jsonb_agg(t) FROM (SELECT request_id,error_phase,error_type,status_code,upstream_status_code,network_error_type FROM failure WHERE family='unknown' ORDER BY request_id LIMIT 10) t),'[]'::jsonb),
   'platforms',COALESCE((SELECT jsonb_agg(t) FROM platform_facts t),'[]'::jsonb),
   'costAccounts',COALESCE((SELECT jsonb_agg(t) FROM cost t),'[]'::jsonb),
