@@ -69,6 +69,25 @@ test("priority history account filter returns one transition and hides other acc
   expect(summary.records[0]).not.toHaveProperty("account_change");
 });
 
+test("priority history labels a deepseek-only automatic round as deepseek", async () => {
+  const store = { async priorityHistory() { return [
+    { id: "ds-round", status: "applied", created_by: "v2-scheduler:deepseek",
+      priorities: {},
+      result: { profiles: { deepseek: { changedCount: 2 } }, changes: [
+        { accountId: 1536, profile: "deepseek", change: "update" },
+      ] },
+      apply_result: { writeMode: "backend-api-paced", verification: "native-api-read-broker", completedChangedCount: 1, verifiedCount: 1 } },
+  ]; } } as unknown as OperationsStore;
+  const service = new OperationsService({ operations: { auditLimit: 10 } } as AppConfig, store, unusedReads);
+  const result = await service.priorityHistory();
+  expect(result.records[0]).toMatchObject({
+    profile: "deepseek",
+    profiles: ["deepseek"],
+    created_by: "v2-scheduler:deepseek",
+    profile_statuses: { deepseek: "applied" },
+  });
+});
+
 test("selects the latest successful USD snapshot by normalized upstream wallet", () => {
   expect(normalizeUpstreamWallet("https://wallet.example.com/v1/")).toBe("https://wallet.example.com");
   expect(normalizeUpstreamWallet("https://billing.example.com plus 0.05")).toBe("https://billing.example.com");

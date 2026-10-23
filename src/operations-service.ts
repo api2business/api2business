@@ -1579,7 +1579,7 @@ export class OperationsService {
           ...Object.keys(profileSummary),
           ...changes.map((change) => String(change.profile ?? "")).filter(Boolean),
         ]);
-        const profiles = ["codex", "claude", "grok"].filter((profile) => discoveredProfiles.has(profile));
+        const profiles = ["codex", "claude", "grok", "deepseek"].filter((profile) => discoveredProfiles.has(profile));
         if (profiles.length === 0) profiles.push("codex");
         const startedAt = row.execution_started_at ?? row.created_at;
         const completedAt = row.completed_at;
