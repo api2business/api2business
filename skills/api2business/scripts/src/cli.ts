@@ -76,6 +76,7 @@ interface Parsed {
   burstInterval: string | null;
   manifest: string | null;
   clickSelector: string | null;
+  selector: string | null;
   model: string | null;
   day: string | null;
   period: string | null;
@@ -178,7 +179,7 @@ export function parseArgs(args: string[]): Parsed {
   }
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required");
-  const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--click-selector", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
+  const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--click-selector", "--selector", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
   const flags = new Set(["--confirm", "--include-records", "--json", "--cache-only", "--refresh", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -250,6 +251,7 @@ export function parseArgs(args: string[]): Parsed {
     burstInterval: value(args, "--burst-interval"),
     manifest: value(args, "--manifest"),
     clickSelector: value(args, "--click-selector"),
+    selector: value(args, "--selector"),
     model: value(args, "--model"),
     affectedOnly: args.includes("--affected-only"),
     file: value(args, "--file"), priority: integer("--priority"), capacity: integer("--capacity"),
@@ -313,9 +315,9 @@ function help(): Record<string, unknown> {
       "records list|delete",
       "credit test",
       "api smoke --over-api <absolute-http(s)-URL>",
-      "web screenshot [--profile <owning smoke profile>] [--scope <enabled scope>] [--session-ttl-seconds N] [--burst-count 1..30] [--burst-interval 200ms..10s] [--manifest <absolute path>] --over-api <absolute-http(s)-URL>",
+      "web screenshot [--profile <owning smoke profile>] [--scope <enabled scope>] [--selector <css>] [--click-selector <css>] [--session-ttl-seconds N] [--burst-count 1..30] [--burst-interval 200ms..10s] [--manifest <absolute path>] --over-api <absolute-http(s)-URL>",
       "workflow status --id <workflow-id>",
-      "priority history --over-api <absolute-http(s)-URL> [--account <positive-id>]",
+      "priority history --over-api <absolute-http(s)-URL> [--scope codex|claude|grok|deepseek] [--account <positive-id>]",
       "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts status --id <job-id> --over-api <absolute-http(s)-URL>",
       "accounts inspect --accounts <id-or-range,...> [--over-api <absolute-http(s)-URL>]",
@@ -500,12 +502,83 @@ async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConf
   throw new Error(`unknown command: ${parsed.command.join(" ")}`);
 }
 
-function emitPriorityHistory(value: Record<string, unknown>, json: boolean): void {
-  if (json || value.account_id === undefined || value.account_id === null) return emit(value, json);
+const priorityHistoryScopes = new Set(["codex", "claude", "grok", "deepseek"]);
+const priorityHistoryDisplayLimit = 20;
+
+export function assertPriorityHistoryScope(scope: string | null): void {
+  if (scope !== null && !priorityHistoryScopes.has(scope)) {
+    throw new Error("--scope must be codex, claude, grok, or deepseek");
+  }
+}
+
+function priorityHistoryMatches(row: Record<string, unknown>, scope: string): boolean {
+  if (row.profile === scope) return true;
+  return Array.isArray(row.profiles) && row.profiles.includes(scope);
+}
+
+export function selectPriorityHistory(value: Record<string, unknown>, scope: string | null): Record<string, unknown> {
+  assertPriorityHistoryScope(scope);
+  if (scope === null) return { ...value, scope: null, omittedCount: 0 };
+  const records = Array.isArray(value.records)
+    ? value.records.filter((item) => {
+      const row = record(item);
+      return row !== null && priorityHistoryMatches(row, scope);
+    })
+    : value.records;
+  const transitions = Array.isArray(value.transitions)
+    ? value.transitions.filter((item) => record(item)?.profile === scope)
+    : value.transitions;
+  const sourceCount = Array.isArray(value.records) ? value.records.length : 0;
+  const matchedCount = Array.isArray(records) ? records.length : 0;
+  return {
+    ...value,
+    scope,
+    records,
+    ...(Array.isArray(value.transitions) ? { transitions } : {}),
+    matchedCount,
+    omittedCount: Math.max(0, sourceCount - matchedCount),
+  };
+}
+
+function emitPriorityHistory(value: Record<string, unknown>, json: boolean, scope: string | null): void {
+  const selected = selectPriorityHistory(value, scope);
+  if (json) return emit(selected, true);
+  if (selected.account_id !== undefined && selected.account_id !== null) {
+    emitPriorityHistoryAccount(selected);
+    return;
+  }
+  const records = Array.isArray(selected.records)
+    ? selected.records.map(record).filter((row): row is Record<string, unknown> => row !== null)
+    : [];
+  const shown = records.slice(0, priorityHistoryDisplayLimit);
+  const displayOmitted = records.length - shown.length;
+  console.log(`API2BUSINESS PRIORITY HISTORY scope=${String(selected.scope ?? "all")} shown=${shown.length} matched=${records.length} omitted=${String(selected.omittedCount ?? 0)} displayOmitted=${displayOmitted}`);
+  console.log("CREATED_AT                 STATUS    PROFILE    CHANGED  APPLIED  MODE                  CREATED_BY");
+  if (shown.length === 0) {
+    console.log("no priority round in the retained history");
+    return;
+  }
+  for (const row of shown) {
+    const counts = record(row.profile_changed_counts);
+    const changed = scope !== null && counts && counts[scope] !== undefined ? counts[scope] : row.changed_count;
+    console.log([
+      String(row.created_at ?? "-").padEnd(25),
+      String(row.status ?? "-").padEnd(8),
+      String(row.profile ?? "-").padEnd(9),
+      String(changed ?? "-").padStart(7),
+      String(row.completed_changed_count ?? "-").padStart(7),
+      String(row.write_mode ?? "-").padEnd(20),
+      String(row.created_by ?? "-"),
+    ].join("  "));
+  }
+  if (displayOmitted > 0) console.log(`displayOmitted=${displayOmitted}; use --json for the full matching records`);
+}
+
+function emitPriorityHistoryAccount(value: Record<string, unknown>): void {
   const transitions = Array.isArray(value.transitions)
     ? value.transitions.map(record).filter((row): row is Record<string, unknown> => row !== null)
     : [];
-  console.log(`API2BUSINESS PRIORITY HISTORY account=${String(value.account_id)} transitions=${transitions.length}`);
+  console.log(`API2BUSINESS PRIORITY HISTORY account=${String(value.account_id)} scope=${String(value.scope ?? "all")} transitions=${transitions.length} omitted=${String(value.omittedCount ?? 0)}`);
   console.log("CREATED_AT                 STATUS    PROFILE  BEFORE  DESIRED  CHANGE  MODE        SCORE  FAIL%");
   if (transitions.length === 0) {
     console.log("no priority transition for this account in the retained history");
@@ -1184,6 +1257,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await client.disableLunaForAccounts(parseAccountIdSelector(parsed.accounts), parsed.confirm);
   }
   if (group === "priority" && action === "history") {
+    assertPriorityHistoryScope(parsed.scope);
     if (parsed.account === null) return await client.priorityHistory();
     if (!/^[1-9]\d*$/u.test(parsed.account)) throw new Error("--account must be a positive integer account id");
     return await client.priorityHistory(Number(parsed.account));
@@ -1450,7 +1524,7 @@ export async function runCli(args: string[]): Promise<void> {
     const routedResult = target.mode === "http" ? bindRuntimeCommands(result, target.baseUrl) : result;
     const output: Record<string, unknown> = { target: targetId, canonicalUrl: target.mode === "http" ? target.baseUrl : null, transport: target.mode === "embedded" ? "local-dispatcher" : "http", ...routedResult as Record<string, unknown> };
     if (parsed.command.join(" ") === "scores rank") emitScoreRanking(output, parsed.json);
-    else if (parsed.command.join(" ") === "priority history") emitPriorityHistory(output, parsed.json);
+    else if (parsed.command.join(" ") === "priority history") emitPriorityHistory(output, parsed.json, parsed.scope);
     else if (parsed.command.join(" ") === "scores pool-quality") emitPoolQuality(output, parsed.json);
     else if (parsed.command.join(" ") === "errors aggregate") emitErrorAggregate(output, parsed.json);
     else if (parsed.command.join(" ") === "errors diagnose") emitErrorDiagnosis(output, parsed.json);

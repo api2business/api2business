@@ -314,6 +314,9 @@
     上一次成功快照，并在数据状态中显示失败原因，下一轮仍按失败完成时间重新计时。
   - Codex、Claude、Grok 和 DeepSeek 是平等作用域。每个作用域的平台、分组、成本、评分、优先级、
     自动调度和探活是否启用均以该作用域开关为准，不把其他作用域数据互相投影。
+  - 页面历史按 `profiles` 过滤。
+  - 投影标签与 Go worker 的探活、模型同步允许列表必须覆盖同一组已启用作用域。
+  - YAML 开关为真而允许列表排除该平台时，定时工作流不会保持。
   - Grok 作用域使用 `platform: grok` 和 `sub2api.grokPriorityPlan.eligibleGroupIds`，
     只允许实时分组「【稳定·企业级】Grok」；「【不稳定·限时3折】grok-4.5(全都映射到
     grok-4.5)」不得进入 Grok 作用域、池质量或优先级计划。分组 ID 只从 owning YAML
@@ -622,6 +625,13 @@
   同时查看 24 小时 coverage 和账号快照，不能把短窗口缺失当作账号永久无样本。
 - 新鲜度告警遇到单作用域 CLI 进程或传输失败时，先区分工具失败与缓存陈旧；只读缓存兜底
   可以避免把健康作用域误报为未知，但不能把旧缓存伪装成本轮刷新成功。
+- 折下表格验收使用官方 `web screenshot --selector <css>`。
+  - 裁切发生在 settle 之后。
+  - 同来源截图串行执行。
+  - Cookie 只留在进程环境，不进 argv、日志或磁盘。
+- 轮次摘要使用 `priority history --scope <codex|claude|grok|deepseek>`。
+  - 人类输出有界，并披露 `omitted` 与 `displayOmitted`。
+  - 单账号前后值仍使用 `--account`。
 
 ### 失败或误判模式
 
@@ -657,6 +667,23 @@
   开发服务器上的文件存在。
 - 不把全局选号阶段的 No available accounts 当成某个上游账号故障；只有已选账号在上游
   阶段返回该正文时，才使用对应平台模板切号。
+- 不要只改历史投影或只改 worker 允许列表。
+  - 页面按 `profiles` 过滤。
+  - watchdog 会终止不在探活允许列表中的工作流。
+  - 两边不一致时，自动轮次要么不启动，要么启动后被页面滤掉。
+- 折下验收不要旁路调用 web-probe。
+  - `--click-selector` 在等待前点击。
+  - 内容展开后，折下表格会离开视口。
+  - 使用官方 `--selector` 在 settle 之后裁切。
+- 省略 `--account` 时不要把整份 records 打成一个 JSON 字段。
+  - 使用 `--scope` 过滤。
+  - 人类输出有界。
+  - 完整对象使用 `--json`。
+- 截图浏览器时区跟随探针宿主，不读取 `monitor.timezone`。
+  - 页面时钟可能与中国时间不一致。
+  - 核对记录时以 UTC 时间为准。
+- 模型同步允许列表未覆盖的平台不会启动定时同步。
+  - 未获用户要求时，不要补允许列表或打开 `modelSyncAutomation`。
 
 ### 过载扣分与优先级证据
 
@@ -691,6 +718,9 @@
 - 多作用域截图使用回执 `retainedScreenshots`。
   - WebProbe 稳定文件名不含 scope，下一次截图会覆盖。
   - `remotePath` 的临时目录在探针退出后删除。
+- 折下区块使用 `web screenshot --selector <css>`。
+  - 调整、探活和调度区分别是 `#v2-history-table`、`#v2-probe-table`、`section.automation-section`。
+  - `--click-selector` 不能替代元素裁切。
 - 含未提交静态页时，不要用 `native start` 发布。
   - 构建与状态目录规则见 [部署参考](../../../docs/reference/deployment.md#compose)。
 - 反例：

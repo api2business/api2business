@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { assertSchedulingRuntimeQuery, parseArgs, poolQualityScope, summarizeWorkflowStatus } from "./cli";
+import { assertSchedulingRuntimeQuery, parseArgs, poolQualityScope, selectPriorityHistory, summarizeWorkflowStatus } from "./cli";
+import { webProbeElementArgs } from "./web-screenshot";
 
 test("historical balance CLI accepts signed USD without consuming the next option", () => {
   const args = ["--config", "config/api2business.yaml", "upstreams", "usage-cache", "restore"];
@@ -13,9 +14,32 @@ test("historical balance CLI accepts signed USD without consuming the next optio
     expect(() => parseArgs([...args, "--remaining-usd", invalid])).toThrow();
   }
   expect(() => parseArgs([...args, "--over-api", "--confirm"])).toThrow();
-  const screenshot = parseArgs(["--config", "config/api2business.yaml", "web", "screenshot", "--click-selector", "th[data-sort-key=remaining]"]);
+  const screenshot = parseArgs(["--config", "config/api2business.yaml", "web", "screenshot", "--click-selector", "th[data-sort-key=remaining]", "--selector", "#v2-history-table"]);
   expect(screenshot.clickSelector).toBe("th[data-sort-key=remaining]");
+  expect(screenshot.selector).toBe("#v2-history-table");
   expect(screenshot.command).toEqual(["web", "screenshot"]);
+  expect(webProbeElementArgs(screenshot.clickSelector, screenshot.selector)).toEqual([
+    "--click-selector", "th[data-sort-key=remaining]",
+    "--selector", "#v2-history-table",
+  ]);
+  expect(() => parseArgs(["--config", "config/api2business.yaml", "web", "screenshot", "--selector"])).toThrow("--selector requires a value");
+});
+
+test("priority history scope keeps matching rounds and discloses omissions", () => {
+  const selected = selectPriorityHistory({
+    ok: true,
+    records: [
+      { id: "ds", profile: "deepseek", profiles: ["deepseek"], created_by: "v2-scheduler:deepseek" },
+      { id: "mixed", profile: "combined", profiles: ["codex", "deepseek"] },
+      { id: "cx", profile: "codex", profiles: ["codex"] },
+    ],
+  }, "deepseek");
+  expect(selected.records).toEqual([
+    { id: "ds", profile: "deepseek", profiles: ["deepseek"], created_by: "v2-scheduler:deepseek" },
+    { id: "mixed", profile: "combined", profiles: ["codex", "deepseek"] },
+  ]);
+  expect(selected).toMatchObject({ scope: "deepseek", matchedCount: 2, omittedCount: 1 });
+  expect(() => selectPriorityHistory({ records: [] }, "openai")).toThrow("codex, claude, grok, or deepseek");
 });
 
 test("pool quality reads the requested scope and runtime evidence accepts deepseek", () => {

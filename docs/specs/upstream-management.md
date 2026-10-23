@@ -29,6 +29,8 @@
   - 全局分组路由失败与已选上游能力失败必须分开归因。
 - 探活必须先完成同作用域的手动核验，再由 owning YAML 的
   features.idleProbe 打开自动探活；探活记录、普通请求记录和轮次终态缺一不可。
+  - worker 允许列表与页面 `profiles` 投影的对齐只见
+    [上游与调度](../../skills/api2business/references/upstream-scheduling.md#失败或误判模式)。
 - 共享钱包别名、账号余额投影、失败保留和额度缓存的唯一口径见
   [额度监控](../../skills/api2business/references/quota-monitoring.md)；本规格只要求
   充值账本、账号成本和质量样本保持各自边界，不把共享余额重复计入这些数据面。

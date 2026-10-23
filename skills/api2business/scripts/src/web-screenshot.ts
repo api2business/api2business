@@ -22,7 +22,8 @@ export function webScreenshotHelp(): Record<string, unknown> {
       "--burst-count": "同页截图 1..30 帧；多帧使用 profile 的桌面视口",
       "--burst-interval": "帧间隔 200ms..10s；默认 1s",
       "--manifest": "完整原始事件的绝对文件路径",
-      "--click-selector": "截图前点击排序、分页等现有控件；仅辅助取景，不判定业务通过",
+      "--selector": "settle 之后按 CSS 裁切元素；折下表格用它取景，不判定业务通过",
+      "--click-selector": "等待前点击排序或分页控件；不能把折下区块留在视口内",
       "--json": "结构化回执；Cookie 和 Secret 不输出",
     },
     evidence: "默认回执保留有界失败请求；retainedScreenshots 按 profile 和 scope 保留 PNG。截图与原始事件不自动判定业务成功",
@@ -36,6 +37,7 @@ export async function runWebScreenshot(
     sessionTtlSeconds?: number | null; burstCount?: number | null;
     burstInterval?: string | null; manifest?: string | null;
     clickSelector?: string | null;
+    selector?: string | null;
   },
   config: ReturnType<typeof loadConfig>,
   target: HttpCliTarget,
@@ -127,7 +129,7 @@ export async function runWebScreenshot(
     ...(burstCount > 1 ? ["--viewport", viewportValue, "--burst-count", String(burstCount), "--burst-interval", burstInterval]
       : ["--viewports", `${viewportValue},${mobileViewportValue}`]),
     ...(parsed.manifest ? ["--manifest", parsed.manifest] : []),
-    ...(parsed.clickSelector ? ["--click-selector", parsed.clickSelector] : []),
+    ...webProbeElementArgs(parsed.clickSelector, parsed.selector),
     "--settle-ms", String(settleMs),
     ...(Number.isSafeInteger(profile.commandTimeoutSeconds)
       ? ["--command-timeout-seconds", String(profile.commandTimeoutSeconds)] : []),
@@ -183,6 +185,13 @@ export async function runWebScreenshot(
     mutation: false,
     valuesPrinted: false,
   };
+}
+
+export function webProbeElementArgs(clickSelector?: string | null, selector?: string | null): string[] {
+  return [
+    ...(clickSelector ? ["--click-selector", clickSelector] : []),
+    ...(selector ? ["--selector", selector] : []),
+  ];
 }
 
 export function retainScreenshotCopies(

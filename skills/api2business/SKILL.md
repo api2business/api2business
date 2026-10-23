@@ -177,7 +177,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 只看窗口失败率不能判断可靠性分项是否已经为零。
 - 单账号优先级前后变化使用
   `priority history --account <正整数ID> --over-api <absolute-http(s)-URL>`。
-  - 省略 `--account` 只返回轮次摘要，不能判断某个账号是否降级。
+  - 省略 `--account` 只返回有界轮次摘要，不能判断某个账号是否降级。
+  - `--scope codex|claude|grok|deepseek` 只保留该作用域轮次。
+  - 人类输出披露 `omitted` 与 `displayOmitted`；完整对象使用 `--json`。
   - 过载计入、切号抑制和证据边界只见
     [过载扣分与优先级证据](references/upstream-scheduling.md#过载扣分与优先级证据)。
 - 池级刷新使用 `scores pool-quality-refresh --over-api <absolute-http(s)-URL>`，
@@ -282,9 +284,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 页面普通读取、V2 读模型缓存、额度缓存和刷新终态分别见
   [上游与调度](references/upstream-scheduling.md) 与
   [额度监控](references/quota-monitoring.md)；本技能不复制第二套缓存状态机。
-- 任务收口必须同时执行 `bun run check` 和 `bun test`；运行时测试通过不能替代严格
-  TypeScript 检查。类型修复应补充真实返回类型、可选字段默认值和测试夹具注解，不得通过
-  关闭 `strict`、排除测试或静默断言来掩盖错误。
+- 任务收口必须在 Api2Business 仓库根目录同时执行 `bun run check` 和 `bun test`。
+  - 运行时测试通过不能替代严格 TypeScript 检查。
+  - 在其他工作区执行会检查另一个仓库，不能当作本仓库类型通过。
+  - 类型修复应补充真实返回类型、可选字段默认值和测试夹具注解。
+  - 不得通过关闭 `strict`、排除测试或静默断言来掩盖错误。
 - 提交前使用 `git diff --check`、配置校验和部署校验；未归属的并行工作区文件不得加入提交，
   只有完成语义合并并通过对应验证后才清理。
 - 读取失败、共享钱包回退和缺失状态的唯一口径见 [额度监控](references/quota-monitoring.md)；
@@ -367,7 +371,11 @@ bun skills/api2business/scripts/api2business-cli.ts \
   - V2 排序表头须带 `[data-sort-bound="1"]`，等待交互绑定后再点。
   - 例如人民币余额排序使用 `'#v2-account-table [data-sort-key="balance"][data-sort-bound="1"]'`。
   - 静态表头先于脚本出现，过早点中不会改变排序；采集成功不代表点击生效。
+  - 此参数在等待前点击，不能把展开后的折下表格留在视口内。
   - 此参数只辅助取景，是否符合验收目标仍须人工看图。
+- 折下区块使用 `--selector <css>`，在 settle 之后裁切元素。
+  - 选择器和投影规则见
+    [上游与调度](references/upstream-scheduling.md#失败或误判模式)。
 - 验证重启后账本、缓存、采样和作业状态仍可读取。
 - 失败时按配置、Secret、网络、数据库、worker 和外部 API 的顺序定位首个断点。
 
