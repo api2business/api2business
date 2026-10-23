@@ -379,7 +379,9 @@
     - 不以提前截断候选、延长超时或修改评分公式掩盖查询性能问题。
     - 池级采样与错误明细共用外层时间下界。
       - 下界写在 `raw_requests`，不写进 `eligible_usage`，窗口前的成功仍能覆盖后到的错误。
-      - 采样先取 24 小时；最近 1000 条未满再取 7 天；两窗都不足才查全历史。
+      - 采样先取 24 小时。
+      - 最近 1000 条未满再取 7 天。
+      - 两窗都不足才查全历史。
       - 有界查询超时后不再放宽窗口。
     - 四个作用域在同一轮内分别采样，成功后立即持久化。
       - 一个作用域失败只记录该作用域，其余作用域继续。
@@ -590,7 +592,7 @@
 
 - 新增或调整作用域时先核对 owning YAML 的独立功能开关，再检查 V2 状态、业务记录和
   作用域范围；禁止通过旧全局状态推断当前作用域。
-- 探活长期出现 `planned=0` 时，先用三作用域的 `accounts idle-probe plan --scope ...`
+- 探活长期出现 `planned=0` 时，先用各作用域的 `accounts idle-probe plan --scope ...`
   比较 `queryDurationMs` 和 `queueDurationMs`，再按作用域执行一次手动轮次；不要把读
   查询超时误判成账号全部不可用。
 - TTFT 采样使用流式 Responses；评分只把非空 `first_token_ms` 视为首 Token 证据，至少
@@ -681,6 +683,16 @@
   - 不查询 `request_body` 或凭据。
 - 相对脚本路径必须从仓库根目录执行。
   - `Module not found` 表示路径不存在，不表示命令未实现。
+- `scores pool-quality` 不带作用域时只读取 Codex。
+  - 其他作用域使用 `--scope` 或 `--platform`，取值 `codex|claude|grok|deepseek`。
+  - 未知值或两个参数不一致时直接失败。
+  - 人类回执打印 `platform`。不能把 Codex 分数当成其他作用域。
+  - 新鲜度仍只认该作用域的 `sampledAt`。窗口规则见上文池级大表查询。
+- 多作用域截图使用回执 `retainedScreenshots`。
+  - WebProbe 稳定文件名不含 scope，下一次截图会覆盖。
+  - `remotePath` 的临时目录在探针退出后删除。
+- 含未提交静态页时，不要用 `native start` 发布。
+  - 构建与状态目录规则见 [部署参考](../../../docs/reference/deployment.md#compose)。
 - 反例：
   - 不查询 `usage_logs.extra`。
   - 用量列是 `input_tokens`、`output_tokens`、`first_token_ms` 和 `duration_ms`。

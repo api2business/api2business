@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { loadConfig, type HttpCliTarget } from "../../../../src/config";
 import { readSecret } from "../../../../src/secrets";
 import { runBoundedProcess } from "../../../../src/bounded-process";
@@ -24,7 +25,7 @@ export function webScreenshotHelp(): Record<string, unknown> {
       "--click-selector": "截图前点击排序、分页等现有控件；仅辅助取景，不判定业务通过",
       "--json": "结构化回执；Cookie 和 Secret 不输出",
     },
-    evidence: "默认回执保留有界失败请求；截图与原始事件不自动判定业务成功",
+    evidence: "默认回执保留有界失败请求；retainedScreenshots 按 profile 和 scope 保留 PNG。截图与原始事件不自动判定业务成功",
   };
 }
 
@@ -160,6 +161,15 @@ export async function runWebScreenshot(
     valuesPrinted: false,
   };
   const projection = record(result.data ?? result) ?? {};
+  const retained = retainScreenshotCopies(projection, {
+    profile: profileName,
+    scope: parsed.scope,
+    directory: "/tmp/api2business-web-screenshots",
+    copyFile: (from, to) => {
+      mkdirSync("/tmp/api2business-web-screenshots", { recursive: true });
+      copyFileSync(from, to);
+    },
+  });
   return {
     ok: projection.ok === true,
     action: "web-screenshot",
@@ -168,10 +178,57 @@ export async function runWebScreenshot(
     scope: parsed.scope,
     process: { exitCode: probe.exitCode, timedOut: probe.timedOut },
     session: { cookieName, present: true, ttlSeconds: sessionTtlSeconds ?? config.webAuth.sessionTtlSeconds, fixture: sessionTtlSeconds !== null, valuesPrinted: false },
-    probe: projection,
+    probe: retained.probe,
+    retainedScreenshots: retained.retainedScreenshots,
     mutation: false,
     valuesPrinted: false,
   };
+}
+
+export function retainScreenshotCopies(
+  probe: Record<string, unknown>,
+  input: {
+    profile: string;
+    scope: string | null;
+    directory: string;
+    copyFile: (from: string, to: string) => void;
+  },
+): { probe: Record<string, unknown>; retainedScreenshots: string[] } {
+  const copied = new Map<string, string>();
+  const rewrite = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(rewrite);
+    const current = record(value);
+    if (!current) return value;
+    const next: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(current)) {
+      if (key === "localPath" && typeof child === "string" && isRetainableScreenshot(child)) {
+        let destination = copied.get(child);
+        if (!destination) {
+          destination = `${input.directory}/${retainedScreenshotName(input.profile, input.scope, child)}`;
+          input.copyFile(child, destination);
+          copied.set(child, destination);
+        }
+        next[key] = destination;
+      } else {
+        next[key] = rewrite(child);
+      }
+    }
+    return next;
+  };
+  return {
+    probe: rewrite(probe) as Record<string, unknown>,
+    retainedScreenshots: [...copied.values()],
+  };
+}
+
+function isRetainableScreenshot(path: string): boolean {
+  return path.startsWith("/tmp/") && path.endsWith(".png") && !path.includes("..");
+}
+
+function retainedScreenshotName(profile: string, scope: string | null, source: string): string {
+  const viewport = /(\d+x\d+)\.png$/u.exec(basename(source))?.[1] ?? basename(source);
+  const safe = (value: string) => value.replace(/[^a-z0-9._-]+/giu, "-");
+  return `${safe(profile)}-${safe(scope ?? "default")}-${safe(viewport)}.png`;
 }
 
 function parseWebProbeOutput(stdout: string): Record<string, unknown> | null {

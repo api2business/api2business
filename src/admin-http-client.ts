@@ -99,8 +99,9 @@ export class AdminHttpClient {
     if (scope) query.set("scope", scope);
     return this.request(`/api/v2/upstream-scheduling/model-sync?${query}`);
   }
-  poolQuality(): Promise<Record<string, unknown>> {
-    return this.request("/api/upstreams/pool-quality", {}, 60000);
+  poolQuality(platform: "codex" | "claude" | "grok" | "deepseek" = "codex"): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams({ platform });
+    return this.request(`/api/upstreams/pool-quality?${query}`, {}, 60000);
   }
   rankScores(recentCallLimit: number, accountSelector: string | null, groupSelector: string | null): Promise<Record<string, unknown>> {
     return this.request("/api/scores/rank", {

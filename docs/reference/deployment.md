@@ -50,6 +50,10 @@ docker compose ps
 
 - 使用 `API2BUSINESS_CONFIG_PATH` 选择配置。
 - 使用 `API2BUSINESS_STATE_ROOT` 指定持久化状态目录。
+  - 未设置时 Compose 默认挂载 `/var/lib/api2business`。
+- `native start` 从当前工作区构建镜像。
+  - 工作区有未提交页面或模板时，不要用它发布。
+  - 从已提交树构建镜像，再用 `--no-build` 替换对应服务。
 - 使用 `API2BUSINESS_SECRET_ROOT` 指定仓库外 Secret 目录。
 - 使用 `API2BUSINESS_INTEGRATION_ROOT` 挂载可选的外部集成文件。
 

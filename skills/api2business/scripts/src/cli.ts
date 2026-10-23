@@ -125,6 +125,29 @@ function parseGroupIds(raw: string | null, command: string): number[] {
   return [...new Set(values)].sort((left, right) => left - right);
 }
 
+const poolQualityScopes = ["codex", "claude", "grok", "deepseek"] as const;
+const schedulingPlatforms = ["openai", "anthropic", "grok", "deepseek"] as const;
+
+export function poolQualityScope(platform: string | null, scope: string | null): typeof poolQualityScopes[number] {
+  if (platform !== null && scope !== null && platform !== scope) {
+    throw new Error("scores pool-quality --platform and --scope must name the same scope");
+  }
+  const selected = platform ?? scope ?? "codex";
+  if (!poolQualityScopes.includes(selected as typeof poolQualityScopes[number])) {
+    throw new Error("scores pool-quality requires --scope or --platform codex|claude|grok|deepseek");
+  }
+  return selected as typeof poolQualityScopes[number];
+}
+
+export function assertSchedulingRuntimeQuery(group: string | null, platform: string | null): { group: string; platform: string } {
+  const groupId = Number(group);
+  if (!group || !/^\d+$/u.test(group) || !Number.isSafeInteger(groupId) || groupId < 1
+    || !schedulingPlatforms.includes(platform as typeof schedulingPlatforms[number])) {
+    throw new Error("reads runtime requires --group <positive-id> --platform openai|anthropic|grok|deepseek");
+  }
+  return { group, platform: platform! };
+}
+
 export function retirementSelectionMode(selection: string | null, scope: string, planType: string): "database-dead" | "database-all" {
   const selected = selection ?? "dead";
   if (selected !== "dead" && selected !== "all") throw new Error("--selection must be dead or all");
@@ -265,7 +288,8 @@ function help(): Record<string, unknown> {
     commands: [
       "config validate",
       "backend check",
-      "scores get|pool-quality|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
+      "scores get|pool-quality-refresh|refresh|rank [--calls N] [--account <id-or-name>] [--group <id-or-exact-name>]|aggregate-smoke",
+      "scores pool-quality [--scope codex|claude|grok|deepseek] [--platform <same scope>] --over-api <absolute-http(s)-URL> (default codex)",
       "upstream-scheduling-v2 scopes|plan [--scope codex|claude|grok|deepseek] --over-api <absolute-http(s)-URL> (read-only; Codex phase first)",
       "upstream-scheduling-v2 snapshot [--scope codex|claude|grok|deepseek] [--refresh|--cache-only] --over-api <absolute-http(s)-URL> (read-only read-model query; default cache with background refresh)",
       "upstream-scheduling-v2 priority-run --scope codex|claude|grok|deepseek [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
@@ -1205,7 +1229,9 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     throw new Error("upstream-scheduling-v2 requires scopes, snapshot, plan, or model-sync plan|run|history");
   }
   if (group === "scores" && action === "get") return await client.scores();
-  if (group === "scores" && action === "pool-quality") return await client.poolQuality();
+  if (group === "scores" && action === "pool-quality") {
+    return await client.poolQuality(poolQualityScope(parsed.platform, parsed.scope));
+  }
   if (group === "scores" && action === "pool-quality-refresh") return await client.workflowSubmit({ kind: "pool.quality.sample" });
   if (group === "scores" && action === "refresh") return await client.workflowSubmit({ kind: "scores.refresh" });
   if (group === "scores" && action === "rank") {
@@ -1213,10 +1239,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   }
   if (group === "reads" && action === "status") return await client.readStatus();
   if (group === "reads" && action === "runtime") {
-    if (!parsed.group || !/^\d+$/.test(parsed.group) || !Number.isSafeInteger(Number(parsed.group)) || Number(parsed.group) < 1 || !["openai", "anthropic", "grok"].includes(parsed.platform ?? "")) {
-      throw new Error("reads runtime requires --group <positive-id> --platform openai|anthropic|grok");
-    }
-    return await client.schedulingRuntime(parsed.group, parsed.platform!);
+    const runtimeQuery = assertSchedulingRuntimeQuery(parsed.group, parsed.platform);
+    return await client.schedulingRuntime(runtimeQuery.group, runtimeQuery.platform);
   }
   if (group === "reads" && action === "query") {
     if (!parsed.file) throw new Error("reads query requires --file <broker-read-request.json>");
@@ -1493,7 +1517,8 @@ function emitPoolQuality(value: Record<string, unknown>, json: boolean): void {
   if (json) return emit(value, true);
   const participation = Array.isArray(value.participation) ? value.participation : [];
   console.log(
-    `API2BUSINESS POOL QUALITY score=${String(value.score ?? "-")}`
+    `API2BUSINESS POOL QUALITY platform=${String(value.platform ?? "-")}`
+    + ` score=${String(value.score ?? "-")}`
     + ` grade=${String(value.grade ?? "-")}`
     + ` window=${String(value.recentCallLimit ?? "-")}`
     + ` attempts=${String(value.observedAttempts ?? "-")}`

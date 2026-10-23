@@ -125,7 +125,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - URL 只匹配 owning YAML 中的唯一 HTTP target。
   - 不接受无值、布尔值、别名或隐式默认运行面。
   - 回执显示 `canonicalUrl`；续查命令保留该 URL。
-- `reads runtime --group <正整数> --platform openai|anthropic|grok --over-api <绝对 URL>`
+- `reads runtime --group <正整数> --platform openai|anthropic|grok|deepseek --over-api <绝对 URL>`
   只读返回可用性、并发及实际原生版本，边界见 [可观测性](references/observability.md#原生调度诊断补充)。
 - `reads query --file <broker-read-request.json> --over-api <绝对 http(s) URL>`：
   - 复用 `/api/internal/sub2api-read` 的排队只读通道。
@@ -168,7 +168,10 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 该参考同时定义 API-key 切号模板的平台边界、成本补齐、评分分层和 V2 迁移；本技能只
   保留入口和命令，不复制第二套算法或状态机。
 - TTFT、流式探活、缺失样本和评分参与边界只见上述参考，本技能不复制评分算法。
-- 池级质量调查使用 `scores pool-quality --over-api <absolute-http(s)-URL>`，账号评分快照使用 `scores get`，
+- 池级质量调查使用 `scores pool-quality [--scope codex|claude|grok|deepseek] --over-api <absolute-http(s)-URL>`。
+  - 省略作用域只返回 Codex，回执里的 `platform` 必须与所问作用域一致。
+  - `--platform` 接受同一组作用域名；与 `--scope` 冲突或写成供应商名时直接失败。
+  - 账号评分快照使用 `scores get`，
   需要刷新时使用 `scores rank --calls <N> --over-api <absolute-http(s)-URL>`。
   - 人类评分表同时给出窗口失败率、突发失败率和有效失败率。
   - 只看窗口失败率不能判断可靠性分项是否已经为零。
@@ -335,6 +338,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - `--scope` 可选，只接受 owning YAML 中已启用的 `codex`、`claude`、`grok` 或 `deepseek` 作用域；CLI 将其写入
   V2 深链查询参数，并在 stderr 输出带 profile、scope 和 phase 的短进度行，避免临时脚本拼接 URL
   或长时间无输出。省略时使用配置中的默认作用域。
+- 成功回执的 `retainedScreenshots` 按 profile 和 scope 保留桌面与窄屏 PNG。
+  - WebProbe 的稳定文件名不含 scope，下一个作用域会覆盖它。
+  - `remotePath` 指向的临时目录在探针退出后删除，不能当作附件路径。
 - 连拍复用 `web screenshot`。
   - `web screenshot --help` 直接显示本操作参数，不要求配置或重印完整 catalog。
   - `--burst-count 1..30` 和 `--burst-interval 200ms..10s` 控制同页采集。

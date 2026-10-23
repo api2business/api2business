@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseArgs, summarizeWorkflowStatus } from "./cli";
+import { assertSchedulingRuntimeQuery, parseArgs, poolQualityScope, summarizeWorkflowStatus } from "./cli";
 
 test("historical balance CLI accepts signed USD without consuming the next option", () => {
   const args = ["--config", "config/api2business.yaml", "upstreams", "usage-cache", "restore"];
@@ -16,6 +16,17 @@ test("historical balance CLI accepts signed USD without consuming the next optio
   const screenshot = parseArgs(["--config", "config/api2business.yaml", "web", "screenshot", "--click-selector", "th[data-sort-key=remaining]"]);
   expect(screenshot.clickSelector).toBe("th[data-sort-key=remaining]");
   expect(screenshot.command).toEqual(["web", "screenshot"]);
+});
+
+test("pool quality reads the requested scope and runtime evidence accepts deepseek", () => {
+  expect(poolQualityScope(null, null)).toBe("codex");
+  expect(poolQualityScope("claude", null)).toBe("claude");
+  expect(poolQualityScope(null, "deepseek")).toBe("deepseek");
+  expect(poolQualityScope("grok", "grok")).toBe("grok");
+  expect(() => poolQualityScope("openai", null)).toThrow("codex|claude|grok|deepseek");
+  expect(() => poolQualityScope("codex", "claude")).toThrow("same scope");
+  expect(assertSchedulingRuntimeQuery("131", "deepseek")).toEqual({ group: "131", platform: "deepseek" });
+  expect(() => assertSchedulingRuntimeQuery("131", "codex")).toThrow("deepseek");
 });
 
 test("workflow summary exposes partial initialization and an in-flight probe", () => {

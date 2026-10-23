@@ -120,7 +120,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 
 ## 原生调度诊断补充
 
-- `reads runtime --group <正整数> --platform openai|anthropic|grok --over-api <绝对URL>`
+- `reads runtime --group <正整数> --platform openai|anthropic|grok|deepseek --over-api <绝对URL>`
   读取当前可用性、并发与 `nativeVersion`。
   - 版本来自 Sub2API `/admin/system/version`，不以配置镜像标签代替。
   - 版本查询失败单独显示未知，不丢弃成功取得的容量证据。
