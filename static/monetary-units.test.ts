@@ -122,7 +122,7 @@ test("V2 makes request quality and missing TTFT evidence explicit in hover detai
   const html = view.node("#v2-account-body").innerHTML;
   expect(html).toContain("成功响应 10 / 63");
   expect(html).toContain("上游失败 0.0%");
-  expect(html).toContain("失败 / 切号 / 恢复：0 / 0 / 0");
+  expect(html).toContain("上游失败 / 切号触发 / 切号恢复：0 / 0 / 0");
   expect(html).toContain("业务/余额拒绝：53");
   expect(html).toContain("TTFT P95：无有效样本");
   expect(html).toContain("当前成功响应无流式样本");

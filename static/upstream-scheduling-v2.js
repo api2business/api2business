@@ -201,7 +201,7 @@ function accountQualityDetails(row, attempts) {
     `可计入上游失败：${number(upstreamFailures)}`,
     `业务/余额拒绝：${number(excluded)}`,
     `可计入上游失败率：${number(upstreamFailures)} / ${number(effective)} = ${percent(row.failureRate)}`,
-    `失败 / 切号 / 恢复：${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}`,
+    `上游失败 / 切号触发 / 切号恢复：${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}`,
   ]
 }
 function accountQualityMarkup(row, attempts) {
