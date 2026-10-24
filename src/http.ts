@@ -1058,7 +1058,17 @@ export function createHandler(
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
         const requestId = decodeURIComponent(url.pathname.slice("/api/admin/errors/".length));
         if (!requestId) return json({ ok: false, error: "request id is required" }, 400);
-        return json(await operations.errorRequest(requestId));
+        try {
+          return json(await operations.errorRequest(requestId));
+        } catch (error) {
+          // A source-coverage warning can reference a request that has no
+          // error row. Treat that as a normal not-found result; it must not
+          // turn a read-only diagnostic lookup into a management 5xx.
+          if (error instanceof Error && /^request id not found:/u.test(error.message)) {
+            return json({ ok: false, error: "request id not found", requestId }, 404);
+          }
+          throw error;
+        }
       }
       if (request.method === "POST" && url.pathname === "/api/admin/users/impact") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
