@@ -445,7 +445,18 @@ export class OperationsStore {
   }
 
   private async readQuery<T>(query: () => PromiseLike<T> & { cancel?: () => void }, timeoutMs = this.readTimeoutMs): Promise<T> {
-    return await this.withConnectionRecovery(() => this.readDeadline(query(), timeoutMs));
+    const caller = new Error().stack?.split("\n")[2]?.trim() ?? "unknown";
+    return await this.withConnectionRecovery(async () => {
+      const startedAt = performance.now();
+      try {
+        return await this.readDeadline(query(), timeoutMs);
+      } catch (error) {
+        console.error(JSON.stringify({ ok: false, component: "operations-database-read",
+          caller, durationMs: Math.round(performance.now() - startedAt),
+          errorType: error instanceof Error ? error.name : "unknown", valuesPrinted: false }));
+        throw error;
+      }
+    });
   }
 
   private async persistQuery<T>(query: () => PromiseLike<T> & { cancel?: () => void }): Promise<T> {
@@ -921,16 +932,19 @@ export class OperationsStore {
 
   async idleProbeHistoryPage(limit: number, offset: number, scope = "codex") {
     return await this.readQuery(() => this.sql`
+      WITH page AS MATERIALIZED (
+        SELECT * FROM api2business_idle_probe_rounds
+        WHERE scope=${scope}
+        ORDER BY started_at DESC, id DESC
+        LIMIT ${limit} OFFSET ${offset}
+      )
       SELECT operation_id, trigger_type, started_at, completed_at, status,
         planned_count, ready_count, attempted_count, succeeded_count,
         failed_count, unready_count, duration_ms, error_summary,
         CASE WHEN jsonb_typeof(request_evidence)='string' THEN (request_evidence #>> '{}')::jsonb
           ELSE request_evidence END AS request_evidence,
-        COUNT(*) OVER()::int AS total_count
-      FROM api2business_idle_probe_rounds
-      WHERE scope=${scope}
-      ORDER BY started_at DESC, id DESC
-      LIMIT ${limit} OFFSET ${offset}
+        (SELECT COUNT(*)::int FROM api2business_idle_probe_rounds WHERE scope=${scope}) AS total_count
+      FROM page ORDER BY started_at DESC, id DESC
     `);
   }
 
@@ -1019,14 +1033,18 @@ export class OperationsStore {
 
   async modelSyncHistoryPage(limit: number, offset: number, scope: string) {
     return await this.readQuery(() => this.sql`
+      WITH page AS MATERIALIZED (
+        SELECT * FROM api2business_upstream_model_sync_rounds
+        WHERE scope=${scope}
+        ORDER BY started_at DESC, id DESC
+        LIMIT ${limit} OFFSET ${offset}
+      )
       SELECT id, operation_id, scope, platform, trigger_type, started_at, completed_at, status,
         batch_size, selected_count, attempted_count, succeeded_count, failed_count,
         changed_account_count, changed_model_count, cursor_before, cursor_after,
-        duration_ms, error_summary, COUNT(*) OVER()::int AS total_count
-      FROM api2business_upstream_model_sync_rounds
-      WHERE scope=${scope}
-      ORDER BY started_at DESC, id DESC
-      LIMIT ${limit} OFFSET ${offset}
+        duration_ms, error_summary,
+        (SELECT COUNT(*)::int FROM api2business_upstream_model_sync_rounds WHERE scope=${scope}) AS total_count
+      FROM page ORDER BY started_at DESC, id DESC
     `);
   }
 

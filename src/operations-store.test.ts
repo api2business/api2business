@@ -39,6 +39,21 @@ test("reconciles interrupted started plans only while holding the existing prior
   expect(calls[4]).toBe("release");
 });
 
+test("history pages limit rows before decoding evidence and retain independent totals", async () => {
+  const calls: string[] = [];
+  const sql = async (parts: TemplateStringsArray) => { calls.push(parts.join("?")); return []; };
+  const store = new OperationsStore("postgres://unused", (() => sql) as never);
+  await store.idleProbeHistoryPage(10, 20, "codex");
+  await store.modelSyncHistoryPage(10, 20, "codex");
+  for (const query of calls) {
+    expect(query).toContain("WITH page AS MATERIALIZED");
+    expect(query.indexOf("LIMIT")).toBeLessThan(query.indexOf("AS total_count"));
+    expect(query).toContain("SELECT COUNT(*)::int");
+    expect(query).not.toContain("COUNT(*) OVER()");
+  }
+  expect(calls[0]!.indexOf("LIMIT")).toBeLessThan(calls[0]!.indexOf("jsonb_typeof"));
+});
+
 test("encodes account IDs as a PostgreSQL bigint array literal", () => {
   expect(postgresBigintArrayLiteral([49, 330, 307])).toBe("{49,330,307}");
   expect(() => postgresBigintArrayLiteral([0])).toThrow("positive integers");
