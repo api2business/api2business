@@ -224,7 +224,7 @@ test("pool quality excludes every monitor-user key without changing account scor
   expect(poolQualitySql).toContain("PARTITION BY event.request_id");
   expect(poolQualitySql).toContain("(event.kind = 'usage') DESC");
   expect(poolQualitySql).toContain("AND (NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)");
-  expect(poolQualitySql).toContain("OR COALESCE(o.upstream_status_code, 0) >= 400)");
+  expect(poolQualitySql).toContain("OR COALESCE(o.upstream_status_code, 0) >= 400");
   expect(poolQualitySql).toContain("'/responses/compact'");
   expect(poolQualitySql).toContain("'/v1/responses/compact'");
   expect(poolQualitySql.match(/NOT LIKE '%luna%'/gu)?.length).toBe(2);
@@ -254,7 +254,7 @@ test("pool quality errors use the same bounded window and expose paginated model
   expect(request?.sql).toContain("'userEmail', user_email");
   expect(request?.sql.match(/NOT LIKE '%luna%'/gu)?.length).toBe(2);
   expect(request?.sql).toContain("AND (NOT (COALESCE(e.client_status_code, e.upstream_status_code, 0) BETWEEN 200 AND 399)");
-  expect(request?.sql).toContain("OR COALESCE(e.upstream_status_code, 0) >= 400)");
+  expect(request?.sql).toContain("OR COALESCE(e.upstream_status_code, 0) >= 400");
   expect(result.pagination).toEqual({ page: 2, pageSize: 20, total: 107, totalPages: 6 });
   expect(result.modelDistribution).toEqual([{ model: "gpt-5.6-sol", count: 107 }]);
   expect(result.databaseQueries).toBe(1);

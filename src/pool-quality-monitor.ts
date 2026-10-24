@@ -41,6 +41,18 @@ WITH internal_probe_keys AS (
       SELECT 1 FROM account_groups ag
       WHERE ag.account_id = a.id AND ag.group_id = ANY(string_to_array($2, ',')::bigint[])
     )
+), pool_terminal_ids AS MATERIALIZED (
+  SELECT o.request_id FROM ops_error_logs o
+  WHERE o.error_phase='request' AND o.error_type='cyber_policy'
+    AND o.group_id = ANY(string_to_array($2, ',')::bigint[])
+    AND o.created_at <= $3::timestamptz AND o.request_id IS NOT NULL
+  UNION
+  SELECT 'client:' || NULLIF(s.extra->>'client_request_id','')
+  FROM ops_error_logs o JOIN ops_system_logs s ON s.request_id=o.request_id
+  WHERE o.error_phase='request' AND o.error_type='cyber_policy'
+    AND o.group_id = ANY(string_to_array($2, ',')::bigint[])
+    AND o.created_at <= $3::timestamptz
+    AND NULLIF(s.extra->>'client_request_id','') IS NOT NULL
 ), eligible_usage AS NOT MATERIALIZED (
   SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at
   FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
@@ -49,8 +61,15 @@ WITH internal_probe_keys AS (
       AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
       AND NOT ${audioRequestSql("u", false)}
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
+      AND u.request_id NOT IN (SELECT policy.request_id FROM pool_terminal_ids policy)
 ), eligible_errors AS NOT MATERIALIZED (
-  SELECT 'error'::text AS kind, o.id, o.request_id, o.created_at
+  SELECT 'error'::text AS kind, o.id, COALESCE((
+    SELECT 'client:' || NULLIF(identity_log.extra->>'client_request_id','')
+    FROM ops_system_logs identity_log
+    WHERE identity_log.request_id=o.request_id
+      AND NULLIF(identity_log.extra->>'client_request_id','') IS NOT NULL
+    LIMIT 1
+  ),o.request_id) AS request_id, o.created_at
   FROM ops_error_logs o
     WHERE (
       COALESCE(o.status_code, 0) >= 400
@@ -64,7 +83,8 @@ WITH internal_probe_keys AS (
       AND NOT ${audioRequestSql("o", true)}
       -- HTTP 200 不能证明流式业务成功；精确 usage 在 final_requests 中优先。
       AND (NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
-        OR COALESCE(o.upstream_status_code, 0) >= 400)
+        OR COALESCE(o.upstream_status_code, 0) >= 400
+        OR (o.error_phase='request' AND o.error_type='cyber_policy'))
       AND LOWER(COALESCE(o.error_type, '')) <> 'failover_event'
       AND LOWER(COALESCE(o.inbound_endpoint, '')) IN (
         '/v1/messages', '/v1/responses', '/v1/chat/completions', '/responses/compact', '/v1/responses/compact'
@@ -87,6 +107,17 @@ WITH internal_probe_keys AS (
 ), recent_requests AS MATERIALIZED (
   SELECT * FROM final_requests WHERE request_rank = 1
   ORDER BY created_at DESC, id DESC LIMIT $1
+), pool_failover_ids AS MATERIALIZED (
+  SELECT s.request_id FROM ops_system_logs s
+  WHERE s.message LIKE '%upstream_failover_switching'
+    AND s.created_at <= $3::timestamptz
+    ${boundParameter === null ? "" : `AND s.created_at >= $${boundParameter}::timestamptz`}
+  UNION
+  SELECT 'client:' || NULLIF(s.extra->>'client_request_id','') FROM ops_system_logs s
+  WHERE s.message LIKE '%upstream_failover_switching'
+    AND s.created_at <= $3::timestamptz
+    ${boundParameter === null ? "" : `AND s.created_at >= $${boundParameter}::timestamptz`}
+    AND NULLIF(s.extra->>'client_request_id','') IS NOT NULL
 ), usage_events AS (
     SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at, u.account_id,
       u.user_id, requester.email AS user_email,
@@ -120,6 +151,7 @@ WITH internal_probe_keys AS (
 ), error_events AS (
     SELECT source.*,
       CASE
+        WHEN source.error_phase='request' AND source.error_type='cyber_policy' THEN true
         WHEN LOWER(COALESCE(source.error_message, '')) LIKE '%context window%'
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%context_length_exceeded%'
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%input must be a list%'
@@ -134,6 +166,7 @@ WITH internal_probe_keys AS (
         ELSE false
       END AS scoreable,
       CASE
+        WHEN source.error_phase='request' AND source.error_type='cyber_policy' THEN NULL
         WHEN LOWER(COALESCE(source.error_message, '')) LIKE '%context window%'
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%context_length_exceeded%'
           OR LOWER(COALESCE(source.error_message, '')) LIKE '%input must be a list%'
@@ -165,9 +198,7 @@ function poolQualitySampleSql(boundParameter: number | null): string {
   return `${poolQualityEventsSql(boundParameter)}
 SELECT e.*,
   EXISTS (
-    SELECT 1 FROM ops_system_logs s
-    WHERE s.request_id=e.request_id
-      AND s.message LIKE '%upstream_failover_switching'
+    SELECT 1 FROM pool_failover_ids s WHERE s.request_id=e.request_id
   ) AS failover_triggered
 FROM recent_events e ORDER BY e.created_at DESC, e.id DESC
 `;
@@ -181,14 +212,13 @@ export type PoolQualityErrorFilter = "scoreable" | "excluded" | "all";
 function poolQualityErrorsQuery(bounded = false): string { return `${poolQualityEventsSql(bounded ? 8 : null)}, filtered_errors AS (
   SELECT e.*,
     EXISTS (
-      SELECT 1 FROM ops_system_logs s
-      WHERE s.request_id=e.request_id
-        AND s.message LIKE '%upstream_failover_switching'
+      SELECT 1 FROM pool_failover_ids s WHERE s.request_id=e.request_id
     ) AS failover_triggered
   FROM recent_events e
   WHERE e.kind = 'error'
     AND (NOT (COALESCE(e.client_status_code, e.upstream_status_code, 0) BETWEEN 200 AND 399)
-      OR COALESCE(e.upstream_status_code, 0) >= 400)
+      OR COALESCE(e.upstream_status_code, 0) >= 400
+      OR (e.error_phase='request' AND e.error_type='cyber_policy'))
     AND ($5::text = 'all'
       OR ($5::text = 'scoreable' AND e.scoreable = true)
       OR ($5::text = 'excluded' AND e.scoreable = false))

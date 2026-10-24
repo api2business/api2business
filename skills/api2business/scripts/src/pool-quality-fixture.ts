@@ -22,10 +22,11 @@ export async function verifyPoolQualityWindow(client: AdminHttpClient, config: A
     FROM (VALUES
       (1,'text','2026-01-01T00:00:00Z',1,999,'gpt-6.1-sol',NULL,NULL),
       (2,'text','2026-01-01T00:10:00Z',1,500,'gpt-6.1-sol',NULL,NULL),
-      (3,'recovered','2026-01-01T00:01:00Z',1,1000,'gpt-6.1-sol',NULL,NULL),
+      (3,'client:recovered-client','2026-01-01T00:01:00Z',1,1000,'gpt-6.1-sol',NULL,NULL),
       (4,'probe','2026-01-01T00:20:00Z',99,999999,'gpt-6.1-sol',NULL,NULL),
       (5,'old','2026-01-01T00:00:00Z',1,999999,'gpt-6.1-sol',NULL,NULL),
-      (6,'other-text','2026-01-01T00:04:00Z',1,1500,'audiovisual-text',NULL,NULL)
+      (6,'other-text','2026-01-01T00:04:00Z',1,1500,'audiovisual-text',NULL,NULL),
+      (7,'client:policy-client','2026-01-01T00:11:00Z',1,0,'gpt-6.1-sol',NULL,NULL)
     ) t(id,request_id,at,key,ttft,model,requested_model,upstream_model)
     UNION ALL SELECT 100+n,'voice-success-'||n,'2026-01-01T00:30:00Z'::timestamptz,
       1,10,1,true,999999,999999,'gpt-6.1-sol',NULL,'AUDIO' FROM generate_series(1,1005) n WHERE ${audio}
@@ -34,8 +35,8 @@ export async function verifyPoolQualityWindow(client: AdminHttpClient, config: A
       2::bigint group_id,1::bigint api_key_id,true stream,NULL::bigint time_to_first_token_ms,
       2000::bigint duration_ms,'gpt-6.1-sol'::text model,NULL::text requested_model,NULL::text upstream_model,
       '/v1/responses'::text inbound_endpoint,NULL::text upstream_endpoint,
-      CASE WHEN request_id='balance' THEN 'business' ELSE 'upstream' END::text error_phase,
-      'upstream_error'::text error_type,status::int status_code,upstream_status::int upstream_status_code,
+      CASE WHEN request_id='balance' THEN 'business' WHEN request_id='policy' THEN 'request' ELSE 'upstream' END::text error_phase,
+      CASE WHEN request_id='policy' THEN 'cyber_policy' ELSE 'upstream_error' END::text error_type,status::int status_code,upstream_status::int upstream_status_code,
       false is_business_limited,message::text error_message,NULL::text error_body,
       NULL::text upstream_error_message,NULL::text upstream_error_detail
     FROM (VALUES
@@ -43,21 +44,23 @@ export async function verifyPoolQualityWindow(client: AdminHttpClient, config: A
       (2,'text-fail','2026-01-01T00:09:00Z',503,503,'upstream failed'),
       (3,'text-fail','2026-01-01T00:08:00Z',503,503,'upstream failed'),
       (4,'balance','2026-01-01T00:02:00Z',403,NULL,'insufficient_balance'),
-      (5,'semantic-fail','2026-01-01T00:06:00Z',200,502,'upstream failed')
+      (5,'semantic-fail','2026-01-01T00:06:00Z',200,502,'upstream failed'),
+      (6,'policy','2026-01-01T00:11:00Z',200,NULL,'cyber policy rejected')
     ) t(id,request_id,at,status,upstream_status,message)
     UNION ALL SELECT 100+n,'voice-error-'||n,'2026-01-01T00:30:00Z'::timestamptz,
       1,10,2,1,true,NULL,999999,'gpt-6.1-sol','VOICE',NULL,'/v1/responses',NULL,
       'upstream','upstream_error',503,503,false,'upstream failed',NULL,NULL,NULL
     FROM generate_series(1,1005) n WHERE ${audio}
   ), ops_system_logs AS (
-    SELECT * FROM (VALUES ('recovered'::text,'openai.upstream_failover_switching'::text),
-      ('voice-error-1','openai.upstream_failover_switching')) t(request_id,message)
+    SELECT t.*,'2026-01-01T00:05:00Z'::timestamptz created_at FROM (VALUES ('recovered'::text,'openai.upstream_failover_switching'::text,'{"client_request_id":"recovered-client"}'::jsonb),
+      ('policy','request.failed','{"client_request_id":"policy-client"}'::jsonb),
+      ('voice-error-1','openai.upstream_failover_switching','{}'::jsonb)) t(request_id,message,extra)
   ), `;
   const reads = (audio: boolean) => new RemoteSub2ApiReadClient({
     sub2ApiRead: (request) => client.sub2ApiRead({ ...request,
       key: `pool-quality-fixture:${crypto.randomUUID()}`, kind: 'pool-quality.fixture', priority: 'manual',
       sql: fixture(audio) + request.sql.replace(/^\s*WITH\s/u, ''),
-      parameters: [6, ...request.parameters.slice(1)],
+      parameters: [7, ...request.parameters.slice(1)],
     }),
   });
   const sampledAt = '2026-01-01T01:00:00Z';
@@ -79,12 +82,13 @@ export async function verifyPoolQualityWindow(client: AdminHttpClient, config: A
   });
   const checks = {
     audioCannotChangePoolScore: JSON.stringify(baseline) === JSON.stringify(withAudio),
-    eligibleWindowFilled: withAudio.rawCallCount === 6,
+    eligibleWindowFilled: withAudio.rawCallCount === 7,
     deduplicatedTextSuccess: withAudio.rawSuccessRequests === 3,
-    textFailureRetained: withAudio.rawFailureRequests === 2,
+    textFailureRetained: withAudio.rawFailureRequests === 3,
     onlyTextFailover: withAudio.rawFailoverRequests === 1 && withAudio.rawFailoverRecovered === 1,
     audioLatencyExcluded: withAudio.ttftP95Ms === 1500,
-    errorWindowMatchesScore: errors.pagination.total === 3,
+    errorWindowMatchesScore: errors.pagination.total === 4,
+    linkedPolicyRemainsFailure: errors.rows.some((row) => row.requestId === 'policy' && row.scoreable === true),
     http200TerminalEvidence: errors.rows.some((row) => row.requestId === 'semantic-fail'
       && row.clientStatusCode === 200 && row.upstreamStatusCode === 502 && row.scoreable === true)
       && !errors.rows.some((row) => row.requestId === 'recovered'),
