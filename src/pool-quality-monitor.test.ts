@@ -260,7 +260,7 @@ test("pool quality errors use the same bounded window and expose paginated model
   expect(result.databaseQueries).toBe(1);
 });
 
-test("pool error fast path preserves old success precedence and falls back for sparse scopes", async () => {
+test("pool error fast path widens to seven days while preserving old success precedence", async () => {
   const requests: { sql: string; parameters: unknown[] }[] = [];
   const reads = { async query(input: { sql: string; parameters: unknown[] }) {
     requests.push(input);
@@ -275,12 +275,33 @@ test("pool error fast path preserves old success precedence and falls back for s
   expect(requests[0]!.sql).toBe(boundedPoolQualityErrorsSql);
   expect(requests[0]!.sql).toContain("u.request_id = e.request_id AND u.created_at < $8::timestamptz");
   expect(requests[0]!.sql).toContain("eligible_usage AS NOT MATERIALIZED");
-  expect(requests[1]!.sql).toBe(poolQualityErrorsSql);
-  expect(requests[1]!.parameters).toHaveLength(7);
+  expect(requests[1]!.sql).toBe(boundedPoolQualityErrorsSql);
+  expect(requests[1]!.parameters.at(-1)).toBe("2026-07-29T22:12:43.000Z");
   expect(result.pagination.total).toBe(2);
   expect(result.databaseQueries).toBe(2);
   expect(result.queryDurationMs).toBe(4);
   expect(result.queueDurationMs).toBe(2);
+});
+
+test("pool errors retain full history when both bounded windows are sparse", async () => {
+  const requests: { sql: string; parameters: unknown[] }[] = [];
+  const reads = { async query(input: { sql: string; parameters: unknown[] }) {
+    requests.push(input);
+    return { rows: [{ recent_count: requests.length < 3 ? 999 : 1000,
+      total_count: requests.length < 3 ? 1 : 2, rows: [], model_distribution: [] }],
+      cached: requests.length === 1, queueDurationMs: 1, queryDurationMs: 2 };
+  } } as unknown as Sub2ApiReadClient;
+  const result = await collectPoolQualityErrors(loadConfig("config/api2business.example.yaml"), reads, {
+    sampledAt: "2026-08-05T22:12:43Z", page: 1, pageSize: 20, filter: "all",
+  });
+  expect(requests.map((request) => request.sql)).toEqual([
+    boundedPoolQualityErrorsSql, boundedPoolQualityErrorsSql, poolQualityErrorsSql,
+  ]);
+  expect(requests[2]!.parameters).toHaveLength(7);
+  expect(result.pagination.total).toBe(2);
+  expect(result.databaseQueries).toBe(2);
+  expect(result.queryDurationMs).toBe(6);
+  expect(result.queueDurationMs).toBe(3);
 });
 
 test("pool quality has an independent YAML score policy without failover points", () => {

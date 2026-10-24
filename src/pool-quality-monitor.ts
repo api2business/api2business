@@ -501,20 +501,27 @@ export async function collectPoolQualityErrors(
   const groupIds = [...new Set(policy.eligibleGroupIds)].sort((a, b) => a - b);
   const offset = (input.page - 1) * input.pageSize;
   const parameters = [recentCallLimit, groupIds.join(","), sampledAt, platform, input.filter, input.pageSize, offset];
-  let query = await reads.query<Row>({
-    key: JSON.stringify(["pool-quality-errors-bounded", platform, recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize]),
-    kind: "pool-quality-errors",
-    priority: input.priority ?? "manual",
-    cacheMode: "prefer-cache",
-    sql: boundedPoolQualityErrorsSql,
-    parameters: [...parameters, new Date(sampledAtMs - 86_400_000).toISOString()],
-  });
-  let databaseQueries = query.cached ? 0 : 1;
-  let queueDurationMs = query.queueDurationMs;
-  let queryDurationMs = query.queryDurationMs;
-  // Only use the fast path when it proves the full latest-N request window.
-  // Sparse scopes fall back to the original unbounded history, never a shorter sample.
-  if (Number(query.rows[0]?.recent_count ?? 0) < recentCallLimit) {
+  let query: Awaited<ReturnType<typeof reads.query<Row>>> | undefined;
+  let databaseQueries = 0;
+  let queueDurationMs = 0;
+  let queryDurationMs = 0;
+  for (const windowMs of poolQualitySampleWindowsMs) {
+    query = await reads.query<Row>({
+      key: JSON.stringify(["pool-quality-errors-bounded", platform, recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize, windowMs]),
+      kind: "pool-quality-errors",
+      priority: input.priority ?? "manual",
+      cacheMode: "prefer-cache",
+      sql: boundedPoolQualityErrorsSql,
+      parameters: [...parameters, new Date(sampledAtMs - windowMs).toISOString()],
+    });
+    databaseQueries += query.cached ? 0 : 1;
+    queueDurationMs += query.queueDurationMs;
+    queryDurationMs += query.queryDurationMs;
+    if (Number(query.rows[0]?.recent_count ?? 0) >= recentCallLimit) break;
+  }
+  // Widen exactly like the sampler; only a complete latest-N window can avoid
+  // the all-history fallback. Sparse scopes must never silently lose requests.
+  if (Number(query?.rows[0]?.recent_count ?? 0) < recentCallLimit) {
     query = await reads.query<Row>({
       key: JSON.stringify(["pool-quality-errors", platform, recentCallLimit, groupIds, sampledAt, input.filter, input.page, input.pageSize]),
       kind: "pool-quality-errors", priority: input.priority ?? "manual", cacheMode: "prefer-cache",
@@ -524,7 +531,7 @@ export async function collectPoolQualityErrors(
     queueDurationMs += query.queueDurationMs;
     queryDurationMs += query.queryDurationMs;
   }
-  const result = query.rows[0] ?? {};
+  const result = query?.rows[0] ?? {};
   const total = Number(result.total_count ?? 0);
   const rows = Array.isArray(result.rows) ? result.rows : [];
   const modelDistribution = Array.isArray(result.model_distribution) ? result.model_distribution : [];
