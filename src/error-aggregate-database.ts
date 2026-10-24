@@ -1,5 +1,5 @@
 import type { AppConfig } from "./config";
-import { terminalPolicyExistsSql } from "./request-terminal-policy";
+import { terminalPolicyExistsSql, usageRequestMatchesSql } from "./request-terminal-policy";
 import type {
   Sub2ApiReadClient,
   Sub2ApiReadPriority,
@@ -64,7 +64,7 @@ classified_errors AS (
       SELECT 1
       FROM usage_logs u
       WHERE e.request_id IS NOT NULL
-        AND u.request_id = e.request_id
+        AND ${usageRequestMatchesSql("u.request_id", "e.request_id")}
     ) AND NOT ${terminalPolicyExistsSql("e.request_id")} AS recovered,
     CASE
       WHEN COALESCE(e.is_business_limited, false)

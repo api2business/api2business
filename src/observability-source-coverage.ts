@@ -10,7 +10,7 @@ export const sourceCoverageSql = `WITH probe_requests AS (
   WHERE u.email='monitor-user@sub2api.platform-infra.local'
     OR LOWER(COALESCE(k.name,'')) LIKE 'api2business-probe-%'
 ), source AS (
-  SELECT l.id,l.created_at,l.request_id,l.account_id,
+  SELECT l.id,l.created_at,l.request_id,l.client_request_id,l.account_id,
     COALESCE(NULLIF(l.model,''),NULLIF(l.extra->>'model','')) AS model,
     NULLIF(l.extra->>'requested_model','') AS requested_model,
     NULLIF(l.extra->>'upstream_model','') AS upstream_model,
@@ -31,7 +31,8 @@ export const sourceCoverageSql = `WITH probe_requests AS (
 ), unresolved AS (
   SELECT DISTINCT ON (COALESCE(NULLIF(TRIM(s.request_id),''),'missing-id:'||s.id::text)) s.*
   FROM eligible s WHERE NULLIF(TRIM(s.request_id),'') IS NULL
-    OR NOT EXISTS (SELECT 1 FROM usage_logs u WHERE u.request_id=s.request_id
+    OR NOT EXISTS (SELECT 1 FROM usage_logs u WHERE (u.request_id=s.request_id
+      OR u.request_id='client:'||NULLIF(s.client_request_id,''))
       AND u.created_at >= $1::timestamptz AND u.created_at < $2::timestamptz)
   ORDER BY COALESCE(NULLIF(TRIM(s.request_id),''),'missing-id:'||s.id::text),s.created_at DESC,s.id DESC
 )

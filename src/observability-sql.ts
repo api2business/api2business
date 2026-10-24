@@ -1,5 +1,5 @@
 import { audioRequestSql } from "./scoring-error-policy";
-import { terminalPolicyExistsSql } from "./request-terminal-policy";
+import { terminalPolicyExistsSql, usageRequestMatchesSql } from "./request-terminal-policy";
 
 // Keep only changes in the evidenced rate. Repeated quota samples are not new
 // billing epochs; scanning all of them for every usage row makes week-long reads slow.
@@ -74,7 +74,7 @@ errors AS (
       WHEN e.error_phase IN ('internal','network') THEN 'infrastructure_other'
       ELSE 'unknown' END AS family
   FROM errors e WHERE NULLIF(TRIM(e.request_id),'') IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM success s WHERE s.request_id=e.request_id)
+    AND NOT EXISTS (SELECT 1 FROM success s WHERE ${usageRequestMatchesSql("s.request_id", "e.request_id")})
     AND NOT EXISTS (SELECT 1 FROM customer_billing b WHERE b.request_id=e.request_id)
   ORDER BY e.request_id,e.created_at DESC,e.id DESC
 ), task_scope_luna_requests AS (
@@ -87,7 +87,7 @@ errors AS (
     AND CONCAT_WS('/',requested_model,model,upstream_model) ILIKE '%luna%'
 ), task_scope_success AS (
   SELECT s.* FROM success s
-  WHERE NOT EXISTS (SELECT 1 FROM task_scope_luna_requests l WHERE l.request_id=s.request_id)
+  WHERE NOT EXISTS (SELECT 1 FROM task_scope_luna_requests l WHERE ${usageRequestMatchesSql("s.request_id", "l.request_id")})
 ), task_scope_failure AS (
   SELECT f.* FROM failure f
   WHERE NOT EXISTS (SELECT 1 FROM task_scope_luna_requests l WHERE l.request_id=f.request_id)
@@ -135,7 +135,7 @@ SELECT jsonb_build_object(
   'excludedAudioRecords',(SELECT COUNT(*) FROM usage_source u WHERE NOT probe AND ${audioRequestSql("u")})
     +(SELECT COUNT(*) FROM error_source e WHERE NOT probe AND ${audioRequestSql("e", true)}),
   'excludedProbeRecords',(SELECT COUNT(*) FROM usage_source WHERE probe)+(SELECT COUNT(*) FROM error_source WHERE probe),
-  'recoveredRequests',(SELECT COUNT(DISTINCT e.request_id) FROM errors e JOIN success s USING(request_id)),
+  'recoveredRequests',(SELECT COUNT(DISTINCT e.request_id) FROM errors e JOIN success s ON ${usageRequestMatchesSql("s.request_id", "e.request_id")}),
   'errorFamilies',COALESCE((SELECT jsonb_agg(t) FROM (SELECT family,COUNT(*)::int AS requests FROM failure GROUP BY family ORDER BY COUNT(*) DESC) t),'[]'::jsonb),
   'businessLimitBreakdown',COALESCE((SELECT jsonb_agg(t) FROM (
     SELECT api_user_id AS user_id,api_user_email AS user_email,api_key_id,api_key_name,
@@ -158,8 +158,8 @@ SELECT jsonb_build_object(
     ORDER BY p95_ms DESC,samples DESC,s.model,s.account_id
   ) t),'[]'::jsonb),
   'taskScope',jsonb_build_object(
-    'excludedLunaRequests',(SELECT COUNT(*) FROM success s JOIN task_scope_luna_requests l USING(request_id))
-      +(SELECT COUNT(*) FROM failure f JOIN task_scope_luna_requests l USING(request_id)),
+    'excludedLunaRequests',(SELECT COUNT(*) FROM success)-(SELECT COUNT(*) FROM task_scope_success)
+      +(SELECT COUNT(*) FROM failure)-(SELECT COUNT(*) FROM task_scope_failure),
     'succeeded',(SELECT COUNT(*) FROM task_scope_success),
     'failed',(SELECT COUNT(*) FROM task_scope_failure),
     'streaming',(SELECT COUNT(*) FROM task_scope_success WHERE stream),

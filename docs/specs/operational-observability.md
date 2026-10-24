@@ -12,6 +12,8 @@
     - 判定与配置唯一见
       [不提供语音服务](../../skills/api2business/references/upstream-scheduling.md#不提供语音服务)。
   - 同一 request ID 去重；窗口内成功记录优先于切号过程错误。
+    - 网关请求与 `client:` 用量身份仅通过系统日志明确记录的 `client_request_id` 关联。
+    - 不按模型、时间接近或账号猜测关联；请求级策略拒绝仍覆盖关联成功记录。
   - 缺少 request ID 的记录单列，不能混进唯一请求分母。
 - Sub2API 成功率为成功请求数除以有终态的唯一请求数。
   - 已明确归属下游用户的余额或 Key 额度限制不进入服务质量分母。

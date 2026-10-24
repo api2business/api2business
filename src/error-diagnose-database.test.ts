@@ -7,7 +7,7 @@ import {
 test("error diagnosis uses one bounded query for signatures and failover chains", () => {
   expect(errorDiagnoseQuery).toContain("LIMIT $1");
   expect(errorDiagnoseQuery).toContain("u.request_id = e.request_id");
-  expect(errorDiagnoseQuery).toContain('terminal.request_id=e.request_id');
+  expect(errorDiagnoseQuery).toContain('e.request_id = terminal.request_id');
   expect(errorDiagnoseQuery).toContain("GROUP BY request_key");
   expect(errorDiagnoseQuery).toContain("COUNT(DISTINCT account_id)");
   expect(errorDiagnoseQuery).toContain("rank <= $4");

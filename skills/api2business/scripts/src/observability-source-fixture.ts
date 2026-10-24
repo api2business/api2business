@@ -7,9 +7,9 @@ export async function verifySourceCoverageWindow(client: AdminHttpClient) {
   ), api_keys AS (
     SELECT * FROM (VALUES (1::bigint,1::bigint,1::bigint,'customer'),(99,99,1,'api2business-probe-fixture')) t(id,user_id,group_id,name)
   ), groups AS (SELECT 1::bigint id,'business'::text name),
-  usage_logs AS (SELECT 'represented'::text request_id,'2026-01-01T01:00:00Z'::timestamptz created_at),
+  usage_logs AS (SELECT 'client:represented-client'::text request_id,'2026-01-01T01:00:00Z'::timestamptz created_at),
   ops_system_logs AS (
-    SELECT id,request_id,CASE WHEN id BETWEEN 10 AND 12 THEN 'native-probe' ELSE NULL END client_request_id,
+    SELECT id,request_id,CASE WHEN id BETWEEN 10 AND 12 THEN 'native-probe' WHEN id=3 THEN 'represented-client' ELSE NULL END client_request_id,
       at::timestamptz created_at,CASE WHEN id=11 THEN 2 ELSE 1 END::bigint account_id,api_key_id,model,
       'openai_usage.success_missing_usage'::text message,
       jsonb_build_object('inbound_endpoint','/v1/responses','terminal_event','response.completed',

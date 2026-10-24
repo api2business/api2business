@@ -18,14 +18,17 @@ export async function verifyObservationWindow(client: AdminHttpClient, config: A
     FROM (VALUES
       (1,'r1','2026-01-01T00:00:00Z',1,50000,2::numeric,2::numeric),
       (2,'r1','2026-01-01T00:30:00Z',1,20000,2,2),
-      (3,'r2','2026-01-01T01:00:00Z',1,10000,4,2),
+      (3,'client:r2-client','2026-01-01T01:00:00Z',1,10000,4,2),
       (4,'probe','2026-01-01T01:00:00Z',99,10,100,1),
       (5,NULL,'2026-01-01T01:00:00Z',1,20,1,1),
       (6,'end-boundary','2026-01-01T02:00:00Z',1,10,100,1),
       (7,'audio-success','2026-01-01T01:00:00Z',1,999999,2,2),
-      (8,'terminal-policy','2026-01-01T01:00:00Z',1,NULL,0,1),
+      (8,'client:policy-client','2026-01-01T01:00:00Z',1,NULL,0,1),
       (9,'luna-success','2026-01-01T01:30:00Z',1,50000,2,2)
     ) t(id,request_id,at,api_key_id,ttft,actual_cost,rate_multiplier)
+  ), ops_system_logs AS (
+    SELECT request_id,jsonb_build_object('client_request_id',client_id) extra
+    FROM (VALUES ('r2','r2-client'),('terminal-policy','policy-client')) t(request_id,client_id)
   ), ops_error_logs AS (
     SELECT id,request_id,at::timestamptz created_at,1::bigint account_id,1::bigint group_id,api_key_id,
       status_code,NULL::int upstream_status_code,NULL::text network_error_type,(id=8) is_business_limited,

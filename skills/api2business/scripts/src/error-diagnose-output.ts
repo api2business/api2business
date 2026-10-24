@@ -72,7 +72,7 @@ function classifyChain(chain: Row): Row {
       failoverObserved,
       suppressedAfterOutput,
       abortedClientDisconnected,
-      recoveryEvidence: successMatched ? "exact_request_id_match" : "no_exact_request_id_match",
+      recoveryEvidence: successMatched ? "recorded_request_identity_match" : "no_recorded_request_identity_match",
       classification,
       errorAttemptCount: attempts.length - failoverAttempts.length,
       failoverSwitchCount: failoverAttempts.length,
@@ -93,10 +93,10 @@ export function decorateDiagnosis(value: Row): Row {
     interpretation: {
       sampleBasis: "recent-error-rows",
       chainOrder: "unrecovered-failover-attempt-count-recency",
-      recoveryJoin: "exact-request-id",
+      recoveryJoin: "exact-or-recorded-client-request-id",
       limitations: [
         "错误样本及排序后的展示链不代表全量请求的失败率或切号恢复率。",
-        "成功用量与错误的请求 ID 可能使用不同命名空间；未匹配不能证明没有恢复。",
+        "恢复关联使用精确请求 ID 或系统日志明确记录的 client_request_id；缺少关联证据仍为未知。",
         "上下游状态码不同不证明模板漏配；模板命中与候选耗尽需要独立证据。",
       ],
     },
