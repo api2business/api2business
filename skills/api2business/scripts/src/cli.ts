@@ -352,7 +352,7 @@ function help(): Record<string, unknown> {
       "upstreams template [--accounts <id-or-range,...>] [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams initialize --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL> (模板、探活及 Codex 强制 Responses)",
       "upstreams isolation --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
-      "upstreams create --platform openai|grok|anthropic --base-url <https-url> --suffix <name> --groups <id,id,...> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams create --platform openai|grok|anthropic|deepseek --base-url <https-url> --suffix <name> --groups <id,id,...> [--pool-mode true|false] [--rate <temporary CNY/API_USD>] [--priority 1 --capacity 16 --recharge-cny CNY] --api-key-stdin [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams update --id <account-id> [--base-url <https-url>] [--suffix <name>] [--rate <CNY/API_USD>] [--groups <id,id,...>] [--template-only] [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams recharge --base-url <https-url> --recharge-cny <CNY> [--idempotency-key <key>] [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams recharge-status --id <workflow-id> --over-api <absolute-http(s)-URL>",
@@ -949,7 +949,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return await verifyRechargeWorkflow(client, { workflowId: parsed.id });
   }
   if (group === "upstreams" && action === "create") {
-    if (!parsed.platform || !["openai", "grok", "anthropic"].includes(parsed.platform)) throw new Error("upstreams create requires --platform openai|grok|anthropic");
+    if (!parsed.platform || !["openai", "grok", "anthropic", "deepseek"].includes(parsed.platform)) throw new Error("upstreams create requires --platform openai|grok|anthropic|deepseek");
     if (!parsed.baseUrl || !parsed.suffix) throw new Error("upstreams create requires --base-url and --suffix");
     const groupIds = parseGroupIds(parsed.groups, "upstreams create");
     if (!parsed.apiKeyStdin) throw new Error("upstreams create requires --api-key-stdin; API keys are never accepted in argv");
