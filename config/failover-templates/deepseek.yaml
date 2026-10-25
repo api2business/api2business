@@ -40,6 +40,9 @@ rules:
 - errorCode: 429
   keywords:
   - rate limit
+  - rate-limited
+  - rate_limit_error
+  - All available accounts are currently rate-limited. Please retry later.
   - rate_limit_exceeded
   - too many requests
   - request rate exceeded
