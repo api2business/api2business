@@ -331,7 +331,16 @@ function parseNewApiLogs(payload: unknown): {
   const root = row(payload);
   const data = root?.data;
   const dataRow = row(data);
-  const values = Array.isArray(data) ? data : Array.isArray(dataRow?.items) ? dataRow.items : [];
+  const values = Array.isArray(data)
+    ? data
+    : [dataRow, root]
+      .flatMap((candidate) => {
+        if (!candidate) return [];
+        for (const key of ["items", "logs", "rows", "records", "list"]) {
+          if (Array.isArray(candidate[key])) return candidate[key];
+        }
+        return [];
+      });
   let input = 0;
   let output = 0;
   let records = 0;
@@ -343,22 +352,34 @@ function parseNewApiLogs(payload: unknown): {
     output += firstNumber(item, ["completion_tokens", "output_tokens"]) ?? 0;
     records += 1;
     if (billingMultiplier === null) {
-      const other = row(item.other) ?? (() => {
-        if (typeof item.other !== "string") return null;
-        try { return row(JSON.parse(item.other)); } catch { return null; }
-      })();
-      const rawUserRatio = firstNumber(other, ["user_group_ratio"]);
-      const rawGroupRatio = firstNumber(other, ["group_ratio"]);
+      const parseOther = (value: unknown): Row | null => {
+        if (row(value)) return row(value);
+        if (typeof value !== "string") return null;
+        let parsed: unknown = value;
+        for (let attempt = 0; attempt < 2 && typeof parsed === "string"; attempt += 1) {
+          try { parsed = JSON.parse(parsed) as unknown; } catch { return null; }
+        }
+        return row(parsed);
+      };
+      const other = parseOther(item.other);
+      const billing = row(other?.billing) ?? row(other?.pricing) ?? row(other?.rate) ?? null;
+      const ratioSource = [other, billing, item].find((candidate) => candidate !== null
+        && (firstNumber(candidate, ["user_group_ratio", "userGroupRatio", "group_special_ratio"]) !== null
+          || firstNumber(candidate, ["group_ratio", "groupRatio", "effective_group_ratio"]) !== null)) ?? null;
+      const rawUserRatio = firstNumber(ratioSource, ["user_group_ratio", "userGroupRatio", "group_special_ratio"]);
+      const rawGroupRatio = firstNumber(ratioSource, ["group_ratio", "groupRatio", "effective_group_ratio"]);
       const userRatio = rawUserRatio !== null && rawUserRatio > 0 ? rawUserRatio : null;
       const groupRatio = rawGroupRatio !== null && rawGroupRatio > 0 ? rawGroupRatio : null;
       const ratio = userRatio ?? groupRatio;
       if (ratio !== null) {
-        const createdAt = firstNumber(item, ["created_at"]);
+        const createdAt = firstNumber(item, ["created_at", "createdAt", "timestamp"]);
+        const observedAt = createdAt === null ? null
+          : new Date(createdAt < 10_000_000_000 ? createdAt * 1000 : createdAt).toISOString();
         billingMultiplier = {
           value: ratio,
           source: "new-api-log",
           scope: userRatio !== null ? "user-group" : "group",
-          observedAt: createdAt === null ? null : new Date(createdAt * 1000).toISOString(),
+          observedAt,
           group: groupRatio,
           user: userRatio,
           peak: null,

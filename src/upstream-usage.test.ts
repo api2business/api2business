@@ -339,6 +339,51 @@ test("falls back to a positive New API group ratio when the user ratio is zero",
   expect(result.billingMultiplier.scope).toBe("group");
 });
 
+test("accepts forked New API log containers and nested billing metadata", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({
+      data: { total_available: 1, unlimited_quota: false },
+    }));
+    if (url.includes("/api/log/token")) return new Response(JSON.stringify({ data: {
+      rows: [{
+        prompt_tokens: 3,
+        completion_tokens: 2,
+        createdAt: 1785585600123,
+        other: JSON.stringify({ billing: { userGroupRatio: 0.23, groupRatio: 0.19 } }),
+      }],
+    } }));
+    return new Response(JSON.stringify({ data: {} }));
+  }) as typeof fetch;
+
+  const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 7 });
+  expect(result.billingMultiplier.value).toBe(0.23);
+  expect(result.billingMultiplier.scope).toBe("user-group");
+  expect(result.billingMultiplier.group).toBe(0.19);
+  expect(result.billingMultiplier.observedAt).toBe("2026-08-01T12:00:00.123Z");
+  expect(result.usage.totalTokens).toBe(5);
+});
+
+test("reads flattened New API ratio fields from a legacy log response", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({
+      data: { total_available: 1, unlimited_quota: false },
+    }));
+    if (url.includes("/api/log/token")) return new Response(JSON.stringify({
+      data: { items: [{ prompt_tokens: 1, completion_tokens: 1, group_ratio: "0.11", created_at: 1785585600 }] },
+    }));
+    return new Response(JSON.stringify({ data: {} }));
+  }) as typeof fetch;
+
+  const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 7 });
+  expect(result.billingMultiplier.value).toBe(0.11);
+  expect(result.billingMultiplier.scope).toBe("group");
+  expect(result.billingMultiplier.observedAt).toBe("2026-08-01T12:00:00.000Z");
+});
+
 test("keeps the New API billing multiplier unknown when all observed ratios are zero", async () => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
