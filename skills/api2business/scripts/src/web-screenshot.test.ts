@@ -1,5 +1,17 @@
 import { expect, test } from "bun:test";
-import { retainScreenshotCopies } from "./web-screenshot";
+import { parseWebProbeOutput, retainScreenshotCopies } from "./web-screenshot";
+
+test("web-probe output keeps the terminal JSON after progress lines", () => {
+  expect(parseWebProbeOutput([
+    "[web-probe] waiting for business selector",
+    "{",
+    '  "ok": true,',
+    '  "action": "screenshot",',
+    '  "valuesPrinted": false',
+    "}",
+  ].join("\n"))).toEqual({ ok: true, action: "screenshot", valuesPrinted: false });
+  expect(parseWebProbeOutput("[web-probe] no terminal result")).toBeNull();
+});
 
 test("screenshot copies are kept per scope and ignore deleted probe directories", () => {
   const copied: string[] = [];

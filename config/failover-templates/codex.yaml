@@ -65,6 +65,7 @@ rules:
   - stream_required
   - 'streaming is required: this endpoint only accepts "stream": true'
   - 'The ''gpt-5.5'' model is not supported when using Codex with a ChatGPT account.'
+  - 'The ''gpt-5.4-mini'' model is not supported when using Codex with a ChatGPT account.'
   - Model gpt-5.4-mini has not been priced by the administrator yet.
   - 'imagegen deployment must be provided through header: x-ms-oai-image-generation-deployment'
   durationMinutes: 3

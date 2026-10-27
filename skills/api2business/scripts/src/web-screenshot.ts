@@ -240,7 +240,7 @@ function retainedScreenshotName(profile: string, scope: string | null, source: s
   return `${safe(profile)}-${safe(scope ?? "default")}-${safe(viewport)}.png`;
 }
 
-function parseWebProbeOutput(stdout: string): Record<string, unknown> | null {
+export function parseWebProbeOutput(stdout: string): Record<string, unknown> | null {
   // WebProbe 的进度行与终态 JSON 可以共存；终态也可以是多行格式。
   const lines = stdout.trim().split(/\r?\n/u);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
