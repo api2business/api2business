@@ -174,6 +174,26 @@ function parseNewApiAccountQuota(payload: unknown, status: Row | null): {
   return { limit: remaining !== null && used !== null ? remaining + used : null, used, remaining };
 }
 
+function parseNewApiTokenUserQuota(payload: unknown, status: Row | null): {
+  limit: number | null;
+  used: number | null;
+  remaining: number | null;
+} | null {
+  const data = newApiData(payload);
+  const userQuota = row(data?.user_quota);
+  if (!userQuota) return null;
+  const remaining = rawNewApiQuotaToUsd(
+    firstNumber(userQuota, ["total_available", "remaining", "quota"]),
+    status,
+  );
+  const used = rawNewApiQuotaToUsd(
+    firstNumber(userQuota, ["total_used", "used_quota", "used"]),
+    status,
+  );
+  if (remaining === null && used === null) return null;
+  return { limit: remaining !== null && used !== null ? remaining + used : null, used, remaining };
+}
+
 async function queryNewApiWalletQuota(
   target: UpstreamUsageTarget,
   timeoutMs: number,
@@ -426,12 +446,14 @@ export async function queryUpstreamUsage(
   }
 
   let accountQuota: { limit: number | null; used: number | null; remaining: number | null } | null = null;
+  let accountQuotaSource: "credentials" | "token-user-quota" | null = null;
   let accountStatus: Row | null = null;
   let walletBalance: UpstreamUsageResult["walletBalance"];
   if (target.newApiCredentials) {
     try {
       const wallet = await queryNewApiWalletQuota(target, options.timeoutMs, options.authCache, options.walletQuotaCache);
       accountQuota = wallet.accountQuota;
+      if (accountQuota) accountQuotaSource = "credentials";
       accountStatus = wallet.status;
       if (accountQuota) walletBalance = { observedAt: wallet.observedAt, sourceAccountId: wallet.sourceAccountId };
       if (!accountQuota) failures.push("New API 登录成功但 /api/user/self 未返回可换算额度");
@@ -443,8 +465,9 @@ export async function queryUpstreamUsage(
   try {
     const quotaResponse = await requestJson(target, "/api/usage/token/", options.timeoutMs);
     const quota = newApiData(quotaResponse.payload);
+    const hasUserQuota = quota !== null && row(quota.user_quota) !== null;
     if (accountQuota || (quotaResponse.status >= 200 && quotaResponse.status < 300 && quota
-      && (quota.total_available !== undefined || quota.unlimited_quota !== undefined))) {
+      && (quota.total_available !== undefined || quota.unlimited_quota !== undefined || hasUserQuota))) {
       const result = emptyResult(target, startedAt, options.days);
       result.ok = true;
       result.provider = "new-api";
@@ -462,6 +485,13 @@ export async function queryUpstreamUsage(
         }
       }
       const quotaPerUnit = firstNumber(status, ["quota_per_unit"]);
+      if (!accountQuota) {
+        const tokenUserQuota = parseNewApiTokenUserQuota(quotaResponse.payload, status);
+        if (tokenUserQuota) {
+          accountQuota = tokenUserQuota;
+          accountQuotaSource = "token-user-quota";
+        }
+      }
       const unlimited = typeof quota?.unlimited_quota === "boolean" ? quota.unlimited_quota : null;
       const rawLimit = firstNumber(quota, ["total_granted"]);
       const tokenLimitUsd = quotaPerUnit !== null && quotaPerUnit > 0 && rawLimit !== null
@@ -469,7 +499,11 @@ export async function queryUpstreamUsage(
       result.quota = accountQuota
         ? { ...accountQuota, unlimited: false, unit: "USD" }
         : { limit: null, used: null, remaining: null, unlimited, unit: null };
-      if (accountQuota) result.warning = "New API 余额取自账号密码登录后的 /api/user/self";
+      if (accountQuotaSource === "credentials") {
+        result.warning = "New API 余额取自账号密码登录后的 /api/user/self";
+      } else if (accountQuotaSource === "token-user-quota") {
+        result.warning = "New API 余额取自 API Key 授权返回的 user_quota（令牌所属用户整体额度）";
+      }
       if (!accountQuota) {
         try {
           const [subscriptionResponse, billingResponse] = await Promise.all([

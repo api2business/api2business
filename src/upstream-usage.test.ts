@@ -106,6 +106,36 @@ test("does not misreport a finite New API key quota as account balance", async (
   expect(result.billingMultiplier.scope).toBe("user-group");
 });
 
+test("uses New API token user_quota as the whole account remaining balance", async () => {
+  const requests: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/api/usage/token/")) {
+      return new Response(JSON.stringify({ data: {
+        total_granted: 100,
+        total_used: 20,
+        total_available: 80,
+        unlimited_quota: true,
+        user_quota: { total_available: 4_500_000, total_used: 1_500_000 },
+      } }));
+    }
+    if (url.endsWith("/api/status")) {
+      return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
+    }
+    if (url.endsWith("/api/log/token")) return new Response(JSON.stringify({ data: [] }));
+    if (url.includes("/dashboard/billing/")) throw new Error("dashboard billing must not be queried");
+    return new Response(JSON.stringify({ data: {} }));
+  }) as typeof fetch;
+
+  const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 7 });
+  expect(requests).not.toContain("https://api.example.com/dashboard/billing/subscription");
+  expect(result.provider).toBe("new-api");
+  expect(result.quota).toEqual({ limit: 12, used: 3, remaining: 9, unlimited: false, unit: "USD" });
+  expect(result.warning).toContain("user_quota");
+});
+
 test("reads New API account balance with username/password login", async () => {
   const requests: string[] = [];
   const loginTarget = { ...target, newApiCredentials: { username: "user@example.com", password: "secret" } };
