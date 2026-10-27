@@ -28,8 +28,11 @@ rules:
   - account balance depleted
   - invalid api key
   - invalid_api_key
+  - API Key 所属分组已删除
+  - Balance is below the configured minimum reserve. Please top up to continue.
+  - 'error code: 1010'
   durationMinutes: 10
-  description: Claude 上游余额不足或 API key 失效
+  description: Claude 上游余额不足、API key 失效或所属分组已删除
 - errorCode: 502
   keywords:
   - upstream access forbidden
@@ -43,6 +46,7 @@ rules:
   - upstream stream disconnected
   - stream_read_error
   - origin web server returned an invalid or incomplete response
+  - Part of the response never arrived
   - bad_response_status_code
   durationMinutes: 3
   description: Claude 上游网关、流中断或包装层故障

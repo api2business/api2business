@@ -173,6 +173,10 @@ test("failover template uses the Sub2API native error_code schema", async () => 
   expect(badResponseRule?.keywords).toContain("Model gpt-5.4-mini has not been priced by the administrator yet.");
   expect(codexTemplate).not.toContain("statusCode:");
   expect(codexTemplate).not.toMatch(/errorCode: 503[\s\S]*model_not_found/u);
+  const serviceUnavailableRule = parsed.operations.upstreamManagement.failoverRules.find(
+    (rule) => rule.error_code === 503 && rule.keywords.includes("service temporarily unavailable"),
+  );
+  expect(serviceUnavailableRule?.duration_minutes).toBe(3);
   expect(codexTemplate).toContain("description: 上游明确返回 gpt-5.6-terra、gpt-5.6-sol 或 gpt-6.1-sol 的 Provider 不支持、模型尚未定价、模型容量、工具调用上下文缺失、临时过载、包装层故障或供应商上下文空间故障");
 });
 
@@ -403,6 +407,15 @@ test("keeps Codex and Claude templates as separate platform files", () => {
   const firstForbiddenMatch = claude.rules.find((rule) =>
     rule.error_code === 502 && rule.keywords.some((keyword) => forbiddenBody.includes(keyword.toLowerCase())));
   expect(firstForbiddenMatch).toBe(accessForbiddenRule);
+  const deletedGroupRule = claude.rules.find((rule) =>
+    rule.error_code === 403 && rule.keywords.includes("API Key 所属分组已删除"));
+  expect(deletedGroupRule?.duration_minutes).toBe(10);
+  expect(claude.rules.find((rule) => rule.error_code === 403 && rule.keywords.some((keyword) =>
+    JSON.stringify({ error: { message: "API Key 所属分组已删除" } }).toLowerCase().includes(keyword.toLowerCase()))))
+    .toBe(deletedGroupRule);
+  const incompleteStreamRule = claude.rules.find((rule) =>
+    rule.error_code === 502 && rule.keywords.includes("Part of the response never arrived"));
+  expect(incompleteStreamRule?.duration_minutes).toBe(3);
   expect(claude.rules.flatMap((rule) => rule.keywords)).toContain("api is at capacity");
   expect(claude.rules.find((rule) => rule.error_code === 520)?.duration_minutes).toBe(3);
   expect(claude.rules.flatMap((rule) => rule.keywords).some((keyword) => /gpt-/u.test(keyword))).toBe(false);

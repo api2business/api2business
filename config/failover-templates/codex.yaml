@@ -64,6 +64,7 @@ rules:
   - no tool call found for function call output
   - stream_required
   - 'streaming is required: this endpoint only accepts "stream": true'
+  - 'The ''gpt-5.5'' model is not supported when using Codex with a ChatGPT account.'
   - Model gpt-5.4-mini has not been priced by the administrator yet.
   - 'imagegen deployment must be provided through header: x-ms-oai-image-generation-deployment'
   durationMinutes: 3
@@ -145,6 +146,7 @@ rules:
 - errorCode: 503
   keywords:
   - upstream service temporarily unavailable
+  - service temporarily unavailable
   - 服务暂时繁忙，请稍后重试
   - overloaded
   - origin web server returned an invalid or incomplete response

@@ -37,6 +37,11 @@ rules:
   - 余额不足
   durationMinutes: 10
   description: DeepSeek 权限或余额拒绝
+- errorCode: 404
+  keywords:
+  - 'Model "deepseek-flash" is not supported by any configured account in this group'
+  durationMinutes: 3
+  description: DeepSeek 明确返回 deepseek-flash 模型不可用时短暂切号
 - errorCode: 429
   keywords:
   - rate limit
@@ -77,3 +82,13 @@ rules:
   - request timeout
   durationMinutes: 3
   description: DeepSeek 上游超时
+- errorCode: 520
+  keywords:
+  - The origin web server sent a response that Cloudflare could not parse
+  durationMinutes: 3
+  description: DeepSeek 上游 Cloudflare 520 origin 响应不可解析时短暂切号
+- errorCode: 524
+  keywords:
+  - '524: A timeout occurred'
+  durationMinutes: 3
+  description: DeepSeek 上游明确返回 524 超时页面时短暂切号
