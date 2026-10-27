@@ -20,7 +20,8 @@
   - `unavailable` 与 `unschedulableRemainingCny` 是总余额减可用额度，包含欠费。
   - 历史成功余额回填的 `--remaining-usd` 接受带符号有限数值，未知值不能当成零。
 - 余额钱包身份由 owning YAML 的 `sub2api.newApiCredentials[].walletKey` 定义；同一钱包可以
-  通过多个 API host、`/v1` 别名或多个平台账号访问。未配置 `walletKey` 时才回退到去除
+  通过多个 API host、`/v1` 别名或多个平台账号访问。额度探测只使用上游 API Key 请求；
+  `newApiCredentials[].username/password` 不参与探测。未配置 `walletKey` 时才回退到去除
   末尾斜杠并归一化 `/v1` 的上游地址。页面、账号缓存、V2 作用域和趋势采样都使用这个
   钱包身份，不能在页面另造 URL 映射。
 - 充值账本仍按充值命令传入的规范化 `base_url` 记账；它与余额读取的 `walletKey` 是两个
@@ -48,8 +49,8 @@
 
 - 正确做法：在 owning YAML 为同一供应商钱包的每个可读 host 声明同一个 `walletKey`，
   Secret 只复用 `sourceRef` 和 `sourceKey`，不把用户名、密码或 Token 写进配置。
-- 正确做法：凭据查找使用归一化后的钱包地址，因此 `https://host` 与
-  `https://host/v1` 命中同一份只读登录凭据；结果再写入统一的上游额度缓存。
+- 正确做法：钱包别名使用归一化后的钱包地址，因此 `https://host` 与
+  `https://host/v1` 命中同一份 API Key 钱包证据；结果再写入统一的上游额度缓存。
 - 正确做法：V2 读取完整额度缓存后按 `walletKey` 选择最新成功的有限 USD 余额，投影到
   Codex、Claude、Grok 等作用域的同钱包账号；账号仍保留自己的用量、成本、状态和质量字段。
 - 正确做法：读取历史 V2 快照时也重新投影 `accountBalanceCny`；旧快照缺少该字段不等于
@@ -64,7 +65,8 @@
   - 缓存写入、账号日志读取和报告生成时间不能刷新余额新鲜度。
   - 失败、限流、`null`、API Key 配额或“不限额”不能覆盖已有的有限钱包余额。
 - 同一 `walletKey` 每轮只采纳一次钱包余额，其他账号和作用域复用相同金额、来源与时间。
-  - New API 的登录和 `/api/user/self` 请求按钱包合并，成功和失败都在单轮内复用。
+  - New API 只通过 `/api/usage/token/`、`/api/status`、公开 billing 和 token 日志 API 读取；
+    不调用登录、Refresh 或 `/api/user/self`。
   - Sub2API `/v1/usage` 同时返回各 API Key 的用量和钱包余额。
   - 各 Key 用量和倍率仍独立读取，只采纳首份成功钱包余额，不另发余额请求。
   - 不将一个 Key 的用量、倍率或请求成功状态复制给其他 Key。
@@ -145,12 +147,10 @@
   - 原始失败记录保留，不为平滑曲线修改数据库审计事实。
 - 余额采样由 owning YAML 的 `operations.upstreamManagement.quotaSampleIntervalSeconds` 控制，当前值为
   `600`，即每 10 分钟写入一次持久化额度样本；现场修改配置后必须通过项目 CLI 重启运行面。
-- 同一 `walletKey` 在一个采样轮次只读取一次账号钱包余额证据；多个 API host 和账号复用该轮次结果，账号自己的 token 用量仍按账号读取。
-  New API 登录态在进程内跨轮次复用，并在 Access Token 到期后使用 Refresh Cookie 续期，不能每轮重新签发登录 Session。
-- `429 AUTH_SESSION_ISSUANCE_LIMIT` 表示上游拒绝新 Session 签发，不是余额为零；保持上一份成功钱包余额，等待既有登录态续期或上游限流窗口恢复。限流失败在进程内冷却 30 分钟，同一钱包不会在每个采样轮次重复申请登录。
-- `AUTH_CAPTCHA_REQUIRED` 表示供应商要求验证码核验，即使 HTTP 为 200 也不是登录成功。
-  - 保留余额旧来源时间；先完成供应商正常核验或使用其支持的已授权余额读取凭据。
-  - 不反复重启 Api2Business、不绕过验证码，不把 API Key 不限额当作钱包余额恢复。
+- 同一 `walletKey` 在一个采样轮次只读取一次 API Key 钱包余额证据；多个 API host 和账号复用该轮次结果，账号自己的 token 用量仍按账号读取。
+- 额度采样不创建登录 Session，不调用登录、Refresh 或 `/api/user/self`，因此不处理
+  `AUTH_SESSION_ISSUANCE_LIMIT`、`AUTH_SESSION_LIMIT` 或 `AUTH_CAPTCHA_REQUIRED`。
+  API Key 未返回整体钱包证据时保持“仅 Key 配额/未知”，不能把它当作钱包余额恢复。
   - 同一钱包在单轮中复用成功或失败结果，其他账号别名不重复登录；下一轮仍可重新尝试。
 - 曲线读取 `/api/upstreams/quota-summary` 返回的同一缓存摘要，不另起额度拉取或缓存；前端复用
   `historyChartMarkup` 绘制 Codex 混池、不降智、Claude、Claude Kiro、Grok 五条人民币余额曲线，共用采样时间轴。

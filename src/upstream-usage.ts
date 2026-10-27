@@ -1,14 +1,10 @@
 import { normalizeUpstreamWallet } from "./upstream-valuation";
-import { newApiLoginSession, type NewApiAuthCache, type NewApiSession } from "./new-api-auth";
-export type { NewApiAuthCache } from "./new-api-auth";
 
 export interface UpstreamUsageTarget {
   id: number;
   name: string;
   baseUrl: string;
   apiKey: string;
-  newApiCredentials?: { username: string; password: string };
-  credentialError?: string;
   walletKey?: string;
   status?: string;
   schedulable?: boolean;
@@ -63,8 +59,6 @@ export interface UpstreamUsageResult {
 
 type Row = Record<string, unknown>;
 type NewApiAccountQuota = { limit: number | null; used: number | null; remaining: number | null };
-type NewApiWalletQuota = { accountQuota: NewApiAccountQuota | null; status: Row | null; session: NewApiSession; observedAt: string; sourceAccountId: number };
-type NewApiWalletQuotaCache = Map<string, Promise<NewApiWalletQuota>>;
 
 function row(value: unknown): Row | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
@@ -125,28 +119,6 @@ async function requestJson(target: UpstreamUsageTarget, path: string, timeoutMs:
   return { status: response.status, payload };
 }
 
-async function requestJsonWithToken(target: UpstreamUsageTarget, path: string, timeoutMs: number, token: string): Promise<{
-  status: number;
-  payload: unknown;
-}> {
-  const controlBaseUrl = (target.walletKey ?? target.baseUrl).replace(/\/$/u, "").replace(/\/v1$/u, "");
-  const response = await fetch(`${controlBaseUrl}${path}`, {
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: "application/json",
-      "user-agent": "Api2Business-Upstream-Usage/1.0",
-    },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const text = await response.text();
-  let payload: unknown = null;
-  if (text.trim()) {
-    try { payload = JSON.parse(text) as unknown; }
-    catch { payload = { error: `上游返回非 JSON 响应（HTTP ${response.status}）` }; }
-  }
-  return { status: response.status, payload };
-}
-
 function rawNewApiQuotaToUsd(value: number | null, status: Row | null): number | null {
   if (value === null) return null;
   const quotaPerUnit = firstNumber(status, ["quota_per_unit"]);
@@ -159,19 +131,6 @@ function rawNewApiQuotaToUsd(value: number | null, status: Row | null): number |
     return exchangeRate !== null && exchangeRate > 0 ? usd * exchangeRate : null;
   }
   return usd;
-}
-
-function parseNewApiAccountQuota(payload: unknown, status: Row | null): {
-  limit: number | null;
-  used: number | null;
-  remaining: number | null;
-} | null {
-  const data = newApiData(payload);
-  if (!data || data.quota === undefined && data.used_quota === undefined) return null;
-  const remaining = rawNewApiQuotaToUsd(firstNumber(data, ["quota"]), status);
-  const used = rawNewApiQuotaToUsd(firstNumber(data, ["used_quota"]), status);
-  if (remaining === null && used === null) return null;
-  return { limit: remaining !== null && used !== null ? remaining + used : null, used, remaining };
 }
 
 function parseNewApiTokenUserQuota(payload: unknown, status: Row | null): {
@@ -192,38 +151,6 @@ function parseNewApiTokenUserQuota(payload: unknown, status: Row | null): {
   );
   if (remaining === null && used === null) return null;
   return { limit: remaining !== null && used !== null ? remaining + used : null, used, remaining };
-}
-
-async function queryNewApiWalletQuota(
-  target: UpstreamUsageTarget,
-  timeoutMs: number,
-  authCache: NewApiAuthCache | undefined,
-  walletQuotaCache: NewApiWalletQuotaCache | undefined,
-): Promise<NewApiWalletQuota> {
-  const key = normalizeUpstreamWallet(target.walletKey ?? target.baseUrl);
-  const existing = walletQuotaCache?.get(key);
-  if (existing) return await existing;
-  const request = (async () => {
-    let session = await newApiLoginSession(target, timeoutMs, authCache);
-    let statusResponse = await requestJsonWithToken(target, "/api/status", timeoutMs, session.token);
-    let status = statusResponse.status >= 200 && statusResponse.status < 300 ? newApiData(statusResponse.payload) : null;
-    let selfResponse = await requestJsonWithToken(target, "/api/user/self", timeoutMs, session.token);
-    if ((statusResponse.status === 401 || statusResponse.status === 403 || selfResponse.status === 401 || selfResponse.status === 403) && authCache) {
-      session = await newApiLoginSession(target, timeoutMs, authCache, session.token);
-      statusResponse = await requestJsonWithToken(target, "/api/status", timeoutMs, session.token);
-      status = statusResponse.status >= 200 && statusResponse.status < 300 ? newApiData(statusResponse.payload) : null;
-      selfResponse = await requestJsonWithToken(target, "/api/user/self", timeoutMs, session.token);
-    }
-    if (selfResponse.status < 200 || selfResponse.status >= 300) {
-      throw new Error(`New API 登录成功但 /api/user/self HTTP ${selfResponse.status}`);
-    }
-    return { accountQuota: parseNewApiAccountQuota(selfResponse.payload, status), status, session,
-      observedAt: new Date().toISOString(), sourceAccountId: target.id };
-  })();
-  walletQuotaCache?.set(key, request);
-  // This cache lives for one sampling round. Reuse failure as well as success
-  // so aliases do not repeatedly log into a wallet rejected by the provider.
-  return await request;
 }
 
 function emptyResult(target: UpstreamUsageTarget, startedAt: number, days: number): UpstreamUsageResult {
@@ -412,14 +339,9 @@ function parseNewApiLogs(payload: unknown): {
 
 export async function queryUpstreamUsage(
   target: UpstreamUsageTarget,
-  options: { timeoutMs: number; days: number; authCache?: NewApiAuthCache; walletQuotaCache?: NewApiWalletQuotaCache },
+  options: { timeoutMs: number; days: number },
 ): Promise<UpstreamUsageResult> {
   const startedAt = Date.now();
-  if (target.credentialError) {
-    const result = emptyResult(target, startedAt, options.days);
-    result.error = target.credentialError;
-    return result;
-  }
   const failures: string[] = [];
   try {
     const response = await requestJson(target, `/v1/usage?days=${options.days}`, options.timeoutMs);
@@ -446,21 +368,7 @@ export async function queryUpstreamUsage(
   }
 
   let accountQuota: { limit: number | null; used: number | null; remaining: number | null } | null = null;
-  let accountQuotaSource: "credentials" | "token-user-quota" | null = null;
-  let accountStatus: Row | null = null;
-  let walletBalance: UpstreamUsageResult["walletBalance"];
-  if (target.newApiCredentials) {
-    try {
-      const wallet = await queryNewApiWalletQuota(target, options.timeoutMs, options.authCache, options.walletQuotaCache);
-      accountQuota = wallet.accountQuota;
-      if (accountQuota) accountQuotaSource = "credentials";
-      accountStatus = wallet.status;
-      if (accountQuota) walletBalance = { observedAt: wallet.observedAt, sourceAccountId: wallet.sourceAccountId };
-      if (!accountQuota) failures.push("New API 登录成功但 /api/user/self 未返回可换算额度");
-    } catch (error) {
-      failures.push(`New API 账号密码登录 ${safeError(error)}`);
-    }
-  }
+  let accountQuotaSource: "token-user-quota" | null = null;
 
   try {
     const quotaResponse = await requestJson(target, "/api/usage/token/", options.timeoutMs);
@@ -471,18 +379,12 @@ export async function queryUpstreamUsage(
       const result = emptyResult(target, startedAt, options.days);
       result.ok = true;
       result.provider = "new-api";
-      result.walletBalance = walletBalance;
-      let status = accountStatus;
-      if (!status) {
-        try {
-          const statusResponse = await requestJson(target, "/api/status", options.timeoutMs);
-          if (statusResponse.status >= 200 && statusResponse.status < 300) {
-            status = newApiData(statusResponse.payload);
-            accountStatus = status;
-          }
-        } catch {
-          // The token endpoint remains useful when older New API forks do not expose status.
-        }
+      let status: Row | null = null;
+      try {
+        const statusResponse = await requestJson(target, "/api/status", options.timeoutMs);
+        if (statusResponse.status >= 200 && statusResponse.status < 300) status = newApiData(statusResponse.payload);
+      } catch {
+        // The token endpoint remains useful when older New API forks do not expose status.
       }
       const quotaPerUnit = firstNumber(status, ["quota_per_unit"]);
       if (!accountQuota) {
@@ -499,9 +401,7 @@ export async function queryUpstreamUsage(
       result.quota = accountQuota
         ? { ...accountQuota, unlimited: false, unit: "USD" }
         : { limit: null, used: null, remaining: null, unlimited, unit: null };
-      if (accountQuotaSource === "credentials") {
-        result.warning = "New API 余额取自账号密码登录后的 /api/user/self";
-      } else if (accountQuotaSource === "token-user-quota") {
+      if (accountQuotaSource === "token-user-quota") {
         result.warning = "New API 余额取自 API Key 授权返回的 user_quota（令牌所属用户整体额度）";
       }
       if (!accountQuota) {
@@ -532,7 +432,6 @@ export async function queryUpstreamUsage(
           } else {
             result.warning = [
               "New API 只返回 API Key 配额；缺少可证明账号钱包余额的 Dashboard/PAT 凭据",
-              ...failures.filter((failure) => failure.startsWith("New API 账号密码登录")),
             ].join("；");
           }
         } catch (error) {
@@ -578,11 +477,9 @@ export async function queryUpstreamUsage(
 
 export async function queryUpstreamUsageConcurrently(
   targets: UpstreamUsageTarget[],
-  options: { timeoutMs: number; days: number; concurrency: number; authCache?: NewApiAuthCache },
+  options: { timeoutMs: number; days: number; concurrency: number },
 ): Promise<UpstreamUsageResult[]> {
   const results = new Array<UpstreamUsageResult>(targets.length);
-  const authCache: NewApiAuthCache = new Map();
-  const walletQuotaCache: NewApiWalletQuotaCache = new Map();
   let next = 0;
   const workers = Array.from({ length: Math.min(options.concurrency, targets.length) }, async () => {
     for (;;) {
@@ -590,8 +487,6 @@ export async function queryUpstreamUsageConcurrently(
       if (index >= targets.length) return;
       results[index] = await queryUpstreamUsage(targets[index]!, {
         ...options,
-        authCache: options.authCache ?? authCache,
-        walletQuotaCache,
       });
     }
   });

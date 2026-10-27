@@ -8,7 +8,6 @@ import { dirname, join } from "node:path";
 import { readApiKeyCutoffEvents, recordApiKeyCutoffEvent, type ApiKeyCutoffTrigger } from "./api-key-cutoff-ledger";
 import {
   queryUpstreamUsageConcurrently,
-  type NewApiAuthCache,
   type UpstreamUsageResult,
   type UpstreamUsageTarget,
 } from "./upstream-usage";
@@ -24,7 +23,6 @@ import {
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
 import { providerActualCostUsd, upstreamCostBasisSql } from "./upstream-cost-sql";
-import { readNewApiCredential } from "./secrets";
 import { configuredWalletKey } from "./upstream-wallet";
 import { initializeUpstreams } from "./upstream-onboarding";
 
@@ -388,10 +386,6 @@ function isAlreadyExistsError(error: unknown): boolean {
 
 export class UpstreamManagementService {
   private ledgerWriteChain: Promise<void> = Promise.resolve();
-  // New API limits session issuance. Keep one login promise per shared wallet
-  // across sampling rounds; queryUpstreamUsage removes it after expiry or a
-  // rejected session response.
-  private readonly newApiAuthCache: NewApiAuthCache = new Map();
   private readonly pendingOperations = new Map<string, {
     operation: UpstreamWorkerOperation;
     submitted: Record<string, unknown>;
@@ -1088,28 +1082,21 @@ export class UpstreamManagementService {
     });
     const targets = query.rows.map((item): UpstreamUsageTarget => {
       const baseUrl = normalizeBaseUrl(String(item.base_url ?? ""));
-      let credentials: ReturnType<typeof readNewApiCredential>;
-      let credentialError: string | undefined;
-      try { credentials = readNewApiCredential(this.config, baseUrl); }
-      catch { credentialError = "钱包登录凭据不可读取，请核对 owning Secret sourceRef/sourceKey 及运行面只读挂载"; }
       return {
-      id: Number(item.id),
-      name: String(item.name ?? ""),
-      baseUrl,
-      apiKey: String(item.api_key ?? ""),
-      newApiCredentials: credentials,
-      credentialError,
-      walletKey: configuredWalletKey(baseUrl, this.config.sub2api.newApiCredentials),
-      status: String(item.status ?? "unknown"),
-      schedulable: item.schedulable === true,
-      apiAmountUsdTotal: Number(item.account_api_amount_usd_total ?? 0),
+        id: Number(item.id),
+        name: String(item.name ?? ""),
+        baseUrl,
+        apiKey: String(item.api_key ?? ""),
+        walletKey: configuredWalletKey(baseUrl, this.config.sub2api.newApiCredentials),
+        status: String(item.status ?? "unknown"),
+        schedulable: item.schedulable === true,
+        apiAmountUsdTotal: Number(item.account_api_amount_usd_total ?? 0),
       };
     });
     const results = await queryUpstreamUsageConcurrently(targets, {
       concurrency: settings.usageConcurrency,
       timeoutMs: settings.usageTimeoutMs,
       days: settings.usageDays,
-      authCache: this.newApiAuthCache,
     });
     return {
       ok: true,

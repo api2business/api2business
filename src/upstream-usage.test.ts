@@ -136,76 +136,6 @@ test("uses New API token user_quota as the whole account remaining balance", asy
   expect(result.warning).toContain("user_quota");
 });
 
-test("reads New API account balance with username/password login", async () => {
-  const requests: string[] = [];
-  const loginTarget = { ...target, newApiCredentials: { username: "user@example.com", password: "secret" } };
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    requests.push(`${init?.method ?? "GET"} ${url}`);
-    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
-    if (url.endsWith("/api/user/login/encryption-key")) {
-      return new Response(JSON.stringify({ success: true, data: { enabled: false } }));
-    }
-    if (url.endsWith("/api/user/login")) {
-      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, string>;
-      expect(body.username).toBe("user@example.com");
-      expect(body.password).toBe("secret");
-      return new Response(JSON.stringify({ success: true, data: { access_token: "login-token" } }));
-    }
-    if (url.endsWith("/api/status")) {
-      return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
-    }
-    if (url.endsWith("/api/user/self")) {
-      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer login-token");
-      return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
-    }
-    if (url.endsWith("/api/usage/token/") || url.endsWith("/api/log/token")) {
-      return new Response(JSON.stringify({ success: false }), { status: 401 });
-    }
-    return new Response(JSON.stringify({ data: {} }));
-  }) as typeof fetch;
-
-  const result = await queryUpstreamUsage(loginTarget, { timeoutMs: 100, days: 7 });
-  expect(result.provider).toBe("new-api");
-  expect(result.quota).toEqual({ limit: (14_654_923 + 455_248_028) / 500_000, used: 455_248_028 / 500_000, remaining: 14_654_923 / 500_000, unlimited: false, unit: "USD" });
-  expect(result.warning).toContain("账号密码登录");
-  expect(requests).toContain("POST https://api.example.com/api/user/login");
-  expect(requests).toContain("GET https://api.example.com/api/user/self");
-});
-
-test("deduplicates New API wallet login across concurrent account aliases", async () => {
-  let loginCount = 0;
-  let selfCount = 0;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
-    if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
-    if (url.endsWith("/api/user/login")) {
-      loginCount += 1;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      return new Response(JSON.stringify({ data: { access_token: "shared-login-token" } }));
-    }
-    if (url.endsWith("/api/status")) return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
-    if (url.endsWith("/api/user/self")) {
-      selfCount += 1;
-      return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
-    }
-    if (url.endsWith("/api/usage/token/") || url.endsWith("/api/log/token")) return new Response(JSON.stringify({ success: false }), { status: 401 });
-    return new Response(JSON.stringify({ data: {} }));
-  }) as typeof fetch;
-
-  const results = await queryUpstreamUsageConcurrently([
-    { ...target, id: 12, walletKey: "https://www.sheapi.cc", newApiCredentials: { username: "wallet-user", password: "secret" } },
-    { ...target, id: 13, baseUrl: "https://cf.sheapi.cc/v1", walletKey: "https://www.sheapi.cc", newApiCredentials: { username: "wallet-alias", password: "secret" } },
-  ], { timeoutMs: 100, days: 7, concurrency: 2 });
-
-  expect(loginCount).toBe(1);
-  expect(selfCount).toBe(1);
-  expect(results.map((result) => result.quota.remaining)).toEqual([14_654_923 / 500_000, 14_654_923 / 500_000]);
-  expect(results[0]!.walletBalance).toEqual(results[1]!.walletBalance);
-  expect(results[0]!.walletBalance?.sourceAccountId).toBe(12);
-});
-
 test("one shared wallet fact per round preserves each Sub2API key's usage and billing", async () => {
   let round = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -238,117 +168,26 @@ test("Sub2API key quotas cannot become shared wallet balances", async () => {
   expect(result.warning).toContain("只返回 API Key 配额");
 });
 
-test("captcha login rejection is shared for one round and never refreshes wallet balance", async () => {
-  let loginCount = 0;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+test("uses API Key requests only and never attempts New API login", async () => {
+  const requests: string[] = [];
+  globalThis.fetch = (async (input, init) => {
     const url = String(input);
-    if (url.endsWith("/api/user/login/encryption-key")) return new Response("{}", { status: 404 });
-    if (url.endsWith("/api/user/login")) {
-      loginCount += 1;
-      return new Response(JSON.stringify({ success: false, message: "验证码校验失败" }));
-    }
-    if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({ data: { unlimited_quota: true } }));
-    if (url.includes("/v1/usage")) return new Response("{}", { status: 404 });
-    return new Response(JSON.stringify({ data: {} }));
-  }) as typeof fetch;
-  const targets = [12, 13, 14].map((id) => ({ ...target, id, walletKey: "https://wallet.example.com",
-    newApiCredentials: { username: "test-user", password: "test-password" } }));
-  const authCache = new Map();
-  const first = await queryUpstreamUsageConcurrently(targets, { timeoutMs: 100, days: 7, concurrency: 1, authCache });
-  expect(loginCount).toBe(1);
-  for (const result of first) {
-    expect(result.warning).toContain("AUTH_CAPTCHA_REQUIRED");
-    expect(result.quota.remaining).toBeNull();
-    expect(result.quota.unit).toBeNull();
-    expect(result.warning).not.toContain("test-password");
-  }
-  await queryUpstreamUsageConcurrently(targets, { timeoutMs: 100, days: 7, concurrency: 1, authCache });
-  expect(loginCount).toBe(2);
-});
-
-test("reuses a New API wallet login across sampling rounds", async () => {
-  let loginCount = 0;
-  const authCache = new Map();
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
+    requests.push(`${init?.method ?? "GET"} ${url}`);
     if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
-    if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
-    if (url.endsWith("/api/user/login")) {
-      loginCount += 1;
-      return new Response(JSON.stringify({ data: { access_token: "opaque-wallet-token" } }));
-    }
-    if (url.endsWith("/api/status")) return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
-    if (url.endsWith("/api/user/self")) return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
-    if (url.endsWith("/api/usage/token/") || url.endsWith("/api/log/token")) return new Response(JSON.stringify({ success: false }), { status: 401 });
-    return new Response(JSON.stringify({ data: {} }));
-  }) as unknown as typeof fetch;
-
-  const first = await queryUpstreamUsage({ ...target, newApiCredentials: { username: "wallet-user", password: "secret" } }, { timeoutMs: 100, days: 7, authCache });
-  const second = await queryUpstreamUsage({ ...target, newApiCredentials: { username: "wallet-user", password: "secret" } }, { timeoutMs: 100, days: 7, authCache });
-  expect(loginCount).toBe(1);
-  expect(first.quota.remaining).toBe(14_654_923 / 500_000);
-  expect(second.quota.remaining).toBe(14_654_923 / 500_000);
-});
-
-test.each([
-  { status: 429, code: "AUTH_SESSION_ISSUANCE_LIMIT" },
-  { status: 409, code: "AUTH_SESSION_LIMIT" },
-])("backs off a session-limited New API wallet login across sampling rounds: $code", async ({ status, code }) => {
-  let loginCount = 0;
-  const authCache = new Map();
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
-    if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
-    if (url.endsWith("/api/user/login")) {
-      loginCount += 1;
-      return new Response(JSON.stringify({ code, message: "Session issuance rejected" }), { status });
-    }
-    if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({ data: { total_available: 1, unlimited_quota: false } }));
+    if (url.endsWith("/api/usage/token/")) return new Response(JSON.stringify({ data: {
+      total_available: 100, total_used: 20, unlimited_quota: false,
+      user_quota: { total_available: 4_500_000, total_used: 1_500_000 },
+    } }));
+    if (url.endsWith("/api/status")) return new Response(JSON.stringify({ data: { quota_per_unit: 500_000 } }));
     if (url.endsWith("/api/log/token")) return new Response(JSON.stringify({ data: [] }));
-    return new Response(JSON.stringify({ data: {} }));
-  }) as unknown as typeof fetch;
+    throw new Error(`unexpected request: ${url}`);
+  }) as typeof fetch;
 
-  const loginTarget = { ...target, newApiCredentials: { username: "wallet-user", password: "secret" } };
-  const first = await queryUpstreamUsage(loginTarget, { timeoutMs: 100, days: 7, authCache });
-  const second = await queryUpstreamUsage(loginTarget, { timeoutMs: 100, days: 7, authCache });
-  expect(loginCount).toBe(1);
-  expect(first.warning).toContain(code);
-  expect(second.warning).toContain(code);
-  expect(first.walletBalance).toBeUndefined();
-  expect(second.walletBalance).toBeUndefined();
-  expect([...authCache.values()][0].retryAtMs).toBeGreaterThan(Date.now());
-});
-
-test("refreshes an expired New API session without issuing another login", async () => {
-  let loginCount = 0;
-  let refreshCount = 0;
-  const authCache = new Map();
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.endsWith("/v1/usage?days=7")) return new Response("not found", { status: 404 });
-    if (url.endsWith("/api/user/login/encryption-key")) return new Response(JSON.stringify({ data: { enabled: false } }));
-    if (url.endsWith("/api/user/login")) {
-      loginCount += 1;
-      return new Response(JSON.stringify({ data: { access_token: "login-token", access_expires_at: Math.floor(Date.now() / 1000) + 1, session: { sid: "sid-1" } } }), { headers: { "set-cookie": "new_api_refresh=refresh-1; Path=/api/user/auth" } });
-    }
-    if (url.endsWith("/api/user/auth/refresh")) {
-      refreshCount += 1;
-      return new Response(JSON.stringify({ data: { access_token: "refreshed-token", access_expires_at: Math.floor(Date.now() / 1000) + 900, session: { sid: "sid-1" } } }), { headers: { "set-cookie": "new_api_refresh=refresh-2; Path=/api/user/auth" } });
-    }
-    if (url.endsWith("/api/status")) return new Response(JSON.stringify({ data: { quota_per_unit: 500_000, quota_display_type: "USD" } }));
-    if (url.endsWith("/api/user/self")) return new Response(JSON.stringify({ data: { quota: 14_654_923, used_quota: 455_248_028 } }));
-    if (url.endsWith("/api/usage/token/") || url.endsWith("/api/log/token")) return new Response(JSON.stringify({ success: false }), { status: 401 });
-    return new Response(JSON.stringify({ data: {} }));
-  }) as unknown as typeof fetch;
-
-  const firstTarget = { ...target, newApiCredentials: { username: "wallet-user", password: "secret" } };
-  const first = await queryUpstreamUsage(firstTarget, { timeoutMs: 100, days: 7, authCache });
-  const second = await queryUpstreamUsage(firstTarget, { timeoutMs: 100, days: 7, authCache });
-  expect(loginCount).toBe(1);
-  expect(refreshCount).toBe(1);
-  expect(first.quota.remaining).toBe(14_654_923 / 500_000);
-  expect(second.quota.remaining).toBe(14_654_923 / 500_000);
+  const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 7 });
+  expect(result.provider).toBe("new-api");
+  expect(result.quota).toEqual({ limit: 12, used: 3, remaining: 9, unlimited: false, unit: "USD" });
+  expect(requests.some((request) => request.includes("/api/user/login"))).toBeFalse();
+  expect(requests.some((request) => request.includes("/api/user/self"))).toBeFalse();
 });
 
 test("falls back to a positive New API group ratio when the user ratio is zero", async () => {

@@ -15,7 +15,6 @@ function parseEnv(text: string): Map<string, string> {
   }
   return values;
 }
-
 export function readSecret(config: AppConfig, ref: SecretRef): string {
   const path = config.runtime.secretSourcePaths[ref.sourceRef];
   if (!path) throw new Error(`runtime.secretSourcePaths is missing sourceRef ${ref.sourceRef}`);
@@ -30,21 +29,5 @@ export function readSub2ApiCredentials(config: AppConfig): { email: string; pass
   return {
     email: readSecret(config, { sourceRef, sourceKey: config.sub2api.adminCredentials.emailKey }),
     password: readSecret(config, { sourceRef, sourceKey: config.sub2api.adminCredentials.passwordKey }),
-  };
-}
-
-function credentialBaseUrl(value: string): string {
-  return value.trim().replace(/\/$/u, "").replace(/\/v1$/u, "");
-}
-
-export function readNewApiCredential(config: AppConfig, baseUrl: string): { username: string; password: string; walletKey: string } | undefined {
-  const refs = (config.sub2api.newApiCredentials ?? []).filter((ref) => credentialBaseUrl(ref.baseUrl) === credentialBaseUrl(baseUrl));
-  if (refs.length > 1) throw new Error(`duplicate sub2api.newApiCredentials baseUrl: ${baseUrl}`);
-  const ref = refs[0];
-  if (!ref) return undefined;
-  return {
-    username: readSecret(config, ref.username),
-    password: readSecret(config, ref.password),
-    walletKey: credentialBaseUrl(ref.walletKey ?? baseUrl),
   };
 }
