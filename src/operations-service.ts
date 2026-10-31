@@ -55,7 +55,7 @@ import {
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
-import { buildQuotaSamples, carryForwardFailedQuotaBalances, carryForwardQuotaHistory, filterQuotaSamplesByWallet, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
+import { buildQuotaSamples, carryForwardFailedQuotaBalances, carryForwardQuotaHistory, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
 import {
   buildOAuthRuntimeSample,
   oauthRuntimeHistory,
@@ -665,14 +665,29 @@ export class OperationsService {
     const policy = readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath);
     const sampledAt = new Date().toISOString();
     const rateForWallet = (wallet: string) => upstreamBalanceRateByWallet(wallet, policy.defaultCnyPerApiUsd, policy.walletCnyPerApiUsd);
+    const excludedWallets = new Set(
+      (this.config.operations.upstreamManagement.quotaMonitor?.excludedWalletKeys ?? [])
+        .map((wallet) => normalizeUpstreamWallet(wallet))
+        .filter(Boolean),
+    );
+    const monitorResults = results.filter((result) => {
+      const wallet = normalizeUpstreamWallet(result.walletKey ?? result.baseUrl);
+      return !excludedWallets.has(wallet);
+    });
+    const monitorApiAmountUsdTotal = apiAmountUsdTotal === null
+      ? null
+      : monitorResults.reduce((sum, result) => {
+        const amount = Number(result.apiAmountUsdTotal);
+        return Number.isFinite(amount) ? sum + amount : sum;
+      }, 0);
     const samples = recordSample
       ? carryForwardFailedQuotaBalances(
-        buildQuotaSamples(results, sampledAt, rateForWallet),
+        buildQuotaSamples(monitorResults, sampledAt, rateForWallet),
         records(await this.store.getUpstreamUsageCache([])),
         rateForWallet,
       )
       : [];
-    await this.store.setUpstreamUsageCache(results, samples, apiAmountUsdTotal);
+    await this.store.setUpstreamUsageCache(results, samples, monitorApiAmountUsdTotal);
   }
 
   async upstreamQuotaSummary(accountIds?: number[], bypassCache = false): Promise<Record<string, unknown>> {
@@ -740,8 +755,9 @@ export class OperationsService {
           && (item.costRateCnyPerApiUsd === null
             || (Number.isFinite(item.costRateCnyPerApiUsd) && item.costRateCnyPerApiUsd > 0)))
         : [],
-    }));
-    samples = filterQuotaSamplesByWallet(carryForwardQuotaHistory(samples), [...excludedWalletKeys]);
+    })).filter((sample) => !excludedWalletKeys.has(sample.walletKey));
+    // 剔除必须发生在历史回填之前，避免被过滤钱包参与任何后续曲线、消耗、成本或汇总计算。
+    samples = carryForwardQuotaHistory(samples);
     const walletKeys = [...new Set(samples.map((row) => row.walletKey).filter(Boolean))];
     const projectionMs = performance.now() - projectionStarted;
     const groupsStarted = performance.now();

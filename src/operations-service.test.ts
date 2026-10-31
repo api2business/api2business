@@ -108,6 +108,33 @@ test("uses a wallet-specific upstream balance conversion rate", () => {
   expect(upstreamBalanceRateByWallet("https://other.example", 1, overrides)).toBe(1);
 });
 
+test("quota monitor excludes configured wallets before persisting derived samples", async () => {
+  const config = loadConfig("config/api2business.example.yaml");
+  const ledgerPath = "/tmp/a2b-quota-filter-ledger.yaml";
+  writeFileSync(ledgerPath, "profit:\n  upstreamBalanceCnyPerApiUsd: 1\n");
+  config.operations.ledgerYamlPath = ledgerPath;
+  config.operations.upstreamManagement.quotaMonitor.excludedWalletKeys = ["https://sub.api2business.com"];
+  let persisted: { results: Array<Record<string, unknown>>; samples: Array<Record<string, unknown>>; total: number | null } | null = null;
+  const store = {
+    async getUpstreamUsageCache() { return []; },
+    async setUpstreamUsageCache(results: Array<Record<string, unknown>>, samples: Array<Record<string, unknown>>, total: number | null) {
+      persisted = { results, samples, total };
+    },
+  } as unknown as OperationsStore;
+  const service = new OperationsService(config, store, unusedReads);
+  await service.setUpstreamUsageCache([
+    { accountId: 1, baseUrl: "https://sub.api2business.com/v1", walletKey: "https://sub.api2business.com", ok: true, status: "active", schedulable: true, provider: "deepseek", quota: { unit: "USD", remaining: 100 }, apiAmountUsdTotal: 23 },
+    { accountId: 2, baseUrl: "https://other.example", walletKey: "https://other.example", ok: true, status: "active", schedulable: true, provider: "deepseek", quota: { unit: "USD", remaining: 7 }, apiAmountUsdTotal: 7 },
+  ], 30, true);
+  expect(persisted).not.toBeNull();
+  const saved = persisted!;
+  expect(saved.results).toHaveLength(2);
+  expect(saved.samples).toHaveLength(1);
+  expect(saved.samples[0]).toMatchObject({ walletKey: "https://other.example", walletApiAmountUsdTotal: 7 });
+  expect(JSON.stringify(saved.samples)).not.toContain("sub.api2business.com");
+  expect(saved.total).toBe(7);
+});
+
 test("wallet assets order actual balance observations before cache timestamps", () => {
   const results = [1, 2].map(accountId => ({ account_id: accountId,
     last_success_at: `2026-10-16T01:0${accountId}:00.000Z`,

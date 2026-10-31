@@ -8,8 +8,9 @@
   `operations.upstreamManagement.quotaMonitor.excludedWalletKeys` 钱包过滤。
   - 钱包键按 `normalizeUpstreamWallet` 归一化后匹配，`https://host` 与 `https://host/v1`
     仍命中同一条配置。
-  - 过滤只作用于额度监控汇总、历史曲线、钱包列表和页面计数；采样、账号缓存、调度、
-    共享钱包投影和其他上游管理页面保持不变。
+  - 额度探测请求和账号缓存仍保留完整数据；构建额度监控样本时先剔除被过滤钱包，随后才写入
+    监控样本、回填历史、计算余额、成本、产出和曲线，避免被过滤钱包污染任何次生结果。
+  - 调度、共享钱包投影和其他上游管理页面保持不变。
   - 页面状态会显示已过滤的自有钱包数量，但不会显示被过滤钱包的额度。
   - 配置变更会使旧的额度监控汇总缓存失配并重建，避免旧钱包继续出现在首屏。
 
@@ -156,6 +157,8 @@
 - 余额采样由 owning YAML 的 `operations.upstreamManagement.quotaSampleIntervalSeconds` 控制，当前值为
   `600`，即每 10 分钟写入一次持久化额度样本；现场修改配置后必须通过项目 CLI 重启运行面。
 - 同一 `walletKey` 在一个采样轮次只读取一次 API Key 钱包余额证据；多个 API host 和账号复用该轮次结果，账号自己的 token 用量仍按账号读取。
+- 已配置排除的钱包不会构建或持久化额度监控样本；已有历史样本在读取映射边界立即剔除，不能进入
+  历史回填、成本、产出、分组汇总或曲线计算。
 - 额度采样不创建登录 Session，不调用登录、Refresh 或 `/api/user/self`，因此不处理
   `AUTH_SESSION_ISSUANCE_LIMIT`、`AUTH_SESSION_LIMIT` 或 `AUTH_CAPTCHA_REQUIRED`。
   API Key 未返回整体钱包证据时保持“仅 Key 配额/未知”，不能把它当作钱包余额恢复。
