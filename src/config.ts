@@ -5,6 +5,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { DateTime } from "luxon";
 import { parse } from "yaml";
 import { validateFailoverRules, type FailoverRule } from "./failover-rules";
+import { normalizeUpstreamWallet } from "./upstream-valuation";
 
 export type IdentityField = "username" | "email" | "emailLocalPart";
 export type OAuthPlanType = "k12" | "plus" | "free" | "team";
@@ -44,6 +45,9 @@ export interface UpstreamManagementConfig {
   usageDays: number;
   quotaSampleIntervalSeconds: number;
   quotaSampleTimeoutSeconds: number;
+  quotaMonitor: {
+    excludedWalletKeys: string[];
+  };
   rechargeCandidates: {
     lowBalanceCny: number;
     lookbackHours: number;
@@ -802,6 +806,14 @@ export function loadConfig(path: string): AppConfig {
   if (quotaSampleTimeoutSeconds >= quotaSampleIntervalSeconds) {
     throw new Error("operations.upstreamManagement.quotaSampleTimeoutSeconds must be less than quotaSampleIntervalSeconds");
   }
+  const quotaMonitor = upstreamManagement.quotaMonitor === undefined
+    ? {}
+    : object(upstreamManagement.quotaMonitor, "operations.upstreamManagement.quotaMonitor");
+  const excludedQuotaWalletKeys = quotaMonitor.excludedWalletKeys === undefined
+    ? []
+    : strings(quotaMonitor, "excludedWalletKeys", "operations.upstreamManagement.quotaMonitor")
+      .map((wallet) => normalizeUpstreamWallet(wallet))
+      .filter(Boolean);
   const oauthEconomics = object(operations.oauthEconomics, "operations.oauthEconomics");
   const idealApiUsdPerAccount = object(
     oauthEconomics.idealApiUsdPerAccount,
@@ -1170,6 +1182,7 @@ export function loadConfig(path: string): AppConfig {
         usageDays: integerValue(upstreamManagement, "usageDays", "operations.upstreamManagement", 1, 90),
         quotaSampleIntervalSeconds,
         quotaSampleTimeoutSeconds,
+        quotaMonitor: { excludedWalletKeys: [...new Set(excludedQuotaWalletKeys)] },
         rechargeCandidates: (() => {
           const value = object(upstreamManagement.rechargeCandidates, "operations.upstreamManagement.rechargeCandidates");
           return {

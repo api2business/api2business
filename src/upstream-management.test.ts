@@ -71,6 +71,11 @@ test("upstream creation bootstrap rate is YAML-owned", () => {
   expect(config.operations.upstreamManagement.unprobedFallbackRateCnyPerApiUsd).toBe(0.1);
 });
 
+test("quota monitor excludes wallets from owning YAML", () => {
+  const config = loadConfig("config/api2business.yaml");
+  expect(config.operations.upstreamManagement.quotaMonitor.excludedWalletKeys).toContain("https://sub.api2business.com");
+});
+
 test("upstream create worker probes quota and synchronizes the detected rate", async () => {
   const source = await Bun.file(new URL("./worker.ts", import.meta.url)).text();
   const createBranch = source.slice(

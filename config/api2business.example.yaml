@@ -568,6 +568,9 @@ operations:
     usageDays: 30
     quotaSampleIntervalSeconds: 600
     quotaSampleTimeoutSeconds: 240
+    quotaMonitor:
+      # 只隐藏额度监控展示与汇总，不停止采样、不改变调度。
+      excludedWalletKeys: []
     rechargeCandidates:
       lowBalanceCny: 10
       lookbackHours: 24

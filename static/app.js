@@ -330,6 +330,7 @@ async function rankingPage() {
 let quotaMonitorRows = []
 let quotaMonitorTotalRemaining = null
 let quotaMonitorSummary = { walletDistribution: [], groupHistory: [] }
+let quotaMonitorExcludedWallets = new Set()
 let quotaMonitorFilter = 'all'
 const quotaRangeQuery = new URLSearchParams(location.search).get('range')
 let quotaMonitorRange = quotaRangeQuery === 'today' || quotaRangeQuery === '1h' ? quotaRangeQuery : '24h'
@@ -429,7 +430,7 @@ function renderQuotaMonitor() {
   const totalPages = Math.max(1, Math.ceil(sorted.length / quotaMonitorPageSize)); quotaMonitorPageNumber = Math.min(quotaMonitorPageNumber, totalPages)
   const pageRows = sorted.slice((quotaMonitorPageNumber - 1) * quotaMonitorPageSize, quotaMonitorPageNumber * quotaMonitorPageSize)
   const body = $('#quota-monitor-body'); if (body) body.innerHTML = pageRows.length ? pageRows.map((row) => `<tr><td>${upstreamWalletMarkup(row)}<small>${number(row.accountCount)} 个账号 · ${escapeHtml(row.wallet)}</small></td><td>${quotaDisplay(row.remaining)}</td><td>${quotaDisplay(row.consumed24h)}</td><td>${quotaDisplay(row.consumption['codex-mix'])}</td><td>${quotaDisplay(row.consumption['no-degrade'])}</td><td>${quotaDisplay(row.consumption.claude)}</td><td>${quotaDisplay(row.consumption['claude-kiro'])}</td><td>${quotaDisplay(row.consumption.grok)}</td><td>${escapeHtml(row.groups.join('、') || '—')}</td></tr>`).join('') : '<tr><td colspan="9" class="empty">暂无额度缓存数据</td></tr>'
-  const state = $('#quota-monitor-state'); if (state) state.textContent = `上游总资产 ${quotaDisplay(quotaMonitorTotalRemaining)} · ${quotaRangeLabel(quotaMonitorRange)} · 读取 ${number(quotaMonitorRows.length)} 个上游钱包 · 共 ${totalPages} 页 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+  const state = $('#quota-monitor-state'); if (state) state.textContent = `上游总资产 ${quotaDisplay(quotaMonitorTotalRemaining)} · ${quotaRangeLabel(quotaMonitorRange)} · 已过滤 ${number(quotaMonitorExcludedWallets.size)} 个自有钱包 · 读取 ${number(quotaMonitorRows.length)} 个上游钱包 · 共 ${totalPages} 页 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
   const consumptionLabel = $('#quota-monitor-consumption-label'); if (consumptionLabel) consumptionLabel.textContent = `${quotaRangeLabel(quotaMonitorRange)}消耗`
   const pageLabel = $('#quota-monitor-page'); if (pageLabel) pageLabel.textContent = `${quotaMonitorPageNumber} / ${totalPages} · ${number(sorted.length)} 条`
   $('#quota-monitor-prev')?.toggleAttribute('disabled', quotaMonitorPageNumber <= 1); $('#quota-monitor-next')?.toggleAttribute('disabled', quotaMonitorPageNumber >= totalPages)
@@ -581,6 +582,7 @@ async function quotaMonitorPage() {
   const usage24h = usage24hResult.status === 'fulfilled' ? usage24hResult.value : { rows: [], failedRequests: 1 }
   const summary = summaryResult.status === 'fulfilled' ? summaryResult.value : quotaMonitorSummary
   if (summaryResult.status === 'fulfilled') quotaMonitorSummary = summary
+  quotaMonitorExcludedWallets = new Set((summary.excludedWalletKeys ?? []).map((wallet) => quotaWallet(wallet)).filter(Boolean))
   const readFailures = accountReadFailures + Number(cached.failedRequests ?? 0) + Number(usage24h.failedRequests ?? 0) + (summaryResult.status === 'fulfilled' ? 0 : 1)
   const sourceTotal = Number(summary.totalRemainingCny)
   quotaMonitorTotalRemaining = Number.isFinite(sourceTotal) ? sourceTotal : null
@@ -600,6 +602,7 @@ async function quotaMonitorPage() {
   for (const account of accounts) {
     const wallet = quotaWallet(account.walletKey ?? account.baseUrl)
     if (!wallet) continue
+    if (quotaMonitorExcludedWallets.has(wallet)) continue
     const current = wallets.get(wallet) ?? { wallet, accounts: [], groupRows: [], usagePoints: [], consumed24h: 0, consumption: { 'codex-mix': 0, 'no-degrade': 0, claude: 0, 'claude-kiro': 0, grok: 0 } }
     current.accounts.push(account)
     current.groupRows.push(account)

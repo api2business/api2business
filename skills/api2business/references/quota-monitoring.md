@@ -4,6 +4,14 @@
   `/api/upstreams/*` 接口；数据库 authority 是 NC01 本地 Sub2API 专用库。
 - Web、worker 和 CLI 只通过 Api2Business 排队读取 broker 访问数据库，不直连旧运行面或从
   Sub2API 管理 API 另取一套状态。
+- 额度监控支持 owning YAML 的
+  `operations.upstreamManagement.quotaMonitor.excludedWalletKeys` 钱包过滤。
+  - 钱包键按 `normalizeUpstreamWallet` 归一化后匹配，`https://host` 与 `https://host/v1`
+    仍命中同一条配置。
+  - 过滤只作用于额度监控汇总、历史曲线、钱包列表和页面计数；采样、账号缓存、调度、
+    共享钱包投影和其他上游管理页面保持不变。
+  - 页面状态会显示已过滤的自有钱包数量，但不会显示被过滤钱包的额度。
+  - 配置变更会使旧的额度监控汇总缓存失配并重建，避免旧钱包继续出现在首屏。
 
 ## 数据口径
 

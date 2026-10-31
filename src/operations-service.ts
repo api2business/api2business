@@ -55,7 +55,7 @@ import {
   readUpstreamValuationPolicy,
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
-import { buildQuotaSamples, carryForwardFailedQuotaBalances, carryForwardQuotaHistory, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
+import { buildQuotaSamples, carryForwardFailedQuotaBalances, carryForwardQuotaHistory, filterQuotaSamplesByWallet, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
 import {
   buildOAuthRuntimeSample,
   oauthRuntimeHistory,
@@ -676,19 +676,31 @@ export class OperationsService {
   }
 
   async upstreamQuotaSummary(accountIds?: number[], bypassCache = false): Promise<Record<string, unknown>> {
+    const excludedWalletKeys = new Set(
+      (this.config.operations.upstreamManagement.quotaMonitor?.excludedWalletKeys ?? [])
+        .map((wallet) => normalizeUpstreamWallet(wallet))
+        .filter(Boolean),
+    );
+    const quotaMonitorConfig = { excludedWalletKeys: [...excludedWalletKeys].sort() };
+    const matchesQuotaMonitorConfig = (payload: Record<string, unknown>) => {
+      const configured = Array.isArray(payload.excludedWalletKeys)
+        ? payload.excludedWalletKeys.map((wallet) => normalizeUpstreamWallet(wallet)).filter(Boolean).sort()
+        : [];
+      return JSON.stringify(configured) === JSON.stringify(quotaMonitorConfig.excludedWalletKeys);
+    };
     // 额度监控首屏只读持久化摘要；首次或显式刷新之外不重复扫描历史样本和分组。
     // 账号筛选仍需独立计算，避免把筛选结果污染全局摘要缓存。
     if (accountIds === undefined && !bypassCache) {
       const ttlMs = (this.config.operations.upstreamSchedulingV2?.readModelCacheSeconds ?? 30) * 1000;
       const memory = this.quotaSummaryCache;
-      if (memory && Date.now() - Date.parse(memory.capturedAt) <= ttlMs) return { ...memory.payload, cache: { state: "hit", capturedAt: memory.capturedAt, ageMs: Date.now() - Date.parse(memory.capturedAt), ttlSeconds: ttlMs / 1000, valuesPrinted: false } };
+      if (memory && matchesQuotaMonitorConfig(memory.payload) && Date.now() - Date.parse(memory.capturedAt) <= ttlMs) return { ...memory.payload, cache: { state: "hit", capturedAt: memory.capturedAt, ageMs: Date.now() - Date.parse(memory.capturedAt), ttlSeconds: ttlMs / 1000, valuesPrinted: false } };
       if (this.quotaSummaryInFlight) return await this.quotaSummaryInFlight;
       const persisted = await this.getReadModelSnapshot("quota-monitor-summary-v1");
       if (persisted?.schema_version === "quota-monitor-summary-v1" && persisted.captured_at && persisted.payload) {
         const cachedAt = String(persisted.captured_at);
         const payload = object(persisted.payload);
         this.quotaSummaryCache = { payload, capturedAt: cachedAt };
-        if (Date.now() - Date.parse(cachedAt) <= ttlMs) return { ...payload, cache: { state: "hit", capturedAt: cachedAt, ageMs: Date.now() - Date.parse(cachedAt), ttlSeconds: ttlMs / 1000, valuesPrinted: false } };
+        if (matchesQuotaMonitorConfig(payload) && Date.now() - Date.parse(cachedAt) <= ttlMs) return { ...payload, cache: { state: "hit", capturedAt: cachedAt, ageMs: Date.now() - Date.parse(cachedAt), ttlSeconds: ttlMs / 1000, valuesPrinted: false } };
       }
       const build = (async () => {
         const payload = await this.upstreamQuotaSummary(accountIds, true);
@@ -729,7 +741,7 @@ export class OperationsService {
             || (Number.isFinite(item.costRateCnyPerApiUsd) && item.costRateCnyPerApiUsd > 0)))
         : [],
     }));
-    samples = carryForwardQuotaHistory(samples);
+    samples = filterQuotaSamplesByWallet(carryForwardQuotaHistory(samples), [...excludedWalletKeys]);
     const walletKeys = [...new Set(samples.map((row) => row.walletKey).filter(Boolean))];
     const projectionMs = performance.now() - projectionStarted;
     const groupsStarted = performance.now();
@@ -790,6 +802,7 @@ export class OperationsService {
       ...summary,
       history,
       groupHistory: groupedHistory.filter((point) => Date.parse(point.sampledAt) >= Date.now() - displayHours * 3_600_000),
+      excludedWalletKeys: quotaMonitorConfig.excludedWalletKeys,
       sourceTimingsMs: { historyQueryMs, projectionMs, groupsReadMs, aggregateMs: performance.now() - aggregateStarted, sampleCount: rows.length },
       valuesPrinted: false,
     };

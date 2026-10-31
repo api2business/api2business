@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildQuotaSamples, carryForwardFailedQuotaBalances, carryForwardQuotaHistory, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
+import { buildQuotaSamples, carryForwardFailedQuotaBalances, carryForwardQuotaHistory, filterQuotaSamplesByWallet, quotaHistory, quotaSamplesForAccounts, summarizeQuotaSamples } from "./upstream-quota-monitor";
 
 const costInputs = (apiAmountUsdTotal: number, costRateCnyPerApiUsd: number, accountId = 1) => ([{
   accountId, apiAmountUsdTotal, costRateCnyPerApiUsd, source: "detected" as const,
@@ -52,6 +52,16 @@ test("keeps shared wallet balance while scoping output and cost inputs to select
   expect(selected[0]!.remainingCny).toBe(10);
   expect(selected[0]!.accountCostInputs).toEqual(costInputs(4, 0.1, 1));
   expect(selected[0]!.apiAmountUsdTotal).toBe(4);
+});
+
+test("filters quota-monitor samples by normalized configured wallet keys", () => {
+  const samples = buildQuotaSamples([
+    { accountId: 1, baseUrl: "https://sub.api2business.com/v1", ok: true, status: "active", schedulable: true, provider: "deepseek", quota: { unit: "USD", remaining: 10 } },
+    { accountId: 2, baseUrl: "https://other.example", ok: true, status: "active", schedulable: true, provider: "deepseek", quota: { unit: "USD", remaining: 20 } },
+  ], "2026-08-02T00:00:00Z", () => 1);
+  const filtered = filterQuotaSamplesByWallet(samples, ["https://sub.api2business.com"]);
+  expect(filtered).toHaveLength(1);
+  expect(filtered[0]!.walletKey).toBe("https://other.example");
 });
 
 test("deduplicates shared wallets and preserves schedulability", () => {

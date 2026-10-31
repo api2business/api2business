@@ -99,6 +99,14 @@ export function quotaSamplesForAccounts(
   return selected.map((row) => ({ ...row, apiAmountUsdTotal: totals.get(row.sampledAt) ?? null }));
 }
 
+export function filterQuotaSamplesByWallet(
+  samples: UpstreamQuotaSample[],
+  excludedWalletKeys: string[],
+): UpstreamQuotaSample[] {
+  const excluded = new Set(excludedWalletKeys.map((wallet) => normalizeUpstreamWallet(wallet)).filter(Boolean));
+  return samples.filter((sample) => !excluded.has(normalizeUpstreamWallet(sample.walletKey)));
+}
+
 function object(value: unknown): Row {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 }

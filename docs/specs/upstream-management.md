@@ -34,6 +34,9 @@
 - 共享钱包别名、账号余额投影、失败保留和额度缓存的唯一口径见
   [额度监控](../../skills/api2business/references/quota-monitoring.md)；本规格只要求
   充值账本、账号成本和质量样本保持各自边界，不把共享余额重复计入这些数据面。
+- 额度监控可通过 owning YAML 的
+  `operations.upstreamManagement.quotaMonitor.excludedWalletKeys` 隐藏没有经营分析意义的
+  自有钱包；该过滤不改变采样、调度、账号缓存或其他上游管理页面。
 - 账号质量、池级综合分和优先级排序的边界见
   [账号评分规格](account-scoring.md)；算法仍只维护在上游与调度参考中。
 - 充值、模板、分组、探活隔离和优先级写入都必须先展示计划，再确认、执行和回读；
