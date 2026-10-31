@@ -83,8 +83,8 @@ export class AccountScoreService {
   }
 
   start(): void {
-    void this.refresh().catch(() => undefined);
-    this.timer = setInterval(() => void this.refresh().catch(() => undefined), this.config.monitor.refreshIntervalMinutes * 60_000);
+    void this.refresh().catch((error) => this.reportRefreshFailure(error, "startup"));
+    this.timer = setInterval(() => void this.refresh().catch((error) => this.reportRefreshFailure(error, "automatic")), this.config.monitor.refreshIntervalMinutes * 60_000);
   }
 
   close(): void {
@@ -253,8 +253,14 @@ export class AccountScoreService {
             accounts: this.poolAccounts(mergeAccountScores(records(cached.accounts))),
           };
         }
-      } catch {
-        // Invalid cache is replaced by the next successful refresh.
+      } catch (error) {
+        console.error(JSON.stringify({
+          ok: false,
+          component: "account-score.cache-read",
+          cachePath: this.cachePath,
+          error: error instanceof Error ? error.message : String(error),
+          valuesPrinted: false,
+        }));
       }
     }
     return {
@@ -278,5 +284,15 @@ export class AccountScoreService {
     const next = `${this.cachePath}.next`;
     writeFileSync(next, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     renameSync(next, this.cachePath);
+  }
+
+  private reportRefreshFailure(error: unknown, priority: "startup" | "automatic"): void {
+    console.error(JSON.stringify({
+      ok: false,
+      component: "account-score.refresh",
+      priority,
+      error: error instanceof Error ? error.message : String(error),
+      valuesPrinted: false,
+    }));
   }
 }

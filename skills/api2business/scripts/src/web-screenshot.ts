@@ -1,5 +1,5 @@
 import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname, isAbsolute } from "node:path";
 import { loadConfig, type HttpCliTarget } from "../../../../src/config";
 import { readSecret } from "../../../../src/secrets";
 import { runBoundedProcess } from "../../../../src/bounded-process";
@@ -21,13 +21,18 @@ export function webScreenshotHelp(): Record<string, unknown> {
       "--session-ttl-seconds": "独立验收会话的正整数期限，必须短于部署配置；省略时使用正式登录会话",
       "--burst-count": "同页截图 1..30 帧；多帧使用 profile 的桌面视口",
       "--burst-interval": "帧间隔 200ms..10s；默认 1s",
-      "--manifest": "完整原始事件的绝对文件路径",
+      "--manifest": "完整原始事件的绝对文件路径；父目录不存在时自动创建",
       "--selector": "settle 之后按 CSS 裁切元素；折下表格用它取景，不判定业务通过",
       "--click-selector": "等待前点击排序或分页控件；不能把折下区块留在视口内",
       "--json": "结构化回执；Cookie 和 Secret 不输出",
     },
     evidence: "默认回执保留有界失败请求；retainedScreenshots 按 profile 和 scope 保留 PNG。截图与原始事件不自动判定业务成功",
   };
+}
+
+export function ensureManifestParent(manifest: string): void {
+  if (!isAbsolute(manifest)) throw new Error("--manifest must be an absolute file path");
+  mkdirSync(dirname(manifest), { recursive: true });
 }
 
 export async function runWebScreenshot(
@@ -116,6 +121,7 @@ export async function runWebScreenshot(
     url.searchParams.set("scope", parsed.scope);
   }
   const startedAt = Date.now();
+  if (parsed.manifest) ensureManifestParent(parsed.manifest);
   const progress = () => process.stderr.write(`API2BUSINESS WEB SCREENSHOT profile=${profileName} scope=${parsed.scope ?? "default"} phase=capturing elapsedMs=${Date.now() - startedAt}\n`);
   progress();
   const heartbeat = setInterval(progress, 5000);

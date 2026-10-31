@@ -350,6 +350,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `--burst-count 1..30` 和 `--burst-interval 200ms..10s` 控制同页采集。
   - 多帧时使用 profile 的桌面视口；单帧保持桌面与移动视口采集。
   - `--manifest <绝对路径>` 留存完整原始事件，默认回执保留有界失败请求。
+  - manifest 父目录由产品 CLI 自动创建；调用方只需传绝对文件路径。独立 Api2Business 页面使用本技能
+    的正式登录会话，不使用 HWLAB WebProbe 的 `--managed-auth`。
   - 采集期间每五秒输出 profile、scope、phase 和耗时。
 - `--session-ttl-seconds <正整数>` 显式创建独立的短时效验收会话。
   - 期限必须短于 `webAuth.sessionTtlSeconds`；省略时使用正式登录 API 返回的会话。

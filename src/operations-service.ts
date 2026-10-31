@@ -97,6 +97,12 @@ function finiteNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function boundedErrorMessage(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error))
+    .replace(/sk-[A-Za-z0-9_-]+/gu, "[REDACTED]")
+    .slice(0, 500);
+}
+
 export function accountPriorityTransition(changes: unknown, accountId: number): Record<string, unknown> | null {
   const match = records(changes).find((change) =>
     Number(change.accountId ?? change.account_id) === accountId);
@@ -721,8 +727,31 @@ export class OperationsService {
         const payload = await this.upstreamQuotaSummary(accountIds, true);
         const capturedAt = new Date().toISOString();
         this.quotaSummaryCache = { payload, capturedAt };
-        await this.store.completeSnapshot("quota-monitor-summary-v1", "quota-monitor-summary-v1", payload, capturedAt).catch(() => undefined);
-        return { ...payload, cache: { state: "refreshed", capturedAt, ageMs: 0, ttlSeconds: ttlMs / 1000, valuesPrinted: false } };
+        let persistWarning: string | null = null;
+        try {
+          await this.store.completeSnapshot("quota-monitor-summary-v1", "quota-monitor-summary-v1", payload, capturedAt);
+        } catch (error) {
+          persistWarning = boundedErrorMessage(error);
+          console.error(JSON.stringify({
+            ok: false,
+            component: "quota-monitor.snapshot-persist",
+            capturedAt,
+            error: persistWarning,
+            valuesPrinted: false,
+          }));
+        }
+        return {
+          ...payload,
+          cache: {
+            state: "refreshed",
+            capturedAt,
+            ageMs: 0,
+            ttlSeconds: ttlMs / 1000,
+            persisted: persistWarning === null,
+            ...(persistWarning ? { persistWarning } : {}),
+            valuesPrinted: false,
+          },
+        };
       })();
       this.quotaSummaryInFlight = build;
       try { return await build; } finally { if (this.quotaSummaryInFlight === build) this.quotaSummaryInFlight = null; }

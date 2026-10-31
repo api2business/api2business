@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { parseWebProbeOutput, retainScreenshotCopies } from "./web-screenshot";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { ensureManifestParent, parseWebProbeOutput, retainScreenshotCopies } from "./web-screenshot";
 
 test("web-probe output keeps the terminal JSON after progress lines", () => {
   expect(parseWebProbeOutput([
@@ -41,4 +43,16 @@ test("screenshot copies are kept per scope and ignore deleted probe directories"
   });
   expect(retained.probe.manifest).toMatchObject({ localPath: "/tmp/web-probe-screenshot-summary.json" });
   expect(retained.probe.outside).toMatchObject({ localPath: "/root/secret.png" });
+});
+
+test("manifest parent is created by the product screenshot command", () => {
+  const root = mkdtempSync("/tmp/api2business-web-screenshot-");
+  const manifest = join(root, "nested", "events.json");
+  try {
+    ensureManifestParent(manifest);
+    expect(existsSync(join(root, "nested"))).toBe(true);
+    expect(() => ensureManifestParent("relative/events.json")).toThrow("absolute file path");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

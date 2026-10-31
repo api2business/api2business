@@ -135,6 +135,18 @@ test("quota monitor excludes configured wallets before persisting derived sample
   expect(saved.total).toBe(7);
 });
 
+test("quota summary reports a snapshot persistence warning instead of hiding it", async () => {
+  const config = loadConfig("config/api2business.example.yaml");
+  const store = {
+    async getSnapshot() { return null; },
+    async getUpstreamQuotaSamples() { return []; },
+    async completeSnapshot() { throw new Error("snapshot write unavailable"); },
+  } as unknown as OperationsStore;
+  const service = new OperationsService(config, store, unusedReads);
+  const result = await service.upstreamQuotaSummary();
+  expect(result.cache).toMatchObject({ state: "refreshed", persisted: false, persistWarning: "snapshot write unavailable" });
+});
+
 test("wallet assets order actual balance observations before cache timestamps", () => {
   const results = [1, 2].map(accountId => ({ account_id: accountId,
     last_success_at: `2026-10-16T01:0${accountId}:00.000Z`,

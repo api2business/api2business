@@ -1218,7 +1218,27 @@ export function createHandler(
       return json({ ok: false, error: "not found" }, 404);
     } catch (error) {
       if (isRecoverableDatabaseConnectionError(error)) {
-        await operations.recoverConnection(error).catch(() => undefined);
+        try {
+          const recovered = await operations.recoverConnection(error);
+          if (!recovered) {
+            console.error(JSON.stringify({
+              ok: false,
+              component: "operations.database-recovery",
+              recovered: false,
+              error: error instanceof Error ? error.message : String(error),
+              valuesPrinted: false,
+            }));
+          }
+        } catch (recoveryError) {
+          console.error(JSON.stringify({
+            ok: false,
+            component: "operations.database-recovery",
+            recovered: false,
+            error: error instanceof Error ? error.message : String(error),
+            recoveryError: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+            valuesPrinted: false,
+          }));
+        }
       }
       return errorResponse(error, request);
     }
