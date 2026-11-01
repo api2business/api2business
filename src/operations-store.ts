@@ -227,6 +227,21 @@ export class OperationsStore {
         DROP CONSTRAINT IF EXISTS api2business_pool_quality_samples_pkey;
       ALTER TABLE api2business_pool_quality_samples
         ADD CONSTRAINT api2business_pool_quality_samples_pkey PRIMARY KEY (sampled_at, platform);
+      -- Existing installations still have the retired TTFT diagnostic column as
+      -- NOT NULL. New score samples omit it, so zero means "not observed" and
+      -- keeps the insert compatible without returning TTFT to scoring.
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'api2business_pool_quality_samples'
+            AND column_name = 'first_token_samples'
+        ) THEN
+          ALTER TABLE api2business_pool_quality_samples
+            ALTER COLUMN first_token_samples SET DEFAULT 0;
+        END IF;
+      END $$;
       ALTER TABLE api2business_pool_quality_samples
         ALTER COLUMN observed_attempts TYPE numeric USING observed_attempts::numeric;
       ALTER TABLE api2business_pool_quality_samples
