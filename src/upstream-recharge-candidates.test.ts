@@ -52,8 +52,8 @@ test("充值候选只读取一次 Sub2API，并返回低余额账号的 24 小�
       upstreamManagement: { rechargeCandidates: { lowBalanceCny: 10, lookbackHours: 24, recommendationLimit: 20, retiredSuppliers: [] } },
     },
     sub2api: {
-      scorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000, ttftPriorScore: 25 },
-      grokScorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000, ttftPriorScore: 25 },
+      scorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, durationFullScoreMs: 5000, durationZeroScoreMs: 55000, durationPriorScore: 25 },
+      grokScorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, durationFullScoreMs: 5000, durationZeroScoreMs: 55000, durationPriorScore: 25 },
       priorityPlan: { procurementAdvice: { billingErrorPatterns: ["insufficient balance"] } },
       grokPriorityPlan: { procurementAdvice: { billingErrorPatterns: ["balance depleted"] } },
     },
@@ -66,7 +66,7 @@ test("充值候选只读取一次 Sub2API，并返回低余额账号的 24 小�
   const reads = {
     async query() {
       queryCount += 1;
-      return { rows: [{ account_id: 21, account_name: "https://low.example 0.05", platform: "openai", account_type: "apikey", status: "active", schedulable: true, balance_cny: 4, wallet_key: "https://low.example", primary_reason: "low-balance", anchor_at: "2026-08-09T01:00:00Z", success_requests: 20, failure_requests: 0, attributed_requests: 20, stream_success_requests: 20, first_token_samples: 20, ttft_values: [1000], ttft_weights: [1], duration_values: [1000], duration_weights: [1], api_amount_usd: 2, selected_calls: 20 }], queueDurationMs: 1, queryDurationMs: 2, totalDurationMs: 3, queryStartedAt: "", queryCompletedAt: "", deduplicated: false, cached: false };
+      return { rows: [{ account_id: 21, account_name: "https://low.example 0.05", platform: "openai", account_type: "apikey", status: "active", schedulable: true, balance_cny: 4, wallet_key: "https://low.example", primary_reason: "low-balance", anchor_at: "2026-08-09T01:00:00Z", success_requests: 20, failure_requests: 0, attributed_requests: 20, stream_success_requests: 20, duration_samples: 20, duration_values: [1000], duration_weights: [1], api_amount_usd: 2, selected_calls: 20 }], queueDurationMs: 1, queryDurationMs: 2, totalDurationMs: 3, queryStartedAt: "", queryCompletedAt: "", deduplicated: false, cached: false };
     },
   };
   const result = await collectRechargeCandidates(config, store as never, reads as never);
@@ -85,8 +85,8 @@ test("退场供应商保留审计结果但永不进入充值推荐", async () =>
       upstreamManagement: { rechargeCandidates: { lowBalanceCny: 10, lookbackHours: 24, recommendationLimit: 20, retiredSuppliers: ["xianapi.cloud"] } },
     },
     sub2api: {
-      scorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000, ttftPriorScore: 25 },
-      grokScorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, ttftFullScoreMs: 5000, ttftZeroScoreMs: 55000, ttftPriorScore: 25 },
+      scorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, durationFullScoreMs: 5000, durationZeroScoreMs: 55000, durationPriorScore: 25 },
+      grokScorePolicy: { reliabilityWeight: 45, failoverWeight: 10, latencyWeight: 35, baselineWeight: 10, failureZeroScoreRate: 0.2, failureBurstCallLimit: 100, failoverZeroScoreRate: 0.2, durationFullScoreMs: 5000, durationZeroScoreMs: 55000, durationPriorScore: 25 },
       priorityPlan: { procurementAdvice: { billingErrorPatterns: ["insufficient balance"] } },
       grokPriorityPlan: { procurementAdvice: { billingErrorPatterns: ["balance depleted"] } },
     },
@@ -96,7 +96,7 @@ test("退场供应商保留审计结果但永不进入充值推荐", async () =>
   };
   const reads = {
     async query() {
-      return { rows: [{ account_id: 66, account_name: "https://www.xianapi.cloud plus 0.08", base_url: "https://www.xianapi.cloud", platform: "openai", account_type: "apikey", status: "error", schedulable: false, primary_reason: "billing-depleted", anchor_at: "2026-08-09T01:00:00Z", success_requests: 100, failure_requests: 0, attributed_requests: 100, stream_success_requests: 100, first_token_samples: 100, ttft_values: [1000], ttft_weights: [1], duration_values: [1000], duration_weights: [1], api_amount_usd: 10, selected_calls: 100 }], queueDurationMs: 1, queryDurationMs: 2, totalDurationMs: 3, queryStartedAt: "", queryCompletedAt: "", deduplicated: false, cached: false };
+      return { rows: [{ account_id: 66, account_name: "https://www.xianapi.cloud plus 0.08", base_url: "https://www.xianapi.cloud", platform: "openai", account_type: "apikey", status: "error", schedulable: false, primary_reason: "billing-depleted", anchor_at: "2026-08-09T01:00:00Z", success_requests: 100, failure_requests: 0, attributed_requests: 100, stream_success_requests: 100, duration_samples: 100, duration_values: [1000], duration_weights: [1], api_amount_usd: 10, selected_calls: 100 }], queueDurationMs: 1, queryDurationMs: 2, totalDurationMs: 3, queryStartedAt: "", queryCompletedAt: "", deduplicated: false, cached: false };
     },
   };
   const result = await collectRechargeCandidates(config, store as never, reads as never);

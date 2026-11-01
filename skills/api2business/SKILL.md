@@ -167,7 +167,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   [上游与调度](references/upstream-scheduling.md)。
 - 该参考同时定义 API-key 切号模板的平台边界、成本补齐、评分分层和 V2 迁移；本技能只
   保留入口和命令，不复制第二套算法或状态机。
-- TTFT、流式探活、缺失样本和评分参与边界只见上述参考，本技能不复制评分算法。
+- 数值语义探活、完整耗时证据、缺失样本和评分参与边界只见上述参考，本技能不复制评分算法。
 - 池级质量调查使用 `scores pool-quality [--scope codex|claude|grok|deepseek] --over-api <absolute-http(s)-URL>`。
   - 省略作用域只返回 Codex，回执里的 `platform` 必须与所问作用域一致。
   - `--platform` 接受同一组作用域名；与 `--scope` 冲突或写成供应商名时直接失败。

@@ -105,9 +105,9 @@ test("rank refreshes the shared snapshot and both reads return the policy score"
     failureZeroScoreRate: 0.2,
     failureBurstCallLimit: 100,
     failoverZeroScoreRate: 0.2,
-    ttftFullScoreMs: 5_000,
-    ttftZeroScoreMs: 55_000,
-    ttftPriorScore: 25,
+    durationFullScoreMs: 5_000,
+    durationZeroScoreMs: 55_000,
+    durationPriorScore: 25,
   };
   const plan = { eligibleGroupIds: [2], procurementAdvice: { billingErrorPatterns: [] } };
   const config = {
@@ -148,7 +148,7 @@ test("rank refreshes the shared snapshot and both reads return the policy score"
           failure_requests: 0,
           attributed_requests: 51,
           failover_requests: 0,
-          first_token_samples: 0,
+          duration_samples: 0,
           selected_calls: 51,
         }, {
           account_id: 479,
@@ -164,7 +164,7 @@ test("rank refreshes the shared snapshot and both reads return the policy score"
           failure_requests: 0,
           attributed_requests: 12,
           failover_requests: 0,
-          first_token_samples: 0,
+          duration_samples: 0,
           selected_calls: 12,
         }],
         cached: false,

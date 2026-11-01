@@ -314,7 +314,7 @@ test("探活记录按轮次分页，不展开普通请求明细", async () => {
   });
 });
 
-test("探活轮次只持久化原生关联证据，不保留自由响应字段", async () => {
+test("探活轮次持久化原生关联证据与数值质量事实，不保留自由响应字段", async () => {
   const evidence = { accountId: 42, groupId: 51, model: "grok-test",
     startedAt: "2026-01-01T01:00:00Z", completedAt: "2026-01-01T01:00:01Z",
     clientRequestId: "native-id" };
@@ -329,7 +329,13 @@ test("探活轮次只持久化原生关联证据，不保留自由响应字段",
     { response: { accountId: 43, clientRequestId: null } },
   ] });
   await service.runIdleProbe([], 1, { operationId: "original-round", triggerType: "manual", scope: "grok" });
-  expect(saved.requestEvidence).toEqual([evidence, timeoutEvidence]);
+  const requestEvidence = saved.requestEvidence;
+  expect(Array.isArray(requestEvidence)).toBe(true);
+  if (!Array.isArray(requestEvidence)) throw new Error("requestEvidence must be persisted as an array");
+  expect(requestEvidence).toHaveLength(2);
+  expect(requestEvidence[0]).toMatchObject({ ...evidence, qualityOk: undefined });
+  expect(requestEvidence[1]).toMatchObject({ ...timeoutEvidence, qualityOk: undefined });
+  expect(JSON.stringify(requestEvidence)).not.toContain("must-not-persist");
   expect(JSON.stringify(saved)).not.toContain("must-not-persist");
 });
 

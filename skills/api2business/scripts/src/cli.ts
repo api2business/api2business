@@ -23,7 +23,10 @@ import { emitOAuthEconomics } from "./oauth-economics-output";
 import { emitDailyProfit } from "./daily-profit-output";
 import { parseAccountIdSelector } from "../../../../src/account-batch-economics";
 import { runBoundedProcess } from "../../../../src/bounded-process";
-import { readSecret } from "../../../../src/secrets";
+import { readSecret, readSub2ApiCredentials } from "../../../../src/secrets";
+import { ProbeIsolationService } from "../../../../src/probe-isolation";
+import { Sub2ApiClient } from "../../../../src/sub2api-client";
+import { Sub2ApiRuntimeService } from "../../../../src/sub2api-runtime-service";
 import { balanceNumber } from "../../../../static/balance-format.js";
 import { BugTeamClient } from "./bugteam-client";
 import { PublicRecoveryClient } from "./public-recovery-client";
@@ -334,6 +337,7 @@ function help(): Record<string, unknown> {
       "accounts idle-probe coverage [--scope codex|claude|grok|deepseek] [--window-minutes N] --over-api <absolute-http(s)-URL>",
       "accounts idle-probe reconcile [--accounts <id-or-range,...>] [--scope codex|claude|grok|deepseek] [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts idle-probe run [--accounts <id-or-range,...>] [--scope codex|claude|grok|deepseek] [--rounds 1..10] [--confirm] --over-api <absolute-http(s)-URL>",
+      "accounts math-probe --scope codex|claude|grok|deepseek --accounts <id-or-range,...> [--model <id>] [--json] (L0 direct CLI; no service required)",
       "accounts lifecycle detect --day YYYY-MM-DD --plan-type k12|plus [--model <id>] [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts lifecycle retire plan [--day YYYY-MM-DD] [--scope pool|day] [--plan-type k12|plus|team|free|all] [--selection dead|all] [--unit-cost-cny CNY] --over-api <absolute-http(s)-URL>",
       "accounts lifecycle retire status --id <plan-id> --over-api <absolute-http(s)-URL>",
@@ -605,13 +609,13 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
   if (json) return emit(value, true);
   const accounts = Array.isArray(value.accounts) ? value.accounts.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
   console.log(`API2BUSINESS ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)} totalDurationMs=${String(value.totalDurationMs)}`);
-  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%   BURST%  SWITCH%  EFFECTIVE%  TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
+  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%   BURST%  SWITCH%  EFFECTIVE%  DURATION_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
   for (const row of accounts) {
     const failureRate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
     const burstRate = typeof row.burstFailureRate === "number" ? `${(row.burstFailureRate * 100).toFixed(1)}%` : "-";
     const failoverRate = typeof row.failoverRate === "number" ? `${(row.failoverRate * 100).toFixed(1)}%` : "-";
     const effectiveFailoverRate = typeof row.effectiveFailoverRate === "number" ? `${(row.effectiveFailoverRate * 100).toFixed(1)}%` : "-";
-    const ttft = typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-";
+    const duration = typeof row.durationP95Ms === "number" ? `${Math.round(row.durationP95Ms)}ms` : "-";
     const groups = Array.isArray(row.groupNames) ? row.groupNames.join(",") : "-";
     console.log([
       String(row.grade ?? "-").padEnd(5),
@@ -622,7 +626,7 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
       burstRate.padStart(7),
       failoverRate.padStart(7),
       effectiveFailoverRate.padStart(10),
-      ttft.padStart(9),
+      duration.padStart(12),
       String(row.priority ?? "-").padStart(8),
       (row.currentAvailable === true ? "available" : row.currentAvailable === false ? "unavailable" : "unknown").padEnd(11),
       String(row.accountName ?? "-"),
@@ -1410,10 +1414,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
 
 
 function aggregateSmoke(): Record<string, unknown> {
-  const account = (groupId: number, groupName: string, successRequests: number, failureRequests: number, ttftP95Ms: number, apiAmountUsd: number) => ({
+  const account = (groupId: number, groupName: string, successRequests: number, failureRequests: number, durationP95Ms: number, apiAmountUsd: number) => ({
     accountId: 15, accountName: "lyon9801 0.0", groupId, groupName, status: "active", currentlyAvailable: true, priority: 1,
     successRequests, failureRequests, observedAttempts: successRequests + failureRequests, streamSuccessRequests: successRequests,
-    firstTokenSamples: successRequests, ttftP95Ms, usage: { requestCount: successRequests, tokenCount: successRequests * 1000, apiAmountUsd },
+    durationSamples: successRequests, durationP95Ms, usage: { requestCount: successRequests, tokenCount: successRequests * 1000, apiAmountUsd },
   });
   const scored = { ...account(3, "自用", 100, 0, 10_591, 1), score: 72.3, scoreComponents: { weights: { reliability: 48, failover: 10, latency: 37 } } };
   const rows = mergeAccountScores([scored, account(2, "混合池", 50, 1, 13_206, 0.5)]);
@@ -1426,6 +1430,91 @@ function aggregateSmoke(): Record<string, unknown> {
       && record(record(row.scoreComponents)?.weights)?.reliability === 48,
   };
   return { ok: Object.values(checks).every(Boolean), action: "account-score-aggregate-smoke", checks, mutation: false };
+}
+
+export async function runMathProbeL0(
+  parsed: Parsed,
+  config: ReturnType<typeof loadConfig>,
+): Promise<Record<string, unknown>> {
+  const scopeName = parsed.scope;
+  if (scopeName !== "codex" && scopeName !== "claude" && scopeName !== "grok" && scopeName !== "deepseek") {
+    throw new Error("accounts math-probe requires --scope codex|claude|grok|deepseek");
+  }
+  if (!parsed.accounts) throw new Error("accounts math-probe requires --accounts");
+  const accountIds = parseAccountIdSelector(parsed.accounts);
+  if (accountIds.length === 0) throw new Error("accounts math-probe requires at least one positive account id");
+  const scope = config.operations.upstreamSchedulingV2?.scopes[scopeName];
+  if (!scope || scope.enabled !== true) throw new Error(`scheduling scope ${scopeName} is not enabled`);
+  const model = parsed.model
+    ?? config.sub2api.idleProbe.platformModels?.[scope.platform]?.[0]
+    ?? config.sub2api.idleProbe.model;
+  const client = new Sub2ApiClient(config, readSub2ApiCredentials(config));
+  const runtime = new Sub2ApiRuntimeService(
+    client,
+    config.operations.upstreamManagement.failoverRules,
+    config.operations.upstreamManagement.failoverRulesByPlatform,
+  );
+  const isolation = new ProbeIsolationService(config, client, runtime);
+  const isolationScope = {
+    platform: scope.platform,
+    eligibleGroupIds: scope.eligibleGroupIds,
+    bindingGroupIds: [],
+  };
+  const results: Array<Record<string, unknown>> = [];
+  for (const accountId of accountIds) {
+    const startedAt = Date.now();
+    try {
+      const account = await client.getAccount(accountId, config.operations.upstreamManagement.mutationTimeoutMs);
+      const platform = String(account.platform ?? "").toLowerCase();
+      const status = String(account.status ?? "").toLowerCase();
+      if (platform !== scope.platform) {
+        throw new Error(`account ${accountId} platform ${platform || "-"} does not match scope ${scopeName}/${scope.platform}`);
+      }
+      if (status !== "active" || account.schedulable !== true) {
+        throw new Error(`account ${accountId} must be active and schedulable before math probing`);
+      }
+      const binding = isolation.get(accountId, isolationScope)
+        ?? await isolation.ensure(accountId, isolationScope);
+      const response = await isolation.probe(accountId, model, config.sub2api.idleProbe.accountTimeoutMs, config.sub2api.idleProbe.reasoningEffort);
+      results.push({
+        accountId,
+        accountName: account.name ?? null,
+        platform,
+        scope: scopeName,
+        model,
+        isolationGroupId: binding.groupId,
+        keyCreated: binding.keyCreated,
+        ok: response.qualityOk === true,
+        elapsedMs: Date.now() - startedAt,
+        response,
+      });
+    } catch (error) {
+      results.push({
+        accountId,
+        platform: scope.platform,
+        scope: scopeName,
+        model,
+        ok: false,
+        elapsedMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return {
+    ok: results.length > 0 && results.every((result) => result.ok === true),
+    action: "math-probe-l0",
+    transport: "direct-sub2api-isolated-user-key",
+    servicesStarted: false,
+    scope: scopeName,
+    platform: scope.platform,
+    model,
+    attempted: results.length,
+    succeeded: results.filter((result) => result.ok === true).length,
+    failed: results.filter((result) => result.ok === false).length,
+    durationMs: results.reduce((total, result) => total + Number(result.elapsedMs ?? 0), 0),
+    results,
+    valuesPrinted: false,
+  };
 }
 
 export async function runCli(args: string[]): Promise<void> {
@@ -1468,6 +1557,9 @@ export async function runCli(args: string[]): Promise<void> {
       refreshIntervalMinutes: config.monitor.refreshIntervalMinutes, recentCallLimit: config.monitor.recentCallLimit,
       automaticCreditEnabled: config.lottery.automaticCredit.enabled, valuesPrinted: false,
     }, parsed.json);
+    if (parsed.command.join(" ") === "accounts math-probe") {
+      return emit(await runMathProbeL0(parsed, config), parsed.json);
+    }
     if (parsed.command[0] === "bugteam" && !["purchase-import", "cost-monitor"].includes(parsed.command[1] ?? "")) {
       return emit(await bugTeamCommand(parsed, config), parsed.json);
     }
@@ -1599,7 +1691,7 @@ function emitPoolQuality(value: Record<string, unknown>, json: boolean): void {
     + ` success=${String(value.successRequests ?? "-")}`
     + ` failure=${String(value.failureRequests ?? "-")}`
     + ` failover=${String(value.failoverRequests ?? "-")}/${String(value.failoverRecovered ?? "-")}`
-    + ` ttftP95Ms=${String(value.ttftP95Ms ?? "-")}`
+    + ` durationP95Ms=${String(value.durationP95Ms ?? "-")}`
     + ` sampledAt=${String(value.sampledAt ?? "-")}`,
   );
   console.log(`PARTICIPANTS ${participation.length}`);
@@ -1619,7 +1711,7 @@ function emitRechargeCandidates(value: Record<string, unknown>, json: boolean): 
   if (json) return emit(value, true);
   const rows = Array.isArray(value.candidates) ? value.candidates.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
   console.log(`API2BUSINESS RECHARGE CANDIDATES threshold=¥${String(value.lowBalanceThresholdCny)} lookback=${String(value.lookbackHours)}h candidates=${rows.length} queryMs=${String(value.queryDurationMs)} totalMs=${String(value.totalDurationMs)}`);
-  console.log("RANK  SCORE  ACTION                 REASON                       BALANCE  ANCHOR                 REQ  FAIL%  TTFT_P95  API_USD  COST_CNY  ACCOUNT");
+  console.log("RANK  SCORE  ACTION                 REASON                       BALANCE  ANCHOR                 REQ  FAIL%  DURATION_P95  API_USD  COST_CNY  ACCOUNT");
   for (const [index, row] of rows.entries()) {
     const rate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
     const anchor = String(row.anchorAt ?? "-").replace("T", " ").slice(0, 19);
@@ -1630,7 +1722,7 @@ function emitRechargeCandidates(value: Record<string, unknown>, json: boolean): 
       String(row.reason ?? "-").padEnd(28),
       (typeof row.balanceCny === "number" ? `¥${balanceNumber(row.balanceCny, 2)}` : "-").padStart(8),
       anchor.padEnd(22), String(row.observedAttempts ?? 0).padStart(3), rate.padStart(6),
-      (typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-").padStart(9),
+      (typeof row.durationP95Ms === "number" ? `${Math.round(row.durationP95Ms)}ms` : "-").padStart(12),
       (typeof row.usage === "object" && row.usage !== null ? Number((row.usage as Record<string, unknown>).apiAmountUsd ?? 0).toFixed(4) : "0").padStart(8),
       (typeof row.usage === "object" && row.usage !== null && typeof (row.usage as Record<string, unknown>).upstreamCostCny === "number" ? Number((row.usage as Record<string, unknown>).upstreamCostCny).toFixed(2) : "-").padStart(8),
       String(row.accountName ?? "-"),

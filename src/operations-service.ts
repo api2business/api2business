@@ -225,6 +225,12 @@ export class OperationsService {
     this.bugTeamCostMonitor = new BugTeamCostMonitor(config, store);
   }
 
+  private async recentIdleProbeFacts(): Promise<Array<Record<string, unknown>>> {
+    const end = new Date();
+    const start = new Date(end.getTime() - this.config.sub2api.scoreSamplePolicy.retentionHours * 3_600_000);
+    return await this.store.recentIdleProbeFacts(start.toISOString(), end.toISOString());
+  }
+
   async createUpstreamBenchmark(accountId: number, model: string) {
     const policy = this.config.operations.upstreamBenchmark;
     const selectedModel = model.trim() || policy.model;
@@ -338,6 +344,7 @@ export class OperationsService {
 
   async modelSyncPlan(scopeName = "codex", explicitAccountIds: number[] = []) {
     const { scope, config } = this.modelSyncScope(scopeName);
+    const idleProbeFacts = await this.recentIdleProbeFacts();
     const ranking = await collectRecentCallScoresFromDatabase(
       this.config,
       config.automation.recentCallLimit,
@@ -345,6 +352,7 @@ export class OperationsService {
       null,
       null,
       "manual",
+      idleProbeFacts,
     );
     const eligible = records(ranking.accounts)
       .filter((row) => String(row.platform ?? "").toLowerCase() === scope.platform)
@@ -507,10 +515,21 @@ export class OperationsService {
           requestEvidence: Array.isArray(result.results) ? result.results.flatMap((item) => {
             const response = item?.response;
             if (!response || typeof response !== "object") return [];
-            const { accountId, groupId, model, startedAt, completedAt, clientRequestId, requestId } = response;
+            const {
+              accountId, groupId, model, startedAt, completedAt, clientRequestId, requestId,
+              qualityOk, ordinaryLogRecorded, answerClassification, answerRaw, parsedAnswer,
+              expectedAnswer, questionPrompt, classification, httpStatus, terminalStatus,
+              finishReason, refusal, durationMs, endToEndMs,
+            } = response;
             return (typeof clientRequestId === "string" && clientRequestId.trim())
               || (typeof requestId === "string" && requestId.trim())
-              ? [{ accountId, groupId, model, startedAt, completedAt, clientRequestId, requestId }] : [];
+              ? [{
+                  accountId, groupId, model, startedAt, completedAt, clientRequestId, requestId,
+                  qualityOk, ordinaryLogRecorded, answerClassification,
+                  answerRaw: typeof answerRaw === "string" ? answerRaw.slice(0, 512) : null,
+                  parsedAnswer, expectedAnswer, questionPrompt, classification, httpStatus,
+                  terminalStatus, finishReason, refusal, durationMs, endToEndMs,
+                }] : [];
           }) : [],
         });
       }
@@ -972,9 +991,9 @@ export class OperationsService {
       failoverRecovered: Number(latest?.failover_recovered ?? 0),
       rawFailoverRequests: Number(latest?.raw_failover_requests ?? 0) || Number(latest?.failover_requests ?? 0),
       rawFailoverRecovered: Number(latest?.raw_failover_recovered ?? 0) || Number(latest?.failover_recovered ?? 0),
-      ttftP95Ms: latest?.ttft_p95_ms == null ? null : Number(latest.ttft_p95_ms),
-      firstTokenSamples: Number(latest?.first_token_samples ?? 0),
-      rawFirstTokenSamples: Number(latest?.raw_first_token_samples ?? 0) || Number(latest?.first_token_samples ?? 0),
+      durationP95Ms: latest?.duration_p95_ms == null ? null : Number(latest.duration_p95_ms),
+      durationSamples: Number(latest?.duration_samples ?? 0),
+      rawDurationSamples: Number(latest?.raw_duration_samples ?? 0) || Number(latest?.duration_samples ?? 0),
       effectiveSampleWeight: Number(latest?.effective_sample_weight ?? latest?.observed_attempts ?? 0),
       sampleWeighting: String(latest?.sample_weighting ?? "recent-call-decay-buckets"),
       errorAttribution: {
@@ -1245,6 +1264,7 @@ export class OperationsService {
     accountSelector: string | null = null,
     groupSelector: string | null = null,
   ): Promise<Record<string, unknown>> {
+    const idleProbeFacts = await this.recentIdleProbeFacts();
     const ranking = await collectRecentCallScoresFromDatabase(
       this.config,
       recentCallLimit,
@@ -1252,6 +1272,7 @@ export class OperationsService {
       accountSelector,
       groupSelector,
       priority,
+      idleProbeFacts,
     );
     const usageRows = records(await this.store.getUpstreamUsageCache([]));
     const usageById = new Map(usageRows.map((row) => [Number(row.account_id), object(row.last_success_result ?? row.result)]));
@@ -1838,6 +1859,7 @@ export class OperationsService {
   }
 
   async procurement(budgetCny: number, operator: string, page = 1, pageSize = 10) {
+    const idleProbeFacts = await this.recentIdleProbeFacts();
     const ranking = await collectRecentCallScoresFromDatabase(
       this.config,
       this.config.monitor.recentCallLimit,
@@ -1845,6 +1867,7 @@ export class OperationsService {
       null,
       null,
       "manual",
+      idleProbeFacts,
     );
     const priority = buildAccountPriorityPlan(ranking, this.config);
     const candidates = records((priority.procurementAdvice as Record<string, unknown>)?.recommendations);

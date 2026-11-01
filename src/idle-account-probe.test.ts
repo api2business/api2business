@@ -219,7 +219,7 @@ test("idle probe skips a concurrent round and never retries inside one account a
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
-    probe: async () => { calls += 1; await gate; return { classification: "alive", ordinaryLogRecorded: true }; },
+    probe: async () => { calls += 1; await gate; return { classification: "alive", ordinaryLogRecorded: true, qualityOk: true }; },
   };
   const runtime = {};
   const service = new IdleAccountProbeService(config, reads([{
@@ -252,7 +252,7 @@ test("idle probe keeps concurrent rounds independent across scheduling scopes", 
     probe: async () => {
       calls += 1;
       if (calls === 1) await gate;
-      return { classification: "alive", ordinaryLogRecorded: true };
+      return { classification: "alive", ordinaryLogRecorded: true, qualityOk: true };
     },
   };
   const scopedConfig = {
@@ -306,7 +306,7 @@ test("idle probe does not use a persisted key after its private group binding wa
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
     probe: async () => {
       probes += 1;
-      return { classification: "alive", ordinaryLogRecorded: true };
+      return { classification: "alive", ordinaryLogRecorded: true, qualityOk: true };
     },
   };
   const service = new IdleAccountProbeService(config, reads([{
@@ -329,7 +329,7 @@ test("idle probe skips blocked accounts even when an explicit plan is stale", as
   const runtime = {};
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
-    probe: async () => { probes += 1; return { classification: "alive", ordinaryLogRecorded: true }; },
+    probe: async () => { probes += 1; return { classification: "alive", ordinaryLogRecorded: true, qualityOk: true }; },
   };
   const service = new IdleAccountProbeService(config, reads([{
     account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
@@ -363,7 +363,7 @@ test("idle probe sends every ready planned request concurrently", async () => {
       peak = Math.max(peak, active);
       await gate;
       active -= 1;
-      return { classification: "alive", ordinaryLogRecorded: true };
+      return { classification: "alive", ordinaryLogRecorded: true, qualityOk: true };
     },
   };
   const service = new IdleAccountProbeService(config, reads(rows), runtime as never, isolation as never);

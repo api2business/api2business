@@ -12,9 +12,9 @@ test("aggregated availability uses the canonical field and keeps both display al
     currentlyAvailable: true,
     successRequests: 10,
     failureRequests: 0,
-    firstTokenSamples: 5,
+    durationSamples: 5,
     streamSuccessRequests: 5,
-    ttftP95Ms: 1000,
+    durationP95Ms: 1000,
   }]);
 
   expect(row).toMatchObject({ currentAvailable: false, currentlyAvailable: false });

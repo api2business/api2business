@@ -169,9 +169,9 @@ sub2api:
     failureZeroScoreRate: 0.2
     failureBurstCallLimit: 100
     failoverZeroScoreRate: 0.2
-    ttftFullScoreMs: 5000
-    ttftZeroScoreMs: 55000
-    ttftPriorScore: 25
+    durationFullScoreMs: 5000
+    durationZeroScoreMs: 55000
+    durationPriorScore: 25
   poolScorePolicy:
     reliabilityWeight: 58
     failoverWeight: 0
@@ -180,9 +180,9 @@ sub2api:
     failureZeroScoreRate: 0.2
     failureBurstCallLimit: 100
     failoverZeroScoreRate: 0.2
-    ttftFullScoreMs: 5000
-    ttftZeroScoreMs: 90000
-    ttftPriorScore: 25
+    durationFullScoreMs: 5000
+    durationZeroScoreMs: 90000
+    durationPriorScore: 25
   grokScorePolicy:
     reliabilityWeight: 55
     failoverWeight: 15
@@ -191,9 +191,9 @@ sub2api:
     failureZeroScoreRate: 0.2
     failureBurstCallLimit: 100
     failoverZeroScoreRate: 0.2
-    ttftFullScoreMs: 7000
-    ttftZeroScoreMs: 70000
-    ttftPriorScore: 25
+    durationFullScoreMs: 7000
+    durationZeroScoreMs: 70000
+    durationPriorScore: 25
   deepseekScorePolicy:
     reliabilityWeight: 60
     failoverWeight: 15
@@ -202,9 +202,9 @@ sub2api:
     failureZeroScoreRate: 0.2
     failureBurstCallLimit: 100
     failoverZeroScoreRate: 0.2
-    ttftFullScoreMs: 5000
-    ttftZeroScoreMs: 60000
-    ttftPriorScore: 25
+    durationFullScoreMs: 5000
+    durationZeroScoreMs: 60000
+    durationPriorScore: 25
   scoreSamplePolicy:
     retentionHours: 8
     decayBucketSize: 100
@@ -245,7 +245,7 @@ sub2api:
     costWeight: 24
     evidenceWeight: 10
     evidenceTargetAttempts: 50
-    evidenceTargetFirstTokenSamples: 20
+    evidenceTargetDurationSamples: 20
     explorationWeight: 2
     explorationTargetAttempts: 50
     explorationQualityPrior: 25
@@ -289,7 +289,7 @@ sub2api:
     costWeight: 8
     evidenceWeight: 4
     evidenceTargetAttempts: 50
-    evidenceTargetFirstTokenSamples: 20
+    evidenceTargetDurationSamples: 20
     explorationWeight: 2
     explorationTargetAttempts: 50
     explorationQualityPrior: 25
@@ -333,7 +333,7 @@ sub2api:
     costWeight: 0
     evidenceWeight: 0
     evidenceTargetAttempts: 50
-    evidenceTargetFirstTokenSamples: 20
+    evidenceTargetDurationSamples: 20
     explorationWeight: 0
     explorationTargetAttempts: 50
     explorationQualityPrior: 0
@@ -377,7 +377,7 @@ sub2api:
     costWeight: 0
     evidenceWeight: 0
     evidenceTargetAttempts: 50
-    evidenceTargetFirstTokenSamples: 20
+    evidenceTargetDurationSamples: 20
     explorationWeight: 0
     explorationTargetAttempts: 50
     explorationQualityPrior: 0

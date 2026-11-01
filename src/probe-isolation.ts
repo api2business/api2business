@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, renameSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { AppConfig } from "./config";
+import { createMathProbeQuestion, MATH_PROBE_SYSTEM_PROMPT, parseMathProbeAnswer } from "./probe-math";
 import type { Paginated, Sub2ApiClient } from "./sub2api-client";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 
@@ -56,6 +57,202 @@ function errorMessage(error: unknown): string {
 function timeoutError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "TimeoutError"
     || error instanceof Error && /timed out|timeout/iu.test(error.message);
+}
+
+interface ProbeStreamResult {
+  body: string;
+  visibleText: string;
+  firstVisibleAt: number | null;
+  terminalReceived: boolean;
+  terminalEvent: string | null;
+  terminalStatus: "completed" | "incomplete" | "failed" | "cancelled" | null;
+  finishReason: string | null;
+  refusal: string | null;
+  streamed: boolean;
+}
+
+function visibleText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value.map((part) => {
+    const item = row(part);
+    return typeof item.text === "string" ? item.text : "";
+  }).join("");
+}
+
+function findRefusal(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findRefusal(item);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  const node = value as Row;
+  if (typeof node.refusal === "string" && node.refusal.trim().length > 0) return node.refusal;
+  for (const child of Object.values(node)) {
+    const found = findRefusal(child);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+function findResponseText(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  if (Array.isArray(value)) return value.map(findResponseText).join("");
+  const node = value as Row;
+  if (node.type === "output_text" && typeof node.text === "string") return node.text;
+  if (node.type === "text" && typeof node.text === "string") return node.text;
+  return Array.isArray(node.content) ? findResponseText(node.content) : "";
+}
+
+async function readProbeStream(response: Response, startedAt: number): Promise<ProbeStreamResult> {
+  const reader = response.body?.getReader();
+  if (!reader) return {
+    body: "",
+    visibleText: "",
+    firstVisibleAt: null,
+    terminalReceived: false,
+    terminalEvent: null,
+    terminalStatus: null,
+    finishReason: null,
+    refusal: null,
+    streamed: false,
+  };
+
+  const decoder = new TextDecoder();
+  const rawChunks: string[] = [];
+  let parseBuffer = "";
+  let answerText = "";
+  let firstVisibleAt: number | null = null;
+  let terminalReceived = false;
+  let terminalEvent: string | null = null;
+  let terminalStatus: ProbeStreamResult["terminalStatus"] = null;
+  let finishReason: string | null = null;
+  let refusal: string | null = null;
+  let sawSse = false;
+
+  const appendVisible = (text: string): void => {
+    if (text.length === 0) return;
+    answerText += text;
+    if (firstVisibleAt === null && text.trim().length > 0) firstVisibleAt = Date.now();
+  };
+  const consumePayload = (payload: Row, eventName: string | null): void => {
+    const type = typeof payload.type === "string" ? payload.type : eventName;
+    const choices = Array.isArray(payload.choices) ? payload.choices.map(row) : [];
+    const choice = choices[0] ?? {};
+    const delta = row(choice.delta);
+    const message = row(choice.message);
+    if (typeof delta.content === "string" || Array.isArray(delta.content)) appendVisible(visibleText(delta.content));
+    if (typeof message.content === "string" || Array.isArray(message.content)) appendVisible(visibleText(message.content));
+    if (typeof choice.finish_reason === "string") finishReason = choice.finish_reason;
+    refusal ??= findRefusal(payload);
+
+    if (type === "response.output_text.delta" && typeof payload.delta === "string") appendVisible(payload.delta);
+    if (type === "response.output_text.done" && answerText.length === 0 && typeof payload.text === "string") appendVisible(payload.text);
+    if (type === "response.refusal.done" && typeof payload.refusal === "string") refusal ??= payload.refusal;
+
+    const nestedResponse = row(payload.response);
+    const responseNode = Object.keys(nestedResponse).length > 0
+      ? nestedResponse
+      : payload.object === "response"
+        ? payload
+        : {};
+    if (answerText.length === 0 && Array.isArray(responseNode.output)) appendVisible(findResponseText(responseNode.output));
+    if (typeof responseNode.status === "string" && ["completed", "incomplete", "failed", "cancelled"].includes(responseNode.status)) {
+      terminalReceived = true;
+      terminalEvent = type ?? `response.${responseNode.status}`;
+      terminalStatus = responseNode.status as ProbeStreamResult["terminalStatus"];
+    }
+    if (type === "response.completed" || type === "response.incomplete" || type === "response.failed" || type === "response.cancelled") {
+      terminalReceived = true;
+      terminalEvent = type;
+      terminalStatus = type.slice("response.".length) as ProbeStreamResult["terminalStatus"];
+    }
+    if (type === "error") {
+      terminalReceived = true;
+      terminalEvent = type;
+      terminalStatus = "failed";
+    }
+  };
+  const consumeEventBlock = (block: string): void => {
+    sawSse = true;
+    let eventName: string | null = null;
+    const data: string[] = [];
+    for (const line of block.split("\n")) {
+      if (line.startsWith("event:")) eventName = line.slice("event:".length).trim() || null;
+      if (line.startsWith("data:")) data.push(line.slice("data:".length).trimStart());
+    }
+    const joined = data.join("\n").trim();
+    if (joined === "[DONE]") {
+      terminalReceived = true;
+      terminalEvent = "chat.completions.done";
+      terminalStatus = "completed";
+      return;
+    }
+    if (!joined || joined === "[DONE]") return;
+    try {
+      const payload = JSON.parse(joined) as Row;
+      consumePayload(payload, eventName);
+    } catch {
+      // Non-JSON SSE events cannot contribute a verifiable model answer.
+    }
+  };
+  const drainEvents = (final: boolean): void => {
+    parseBuffer = parseBuffer.replace(/\r\n/gu, "\n");
+    for (;;) {
+      const boundary = parseBuffer.indexOf("\n\n");
+      if (boundary < 0) break;
+      const block = parseBuffer.slice(0, boundary);
+      parseBuffer = parseBuffer.slice(boundary + 2);
+      if (block.trim()) consumeEventBlock(block);
+    }
+    if (final && parseBuffer.trim()) {
+      consumeEventBlock(parseBuffer);
+      parseBuffer = "";
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value, { stream: true });
+    rawChunks.push(chunk);
+    parseBuffer += chunk;
+    drainEvents(false);
+  }
+  const tail = decoder.decode();
+  if (tail) {
+    rawChunks.push(tail);
+    parseBuffer += tail;
+  }
+  drainEvents(true);
+  const body = rawChunks.join("");
+  if (!sawSse && body.trim()) {
+    try {
+      const payload = JSON.parse(body) as Row;
+      consumePayload(payload, null);
+      if (finishReason !== null && !terminalReceived) {
+        terminalReceived = true;
+        terminalEvent = "chat.completions.non_stream_complete";
+        terminalStatus = "completed";
+      }
+    } catch {
+      // The caller records the HTTP response as protocol-invalid.
+    }
+  }
+  return {
+    body,
+    visibleText: answerText,
+    firstVisibleAt,
+    terminalReceived,
+    terminalEvent,
+    terminalStatus,
+    finishReason,
+    refusal,
+    streamed: sawSse,
+  };
 }
 
 function pageItems(value: unknown): Row[] {
@@ -453,6 +650,7 @@ export class ProbeIsolationService {
     reasoningEffort: "low" | "medium" | "high" = "low",
   ): Promise<Record<string, unknown>> {
     const startedAt = Date.now();
+    const question = createMathProbeQuestion();
     const roundBudgetMs = Math.max(1_000, this.config.sub2api.idleProbe.roundTimeoutSeconds * 1_000 - 1_000);
     const deadline = startedAt + roundBudgetMs;
     const stored = this.readFile().records[String(accountId)];
@@ -460,6 +658,17 @@ export class ProbeIsolationService {
       return {
         accountId,
         classification: "skipped",
+        answerClassification: "not_assessed",
+        qualityOk: false,
+        questionId: question.questionId,
+        questionPrompt: question.prompt,
+        expectedAnswer: question.expectedAnswer,
+        answerRaw: "",
+        parsedAnswer: null,
+        trimmedNumeric: false,
+        ttftMs: null,
+        postTtftMs: null,
+        endToEndMs: Date.now() - startedAt,
         httpStatus: null,
         durationMs: Date.now() - startedAt,
         ordinaryLogRecorded: false,
@@ -473,9 +682,10 @@ export class ProbeIsolationService {
     };
     const requestId = crypto.randomUUID();
     const requestEvidence = { accountId, groupId: ensured.binding.groupId, model,
-      startedAt: new Date(startedAt).toISOString(), requestId };
+      startedAt: new Date(startedAt).toISOString(), requestId,
+      questionId: question.questionId, questionPrompt: question.prompt, expectedAnswer: question.expectedAnswer };
     let response: Response;
-    let body: string;
+    let stream: ProbeStreamResult;
     try {
       const chatCompletions = ensured.record.platform === "deepseek";
       response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}${chatCompletions ? "/chat/completions" : "/responses"}`, {
@@ -487,12 +697,21 @@ export class ProbeIsolationService {
           authorization: `Bearer ${ensured.record.apiKey}`,
         },
         body: JSON.stringify(chatCompletions
-          ? { model, messages: [{ role: "user", content: "health probe" }], max_tokens: 1, stream: true }
+          ? {
+              model,
+              messages: [
+                { role: "system", content: MATH_PROBE_SYSTEM_PROMPT },
+                { role: "user", content: question.prompt },
+              ],
+              max_tokens: 256,
+              stream: true,
+            }
           : {
               model,
-              input: "health probe",
+              instructions: MATH_PROBE_SYSTEM_PROMPT,
+              input: question.prompt,
               reasoning: { effort: reasoningEffort },
-              max_output_tokens: 1,
+              max_output_tokens: 256,
               // TTFT is emitted by Sub2API only for streaming responses. Keep
               // the probe body streaming so every successful probe contributes
               // a first-token sample to every platform scope.
@@ -500,22 +719,43 @@ export class ProbeIsolationService {
             }),
         signal: AbortSignal.timeout(Math.min(timeoutMs, this.remainingTimeout(deadline) ?? timeoutMs)),
       });
-      body = await response.text();
+      stream = await readProbeStream(response, startedAt);
     } catch (error) {
+      const completedAt = Date.now();
       return {
         ...requestEvidence,
-        completedAt: new Date().toISOString(),
+        completedAt: new Date(completedAt).toISOString(),
         classification: "error",
+        answerClassification: "not_assessed",
+        qualityOk: false,
+        answerRaw: "",
+        parsedAnswer: null,
+        trimmedNumeric: false,
+        ttftMs: null,
+        postTtftMs: null,
+        endToEndMs: completedAt - startedAt,
+        terminalReceived: false,
+        terminalEvent: null,
+        terminalStatus: null,
+        finishReason: null,
+        refusal: null,
         httpStatus: null,
-        durationMs: Date.now() - startedAt,
+        durationMs: completedAt - startedAt,
         ordinaryLogRecorded: false,
         responseBytes: 0,
         errorMarker: timeoutError(error) ? "request-timeout" : "transport-error",
         error: errorMessage(error),
       };
     }
+    const completedAt = Date.now();
+    const mathAnswer = parseMathProbeAnswer(stream.visibleText, question.expectedAnswer);
+    const answerClassification = stream.refusal !== null ? "refused"
+      : stream.finishReason === "length" ? "truncated"
+        : stream.terminalStatus === "failed" ? "failed"
+          : stream.terminalStatus === "incomplete" || !stream.terminalReceived ? "incomplete"
+            : mathAnswer.classification;
     const success = response.status >= 200 && response.status < 300;
-    const lowered = body.toLowerCase();
+    const lowered = stream.body.toLowerCase();
     const accountRoutingFailed = !success && [
       "no available accounts",
       "no available account",
@@ -527,14 +767,27 @@ export class ProbeIsolationService {
         : response.status === 429 ? "rate-limited" : "error";
     return {
       ...requestEvidence,
-      completedAt: new Date().toISOString(),
+      completedAt: new Date(completedAt).toISOString(),
       // This is returned by the native gateway, not a caller-selected marker.
       clientRequestId: response.headers.get("x-client-request-id")?.trim() || null,
       classification,
+      answerClassification: success ? answerClassification : "not_assessed",
+      qualityOk: success && answerClassification === "correct",
+      answerRaw: stream.visibleText,
+      parsedAnswer: mathAnswer.parsedAnswer,
+      trimmedNumeric: mathAnswer.trimmedNumeric,
+      ttftMs: stream.firstVisibleAt === null ? null : stream.firstVisibleAt - startedAt,
+      postTtftMs: stream.firstVisibleAt === null ? null : completedAt - stream.firstVisibleAt,
+      endToEndMs: completedAt - startedAt,
+      terminalReceived: stream.terminalReceived,
+      terminalEvent: stream.terminalEvent,
+      terminalStatus: stream.terminalStatus,
+      finishReason: stream.finishReason,
+      refusal: stream.refusal,
       httpStatus: response.status,
-      durationMs: Date.now() - startedAt,
+      durationMs: completedAt - startedAt,
       ordinaryLogRecorded: !accountRoutingFailed,
-      responseBytes: body.length,
+      responseBytes: stream.body.length,
       errorMarker: success ? null : accountRoutingFailed ? "no-available-account" : ["invalid_api_key", "insufficient", "rate_limit", "temporarily", "overloaded", "model_not_found"]
         .find((marker) => lowered.includes(marker)) ?? "upstream-error",
     };

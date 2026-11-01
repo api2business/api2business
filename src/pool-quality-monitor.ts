@@ -286,7 +286,7 @@ export interface PoolQualitySample {
   rawFailureRequests: number;
   rawFailoverRequests: number;
   rawFailoverRecovered: number;
-  rawFirstTokenSamples: number;
+  rawDurationSamples: number;
   score: number | null;
   grade: string;
   observedAttempts: number;
@@ -295,8 +295,8 @@ export interface PoolQualitySample {
   failureRate: number | null;
   failoverRequests: number;
   failoverRecovered: number;
-  ttftP95Ms: number | null;
-  firstTokenSamples: number;
+  durationP95Ms: number | null;
+  durationSamples: number;
   effectiveSampleWeight: number;
   sampleWeighting: "recent-call-decay-buckets";
   errorAttribution: {
@@ -384,9 +384,9 @@ export async function collectPoolQualitySample(
   const attributedErrors = errors.filter((row) => Number.isInteger(Number(row.account_id)) && Number(row.account_id) > 0);
   const failovers = weightedRows.filter((row) => row.failover_triggered === true);
   const recovered = failovers.filter((row) => row.kind === "usage");
-  const ttftRows = successes.filter((row) => Number.isFinite(Number(row.first_token_ms)) && Number(row.first_token_ms) >= 0);
-  const ttft = ttftRows.map((row) => Number(row.first_token_ms));
-  const ttftWeights = ttftRows.map(weight);
+  const durationRows = successes.filter((row) => Number.isFinite(Number(row.duration_ms)) && Number(row.duration_ms) >= 0);
+  const durations = durationRows.map((row) => Number(row.duration_ms));
+  const durationWeights = durationRows.map(weight);
   const effectiveSampleWeight = weightedCount(weightedRows);
   const accounts = new Map<number, { accountName: string; baseUrl: string; attempts: number; rawAttempts: number }>();
   for (const row of weightedRows) {
@@ -412,12 +412,9 @@ export async function collectPoolQualitySample(
     failover_recovered: weightedDistinctCount(recovered),
     failover_failed: 0, failover_aborted: 0, burst_attempts: effectiveSampleWeight,
     burst_failure_requests: weightedCount(failures), stream_success_requests: weightedCount(successes.filter((row) => row.stream === true)),
-    first_token_samples: weightedCount(ttftRows), ttft_values: ttft, ttft_weights: ttftWeights,
-    ttft_p50_ms: percentile(ttft, 0.5), ttft_p95_ms: percentile(ttft, 0.95),
-    ttft_p99_ms: percentile(ttft, 0.99), ttft_max_ms: ttft.length ? Math.max(...ttft) : null,
-    duration_values: successes.map((row) => Number(row.duration_ms)).filter(Number.isFinite),
-    duration_weights: successes.filter((row) => Number.isFinite(Number(row.duration_ms))).map(weight),
-    duration_p95_ms: percentile(successes.map((row) => Number(row.duration_ms)).filter(Number.isFinite), 0.95),
+    duration_samples: weightedCount(durationRows), duration_values: durations, duration_weights: durationWeights,
+    duration_p50_ms: percentile(durations, 0.5), duration_p95_ms: percentile(durations, 0.95),
+    duration_p99_ms: percentile(durations, 0.99), duration_max_ms: durations.length ? Math.max(...durations) : null,
     customer_error_requests: weightedCount(failures), excluded_error_requests: weightedCount(weightedRows.filter((row) => row.kind === "error" && row.scoreable !== true)),
     token_count: 0, api_amount_usd: 0,
   }, recentCallLimit, config.sub2api.poolScorePolicy);
@@ -429,7 +426,7 @@ export async function collectPoolQualitySample(
     rawFailureRequests: failures.length,
     rawFailoverRequests: failovers.length,
     rawFailoverRecovered: recovered.length,
-    rawFirstTokenSamples: ttftRows.length,
+    rawDurationSamples: durationRows.length,
     score: scored.score == null ? null : Number(scored.score),
     grade: String(scored.grade ?? "insufficient"),
     observedAttempts: Number(scored.observedAttempts ?? effectiveSampleWeight),
@@ -439,8 +436,8 @@ export async function collectPoolQualitySample(
     failureRate: rows.length > 0 ? failures.length / rows.length : null,
     failoverRequests: Number(scored.failoverRequests ?? 0),
     failoverRecovered: Number(scored.failoverRecovered ?? 0),
-    ttftP95Ms: scored.ttftP95Ms == null ? null : Number(scored.ttftP95Ms),
-    firstTokenSamples: weightedCount(ttftRows),
+    durationP95Ms: scored.durationP95Ms == null ? null : Number(scored.durationP95Ms),
+    durationSamples: weightedCount(durationRows),
     effectiveSampleWeight,
     sampleWeighting: "recent-call-decay-buckets",
     errorAttribution: {
@@ -562,7 +559,7 @@ export function poolQualityHistory(rows: Row[], rollingWindowPoints = 100) {
     sampledAt: new Date(String(row.sampled_at)).toISOString(),
     score: row.score == null ? null : Number(row.score),
     failureRate: row.failure_rate == null ? null : Number(row.failure_rate),
-    ttftP95Ms: row.ttft_p95_ms == null ? null : Number(row.ttft_p95_ms),
+    durationP95Ms: row.duration_p95_ms == null ? null : Number(row.duration_p95_ms),
   }));
   return points.map((point, index) => {
     const window = points.slice(Math.max(0, index + 1 - rollingWindowPoints), index + 1)

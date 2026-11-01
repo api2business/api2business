@@ -29,7 +29,7 @@ function fixture(usageRows: unknown[] = [{
     observedAttempts: 120,
     failureRate: 0.01,
     failoverRate: 0,
-    ttftP95Ms: 1000,
+    durationP95Ms: 1000,
     scoreComponents: { reliability: 92, latency: 90, failover: 100, weights: { reliability: 48, latency: 37, failover: 10 } },
     usage: { costRateCnyPerApiUsd: 0.2 },
   };

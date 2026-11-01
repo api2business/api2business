@@ -20,6 +20,27 @@ interface FakeState {
   rejectKeyCreateOnce?: string;
 }
 
+function answerFromPrompt(prompt: string): number {
+  const match = /^(\d+) \+ (\d+)$/u.exec(prompt);
+  if (!match) throw new Error(`unexpected math probe prompt: ${prompt}`);
+  return Number(match[1]) + Number(match[2]);
+}
+
+function chatMathStream(answer: number): string {
+  return [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: String(answer) } }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
+    "data: [DONE]\n\n",
+  ].join("");
+}
+
+function responsesMathStream(answer: number): string {
+  return [
+    `event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", delta: String(answer) })}\n\n`,
+    `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { status: "completed" } })}\n\n`,
+  ].join("");
+}
+
 class FakeClient {
   constructor(private readonly state: FakeState) {}
 
@@ -181,22 +202,28 @@ test("DeepSeek probe uses Chat Completions and the configured probe model", asyn
   const originalFetch = globalThis.fetch;
   let requestUrl = "";
   let requestBody = "";
+  let result: Record<string, unknown> = {};
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     requestUrl = String(input);
     requestBody = String(init?.body ?? "");
-    return new Response("data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+    const prompt = String((JSON.parse(requestBody) as { messages: Array<{ content: string }> }).messages[1]?.content);
+    return new Response(chatMathStream(answerFromPrompt(prompt)), { status: 200, headers: { "content-type": "text/event-stream" } });
   }) as unknown as typeof fetch;
   try {
     await service.ensure(42, { platform: "deepseek", eligibleGroupIds: [131], bindingGroupIds: [] });
-    await service.probe(42, "deepseek-flash", 1000);
+    result = await service.probe(42, "deepseek-flash", 1000);
     expect(requestUrl).toBe("https://gateway.example.com/v1/chat/completions");
     expect(JSON.parse(requestBody)).toMatchObject({
       model: "deepseek-flash",
-      messages: [{ role: "user", content: "health probe" }],
-      max_tokens: 1,
+      messages: [
+        { role: "system", content: expect.stringContaining("只输出最终整数") },
+        { role: "user", content: expect.stringMatching(/^\d+ \+ \d+$/u) },
+      ],
+      max_tokens: 256,
       stream: true,
     });
     expect(requestBody).not.toContain("max_output_tokens");
+    expect(result).toMatchObject({ answerClassification: "correct", qualityOk: true, terminalStatus: "completed" });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -283,14 +310,26 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     requestUrl = String(input);
     requestBody = String(init?.body ?? "");
     sentRequestId = new Headers(init?.headers).get("x-request-id") ?? "";
-    return new Response(JSON.stringify({ id: "resp_probe", output: [] }), {
-      status: 200, headers: { "X-Client-Request-ID": "native-probe-correlation" },
+    const prompt = String((JSON.parse(requestBody) as { input: string }).input);
+    return new Response(responsesMathStream(answerFromPrompt(prompt)), {
+      status: 200,
+      headers: { "X-Client-Request-ID": "native-probe-correlation", "content-type": "text/event-stream" },
     });
   }) as unknown as typeof fetch;
   try {
     await service.ensure(42);
     const result = await service.probe(42, "gpt-5.6-terra", 1000, "low");
-    expect(result).toMatchObject({ accountId: 42, groupId: 51, classification: "alive", ordinaryLogRecorded: true });
+    expect(result).toMatchObject({
+      accountId: 42,
+      groupId: 51,
+      classification: "alive",
+      ordinaryLogRecorded: true,
+      answerClassification: "correct",
+      qualityOk: true,
+      terminalReceived: true,
+      terminalStatus: "completed",
+      finishReason: null,
+    });
     expect(result).toMatchObject({ model: "gpt-5.6-terra", clientRequestId: "native-probe-correlation" });
     expect(sentRequestId).toMatch(/^[a-f0-9-]{36}$/);
     expect(result.requestId).toBe(sentRequestId);
@@ -299,11 +338,34 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     expect(requestUrl).not.toContain("/admin/accounts/");
     expect(JSON.parse(requestBody)).toMatchObject({
       model: "gpt-5.6-terra",
+      instructions: expect.stringContaining("只输出最终整数"),
+      input: expect.stringMatching(/^\d+ \+ \d+$/u),
       reasoning: { effort: "low" },
+      max_output_tokens: 256,
       stream: true,
     });
     expect(requestBody).toContain('"stream":true');
     expect(requestBody).not.toContain('"stream":false');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("probe does not treat a completed empty response as healthy", async () => {
+  const { service } = fixture();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response([
+    `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: { status: "completed", output: [] } })}\n\n`,
+  ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch;
+  try {
+    await service.ensure(42);
+    expect(await service.probe(42, "gpt-5.6-terra", 1000)).toMatchObject({
+      classification: "alive",
+      answerClassification: "empty",
+      qualityOk: false,
+      answerRaw: "",
+      ttftMs: null,
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

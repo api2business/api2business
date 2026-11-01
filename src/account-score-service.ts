@@ -24,6 +24,7 @@ interface ScoreSnapshot {
 }
 
 export interface ScoreSnapshotStore {
+  recentIdleProbeFacts?(start: string, end: string): Promise<Array<Record<string, unknown>>>;
   getSnapshot(key: string): Promise<Record<string, unknown> | null>;
   beginSnapshotRefresh(key: string, schemaVersion: string, startedAt: string): Promise<void>;
   completeSnapshot(key: string, schemaVersion: string, payload: Record<string, unknown>, capturedAt: string): Promise<void>;
@@ -126,6 +127,11 @@ export class AccountScoreService {
     if (this.snapshotStore) await this.snapshotStore.beginSnapshotRefresh(scoreSnapshotKey, scoreCacheVersion, startedAt.toISOString());
     try {
       if (!this.reads) throw new Error("scores.refresh requires the Native API read executor");
+      const probeEnd = new Date();
+      const probeStart = new Date(probeEnd.getTime() - this.config.sub2api.scoreSamplePolicy.retentionHours * 3_600_000);
+      const idleProbeFacts = this.snapshotStore?.recentIdleProbeFacts
+        ? await this.snapshotStore.recentIdleProbeFacts(probeStart.toISOString(), probeEnd.toISOString())
+        : [];
       const collected = await collectRecentCallScoresFromDatabase(
         this.config,
         recentCallLimit,
@@ -133,6 +139,7 @@ export class AccountScoreService {
         null,
         null,
         priority,
+        idleProbeFacts,
       );
       const refreshedAt = new Date();
       const accounts = this.poolAccounts(mergeAccountScores(collected.accounts));
@@ -156,6 +163,7 @@ export class AccountScoreService {
           recentCallLimit,
           databaseQueries: collected.databaseQueries,
           queryDurationMs: collected.queryDurationMs,
+          idleProbeFactCount: idleProbeFacts.length,
         },
       };
       if (this.snapshotStore) await this.snapshotStore.completeSnapshot(scoreSnapshotKey, scoreCacheVersion, this.snapshot as unknown as Record<string, unknown>, refreshedAt.toISOString());

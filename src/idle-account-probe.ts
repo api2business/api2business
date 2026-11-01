@@ -540,7 +540,7 @@ export class IdleAccountProbeService {
                   schedulable: candidate.schedulable,
                   hadRuntimeBlock: candidate.hadRuntimeBlock,
                 },
-                ok: response.ordinaryLogRecorded === true,
+                ok: response.ordinaryLogRecorded === true && response.qualityOk === true,
                 response,
               };
             } catch (error) {

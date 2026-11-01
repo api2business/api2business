@@ -495,7 +495,7 @@ button:disabled { cursor: wait; opacity: .48; }
 .score-col-output { width: 138px; }
 .score-col-sample { width: 104px; }
 .score-col-failure { width: 174px; }
-.score-col-ttft { width: 172px; }
+.score-col-duration { width: 184px; }
 .score-col-failover { width: 148px; }
 .score-col-groups { width: 242px; }
 .score-col-actions { width: 116px; }

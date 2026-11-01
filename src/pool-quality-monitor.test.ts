@@ -28,7 +28,7 @@ test("pool quality uses one queued query and separates exact upstream accounts",
   expect(sample.rawFailureRequests).toBe(1);
   expect(sample.rawFailoverRequests).toBe(1);
   expect(sample.rawFailoverRecovered).toBe(0);
-  expect(sample.rawFirstTokenSamples).toBe(2);
+  expect(sample.rawDurationSamples).toBe(2);
   expect(sample.observedAttempts).toBe(3);
   expect(sample.participation).toHaveLength(2);
   expect(sample.failureRequests).toBe(1);
@@ -312,8 +312,8 @@ test("pool quality has an independent YAML score policy without failover points"
 });
 
 test("pool quality history preserves bounded chart fields", () => {
-  expect(poolQualityHistory([{ sampled_at: "2026-08-03T00:00:00Z", score: "88.5", failure_rate: "0.02", ttft_p95_ms: 2500 }])).toEqual([
-    { sampledAt: "2026-08-03T00:00:00.000Z", score: 88.5, failureRate: 0.02, ttftP95Ms: 2500, rollingScore: 88.5 },
+  expect(poolQualityHistory([{ sampled_at: "2026-08-03T00:00:00Z", score: "88.5", failure_rate: "0.02", duration_p95_ms: 2500 }])).toEqual([
+    { sampledAt: "2026-08-03T00:00:00.000Z", score: 88.5, failureRate: 0.02, durationP95Ms: 2500, rollingScore: 88.5 },
   ]);
 });
 
@@ -322,7 +322,7 @@ test("pool quality rolling score uses the latest 100 sample points", () => {
     sampled_at: new Date(Date.UTC(2026, 7, 3, 0, index)).toISOString(),
     score: index === 0 ? 0 : 100,
     failure_rate: "0",
-    ttft_p95_ms: 2500,
+    duration_p95_ms: 2500,
   }));
   expect(poolQualityHistory(rows).at(-1)?.rollingScore).toBe(100);
 });

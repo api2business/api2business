@@ -131,7 +131,7 @@ function renderQuality(quality, scope) {
   $('#v2-quality-title').textContent = `${label} 综合质量`; $('#v2-quality-state').textContent = `最近 ${number(quality?.recentCallLimit)} 次被动调用 · 评分采样 ${time(quality?.sampledAt)}${quality?.sampleStale ? '（陈旧）' : ''} · 排除语音和内部探活`
   $('#v2-quality-score').textContent = Number.isFinite(score) ? score.toFixed(1) : '—'; $('#v2-quality-grade').textContent = grade === 'insufficient' ? '证据不足' : `${grade} 级`; $('#v2-quality-score').closest('.pool-quality-score').dataset.grade = grade
   $('#v2-quality-outcomes').textContent = `${number(quality?.rawSuccessRequests ?? quality?.successRequests)} / ${number(quality?.rawFailureRequests ?? quality?.failureRequests)}`; $('#v2-quality-failure-rate').textContent = `失败率 ${percent(quality?.failureRate)}`
-  $('#v2-quality-failover').textContent = `${number(quality?.rawFailoverRecovered ?? quality?.failoverRecovered)} / ${number(quality?.rawFailoverRequests ?? quality?.failoverRequests)}`; $('#v2-quality-ttft').textContent = quality?.ttftP95Ms == null ? '—' : `${number(Math.round(Number(quality.ttftP95Ms)))} ms`; $('#v2-quality-ttft-samples').textContent = `首 token 样本 ${number(quality?.rawFirstTokenSamples ?? quality?.firstTokenSamples)}`
+  $('#v2-quality-failover').textContent = `${number(quality?.rawFailoverRecovered ?? quality?.failoverRecovered)} / ${number(quality?.rawFailoverRequests ?? quality?.failoverRequests)}`; $('#v2-quality-duration').textContent = quality?.durationP95Ms == null ? '—' : `${number(Math.round(Number(quality.durationP95Ms)))} ms`; $('#v2-quality-duration-samples').textContent = `完整耗时样本 ${number(quality?.rawDurationSamples ?? quality?.durationSamples)}`
   const history = Array.isArray(quality?.history) ? quality.history : []
   $('#v2-quality-chart').innerHTML = historyChartMarkup(history, { series: [{ key: 'score', className: 'chart-pool-quality', label: '当前采样' }, { key: 'rollingScore', className: 'chart-pool-quality-rolling', label: '100 点滚动' }], valueFormatter: (value) => number(value, 1), unit: '质量分 / 100', ariaLabel: `${label} 最近一百个采样点综合质量评分`, yMin: 0, yMax: 100 })
   bindHistoryChartTooltip($('#v2-quality-chart'))
@@ -210,27 +210,27 @@ function accountQualityMarkup(row, attempts) {
   const tone = excluded > 0 ? 'warning' : 'info'
   return `<td class="quality-detail-cell"><strong>成功响应 ${number(success)} / ${number(attempts)}</strong><small>上游失败 ${percent(row.failureRate)} ${metricHelp(accountQualityDetails(row, attempts), tone)}</small></td>`
 }
-function accountTtftDetails(row) {
-  const ttft = row.ttftP95Ms == null ? '无有效样本' : `${number(Math.round(Number(row.ttftP95Ms)))} ms`
-  const streamSuccess = row.streamSuccessRequests ?? 0
-  const firstTokenSamples = row.firstTokenSamples ?? 0
-  const streamState = streamSuccess > 0
-    ? firstTokenSamples > 0 ? '已捕获首 Token' : '流式响应未捕获首 Token'
-    : Number(row.successRequests ?? 0) > 0 ? '当前成功响应无流式样本' : '没有成功响应'
+function accountDurationDetails(row) {
+  const duration = row.durationP95Ms == null ? '无有效样本' : `${number(Math.round(Number(row.durationP95Ms)))} ms`
+  const successRequests = row.successRequests ?? 0
+  const durationSamples = row.durationSamples ?? 0
+  const durationState = successRequests > 0
+    ? durationSamples > 0 ? '已捕获完整耗时' : '成功响应未记录完整耗时'
+    : '没有成功响应'
   return [
-    `TTFT P95：${ttft}`,
-    `流式成功：${number(streamSuccess)} / ${number(row.successRequests ?? 0)}`,
-    `首 Token 样本：${number(firstTokenSamples)}`,
-    `首 Token 覆盖率：${percent(row.firstTokenCoverage)}`,
+    `完整耗时 P95：${duration}`,
+    `成功响应：${number(successRequests)}`,
+    `完整耗时样本：${number(durationSamples)}`,
+    `完整耗时覆盖率：${percent(row.durationCoverage)}`,
     `总耗时 P95：${row.durationP95Ms == null ? '—' : `${number(Math.round(Number(row.durationP95Ms)))} ms`}`,
-    `状态：${streamState}`,
+    `状态：${durationState}`,
   ]
 }
-function accountTtftMarkup(row) {
-  const observed = row.ttftP95Ms != null && Number(row.firstTokenSamples ?? 0) > 0
-  const value = observed ? `${number(Math.round(Number(row.ttftP95Ms)))} ms` : '无有效样本'
+function accountDurationMarkup(row) {
+  const observed = row.durationP95Ms != null && Number(row.durationSamples ?? 0) > 0
+  const value = observed ? `${number(Math.round(Number(row.durationP95Ms)))} ms` : '无有效样本'
   const tone = observed ? 'info' : 'warning'
-  return `<td class="ttft-detail-cell"><strong class="ttft-value${observed ? '' : ' is-missing'}">${value}</strong><small>${metricHelp(accountTtftDetails(row), tone)}</small></td>`
+  return `<td class="duration-detail-cell"><strong class="duration-value${observed ? '' : ' is-missing'}">${value}</strong><small>${metricHelp(accountDurationDetails(row), tone)}</small></td>`
 }
 function accountSortValue(row, key) {
   return ({
@@ -243,7 +243,7 @@ function accountSortValue(row, key) {
     output: row.usage?.apiAmountUsd,
     sample: row.latestSampleAt,
     failure: row.failureRate,
-    ttft: row.ttftP95Ms,
+    duration: row.durationP95Ms,
     failover: row.failureRequests,
     groups: (row.groupNames ?? []).join('、'),
   })[key]
@@ -272,7 +272,7 @@ function renderAccounts() {
     const accountMarkup = upstreamUrl
       ? `<a class="upstream-account-link" href="${escapeHtml(upstreamUrl)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开上游页面">${accountLabel}</a>`
       : `<strong>${accountLabel}</strong>`
-    return `<tr><td>${accountMarkup}<small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td title="${escapeHtml(costTitle)}">${cost == null ? '—' : `¥${number(cost, 4)}/API 美元`}<small>${escapeHtml(costSource)}</small></td><td>${usd(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td>${accountQualityMarkup(row, attempts)}${accountTtftMarkup(row)}<td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
+    return `<tr><td>${accountMarkup}<small>#${escapeHtml(row.accountId)}</small></td><td>${escapeHtml(row.currentStatus ?? row.status ?? '—')}</td><td><b>${row.score == null ? '—' : Number(row.score).toFixed(1)}</b><small>${escapeHtml(row.grade ?? row.confidence ?? '')}</small></td><td>${number(row.priority)}</td><td>${quotaValue}<small title="${escapeHtml(quotaSample.exact)}">${quotaLabel}</small></td><td title="${escapeHtml(costTitle)}">${cost == null ? '—' : `¥${number(cost, 4)}/API 美元`}<small>${escapeHtml(costSource)}</small></td><td>${usd(row.usage?.apiAmountUsd)}</td><td class="sample-time sample-time-${sample.freshness}" title="北京时间 ${escapeHtml(sample.exact)}">${escapeHtml(sample.label)}</td>${accountQualityMarkup(row, attempts)}${accountDurationMarkup(row)}<td>${number(row.failureRequests)} / ${number(row.failoverRequests)} / ${number(row.failoverRecovered)}<small>${number(attempts)} 次采样 · 未触发 ${number(row.failoverNotTriggered)}</small></td><td><div class="group-list">${(row.groupNames ?? []).map((group) => `<span>${escapeHtml(group)}</span>`).join('') || '—'}</div></td><td><span class="section-state">只读</span></td></tr>`
   }).join('') : '<tr><td colspan="13" class="empty">当前作用域没有评分账号</td></tr>'
   updateTableSortHeaders($('#v2-account-table'), state.accountSort)
   $('#v2-account-page').textContent = rows.length ? `${state.accountPage} / ${pages} · 共 ${number(rows.length)} 条` : '0 条'; $('#v2-account-prev').disabled = state.accountPage <= 1; $('#v2-account-next').disabled = state.accountPage >= pages

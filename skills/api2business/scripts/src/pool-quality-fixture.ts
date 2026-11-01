@@ -86,7 +86,7 @@ export async function verifyPoolQualityWindow(client: AdminHttpClient, config: A
     deduplicatedTextSuccess: withAudio.rawSuccessRequests === 3,
     textFailureRetained: withAudio.rawFailureRequests === 3,
     onlyTextFailover: withAudio.rawFailoverRequests === 1 && withAudio.rawFailoverRecovered === 1,
-    audioLatencyExcluded: withAudio.ttftP95Ms === 1500,
+    audioDurationExcluded: withAudio.durationP95Ms === 2000,
     errorWindowMatchesScore: errors.pagination.total === 4,
     linkedPolicyRemainsFailure: errors.rows.some((row) => row.requestId === 'policy' && row.scoreable === true),
     http200TerminalEvidence: errors.rows.some((row) => row.requestId === 'semantic-fail'
