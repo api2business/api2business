@@ -237,6 +237,10 @@ export class OperationsStore {
         ALTER COLUMN failover_requests TYPE numeric USING failover_requests::numeric;
       ALTER TABLE api2business_pool_quality_samples
         ALTER COLUMN failover_recovered TYPE numeric USING failover_recovered::numeric;
+      -- Existing installations predate duration_samples, so add it before
+      -- applying the numeric-column migration used by score snapshots.
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS duration_samples numeric NOT NULL DEFAULT 0;
       ALTER TABLE api2business_pool_quality_samples
         ALTER COLUMN duration_samples TYPE numeric USING duration_samples::numeric;
       ALTER TABLE api2business_pool_quality_samples
