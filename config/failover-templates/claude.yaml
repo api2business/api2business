@@ -33,6 +33,12 @@ rules:
   - 'error code: 1010'
   durationMinutes: 10
   description: Claude 上游余额不足、API key 失效或所属分组已删除
+- errorCode: 401
+  keywords:
+  - INVALID_API_KEY
+  - Invalid API key
+  durationMinutes: 10
+  description: Claude 上游明确返回 401 INVALID_API_KEY 时切换账号；仅匹配该状态码与稳定正文
 - errorCode: 502
   keywords:
   - upstream access forbidden

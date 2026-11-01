@@ -198,6 +198,7 @@ rules:
   description: 上游连接超时
 - errorCode: 524
   keywords:
+  - 'error code: 524'
   - upstream request failed
   - upstream service temporarily unavailable
   - overloaded
