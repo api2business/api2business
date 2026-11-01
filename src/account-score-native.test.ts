@@ -82,7 +82,7 @@ describe("aggregateNativeGroupScore", () => {
     expect(result.group.maxCapacity).toBe(10);
   });
 
-  test("uses end-to-end duration even when an older usage adapter omitted stream", () => {
+  test("uses TTFT even when an older usage adapter omitted stream", () => {
     const result = aggregateNativeGroupScore({
       group: { id: 2, name: "pool", platform: "openai", status: "active" },
       accounts: [{ id: 15, name: "legacy-adapter", platform: "openai", status: "active", schedulable: true, priority: 1 }],
@@ -99,8 +99,8 @@ describe("aggregateNativeGroupScore", () => {
     });
 
     expect(result.accounts[0]).toMatchObject({
-      durationSamples: 1,
-      durationP95Ms: 9000,
+      firstTokenSamples: 1,
+      ttftP95Ms: 4000,
       scoreComponents: { latencyEvidence: "observed" },
     });
   });

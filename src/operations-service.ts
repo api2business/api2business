@@ -519,7 +519,7 @@ export class OperationsService {
               accountId, groupId, model, startedAt, completedAt, clientRequestId, requestId,
               qualityOk, ordinaryLogRecorded, answerClassification, answerRaw, parsedAnswer,
               expectedAnswer, questionPrompt, classification, httpStatus, terminalStatus,
-              finishReason, refusal, durationMs, endToEndMs,
+              finishReason, refusal, ttftMs, durationMs, endToEndMs,
             } = response;
             return (typeof clientRequestId === "string" && clientRequestId.trim())
               || (typeof requestId === "string" && requestId.trim())
@@ -528,7 +528,7 @@ export class OperationsService {
                   qualityOk, ordinaryLogRecorded, answerClassification,
                   answerRaw: typeof answerRaw === "string" ? answerRaw.slice(0, 512) : null,
                   parsedAnswer, expectedAnswer, questionPrompt, classification, httpStatus,
-                  terminalStatus, finishReason, refusal, durationMs, endToEndMs,
+                  terminalStatus, finishReason, refusal, ttftMs, durationMs, endToEndMs,
                 }] : [];
           }) : [],
         });
@@ -991,9 +991,9 @@ export class OperationsService {
       failoverRecovered: Number(latest?.failover_recovered ?? 0),
       rawFailoverRequests: Number(latest?.raw_failover_requests ?? 0) || Number(latest?.failover_requests ?? 0),
       rawFailoverRecovered: Number(latest?.raw_failover_recovered ?? 0) || Number(latest?.failover_recovered ?? 0),
-      durationP95Ms: latest?.duration_p95_ms == null ? null : Number(latest.duration_p95_ms),
-      durationSamples: Number(latest?.duration_samples ?? 0),
-      rawDurationSamples: Number(latest?.raw_duration_samples ?? 0) || Number(latest?.duration_samples ?? 0),
+      ttftP95Ms: latest?.ttft_p95_ms == null ? null : Number(latest.ttft_p95_ms),
+      firstTokenSamples: Number(latest?.first_token_samples ?? 0),
+      rawFirstTokenSamples: Number(latest?.raw_first_token_samples ?? 0) || Number(latest?.first_token_samples ?? 0),
       effectiveSampleWeight: Number(latest?.effective_sample_weight ?? latest?.observed_attempts ?? 0),
       sampleWeighting: String(latest?.sample_weighting ?? "recent-call-decay-buckets"),
       errorAttribution: {

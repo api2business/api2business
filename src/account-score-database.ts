@@ -20,10 +20,10 @@ WITH probe_facts AS MATERIALIZED (
   SELECT account_id, request_id, client_request_id,
     COALESCE(NULLIF(request_id, ''), NULLIF(client_request_id, ''),
       CONCAT('probe:', account_id::text, ':', completed_at::text)) AS request_key,
-    completed_at, quality_ok, duration_ms
+    completed_at, quality_ok, ttft_ms
   FROM jsonb_to_recordset($9::jsonb) AS p(
     account_id bigint, request_id text, client_request_id text,
-    completed_at timestamptz, quality_ok boolean, duration_ms numeric
+    completed_at timestamptz, quality_ok boolean, ttft_ms numeric
   )
   WHERE account_id IS NOT NULL
     AND completed_at IS NOT NULL
@@ -115,12 +115,12 @@ account_stats AS (
     ), 0)::numeric AS customer_error_requests,
     COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'error' AND NOT e.scoreable), 0)::numeric AS excluded_error_requests,
     COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage' AND e.stream), 0)::numeric AS stream_success_requests,
-    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage' AND e.duration_ms IS NOT NULL), 0)::numeric AS duration_samples,
-    ARRAY_AGG(e.duration_ms ORDER BY e.duration_ms)
-      FILTER (WHERE e.kind = 'usage' AND e.duration_ms IS NOT NULL) AS duration_values,
-    ARRAY_AGG(e.sample_weight ORDER BY e.duration_ms)
-      FILTER (WHERE e.kind = 'usage' AND e.duration_ms IS NOT NULL) AS duration_weights,
-    MAX(e.duration_ms) FILTER (WHERE e.kind = 'usage' AND e.duration_ms IS NOT NULL) AS duration_max_ms,
+    COALESCE(SUM(e.sample_weight) FILTER (WHERE e.kind = 'usage' AND e.first_token_ms IS NOT NULL), 0)::numeric AS first_token_samples,
+    ARRAY_AGG(e.first_token_ms ORDER BY e.first_token_ms)
+      FILTER (WHERE e.kind = 'usage' AND e.first_token_ms IS NOT NULL) AS ttft_values,
+    ARRAY_AGG(e.sample_weight ORDER BY e.first_token_ms)
+      FILTER (WHERE e.kind = 'usage' AND e.first_token_ms IS NOT NULL) AS ttft_weights,
+    MAX(e.first_token_ms) FILTER (WHERE e.kind = 'usage' AND e.first_token_ms IS NOT NULL) AS ttft_max_ms,
     COALESCE(SUM((e.input_tokens + e.output_tokens) * e.sample_weight) FILTER (WHERE e.kind = 'usage'), 0)::numeric AS token_count,
     COALESCE(SUM(e.actual_cost * e.sample_weight) FILTER (WHERE e.kind = 'usage'), 0)::numeric AS api_amount_usd,
     COALESCE(SUM(e.sample_weight), 0)::numeric AS effective_sample_weight,
@@ -150,12 +150,12 @@ account_stats AS (
           u.created_at,
           u.stream,
           COALESCE((
-            SELECT probe.duration_ms::bigint FROM probe_facts probe
+            SELECT probe.ttft_ms::bigint FROM probe_facts probe
             WHERE probe.account_id = a.account_id
               AND probe.quality_ok = true
               AND (probe.request_id = u.request_id OR probe.client_request_id = u.request_id)
             ORDER BY probe.completed_at DESC LIMIT 1
-          ), u.duration_ms::bigint) AS duration_ms,
+          ), u.first_token_ms::bigint) AS first_token_ms,
           u.input_tokens::bigint,
           u.output_tokens::bigint,
           u.actual_cost::numeric,
@@ -196,7 +196,7 @@ account_stats AS (
           o.request_id,
           o.created_at,
           o.stream,
-          o.duration_ms::bigint,
+          NULL::bigint AS first_token_ms,
           0::bigint,
           0::bigint,
           0::numeric,
@@ -261,7 +261,7 @@ account_stats AS (
           probe.request_key AS request_id,
           probe.completed_at AS created_at,
           false AS stream,
-          NULL::bigint AS duration_ms,
+          NULL::bigint AS first_token_ms,
           0::bigint AS input_tokens,
           0::bigint AS output_tokens,
           0::numeric AS actual_cost,
@@ -405,7 +405,7 @@ export function scoreRecentDatabaseRow(
   now = Date.now(),
   billingErrorPatterns: string[] = [],
 ): Row {
-  if (policy.durationZeroScoreMs <= policy.durationFullScoreMs) throw new Error("duration zero-score boundary must exceed full-score boundary");
+  if (policy.ttftZeroScoreMs <= policy.ttftFullScoreMs) throw new Error("ttft zero-score boundary must exceed full-score boundary");
   const totalWeight = policy.reliabilityWeight + policy.failoverWeight + policy.latencyWeight + policy.baselineWeight;
   if (totalWeight !== 100) throw new Error("account score policy weights must total 100");
   const successRequests = numeric(row.success_requests) ?? 0;
@@ -440,22 +440,22 @@ export function scoreRecentDatabaseRow(
   const effectiveFailoverRate = recoveredFailoverRate === null || unrecoveredFailoverRate === null
     ? null
     : Math.round((unrecoveredFailoverRate + 0.25 * recoveredFailoverRate) * 1_000_000) / 1_000_000;
-  const durationSamples = numeric(row.duration_samples) ?? 0;
+  const firstTokenSamples = numeric(row.first_token_samples) ?? 0;
   const streamSuccessRequests = numeric(row.stream_success_requests) ?? 0;
-  const durationP50Ms = weightedPercentile(row.duration_values, row.duration_weights, 0.50) ?? percentile(row.duration_p50_ms);
-  const durationP95Ms = weightedPercentile(row.duration_values, row.duration_weights, 0.95) ?? percentile(row.duration_p95_ms);
-  const durationP99Ms = weightedPercentile(row.duration_values, row.duration_weights, 0.99) ?? percentile(row.duration_p99_ms);
+  const ttftP50Ms = weightedPercentile(row.ttft_values, row.ttft_weights, 0.50) ?? percentile(row.ttft_p50_ms);
+  const ttftP95Ms = weightedPercentile(row.ttft_values, row.ttft_weights, 0.95) ?? percentile(row.ttft_p95_ms);
+  const ttftP99Ms = weightedPercentile(row.ttft_values, row.ttft_weights, 0.99) ?? percentile(row.ttft_p99_ms);
   const reliability = effectiveFailureRate === null ? null : Math.round(policy.reliabilityWeight * (1 - Math.min(Math.max(effectiveFailureRate, 0), policy.failureZeroScoreRate) / policy.failureZeroScoreRate) * 100) / 100;
   const failover = effectiveFailoverRate === null ? null : Math.round(policy.failoverWeight * (1 - Math.min(Math.max(effectiveFailoverRate, 0), policy.failoverZeroScoreRate) / policy.failoverZeroScoreRate) * 100) / 100;
-  // End-to-end duration is the authoritative latency evidence marker. Do not
+  // TTFT is the authoritative latency evidence marker. Do not
   // discard a valid sample just because the pool has fewer than five yet.
-  const latencyObserved = durationSamples > 0 && durationP95Ms !== null;
+  const latencyObserved = firstTokenSamples > 0 && ttftP95Ms !== null;
   const latencyPercent = !latencyObserved
-    ? policy.durationPriorScore
+    ? policy.ttftPriorScore
     : 100 * (1 - Math.min(
-      Math.max(durationP95Ms - policy.durationFullScoreMs, 0),
-      policy.durationZeroScoreMs - policy.durationFullScoreMs,
-    ) / (policy.durationZeroScoreMs - policy.durationFullScoreMs));
+      Math.max(ttftP95Ms - policy.ttftFullScoreMs, 0),
+      policy.ttftZeroScoreMs - policy.ttftFullScoreMs,
+    ) / (policy.ttftZeroScoreMs - policy.ttftFullScoreMs));
   const latency = Math.round(policy.latencyWeight * latencyPercent) / 100;
   // 当前状态只展示，不参与最近调用质量分。
   const availableWeight = (reliability === null ? 0 : policy.reliabilityWeight)
@@ -465,7 +465,7 @@ export function scoreRecentDatabaseRow(
   const score = observedAttempts > 0
     ? Math.round(((reliability ?? 0) + (failover ?? 0) + (latency ?? 0) + policy.baselineWeight) / availableWeight * 1_000) / 10
     : null;
-  const comparable = observedAttempts >= 10 && durationSamples >= 5;
+  const comparable = observedAttempts >= 10 && firstTokenSamples >= 5;
   const accountGrade = grade(score);
   const untilActive = (value: unknown): boolean => {
     const parsed = Date.parse(String(value ?? ""));
@@ -506,7 +506,7 @@ export function scoreRecentDatabaseRow(
     score,
     grade: accountGrade,
     assessment: ({ A: "preferred", B: "healthy", C: "watch", D: "degraded", E: "poor" } as Row)[accountGrade] ?? "insufficient-evidence",
-    confidence: observedAttempts >= 50 && durationSamples >= 20 ? "high" : observedAttempts >= 10 && durationSamples >= 5 ? "medium" : "low",
+    confidence: observedAttempts >= 50 && firstTokenSamples >= 20 ? "high" : observedAttempts >= 10 && firstTokenSamples >= 5 ? "medium" : "low",
     scoreComparable: comparable,
     // selected_calls is the complete deduplicated request sample used for
     // latestSampleAt. Keep it separate from observedAttempts, which excludes
@@ -533,12 +533,12 @@ export function scoreRecentDatabaseRow(
     unrecoveredFailoverRate,
     effectiveFailoverRate,
     streamSuccessRequests,
-    durationSamples,
-    durationCoverage: successRequests > 0 ? Math.round(durationSamples / successRequests * 1_000_000) / 1_000_000 : null,
-    durationP50Ms,
-    durationP95Ms,
-    durationP99Ms,
-    durationMaxMs: percentile(row.duration_max_ms),
+    firstTokenSamples,
+    firstTokenCoverage: streamSuccessRequests > 0 ? Math.round(firstTokenSamples / streamSuccessRequests * 1_000_000) / 1_000_000 : null,
+    ttftP50Ms,
+    ttftP95Ms,
+    ttftP99Ms,
+    ttftMaxMs: percentile(row.ttft_max_ms),
     customerErrorRequests: numeric(row.customer_error_requests) ?? 0,
     scoreableUpstreamErrorRequests: failureRequests,
     excludedNonUpstreamErrorRequests: numeric(row.excluded_error_requests) ?? 0,
@@ -554,7 +554,7 @@ export function scoreRecentDatabaseRow(
       failover,
       latency,
       latencyEvidence: latencyObserved ? "observed" : "prior",
-      latencyPriorScore: latencyObserved ? null : policy.durationPriorScore,
+      latencyPriorScore: latencyObserved ? null : policy.ttftPriorScore,
       effectiveFailoverRate,
       baseline: policy.baselineWeight,
       availableWeight,

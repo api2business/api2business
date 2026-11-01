@@ -112,9 +112,9 @@ export interface ScorePolicy {
   failureZeroScoreRate: number;
   failureBurstCallLimit: number;
   failoverZeroScoreRate: number;
-  durationFullScoreMs: number;
-  durationZeroScoreMs: number;
-  durationPriorScore: number;
+  ttftFullScoreMs: number;
+  ttftZeroScoreMs: number;
+  ttftPriorScore: number;
 }
 
 export interface PriorityPlanPolicy {
@@ -127,7 +127,7 @@ export interface PriorityPlanPolicy {
   costWeight: number;
   evidenceWeight: number;
   evidenceTargetAttempts: number;
-  evidenceTargetDurationSamples: number;
+  evidenceTargetFirstTokenSamples: number;
   explorationWeight: number;
   explorationTargetAttempts: number;
   explorationQualityPrior: number;
@@ -554,9 +554,9 @@ function readScorePolicy(raw: unknown, path: string): ScorePolicy {
     failureZeroScoreRate: numberValue(policy, "failureZeroScoreRate", path, 0.000001, 1),
     failureBurstCallLimit: integerValue(policy, "failureBurstCallLimit", path, 1),
     failoverZeroScoreRate: numberValue(policy, "failoverZeroScoreRate", path, 0.000001, 1),
-    durationFullScoreMs: integerValue(policy, "durationFullScoreMs", path, 0),
-    durationZeroScoreMs: integerValue(policy, "durationZeroScoreMs", path, 1),
-    durationPriorScore: numberValue(policy, "durationPriorScore", path, 0, 100),
+    ttftFullScoreMs: integerValue(policy, "ttftFullScoreMs", path, 0),
+    ttftZeroScoreMs: integerValue(policy, "ttftZeroScoreMs", path, 1),
+    ttftPriorScore: numberValue(policy, "ttftPriorScore", path, 0, 100),
   };
 }
 
@@ -599,7 +599,7 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
     costWeight: numberValue(policy, "costWeight", path, 0, 100),
     evidenceWeight: numberValue(policy, "evidenceWeight", path, 0, 100),
     evidenceTargetAttempts: integerValue(policy, "evidenceTargetAttempts", path, 1, 10000),
-    evidenceTargetDurationSamples: integerValue(policy, "evidenceTargetDurationSamples", path, 1, 10000),
+    evidenceTargetFirstTokenSamples: integerValue(policy, "evidenceTargetFirstTokenSamples", path, 1, 10000),
     explorationWeight: numberValue(policy, "explorationWeight", path, 0, 100),
     explorationTargetAttempts: integerValue(policy, "explorationTargetAttempts", path, 1, 10000),
     explorationQualityPrior: numberValue(policy, "explorationQualityPrior", path, 0, 100),

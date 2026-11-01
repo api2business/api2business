@@ -9,9 +9,9 @@ const scorePolicy = {
   failureZeroScoreRate: 0.2,
   failureBurstCallLimit: 100,
   failoverZeroScoreRate: 0.2,
-  durationFullScoreMs: 5_000,
-  durationZeroScoreMs: 55_000,
-  durationPriorScore: 25,
+  ttftFullScoreMs: 5_000,
+  ttftZeroScoreMs: 55_000,
+  ttftPriorScore: 25,
 };
 
 test("database aggregate uses bounded account indexes and current state is display-only", () => {
@@ -30,8 +30,10 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("selected_g.id::text = $3::text");
   expect(recentAccountAggregateQuery).toContain("selected_g.name = $3::text");
   expect(recentAccountAggregateQuery).toContain("AND e.kind = 'usage'");
-  expect(recentAccountAggregateQuery).toContain("e.kind = 'usage' AND e.duration_ms IS NOT NULL");
-  expect(recentAccountAggregateQuery).not.toContain("e.kind = 'usage' AND e.stream AND e.duration_ms IS NOT NULL");
+  expect(recentAccountAggregateQuery).toContain("e.kind = 'usage' AND e.first_token_ms IS NOT NULL");
+  expect(recentAccountAggregateQuery).not.toContain("e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL");
+  expect(recentAccountAggregateQuery).toContain("completed_at, quality_ok, ttft_ms");
+  expect(recentAccountAggregateQuery).toContain("SELECT probe.ttft_ms::bigint FROM probe_facts probe");
   expect(recentAccountAggregateQuery).toContain("FROM failed_probe_facts failed");
   expect(recentAccountAggregateQuery).toContain("(failed.request_id = u.request_id OR failed.client_request_id = u.request_id)");
   expect(recentAccountAggregateQuery.indexOf("NOT EXISTS (\n            SELECT 1 FROM failed_probe_facts failed"))
@@ -84,11 +86,11 @@ test("database aggregate uses bounded account indexes and current state is displ
     customer_error_requests: 0,
     excluded_error_requests: 0,
     stream_success_requests: 100,
-    duration_samples: 100,
-    duration_p50_ms: 4_000,
-    duration_p95_ms: 5_000,
-    duration_p99_ms: 6_000,
-    duration_max_ms: 7_000,
+    first_token_samples: 100,
+    ttft_p50_ms: 4_000,
+    ttft_p95_ms: 5_000,
+    ttft_p99_ms: 6_000,
+    ttft_max_ms: 7_000,
     token_count: 2_000,
     api_amount_usd: 1,
     selected_calls: 100,
@@ -119,8 +121,8 @@ test("业务额度限制事实不会成为账号质量失败", () => {
     excluded_error_requests: 12,
     selected_calls: 112,
     stream_success_requests: 100,
-    duration_samples: 100,
-    duration_p95_ms: 5_000,
+    first_token_samples: 100,
+    ttft_p95_ms: 5_000,
   }, 1000, scorePolicy);
 
   expect(row.score).toBe(100);
@@ -148,8 +150,8 @@ test("账务额度不足样本保留审计但不参与质量评分", () => {
     burst_attempts: 6,
     burst_failure_requests: 2,
     stream_success_requests: 0,
-    duration_samples: 0,
-    duration_p95_ms: 19598,
+    first_token_samples: 0,
+    ttft_p95_ms: 19598,
     selected_calls: 40,
   }, 1000, scorePolicy);
 
@@ -192,13 +194,13 @@ test("database aggregate accepts a 2000-call analysis window", () => {
     success_requests: 2000,
     failure_requests: 0,
     stream_success_requests: 2000,
-    duration_samples: 2000,
-    duration_p95_ms: 5000,
+    first_token_samples: 2000,
+    ttft_p95_ms: 5000,
     selected_calls: 2000,
   }, 2000, scorePolicy)).not.toThrow();
 });
 
-test("missing duration uses the configured prior instead of removing latency from the denominator", () => {
+test("missing TTFT uses the configured prior instead of removing latency from the denominator", () => {
   const successful = scoreRecentDatabaseRow({
     account_id: 41,
     account_name: "one-success 0.08",
@@ -234,7 +236,7 @@ test("missing duration uses the configured prior instead of removing latency fro
   expect(Number(failed.score)).toBeLessThan(60);
 });
 
-test("one valid duration sample is observed immediately instead of waiting for five", () => {
+test("one valid TTFT sample is observed immediately instead of waiting for five", () => {
   const row = scoreRecentDatabaseRow({
     account_id: 43,
     account_name: "one-ttft-sample 0.08",
@@ -246,12 +248,12 @@ test("one valid duration sample is observed immediately instead of waiting for f
     success_requests: 1,
     failure_requests: 0,
     stream_success_requests: 0,
-    duration_samples: 1,
-    duration_p95_ms: 12_000,
+    first_token_samples: 1,
+    ttft_p95_ms: 12_000,
     selected_calls: 1,
   }, 1000, scorePolicy);
 
-  expect(row.durationP95Ms).toBe(12_000);
+  expect(row.ttftP95Ms).toBe(12_000);
   expect(row.scoreComponents).toMatchObject({ latencyEvidence: "observed", latencyPriorScore: null });
 });
 
@@ -272,8 +274,8 @@ test("database score always projects failover and recovered request counts", () 
     failover_aborted: 1,
     failure_requests: 0,
     stream_success_requests: 100,
-    duration_samples: 100,
-    duration_p95_ms: 5000,
+    first_token_samples: 100,
+    ttft_p95_ms: 5000,
     selected_calls: 100,
   }, 1000, scorePolicy);
   const zero = scoreRecentDatabaseRow({
@@ -288,8 +290,8 @@ test("database score always projects failover and recovered request counts", () 
     attributed_requests: 100,
     failure_requests: 0,
     stream_success_requests: 100,
-    duration_samples: 100,
-    duration_p95_ms: 5000,
+    first_token_samples: 100,
+    ttft_p95_ms: 5000,
     selected_calls: 100,
   }, 1000, scorePolicy);
 
@@ -311,15 +313,15 @@ test("recovered failovers receive less linear penalty than unrecovered failovers
     account_id: 20, account_name: "recovered 0.1", status: "active", schedulable: true,
     priority: 1, group_ids: [2], group_names: ["pool"], success_requests: 100,
     attributed_requests: 100, failover_requests: 10, failover_recovered: 10, failover_failed: 0,
-    failure_requests: 0, stream_success_requests: 100, duration_samples: 100,
-    duration_p95_ms: 5000, selected_calls: 100,
+    failure_requests: 0, stream_success_requests: 100, first_token_samples: 100,
+    ttft_p95_ms: 5000, selected_calls: 100,
   }, 1000, scorePolicy);
   const failed = scoreRecentDatabaseRow({
     account_id: 21, account_name: "failed 0.1", status: "active", schedulable: true,
     priority: 1, group_ids: [2], group_names: ["pool"], success_requests: 100,
     attributed_requests: 100, failover_requests: 10, failover_recovered: 0, failover_failed: 10,
-    failure_requests: 0, stream_success_requests: 100, duration_samples: 100,
-    duration_p95_ms: 5000, selected_calls: 100,
+    failure_requests: 0, stream_success_requests: 100, first_token_samples: 100,
+    ttft_p95_ms: 5000, selected_calls: 100,
   }, 1000, scorePolicy);
 
   expect(recovered.effectiveFailoverRate).toBe(0.025);
@@ -328,7 +330,7 @@ test("recovered failovers receive less linear penalty than unrecovered failovers
     .toBeGreaterThan(Number((failed.scoreComponents as Record<string, unknown>).failover));
 });
 
-test("duration weight curve keeps latency above 20 seconds below grade A", () => {
+test("TTFT weight curve keeps latency above 20 seconds below grade A", () => {
   const row = scoreRecentDatabaseRow({
     account_id: 2,
     account_name: "slow-perfect",
@@ -342,8 +344,8 @@ test("duration weight curve keeps latency above 20 seconds below grade A", () =>
     failover_requests: 0,
     failure_requests: 0,
     stream_success_requests: 1000,
-    duration_samples: 1000,
-    duration_p95_ms: 20_001,
+    first_token_samples: 1000,
+    ttft_p95_ms: 20_001,
     selected_calls: 1000,
   }, 1000, scorePolicy);
 
@@ -367,8 +369,8 @@ test("short-window upstream burst cannot be diluted by long-window success", () 
     burst_attempts: 100,
     burst_failure_requests: 10,
     stream_success_requests: 900,
-    duration_samples: 900,
-    duration_p95_ms: 10_000,
+    first_token_samples: 900,
+    ttft_p95_ms: 10_000,
     selected_calls: 1000,
   }, 1000, scorePolicy);
 

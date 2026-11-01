@@ -31,7 +31,7 @@ export interface ScoreSnapshotStore {
   failSnapshotRefresh(key: string, schemaVersion: string, error: string): Promise<void>;
 }
 
-const scoreCacheVersion = "api-key-platform-v1";
+const scoreCacheVersion = "api-key-platform-ttft-v2";
 const scoreSnapshotKey = "account-scores";
 
 function record(value: unknown): Record<string, unknown> | null {

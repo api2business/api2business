@@ -197,7 +197,7 @@ export class OperationsStore {
         raw_failure_requests integer NOT NULL DEFAULT 0,
         raw_failover_requests integer NOT NULL DEFAULT 0,
         raw_failover_recovered integer NOT NULL DEFAULT 0,
-        raw_duration_samples integer NOT NULL DEFAULT 0,
+        raw_first_token_samples integer NOT NULL DEFAULT 0,
         score numeric,
         grade text NOT NULL,
         observed_attempts numeric NOT NULL,
@@ -206,8 +206,8 @@ export class OperationsStore {
         failure_rate numeric,
         failover_requests numeric NOT NULL,
         failover_recovered numeric NOT NULL,
-        duration_p95_ms integer,
-        duration_samples numeric NOT NULL DEFAULT 0,
+        ttft_p95_ms integer,
+        first_token_samples numeric NOT NULL DEFAULT 0,
         error_attribution_total numeric NOT NULL DEFAULT 0,
         error_attributed numeric NOT NULL DEFAULT 0,
         error_unattributed numeric NOT NULL DEFAULT 0,
@@ -227,21 +227,14 @@ export class OperationsStore {
         DROP CONSTRAINT IF EXISTS api2business_pool_quality_samples_pkey;
       ALTER TABLE api2business_pool_quality_samples
         ADD CONSTRAINT api2business_pool_quality_samples_pkey PRIMARY KEY (sampled_at, platform);
-      -- Existing installations still have the retired TTFT diagnostic column as
-      -- NOT NULL. New score samples omit it, so zero means "not observed" and
-      -- keeps the insert compatible without returning TTFT to scoring.
-      DO $$
-      BEGIN
-        IF EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_schema = current_schema()
-            AND table_name = 'api2business_pool_quality_samples'
-            AND column_name = 'first_token_samples'
-        ) THEN
-          ALTER TABLE api2business_pool_quality_samples
-            ALTER COLUMN first_token_samples SET DEFAULT 0;
-        END IF;
-      END $$;
+      -- Deployments briefly used duration_* columns. Add the canonical TTFT
+      -- columns back in place before querying without dropping old diagnostics.
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS raw_first_token_samples integer NOT NULL DEFAULT 0;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS ttft_p95_ms integer;
+      ALTER TABLE api2business_pool_quality_samples
+        ADD COLUMN IF NOT EXISTS first_token_samples numeric NOT NULL DEFAULT 0;
       ALTER TABLE api2business_pool_quality_samples
         ALTER COLUMN observed_attempts TYPE numeric USING observed_attempts::numeric;
       ALTER TABLE api2business_pool_quality_samples
@@ -252,12 +245,8 @@ export class OperationsStore {
         ALTER COLUMN failover_requests TYPE numeric USING failover_requests::numeric;
       ALTER TABLE api2business_pool_quality_samples
         ALTER COLUMN failover_recovered TYPE numeric USING failover_recovered::numeric;
-      -- Existing installations predate duration_samples, so add it before
-      -- applying the numeric-column migration used by score snapshots.
       ALTER TABLE api2business_pool_quality_samples
-        ADD COLUMN IF NOT EXISTS duration_samples numeric NOT NULL DEFAULT 0;
-      ALTER TABLE api2business_pool_quality_samples
-        ALTER COLUMN duration_samples TYPE numeric USING duration_samples::numeric;
+        ALTER COLUMN first_token_samples TYPE numeric USING first_token_samples::numeric;
       ALTER TABLE api2business_pool_quality_samples
         ADD COLUMN IF NOT EXISTS error_attribution_total integer NOT NULL DEFAULT 0;
       ALTER TABLE api2business_pool_quality_samples
@@ -282,14 +271,6 @@ export class OperationsStore {
         ADD COLUMN IF NOT EXISTS raw_failover_requests integer NOT NULL DEFAULT 0;
       ALTER TABLE api2business_pool_quality_samples
         ADD COLUMN IF NOT EXISTS raw_failover_recovered integer NOT NULL DEFAULT 0;
-      ALTER TABLE api2business_pool_quality_samples
-        ADD COLUMN IF NOT EXISTS raw_duration_samples integer NOT NULL DEFAULT 0;
-      ALTER TABLE api2business_pool_quality_samples
-        ADD COLUMN IF NOT EXISTS duration_p95_ms integer;
-      ALTER TABLE api2business_pool_quality_samples
-        ADD COLUMN IF NOT EXISTS duration_samples numeric NOT NULL DEFAULT 0;
-      ALTER TABLE api2business_pool_quality_samples
-        ALTER COLUMN duration_samples TYPE numeric USING duration_samples::numeric;
       ALTER TABLE api2business_pool_quality_samples
         ADD COLUMN IF NOT EXISTS sample_weighting text NOT NULL DEFAULT 'recent-call-decay-buckets';
       CREATE INDEX IF NOT EXISTS api2business_pool_quality_samples_time_idx
@@ -800,17 +781,17 @@ export class OperationsStore {
     await this.sql`
       INSERT INTO api2business_pool_quality_samples (
         sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
-        raw_failover_requests, raw_failover_recovered, raw_duration_samples,
+        raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
         score, grade, observed_attempts, success_requests, failure_requests,
-        failure_rate, failover_requests, failover_recovered, duration_p95_ms,
-        duration_samples, error_attribution_total, error_attributed, error_unattributed,
+        failure_rate, failover_requests, failover_recovered, ttft_p95_ms,
+        first_token_samples, error_attribution_total, error_attributed, error_unattributed,
         effective_sample_weight, sample_weighting, participation
       ) VALUES (${sample.sampledAt}, ${sample.platform}, ${sample.rawCallCount}, ${sample.rawSuccessRequests},
         ${sample.rawFailureRequests}, ${sample.rawFailoverRequests}, ${sample.rawFailoverRecovered},
-        ${sample.rawDurationSamples}, ${sample.score}, ${sample.grade}, ${sample.observedAttempts},
+        ${sample.rawFirstTokenSamples}, ${sample.score}, ${sample.grade}, ${sample.observedAttempts},
         ${sample.successRequests}, ${sample.failureRequests}, ${sample.failureRate},
-        ${sample.failoverRequests}, ${sample.failoverRecovered}, ${sample.durationP95Ms},
-        ${sample.durationSamples}, ${sample.errorAttribution.total},
+        ${sample.failoverRequests}, ${sample.failoverRecovered}, ${sample.ttftP95Ms},
+        ${sample.firstTokenSamples}, ${sample.errorAttribution.total},
         ${sample.errorAttribution.attributed}, ${sample.errorAttribution.unattributed},
         ${sample.effectiveSampleWeight}, ${sample.sampleWeighting},
         ${sample.participation}::jsonb)
@@ -821,10 +802,10 @@ export class OperationsStore {
   async getPoolQualitySamples(hours: number, platform = "codex") {
     return await this.readQuery(() => this.sql`
       SELECT sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
-        raw_failover_requests, raw_failover_recovered, raw_duration_samples,
+        raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
         score, grade, observed_attempts, success_requests,
         failure_requests, failure_rate, failover_requests, failover_recovered,
-        duration_p95_ms, duration_samples, error_attribution_total, error_attributed,
+        ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
         error_unattributed, effective_sample_weight, sample_weighting, participation
       FROM api2business_pool_quality_samples
       WHERE platform = ${platform}
@@ -840,17 +821,17 @@ export class OperationsStore {
   async getPoolQualitySamplesByLimit(limit: number, platform = "codex") {
     return await this.readQuery(() => this.sql`
       SELECT sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
-        raw_failover_requests, raw_failover_recovered, raw_duration_samples,
+        raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
         score, grade, observed_attempts, success_requests,
         failure_requests, failure_rate, failover_requests, failover_recovered,
-        duration_p95_ms, duration_samples, error_attribution_total, error_attributed,
+        ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
         error_unattributed, effective_sample_weight, sample_weighting, participation
       FROM (
         SELECT sampled_at, platform, raw_call_count, raw_success_requests, raw_failure_requests,
-          raw_failover_requests, raw_failover_recovered, raw_duration_samples,
+          raw_failover_requests, raw_failover_recovered, raw_first_token_samples,
           score, grade, observed_attempts, success_requests,
           failure_requests, failure_rate, failover_requests, failover_recovered,
-          duration_p95_ms, duration_samples, error_attribution_total, error_attributed,
+          ttft_p95_ms, first_token_samples, error_attribution_total, error_attributed,
           error_unattributed, effective_sample_weight, sample_weighting, participation
         FROM api2business_pool_quality_samples
         WHERE platform = ${platform}
@@ -995,6 +976,7 @@ export class OperationsStore {
         'client_request_id', NULLIF(evidence->>'clientRequestId', ''),
         'completed_at', NULLIF(evidence->>'completedAt', '')::timestamptz,
         'quality_ok', COALESCE((evidence->>'qualityOk')::boolean, false),
+        'ttft_ms', NULLIF(evidence->>'ttftMs', '')::numeric,
         'duration_ms', NULLIF(evidence->>'durationMs', '')::numeric,
         'end_to_end_ms', NULLIF(evidence->>'endToEndMs', '')::numeric,
         'answer_classification', NULLIF(evidence->>'answerClassification', ''),

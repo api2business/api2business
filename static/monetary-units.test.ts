@@ -96,7 +96,7 @@ test("V2 sorts by converted balances and keeps missing valuation distinct from r
   expect(view.accountSortValue(view.state.accounts[0], "balance")).toBe(10);
 });
 
-test("V2 makes request quality and missing duration evidence explicit in hover details", async () => {
+test("V2 makes request quality and missing TTFT evidence explicit in hover details", async () => {
   const view = await renderer();
   view.state.accounts = [{
     accountId: 1502,
@@ -108,9 +108,9 @@ test("V2 makes request quality and missing duration evidence explicit in hover d
     excludedNonUpstreamErrorRequests: 53,
     customerErrorRequests: 53,
     streamSuccessRequests: 0,
-    durationSamples: 0,
-    durationCoverage: null,
-    durationP95Ms: null,
+    firstTokenSamples: 0,
+    firstTokenCoverage: null,
+    ttftP95Ms: null,
     failoverRequests: 0,
     failoverRecovered: 0,
     failoverNotTriggered: 0,
@@ -123,7 +123,7 @@ test("V2 makes request quality and missing duration evidence explicit in hover d
   expect(html).toContain("上游失败 0.0%");
   expect(html).toContain("上游失败 / 切号触发 / 切号恢复：0 / 0 / 0");
   expect(html).toContain("业务/余额拒绝：53");
-  expect(html).toContain("完整耗时 P95：无有效样本");
-  expect(html).toContain("成功响应未记录完整耗时");
+  expect(html).toContain("TTFT P95：无有效样本");
+  expect(html).toContain("成功响应未记录 TTFT");
   expect(html).toContain("metric-help-warning");
 });

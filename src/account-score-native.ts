@@ -246,20 +246,21 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
   const accountRows = input.accounts.map((account): Row => {
     const usages = usageByAccount.get(account.id) ?? [];
     const streams = usages.filter((row) => row.stream);
-    // End-to-end duration is the authoritative latency marker.
-    const durations = usages.flatMap((row) => row.duration_ms === null ? [] : [row.duration_ms]);
+    // first_token_ms is the authoritative sample marker. Keep it even when
+    // an older adapter omitted the stream flag on the usage row.
+    const ttft = usages.flatMap((row) => row.first_token_ms === null ? [] : [row.first_token_ms]);
     const scoreable = scoreableByAccount.get(account.id) ?? new Set<string>();
     const failed = new Set([...(failover.get(account.id) ?? []), ...(forward.get(account.id) ?? []), ...scoreable]);
     const successRequests = usages.length;
     const failureRequests = failed.size;
     const attempts = successRequests + failureRequests;
     const failureRate = attempts > 0 ? Math.round(failureRequests / attempts * 1_000_000) / 1_000_000 : null;
-    const durationP95Ms = percentile(durations, 0.95);
+    const ttftP95Ms = percentile(ttft, 0.95);
     const reliability = failureRate === null ? null : Math.round(60 * (1 - Math.min(Math.max(failureRate, 0), 0.2) / 0.2) * 100) / 100;
-    const latencyObserved = durations.length > 0 && durationP95Ms !== null;
+    const latencyObserved = ttft.length > 0 && ttftP95Ms !== null;
     const latency = !latencyObserved
       ? 6.25
-      : Math.round(25 * (1 - Math.min(Math.max(durationP95Ms - 10_000, 0), 170_000) / 170_000) * 100) / 100;
+      : Math.round(25 * (1 - Math.min(Math.max(ttftP95Ms - 10_000, 0), 170_000) / 170_000) * 100) / 100;
     const nativeAvailability = availabilityByAccount.get(account.id)?.is_available;
     const currentlyAvailable = typeof nativeAvailability === "boolean"
       ? nativeAvailability
@@ -267,9 +268,9 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
     const availability = currentlyAvailable ? 15 : account.status === "active" ? 8 : 0;
     const availableWeight = (reliability === null ? 0 : 60) + 25 + 15;
     const score = attempts > 0 ? Math.round(((reliability ?? 0) + (latency ?? 0) + availability) / availableWeight * 1_000) / 10 : null;
-    // scoreComparable remains an evidence-quality label; duration evidence
-    // is already included above when at least one sample exists.
-    const comparable = attempts >= 10 && durations.length >= 5;
+    // scoreComparable remains an evidence-quality label; TTFT itself is
+    // already included above when at least one sample exists.
+    const comparable = attempts >= 10 && ttft.length >= 5;
     const accountGrade = grade(score);
     const failoverIds = failover.get(account.id) ?? new Set<string>();
     const failoverRecovered = [...failoverIds].filter((id) => (finalStatus.get(id) ?? 999) < 400).length;
@@ -290,7 +291,7 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
       ...(failureRate !== null && failureRate >= 0.1 ? ["failure-rate>=10%"] : failureRate !== null && failureRate >= 0.03 ? ["failure-rate>=3%"] : []),
       ...(failoverIds.size > 0 ? ["upstream-failover-triggered"] : []),
       ...(!currentlyAvailable ? ["currently-unavailable"] : []),
-      ...(durations.length === 0 ? ["duration-evidence-insufficient"] : []),
+      ...(ttft.length === 0 ? ["ttft-evidence-insufficient"] : []),
       ...(attempts < 10 ? ["request-evidence-insufficient"] : []),
     ];
     return {
@@ -305,19 +306,19 @@ export function aggregateNativeGroupScore(input: NativeGroupScoreInput): { group
       score,
       grade: accountGrade,
       assessment: ({ A: "preferred", B: "healthy", C: "watch", D: "degraded", E: "poor" } as Row)[accountGrade] ?? "insufficient-evidence",
-      confidence: attempts >= 50 && durations.length >= 20 ? "high" : attempts >= 10 && durations.length >= 5 ? "medium" : "low",
+      confidence: attempts >= 50 && ttft.length >= 20 ? "high" : attempts >= 10 && ttft.length >= 5 ? "medium" : "low",
       scoreComparable: comparable,
       observedAttempts: attempts,
       successRequests,
       failureRequests,
       failureRate,
       streamSuccessRequests: streams.length,
-      durationSamples: durations.length,
-      durationCoverage: usages.length > 0 ? Math.round(durations.length / usages.length * 1_000_000) / 1_000_000 : null,
-      durationP50Ms: percentile(durations, 0.5),
-      durationP95Ms,
-      durationP99Ms: percentile(durations, 0.99),
-      durationMaxMs: durations.length ? Math.max(...durations) : null,
+      firstTokenSamples: ttft.length,
+      firstTokenCoverage: usages.length > 0 ? Math.round(ttft.length / usages.length * 1_000_000) / 1_000_000 : null,
+      ttftP50Ms: percentile(ttft, 0.5),
+      ttftP95Ms,
+      ttftP99Ms: percentile(ttft, 0.99),
+      ttftMaxMs: ttft.length ? Math.max(...ttft) : null,
       modelBuckets: [...models].sort((left, right) => right[1] - left[1]).slice(0, 8).map(([model, count]) => ({ model, count })),
       customerErrorRequests: customerErrorCount.get(account.id)?.size ?? 0,
       scoreableUpstreamErrorRequests: scoreable.size,

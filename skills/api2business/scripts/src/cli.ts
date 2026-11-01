@@ -609,13 +609,13 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
   if (json) return emit(value, true);
   const accounts = Array.isArray(value.accounts) ? value.accounts.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
   console.log(`API2BUSINESS ACCOUNT SCORES mode=${String(value.mode)} calls=${String(value.recentCallLimit)} accounts=${accounts.length} databaseQueries=${String(value.databaseQueries)} queryDurationMs=${String(value.queryDurationMs)} totalDurationMs=${String(value.totalDurationMs)}`);
-  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%   BURST%  SWITCH%  EFFECTIVE%  DURATION_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
+  console.log("GRADE  SCORE  CONF    ATTEMPTS  FAIL%   BURST%  SWITCH%  EFFECTIVE%  TTFT_P95  PRIORITY  CURRENT      ACCOUNT  GROUPS");
   for (const row of accounts) {
     const failureRate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
     const burstRate = typeof row.burstFailureRate === "number" ? `${(row.burstFailureRate * 100).toFixed(1)}%` : "-";
     const failoverRate = typeof row.failoverRate === "number" ? `${(row.failoverRate * 100).toFixed(1)}%` : "-";
     const effectiveFailoverRate = typeof row.effectiveFailoverRate === "number" ? `${(row.effectiveFailoverRate * 100).toFixed(1)}%` : "-";
-    const duration = typeof row.durationP95Ms === "number" ? `${Math.round(row.durationP95Ms)}ms` : "-";
+    const ttft = typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-";
     const groups = Array.isArray(row.groupNames) ? row.groupNames.join(",") : "-";
     console.log([
       String(row.grade ?? "-").padEnd(5),
@@ -626,7 +626,7 @@ function emitScoreRanking(value: Record<string, unknown>, json: boolean): void {
       burstRate.padStart(7),
       failoverRate.padStart(7),
       effectiveFailoverRate.padStart(10),
-      duration.padStart(12),
+      ttft.padStart(9),
       String(row.priority ?? "-").padStart(8),
       (row.currentAvailable === true ? "available" : row.currentAvailable === false ? "unavailable" : "unknown").padEnd(11),
       String(row.accountName ?? "-"),
@@ -1414,10 +1414,10 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
 
 
 function aggregateSmoke(): Record<string, unknown> {
-  const account = (groupId: number, groupName: string, successRequests: number, failureRequests: number, durationP95Ms: number, apiAmountUsd: number) => ({
+  const account = (groupId: number, groupName: string, successRequests: number, failureRequests: number, ttftP95Ms: number, apiAmountUsd: number) => ({
     accountId: 15, accountName: "lyon9801 0.0", groupId, groupName, status: "active", currentlyAvailable: true, priority: 1,
     successRequests, failureRequests, observedAttempts: successRequests + failureRequests, streamSuccessRequests: successRequests,
-    durationSamples: successRequests, durationP95Ms, usage: { requestCount: successRequests, tokenCount: successRequests * 1000, apiAmountUsd },
+    firstTokenSamples: successRequests, ttftP95Ms, usage: { requestCount: successRequests, tokenCount: successRequests * 1000, apiAmountUsd },
   });
   const scored = { ...account(3, "自用", 100, 0, 10_591, 1), score: 72.3, scoreComponents: { weights: { reliability: 48, failover: 10, latency: 37 } } };
   const rows = mergeAccountScores([scored, account(2, "混合池", 50, 1, 13_206, 0.5)]);
@@ -1691,7 +1691,7 @@ function emitPoolQuality(value: Record<string, unknown>, json: boolean): void {
     + ` success=${String(value.successRequests ?? "-")}`
     + ` failure=${String(value.failureRequests ?? "-")}`
     + ` failover=${String(value.failoverRequests ?? "-")}/${String(value.failoverRecovered ?? "-")}`
-    + ` durationP95Ms=${String(value.durationP95Ms ?? "-")}`
+    + ` ttftP95Ms=${String(value.ttftP95Ms ?? "-")}`
     + ` sampledAt=${String(value.sampledAt ?? "-")}`,
   );
   console.log(`PARTICIPANTS ${participation.length}`);
@@ -1711,7 +1711,7 @@ function emitRechargeCandidates(value: Record<string, unknown>, json: boolean): 
   if (json) return emit(value, true);
   const rows = Array.isArray(value.candidates) ? value.candidates.map(record).filter((row): row is Record<string, unknown> => row !== null) : [];
   console.log(`API2BUSINESS RECHARGE CANDIDATES threshold=¥${String(value.lowBalanceThresholdCny)} lookback=${String(value.lookbackHours)}h candidates=${rows.length} queryMs=${String(value.queryDurationMs)} totalMs=${String(value.totalDurationMs)}`);
-  console.log("RANK  SCORE  ACTION                 REASON                       BALANCE  ANCHOR                 REQ  FAIL%  DURATION_P95  API_USD  COST_CNY  ACCOUNT");
+  console.log("RANK  SCORE  ACTION                 REASON                       BALANCE  ANCHOR                 REQ  FAIL%  TTFT_P95  API_USD  COST_CNY  ACCOUNT");
   for (const [index, row] of rows.entries()) {
     const rate = typeof row.failureRate === "number" ? `${(row.failureRate * 100).toFixed(1)}%` : "-";
     const anchor = String(row.anchorAt ?? "-").replace("T", " ").slice(0, 19);
@@ -1722,7 +1722,7 @@ function emitRechargeCandidates(value: Record<string, unknown>, json: boolean): 
       String(row.reason ?? "-").padEnd(28),
       (typeof row.balanceCny === "number" ? `¥${balanceNumber(row.balanceCny, 2)}` : "-").padStart(8),
       anchor.padEnd(22), String(row.observedAttempts ?? 0).padStart(3), rate.padStart(6),
-      (typeof row.durationP95Ms === "number" ? `${Math.round(row.durationP95Ms)}ms` : "-").padStart(12),
+      (typeof row.ttftP95Ms === "number" ? `${Math.round(row.ttftP95Ms)}ms` : "-").padStart(9),
       (typeof row.usage === "object" && row.usage !== null ? Number((row.usage as Record<string, unknown>).apiAmountUsd ?? 0).toFixed(4) : "0").padStart(8),
       (typeof row.usage === "object" && row.usage !== null && typeof (row.usage as Record<string, unknown>).upstreamCostCny === "number" ? Number((row.usage as Record<string, unknown>).upstreamCostCny).toFixed(2) : "-").padStart(8),
       String(row.accountName ?? "-"),

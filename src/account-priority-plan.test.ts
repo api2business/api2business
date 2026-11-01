@@ -14,12 +14,12 @@ const config = {
   },
   sub2api: {
     scorePolicy: {
-      durationFullScoreMs: 5_000,
-      durationZeroScoreMs: 55_000,
+      ttftFullScoreMs: 5_000,
+      ttftZeroScoreMs: 55_000,
     },
     grokScorePolicy: {
-      durationFullScoreMs: 7_000,
-      durationZeroScoreMs: 70_000,
+      ttftFullScoreMs: 7_000,
+      ttftZeroScoreMs: 70_000,
     },
     priorityPlan: {
       platform: "openai",
@@ -31,7 +31,7 @@ const config = {
       costWeight: 20,
       evidenceWeight: 0,
       evidenceTargetAttempts: 50,
-      evidenceTargetDurationSamples: 20,
+      evidenceTargetFirstTokenSamples: 20,
       explorationWeight: 0,
       explorationTargetAttempts: 50,
       explorationQualityPrior: 0,
@@ -68,7 +68,7 @@ const config = {
       costWeight: 15,
       evidenceWeight: 0,
       evidenceTargetAttempts: 50,
-      evidenceTargetDurationSamples: 20,
+      evidenceTargetFirstTokenSamples: 20,
       explorationWeight: 0,
       explorationTargetAttempts: 50,
       explorationQualityPrior: 0,
@@ -125,7 +125,7 @@ function account(id: number, name: string, score: number, available = true, erro
     observedAttempts: 1000,
     failureRate: 0,
     failoverRate: 0,
-    durationP95Ms: 8000,
+    ttftP95Ms: 8000,
     usage: { costRateCnyPerApiUsd: 0.1 },
   };
 }
@@ -290,14 +290,14 @@ test("linear reliability and raw TTFT weights can distinguish equal composite qu
     latency: 3,
     weights: { reliability: 50, latency: 30 },
   };
-  reliableSlow.durationP95Ms = 50_000;
+  reliableSlow.ttftP95Ms = 50_000;
   const fastLessReliable = account(2, "fast-less-reliable", 80);
   fastLessReliable.scoreComponents = {
     reliability: 30,
     latency: 27,
     weights: { reliability: 50, latency: 30 },
   };
-  fastLessReliable.durationP95Ms = 5_000;
+  fastLessReliable.ttftP95Ms = 5_000;
   const plan = buildAccountPriorityPlan({
     recentCallLimit: 1000,
     accounts: [reliableSlow, fastLessReliable],
@@ -320,11 +320,11 @@ test("TTFT penalty is linearly proportional to the eligible account latency rang
   latencyConfig.sub2api.priorityPlan.reliabilityWeight = 50;
   latencyConfig.sub2api.priorityPlan.latencyWeight = 30;
   latencyConfig.sub2api.priorityPlan.costWeight = 20;
-  const accounts = [5_000, 30_000, 55_000].map((durationP95Ms, index) => {
-    const row = account(index + 1, `latency-${durationP95Ms}`, 80);
-    row.durationP95Ms = durationP95Ms;
-    (row as Record<string, unknown>).durationSamples = 20;
-    (row as Record<string, unknown>).durationCoverage = 1;
+  const accounts = [5_000, 30_000, 55_000].map((ttftP95Ms, index) => {
+    const row = account(index + 1, `latency-${ttftP95Ms}`, 80);
+    row.ttftP95Ms = ttftP95Ms;
+    (row as Record<string, unknown>).firstTokenSamples = 20;
+    (row as Record<string, unknown>).firstTokenCoverage = 1;
     row.usage = { costRateCnyPerApiUsd: 0.1 };
     return row;
   });
@@ -337,8 +337,8 @@ test("TTFT penalty is linearly proportional to the eligible account latency rang
     strategy: "linear-penalty",
     evidenceSource: "required-confidence",
     evidenceCount: 3,
-    minimumDurationP95Ms: 5_000,
-    maximumDurationP95Ms: 55_000,
+    minimumTtftP95Ms: 5_000,
+    maximumTtftP95Ms: 55_000,
   });
   expect(rows.map((row) => Number(row.latencyPenalty))).toEqual([0, 50, 100]);
   expect(rows.map((row) => Number(row.latencyScore))).toEqual([100, 50, 0]);
@@ -347,11 +347,11 @@ test("TTFT penalty is linearly proportional to the eligible account latency rang
 });
 
 test("TTFT penalty uses absolute configured boundaries instead of an outlier-driven range", () => {
-  const accounts = [5_000, 55_000, 105_000].map((durationP95Ms, index) => {
-    const row = account(index + 1, `absolute-latency-${durationP95Ms}`, 80);
-    row.durationP95Ms = durationP95Ms;
-    (row as Record<string, unknown>).durationSamples = 20;
-    (row as Record<string, unknown>).durationCoverage = 1;
+  const accounts = [5_000, 55_000, 105_000].map((ttftP95Ms, index) => {
+    const row = account(index + 1, `absolute-latency-${ttftP95Ms}`, 80);
+    row.ttftP95Ms = ttftP95Ms;
+    (row as Record<string, unknown>).firstTokenSamples = 20;
+    (row as Record<string, unknown>).firstTokenCoverage = 1;
     return row;
   });
   const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts }, config);
@@ -360,8 +360,8 @@ test("TTFT penalty uses absolute configured boundaries instead of an outlier-dri
     .sort((left, right) => Number(left.rank) - Number(right.rank));
 
   expect(plan.latencyNormalizationRange).toMatchObject({
-    minimumDurationP95Ms: 5_000,
-    maximumDurationP95Ms: 55_000,
+    minimumTtftP95Ms: 5_000,
+    maximumTtftP95Ms: 55_000,
   });
   expect(rows.map((row) => Number(row.latencyPenalty))).toEqual([0, 100, 100]);
   expect(rows.map((row) => Number(row.latencyScore))).toEqual([100, 0, 0]);
@@ -369,7 +369,7 @@ test("TTFT penalty uses absolute configured boundaries instead of an outlier-dri
 
 test("missing TTFT keeps the existing prior latency score without inventing a penalty", () => {
   const row = account(1, "missing-ttft", 80);
-  row.durationP95Ms = null as unknown as number;
+  row.ttftP95Ms = null as unknown as number;
   row.scoreComponents = {
     reliability: 40,
     latency: 7.5,
@@ -885,12 +885,12 @@ test("independent evidence score linearly lowers a low-sample account without ex
   evidenceConfig.sub2api.priorityPlan.explorationWeight = 2;
   evidenceConfig.sub2api.priorityPlan.balanceWeight = 1;
   const mature = account(1, "mature 0.08", 80);
-  mature.durationSamples = 20;
-  mature.durationCoverage = 1;
+  mature.firstTokenSamples = 20;
+  mature.firstTokenCoverage = 1;
   const lowEvidence = account(2, "low-evidence 0.08", 80);
   lowEvidence.observedAttempts = 4;
-  lowEvidence.durationSamples = 0;
-  lowEvidence.durationCoverage = 0;
+  lowEvidence.firstTokenSamples = 0;
+  lowEvidence.firstTokenCoverage = 0;
   const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: [mature, lowEvidence] }, evidenceConfig);
   const rows = (plan.changes as Array<Record<string, unknown>>)
     .filter((row) => row.priorityMode !== "topk-tail")

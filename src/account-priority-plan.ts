@@ -26,7 +26,7 @@ type QualityDimensions = {
 type EvidenceDimensions = {
   score: number;
   requestScore: number;
-  durationScore: number;
+  firstTokenScore: number;
   coverageScore: number;
 };
 
@@ -34,22 +34,22 @@ type LatencyNormalization = {
   strategy: "linear-penalty";
   evidenceSource: "required-confidence" | "eligible-fallback" | "none";
   evidenceCount: number;
-  minimumDurationP95Ms: number | null;
-  maximumDurationP95Ms: number | null;
+  minimumTtftP95Ms: number | null;
+  maximumTtftP95Ms: number | null;
 };
 
 type PriorityProfile = "codex" | "claude" | "grok" | "deepseek";
 
 function latencyBounds(config: AppConfig, profile: PriorityProfile): {
-  minimumDurationP95Ms: number;
-  maximumDurationP95Ms: number;
+  minimumTtftP95Ms: number;
+  maximumTtftP95Ms: number;
 } {
   const scorePolicy = profile === "grok" ? config.sub2api.grokScorePolicy
     : profile === "deepseek" ? (config.sub2api.deepseekScorePolicy ?? config.sub2api.scorePolicy)
       : config.sub2api.scorePolicy;
   return {
-    minimumDurationP95Ms: scorePolicy.durationFullScoreMs,
-    maximumDurationP95Ms: scorePolicy.durationZeroScoreMs,
+    minimumTtftP95Ms: scorePolicy.ttftFullScoreMs,
+    maximumTtftP95Ms: scorePolicy.ttftZeroScoreMs,
   };
 }
 
@@ -82,16 +82,16 @@ function qualityDimensions(
 ): QualityDimensions {
   const reliability = dimensionScore(row, ["reliability", "failover"], policy.explorationQualityPrior);
   const existingLatency = dimensionScore(row, ["latency"], policy.explorationQualityPrior);
-  const measuredDurationP95Ms = number(row.durationP95Ms);
-  const latency = measuredDurationP95Ms !== null
+  const measuredTtftP95Ms = number(row.ttftP95Ms);
+  const latency = measuredTtftP95Ms !== null
     && existingLatency.evidence === "observed"
-    && latencyNormalization.minimumDurationP95Ms !== null
-    && latencyNormalization.maximumDurationP95Ms !== null
+    && latencyNormalization.minimumTtftP95Ms !== null
+    && latencyNormalization.maximumTtftP95Ms !== null
     ? {
         score: 100 - linearLatencyPenalty(
-          measuredDurationP95Ms,
-          latencyNormalization.minimumDurationP95Ms,
-          latencyNormalization.maximumDurationP95Ms,
+          measuredTtftP95Ms,
+          latencyNormalization.minimumTtftP95Ms,
+          latencyNormalization.maximumTtftP95Ms,
         ),
         evidence: "observed" as const,
       }
@@ -109,15 +109,15 @@ function qualityDimensions(
 
 function evidenceDimensions(row: ScoreRow, policy: PriorityPlanPolicy): EvidenceDimensions {
   const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
-  const durationSamples = Math.max(0, number(row.durationSamples) ?? 0);
-  const coverage = Math.max(0, Math.min(1, number(row.durationCoverage) ?? 0));
+  const firstTokenSamples = Math.max(0, number(row.firstTokenSamples) ?? 0);
+  const coverage = Math.max(0, Math.min(1, number(row.firstTokenCoverage) ?? 0));
   const requestScore = 100 * Math.min(1, attempts / policy.evidenceTargetAttempts);
-  const durationScore = 100 * Math.min(1, durationSamples / policy.evidenceTargetDurationSamples);
+  const firstTokenScore = 100 * Math.min(1, firstTokenSamples / policy.evidenceTargetFirstTokenSamples);
   const coverageScore = 100 * coverage;
   return {
-    score: 0.5 * requestScore + 0.25 * durationScore + 0.25 * coverageScore,
+    score: 0.5 * requestScore + 0.25 * firstTokenScore + 0.25 * coverageScore,
     requestScore,
-    durationScore,
+    firstTokenScore,
     coverageScore,
   };
 }
@@ -153,10 +153,10 @@ function linearCostPenalty(cost: number, minimumCost: number, maximumCost: numbe
     / (maximumCost - minimumCost);
 }
 
-function linearLatencyPenalty(durationP95Ms: number, minimumDurationP95Ms: number, maximumDurationP95Ms: number): number {
-  if (maximumDurationP95Ms === minimumDurationP95Ms) return 0;
-  return 100 * (Math.min(maximumDurationP95Ms, Math.max(minimumDurationP95Ms, durationP95Ms)) - minimumDurationP95Ms)
-    / (maximumDurationP95Ms - minimumDurationP95Ms);
+function linearLatencyPenalty(ttftP95Ms: number, minimumTtftP95Ms: number, maximumTtftP95Ms: number): number {
+  if (maximumTtftP95Ms === minimumTtftP95Ms) return 0;
+  return 100 * (Math.min(maximumTtftP95Ms, Math.max(minimumTtftP95Ms, ttftP95Ms)) - minimumTtftP95Ms)
+    / (maximumTtftP95Ms - minimumTtftP95Ms);
 }
 
 function buildStableRankPriorities(
@@ -297,7 +297,7 @@ function buildPriorityProfile(
       observedAttempts: row.observedAttempts,
       failureRate: row.failureRate,
       failoverRate: row.failoverRate,
-      durationP95Ms: row.durationP95Ms,
+      ttftP95Ms: row.ttftP95Ms,
       beforePriority: before,
       calculatedPriority: null,
       configuredPriorityFloor: null,
@@ -363,7 +363,7 @@ function buildPriorityProfile(
         observedAttempts: row.observedAttempts,
         failureRate: row.failureRate,
         failoverRate: row.failoverRate,
-        durationP95Ms: row.durationP95Ms,
+        ttftP95Ms: row.ttftP95Ms,
         beforePriority: before,
         calculatedPriority: desired,
         normalizedPriority: desired,
@@ -391,8 +391,8 @@ function buildPriorityProfile(
         strategy: "linear-penalty",
         evidenceSource: "none",
         evidenceCount: 0,
-        minimumDurationP95Ms: null,
-        maximumDurationP95Ms: null,
+        minimumTtftP95Ms: null,
+        maximumTtftP95Ms: null,
       },
       eligibleCount: 0,
       fixedCount: fixedChanges.length,
@@ -408,10 +408,10 @@ function buildPriorityProfile(
   const maximumCost = Math.max(...costEvidence);
   const trustedLatencies = eligible
     .filter((row) => row.confidence === policy.requiredConfidence)
-    .map((row) => number(row.durationP95Ms))
+    .map((row) => number(row.ttftP95Ms))
     .filter((value): value is number => value !== null && value >= 0);
   const fallbackLatencies = eligible
-    .map((row) => number(row.durationP95Ms))
+    .map((row) => number(row.ttftP95Ms))
     .filter((value): value is number => value !== null && value >= 0);
   const latencyEvidence = trustedLatencies.length > 0 ? trustedLatencies : fallbackLatencies;
   const configuredLatencyBounds = latencyBounds(config, profile);
@@ -420,15 +420,15 @@ function buildPriorityProfile(
         strategy: "linear-penalty",
         evidenceSource: "none",
         evidenceCount: 0,
-        minimumDurationP95Ms: null,
-        maximumDurationP95Ms: null,
+        minimumTtftP95Ms: null,
+        maximumTtftP95Ms: null,
       }
     : {
       strategy: "linear-penalty",
       evidenceSource: trustedLatencies.length > 0 ? "required-confidence" : "eligible-fallback",
       evidenceCount: latencyEvidence.length,
-      minimumDurationP95Ms: configuredLatencyBounds.minimumDurationP95Ms,
-      maximumDurationP95Ms: configuredLatencyBounds.maximumDurationP95Ms,
+      minimumTtftP95Ms: configuredLatencyBounds.minimumTtftP95Ms,
+      maximumTtftP95Ms: configuredLatencyBounds.maximumTtftP95Ms,
     };
   const knownBalances = eligible.map((row) => number(row.accountBalanceCny)).filter((value): value is number => value !== null);
   const minimumBalance = knownBalances.length ? Math.min(...knownBalances) : null;
@@ -474,15 +474,15 @@ function buildPriorityProfile(
     const evidence = evidenceDimensions(row, policy);
     const cost = resolvedCost(row)!;
     const costPenalty = linearCostPenalty(cost, minimumCost, maximumCost);
-    const latencyValue = number(row.durationP95Ms);
+    const latencyValue = number(row.ttftP95Ms);
     const latencyPenalty = latencyValue !== null
       && dimensions.latencyEvidence === "observed"
-      && latencyNormalization.minimumDurationP95Ms !== null
-      && latencyNormalization.maximumDurationP95Ms !== null
+      && latencyNormalization.minimumTtftP95Ms !== null
+      && latencyNormalization.maximumTtftP95Ms !== null
       ? linearLatencyPenalty(
           latencyValue,
-          latencyNormalization.minimumDurationP95Ms,
-          latencyNormalization.maximumDurationP95Ms,
+          latencyNormalization.minimumTtftP95Ms,
+          latencyNormalization.maximumTtftP95Ms,
         )
       : null;
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
@@ -533,7 +533,7 @@ function buildPriorityProfile(
       latencyEvidence: dimensions.latencyEvidence,
       evidenceScore: evidence.score,
       evidenceRequestScore: evidence.requestScore,
-      evidenceDurationScore: evidence.durationScore,
+      evidenceFirstTokenScore: evidence.firstTokenScore,
       evidenceCoverageScore: evidence.coverageScore,
       costRateCnyPerApiUsd: cost,
       costPenalty,
@@ -553,7 +553,7 @@ function buildPriorityProfile(
       observedAttempts: row.observedAttempts,
       failureRate: row.failureRate,
       failoverRate: row.failoverRate,
-      durationP95Ms: row.durationP95Ms,
+      ttftP95Ms: row.ttftP95Ms,
       beforePriority: before,
       calculatedPriority: calculated,
       normalizedPriority,
@@ -592,7 +592,7 @@ function buildPriorityProfile(
       observedAttempts: row.observedAttempts,
       failureRate: row.failureRate,
       failoverRate: row.failoverRate,
-      durationP95Ms: row.durationP95Ms,
+      ttftP95Ms: row.ttftP95Ms,
       beforePriority: before,
       calculatedPriority: desired,
       normalizedPriority: desired,
