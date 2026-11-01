@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "./config";
 import { ProbeIsolationService } from "./probe-isolation";
+import { MATH_PROBE_SYSTEM_PROMPT } from "./probe-math";
 
 type Row = Record<string, unknown>;
 
@@ -216,7 +217,7 @@ test("DeepSeek probe uses Chat Completions and the configured probe model", asyn
     expect(JSON.parse(requestBody)).toMatchObject({
       model: "deepseek-flash",
       messages: [
-        { role: "system", content: expect.stringContaining("只输出最终整数") },
+        { role: "system", content: MATH_PROBE_SYSTEM_PROMPT },
         { role: "user", content: expect.stringMatching(/^\d+ \+ \d+$/u) },
       ],
       max_tokens: 256,
@@ -338,7 +339,7 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     expect(requestUrl).not.toContain("/admin/accounts/");
     expect(JSON.parse(requestBody)).toMatchObject({
       model: "gpt-5.6-terra",
-      instructions: expect.stringContaining("只输出最终整数"),
+      instructions: MATH_PROBE_SYSTEM_PROMPT,
       input: expect.stringMatching(/^\d+ \+ \d+$/u),
       reasoning: { effort: "low" },
       max_output_tokens: 256,

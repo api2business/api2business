@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { createMathProbeQuestion, parseMathProbeAnswer } from "./probe-math";
+import { createMathProbeQuestion, MATH_PROBE_SYSTEM_PROMPT, parseMathProbeAnswer } from "./probe-math";
+
+test("math probe system prompt requires one bare decimal integer", () => {
+  expect(MATH_PROBE_SYSTEM_PROMPT).toContain("只输出最终结果的十进制整数");
+  expect(MATH_PROBE_SYSTEM_PROMPT).toContain("不要解释");
+  expect(MATH_PROBE_SYSTEM_PROMPT).toContain("不得输出思考过程、推导、等式、Markdown、XML/JSON 标签、标点、单位、前后缀或任何其他文字");
+  expect(MATH_PROBE_SYSTEM_PROMPT).toContain("除这个整数外不得包含任何其他字符");
+});
 
 test("math probe returns one deterministic two-digit addition", () => {
   const question = createMathProbeQuestion(42);

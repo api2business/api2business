@@ -2,7 +2,8 @@ import { randomInt } from "node:crypto";
 
 export const MATH_PROBE_SYSTEM_PROMPT = [
   "你是 API 探活计算器。",
-  "计算下面两个两位整数的和，只输出最终整数，不要解释。",
+  "计算下面两个两位整数的和。",
+  "只输出最终结果的十进制整数，不要解释。不得输出思考过程、推导、等式、Markdown、XML/JSON 标签、标点、单位、前后缀或任何其他文字；除这个整数外不得包含任何其他字符。",
 ].join("");
 
 export interface MathProbeQuestion {
