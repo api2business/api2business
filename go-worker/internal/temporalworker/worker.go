@@ -219,7 +219,9 @@ func ensureSchedules(c client.Client, cfg Config, replaceQuota bool) error {
 			if configured, ok := cfg.V2IdleProbeIntervals[scope]; ok && configured > 0 {
 				intervalSeconds = configured
 			}
-			if err := startWorkflow(c, scheduleOptions(workflowID, cfg.TaskQueue), "upstreamSchedulingV2IdleProbeScheduleWorkflow", ScheduleInput{
+			// Round timeout and interval are workflow inputs. Recreate the schedule on
+			// startup so configuration changes do not remain pinned to stale inputs.
+			if err := startWorkflow(c, replacingScheduleOptions(workflowID, cfg.TaskQueue), "upstreamSchedulingV2IdleProbeScheduleWorkflow", ScheduleInput{
 				IntervalMS:                  intervalSeconds * 1000,
 				RoundTimeoutMS:              cfg.IdleProbeTimeoutSeconds * 1000,
 				ActivityStartToCloseTimeout: cfg.ActivityTimeout,
