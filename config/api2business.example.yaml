@@ -222,10 +222,10 @@ sub2api:
     reasoningEffort: low
     candidateLimit: 10
     concurrency: 1000
-    accountTimeoutMs: 30000
+    accountTimeoutMs: 120000
     requestJitterMinMs: 1000
     requestJitterMaxMs: 3000
-    roundTimeoutSeconds: 50
+    roundTimeoutSeconds: 300
     provisionCandidateLimit: 1
     provisionTimeoutSeconds: 120
     isolation:

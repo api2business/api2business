@@ -7,7 +7,7 @@ const config = {
   sub2api: {
     idleProbe: {
       enabled: true, intervalSeconds: 60, idleSeconds: 60, model: "gpt-6.1-sol", reasoningEffort: "low",
-      candidateLimit: 20, concurrency: 4, accountTimeoutMs: 15000, roundTimeoutSeconds: 50,
+      candidateLimit: 20, concurrency: 4, accountTimeoutMs: 120000, roundTimeoutSeconds: 300,
       requestJitterMinMs: 0, requestJitterMaxMs: 0,
       provisionCandidateLimit: 1, provisionTimeoutSeconds: 120,
       isolation: {
@@ -213,13 +213,22 @@ test("idle probe request jitter includes both configured boundaries", () => {
   expect(idleProbeRequestJitterMs(1000, 3000, () => 0.999999)).toBe(3000);
 });
 
-test("idle probe skips a concurrent round and never retries inside one account attempt", async () => {
+test("idle probe skips a concurrent round and uses the full per-account timeout", async () => {
   let calls = 0;
+  let observedTimeoutMs = 0;
   let release = () => {};
+  let markStarted = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
-    probe: async () => { calls += 1; await gate; return { classification: "alive", ordinaryLogRecorded: true, qualityOk: true }; },
+    probe: async (_accountId: number, _model: string, timeoutMs: number) => {
+      calls += 1;
+      observedTimeoutMs = timeoutMs;
+      markStarted();
+      await gate;
+      return { classification: "alive", ordinaryLogRecorded: true, qualityOk: true };
+    },
   };
   const runtime = {};
   const service = new IdleAccountProbeService(config, reads([{
@@ -227,9 +236,10 @@ test("idle probe skips a concurrent round and never retries inside one account a
     account_status: "active", schedulable: true, group_ids: [51],
   }]), runtime as never, isolation as never);
   const first = service.run([369], 1);
-  await Bun.sleep(1);
+  await started;
   expect(await service.run([369], 1)).toMatchObject({ skipped: true, reason: "in-flight" });
   release();
+  expect(observedTimeoutMs).toBe(120000);
   expect(await first).toMatchObject({
     planned: 1,
     ready: 1,

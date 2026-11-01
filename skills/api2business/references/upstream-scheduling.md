@@ -273,6 +273,10 @@
     超时前完成，不能让一个大作用域长期产生 `planned=0` 的失败轮次。
   - 探活并发保护按作用域维护。相同作用域的重叠轮次可以标记 `in-flight` 并跳过，
     Codex、Claude、Grok 之间必须互不阻塞；不能用一个全局运行标志把其他作用域误判为 skip。
+  - 自动探活的单账号请求预算使用 `sub2api.idleProbe.accountTimeoutMs`，当前为 120 秒；
+    自动轮次总预算使用 `sub2api.idleProbe.roundTimeoutSeconds`，当前为 300 秒。两个字段必须
+    同时配置，不能用 300 秒轮次预算替代单请求上限，也不能让轮次预算把单账号请求提前截断为
+    30 秒。
   - 自动探活周期使用 `operations.upstreamSchedulingV2.scopes.<scope>.idleProbeIntervalSeconds`；
     未声明时回退到 `sub2api.idleProbe.intervalSeconds`。因此调整单一平台周期时，必须保留
     其他作用域的显式值，避免改变全局默认。

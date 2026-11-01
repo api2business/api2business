@@ -127,7 +127,7 @@ function fixture() {
     rootDirectory,
     sub2api: {
       idleProbe: {
-        roundTimeoutSeconds: 50,
+        roundTimeoutSeconds: 300,
         concurrency: 10,
         isolation: {
           enabled: true,
