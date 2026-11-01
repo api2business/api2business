@@ -66,6 +66,7 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("o.upstream_error_detail");
   expect(recentAccountAggregateQuery).toContain("currently experiencing high demand");
   expect(recentAccountAggregateQuery).toContain("e.kind = 'usage' OR e.scoreable");
+  expect(recentAccountAggregateQuery).not.toContain("time_to_first_token_ms");
   expect(recentAccountAggregateQuery).not.toContain("start_time");
 
   const row = scoreRecentDatabaseRow({

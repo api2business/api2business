@@ -196,7 +196,6 @@ account_stats AS (
           o.request_id,
           o.created_at,
           o.stream,
-          o.time_to_first_token_ms,
           o.duration_ms::bigint,
           0::bigint,
           0::bigint,
