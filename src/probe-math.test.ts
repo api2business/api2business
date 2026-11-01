@@ -22,7 +22,8 @@ test("math probe returns one deterministic two-digit addition", () => {
 test("math probe strictly separates empty, invalid, wrong, and correct answers", () => {
   expect(parseMathProbeAnswer("", 59)).toMatchObject({ classification: "empty", parsedAnswer: null });
   expect(parseMathProbeAnswer(" \n", 59)).toMatchObject({ classification: "empty", parsedAnswer: null });
-  expect(parseMathProbeAnswer("59\n", 59)).toMatchObject({ classification: "format_invalid", parsedAnswer: 59, trimmedNumeric: true });
+  expect(parseMathProbeAnswer("59\n", 59)).toMatchObject({ classification: "correct", parsedAnswer: 59, trimmedNumeric: true });
+  expect(parseMathProbeAnswer("  \n159 \t\n", 159)).toMatchObject({ classification: "correct", parsedAnswer: 159, trimmedNumeric: true });
   expect(parseMathProbeAnswer("答案是 59", 59)).toMatchObject({ classification: "format_invalid", parsedAnswer: null, trimmedNumeric: false });
   expect(parseMathProbeAnswer("58", 59)).toMatchObject({ classification: "wrong_number", parsedAnswer: 58 });
   expect(parseMathProbeAnswer("59", 59)).toMatchObject({ classification: "correct", parsedAnswer: 59 });

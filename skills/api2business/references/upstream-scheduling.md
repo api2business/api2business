@@ -598,7 +598,7 @@
 - 探活长期出现 `planned=0` 时，先用各作用域的 `accounts idle-probe plan --scope ...`
   比较 `queryDurationMs` 和 `queueDurationMs`，再按作用域执行一次手动轮次；不要把读
   查询超时误判成账号全部不可用。
-- 数值探活随机生成两个两位整数相加，只接受严格纯整数答案；空回答、非纯数字、错数、
+- 数值探活随机生成两个两位整数相加，容忍首尾空白，去除后只接受纯十进制整数答案；空回答、中间混入非数字、错数、
   拒答、截断、失败或缺失终态均直接判失败，模型名、HTTP 200 和 `ordinaryLogRecorded`
   都不能覆盖语义失败。
 - 评分查询用探活 `requestId`/`clientRequestId` 把上述语义失败改记为可计分错误，并以

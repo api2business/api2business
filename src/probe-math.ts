@@ -54,19 +54,15 @@ export function createMathProbeQuestion(seed = randomInt(0, 0x1_0000_0000)): Mat
 export function parseMathProbeAnswer(raw: string, expectedAnswer: number): MathProbeAnswerResult {
   const strictInteger = /^(0|[1-9][0-9]*)$/u;
   const normalized = raw.trim();
-  const trimmedNumeric = strictInteger.test(normalized);
-  if (raw.trim().length === 0) {
+  if (normalized.length === 0) {
     return { classification: "empty", raw, parsedAnswer: null, trimmedNumeric: false };
   }
-  if (!strictInteger.test(raw)) {
-    return {
-      classification: "format_invalid",
-      raw,
-      parsedAnswer: trimmedNumeric ? Number(normalized) : null,
-      trimmedNumeric,
-    };
+  // Tokenizers commonly emit one leading or trailing space. Treat surrounding
+  // whitespace as transport noise while still rejecting text and markup.
+  if (!strictInteger.test(normalized)) {
+    return { classification: "format_invalid", raw, parsedAnswer: null, trimmedNumeric: false };
   }
-  const parsedAnswer = Number(raw);
+  const parsedAnswer = Number(normalized);
   return {
     classification: parsedAnswer === expectedAnswer ? "correct" : "wrong_number",
     raw,
