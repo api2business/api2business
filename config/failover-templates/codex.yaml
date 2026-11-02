@@ -131,6 +131,7 @@ rules:
   description: 上游持续过载、容量、限流或余额故障
 - errorCode: 502
   keywords:
+  - Upstream HTTP/2 stream failed
   - upstream service temporarily unavailable
   - upstream response stream was interrupted
   - upstream_unavailable

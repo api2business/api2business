@@ -152,6 +152,7 @@ test("failover template uses the Sub2API native error_code schema", async () => 
     (rule) => rule.keywords.includes("openai_error"),
   );
   expect(codexTemplate).toContain("errorCode: 502");
+  expect(codexTemplate).toContain("Upstream HTTP/2 stream failed");
   expect(codexTemplate).toContain("errorCode: 524");
   expect(badResponseRule?.duration_minutes).toBe(3);
   expect(openAIErrorRules.map((rule) => rule.error_code)).toEqual([400]);
