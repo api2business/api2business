@@ -88,10 +88,12 @@ export function idleProbeHelp(action?: string): Record<string, unknown> {
   if (selected === "coverage" || selected === null) options["--window-minutes"] = "可选；正整数覆盖窗口，省略为 20 分钟；生产核对同时查看 24 小时窗口";
   if (selected === "run" || selected === null) options["--rounds"] = "可选；1 到 10 的整数，省略为 1";
   if (selected === "reconcile" || selected === "run" || selected === null) options["--confirm"] = "写入确认；省略时只返回预览并设置 mutation=false";
+  const usageAction = selected ?? "plan|history|coverage|reconcile|run";
+  const usageTail = selected ? usageSuffix : "[options]";
   return {
     ok: true,
     command: `accounts idle-probe${selected ? ` ${selected}` : ""}`,
-    usage: `${entry} --config <owning-YAML> accounts idle-probe ${usageSuffix} --over-api <absolute-http(s)-URL> [--json]`,
+    usage: `${entry} --config <owning-YAML> accounts idle-probe ${usageAction} ${usageTail} --over-api <absolute-http(s)-URL> [--json]`,
     options,
     behavior: selected === "plan"
       ? "只读计算同作用域待探活计划，不创建隔离 Key、不发送探活请求。"

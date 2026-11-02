@@ -39,9 +39,15 @@ test("CLI uses the repository config only when --config is omitted", () => {
 test("operation help returns action-specific contracts without loading config", () => {
   const reconcile = operationHelp(["accounts", "idle-probe", "--scope", "codex", "reconcile", "--confirm", "--help"]);
   expect(reconcile).toMatchObject({ ok: true, command: "accounts idle-probe reconcile" });
+  expect(String(reconcile?.usage)).toContain("accounts idle-probe reconcile");
   expect(String(reconcile?.usage)).toContain("--confirm");
   expect(String(reconcile?.verification)).toContain("coverage");
   expect(JSON.stringify(reconcile)).toContain("仓库根自动读取");
+
+  const coverage = operationHelp(["accounts", "idle-probe", "coverage", "--help"]);
+  expect(coverage).toMatchObject({ ok: true, command: "accounts idle-probe coverage" });
+  expect(String(coverage?.usage)).toContain("accounts idle-probe coverage");
+  expect(String(coverage?.usage)).toContain("--window-minutes");
 
   const snapshot = operationHelp(["upstream-scheduling-v2", "--scope", "codex", "snapshot", "--help"]);
   expect(snapshot).toMatchObject({ ok: true, command: "upstream-scheduling-v2 snapshot" });
