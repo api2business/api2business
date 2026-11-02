@@ -33,11 +33,25 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("e.kind = 'usage' AND e.first_token_ms IS NOT NULL");
   expect(recentAccountAggregateQuery).not.toContain("e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL");
   expect(recentAccountAggregateQuery).toContain("completed_at, quality_ok, ttft_ms");
-  expect(recentAccountAggregateQuery).toContain("SELECT probe.ttft_ms::bigint FROM probe_facts probe");
-  expect(recentAccountAggregateQuery).toContain("FROM failed_probe_facts failed");
-  expect(recentAccountAggregateQuery).toContain("(failed.request_id = u.request_id OR failed.client_request_id = u.request_id)");
-  expect(recentAccountAggregateQuery.indexOf("NOT EXISTS (\n            SELECT 1 FROM failed_probe_facts failed"))
+  expect(recentAccountAggregateQuery).toContain("WITH bounded_probe_facts AS MATERIALIZED");
+  expect(recentAccountAggregateQuery).toContain("ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY completed_at DESC) AS fact_rank");
+  expect(recentAccountAggregateQuery).toContain("WHERE fact_rank <= $1");
+  expect(recentAccountAggregateQuery).toContain("probe_request_keys AS MATERIALIZED");
+  expect(recentAccountAggregateQuery).toContain("SELECT account_id, request_id, completed_at, quality_ok, ttft_ms");
+  expect(recentAccountAggregateQuery).toContain("SELECT account_id, client_request_id, completed_at, quality_ok, ttft_ms");
+  expect(recentAccountAggregateQuery).toContain("probe_ttft_by_account AS MATERIALIZED");
+  expect(recentAccountAggregateQuery).toContain("jsonb_object_agg(request_key, ttft_ms::bigint) AS ttft_by_request");
+  expect(recentAccountAggregateQuery).toContain("LEFT JOIN probe_ttft_by_account probe");
+  expect(recentAccountAggregateQuery).toContain("(probe.ttft_by_request->>u.request_id)::bigint");
+  expect(recentAccountAggregateQuery).toContain("failed_requests_by_account AS MATERIALIZED");
+  expect(recentAccountAggregateQuery).toContain("LEFT JOIN failed_requests_by_account failed");
+  expect(recentAccountAggregateQuery).toContain("NOT COALESCE(failed.failed_requests ? u.request_id, false)");
+  expect(recentAccountAggregateQuery).not.toContain("probe.request_id = u.request_id OR probe.client_request_id = u.request_id");
+  expect(recentAccountAggregateQuery).not.toContain("failed.request_id = u.request_id OR failed.client_request_id = u.request_id");
+  expect(recentAccountAggregateQuery.indexOf("NOT COALESCE(failed.failed_requests ? u.request_id, false)"))
     .toBeLessThan(recentAccountAggregateQuery.indexOf("UNION ALL\n      (\n        SELECT\n          'error'::text"));
+  expect(recentAccountAggregateQuery).toContain("AND ($10::text IS NULL OR a.platform = $10::text)");
+  expect(recentAccountAggregateQuery).toContain("scoped_g.id = ANY(string_to_array($11::text, ',')::bigint[])");
   expect(recentAccountAggregateQuery).toContain("true AS scoreable");
   expect(recentAccountAggregateQuery).toContain("AND (e.client_status_code >= 400 OR e.upstream_status_code >= 400)");
   expect(recentAccountAggregateQuery).toContain("o.status_code::int AS client_status_code");

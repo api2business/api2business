@@ -32,6 +32,15 @@ export function postgresBigintArrayLiteral(values: number[]): string {
   return `{${values.join(",")}}`;
 }
 
+export function parsePlanJsonField(planId: string, field: string, value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`priority plan ${planId} field ${field} contains invalid JSON`);
+  }
+}
+
 export class OperationsStore {
   private sql: SQL;
   private priorityOptimizationQueueSql: SQL;
@@ -968,28 +977,33 @@ export class OperationsStore {
     `);
   }
 
-  async recentIdleProbeFacts(start: string, end: string) {
+  async recentIdleProbeFacts(start: string, end: string, maximumPerAccount = 2000) {
     return await this.readQuery(() => this.sql`
-      SELECT jsonb_build_object(
-        'account_id', NULLIF(evidence->>'accountId', '')::bigint,
-        'request_id', NULLIF(evidence->>'requestId', ''),
-        'client_request_id', NULLIF(evidence->>'clientRequestId', ''),
-        'completed_at', NULLIF(evidence->>'completedAt', '')::timestamptz,
-        'quality_ok', COALESCE((evidence->>'qualityOk')::boolean, false),
-        'ttft_ms', NULLIF(evidence->>'ttftMs', '')::numeric,
-        'duration_ms', NULLIF(evidence->>'durationMs', '')::numeric,
-        'end_to_end_ms', NULLIF(evidence->>'endToEndMs', '')::numeric,
-        'answer_classification', NULLIF(evidence->>'answerClassification', ''),
-        'ordinary_log_recorded', COALESCE((evidence->>'ordinaryLogRecorded')::boolean, false)
-      ) AS fact
-      FROM api2business_idle_probe_rounds r,
-        LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.request_evidence)='string'
-          THEN (r.request_evidence #>> '{}')::jsonb ELSE r.request_evidence END) AS p(evidence)
-      WHERE r.started_at < ${end}::timestamptz
-        AND r.completed_at >= ${start}::timestamptz
-        AND evidence ? 'qualityOk'
-        AND NULLIF(evidence->>'completedAt', '') IS NOT NULL
-      ORDER BY NULLIF(evidence->>'completedAt', '')::timestamptz DESC
+      WITH ranked AS MATERIALIZED (
+        SELECT jsonb_build_object(
+          'account_id', NULLIF(evidence->>'accountId', '')::bigint,
+          'request_id', NULLIF(evidence->>'requestId', ''),
+          'client_request_id', NULLIF(evidence->>'clientRequestId', ''),
+          'completed_at', NULLIF(evidence->>'completedAt', '')::timestamptz,
+          'quality_ok', COALESCE((evidence->>'qualityOk')::boolean, false),
+          'ttft_ms', NULLIF(evidence->>'ttftMs', '')::numeric
+        ) AS fact,
+        ROW_NUMBER() OVER (
+          PARTITION BY NULLIF(evidence->>'accountId', '')::bigint
+          ORDER BY NULLIF(evidence->>'completedAt', '')::timestamptz DESC
+        ) AS account_rank
+        FROM api2business_idle_probe_rounds r,
+          LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.request_evidence)='string'
+            THEN (r.request_evidence #>> '{}')::jsonb ELSE r.request_evidence END) AS p(evidence)
+        WHERE r.started_at < ${end}::timestamptz
+          AND r.completed_at >= ${start}::timestamptz
+          AND evidence ? 'qualityOk'
+          AND NULLIF(evidence->>'completedAt', '') IS NOT NULL
+      )
+      SELECT fact
+      FROM ranked
+      WHERE account_rank <= ${Math.max(1, Math.floor(maximumPerAccount))}
+      ORDER BY fact->>'completed_at' DESC
     `).then((rows: Array<Record<string, unknown>>) => rows.map((row) => row.fact as Record<string, unknown>));
   }
 
@@ -1363,9 +1377,7 @@ export class OperationsStore {
     if (!row) throw new Error("priority plan does not exist");
     const plan = row as Record<string, unknown>;
     for (const key of ["priorities", "result", "apply_result"]) {
-      if (typeof plan[key] === "string") {
-        try { plan[key] = JSON.parse(plan[key] as string); } catch {}
-      }
+      plan[key] = parsePlanJsonField(id, key, plan[key]);
     }
     return plan;
   }

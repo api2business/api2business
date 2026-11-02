@@ -305,6 +305,16 @@
     `account_id`，评分和候选查询必须通过 `api2business-probe-<accountId>` 或平台命名的
     私有分组回补账号归属。失败记录不能因 `account_id` 为空而从样本、失败率或 TTFT 证据中
     消失；普通用户流量仍不能反向归入探活账号。
+  - 覆盖判定只认同作用域 `accounts idle-probe coverage` 的专用 Key 记录；
+    plan 的 `availableSampleCount` 是评分可用样本，不等于探活专用 Key 已覆盖。
+  - active 且 `schedulable=true` 但缺少私有探活绑定的账号，会被每轮计划记为
+    `unready`；自动轮次必须在 `provisionCandidateLimit` 预算内调用隔离绑定的
+    `ensure()` 修复后重试，不能只等待下一轮。
+    - 修复成功才进入本轮的 ready/attempted 集合。
+    - 修复失败写入 `repairFailures`、保留 `unreadyAccountIds`，并由
+      `errorSummary` 披露有界错误；`ok` 必须同时要求无修复失败。
+  - 持续 `planned > ready` 或同一账号连续 unready 时，先按平台、业务分组和
+    私有探活绑定归因，再检查 coverage；不要只增加轮次、放宽超时或把 unready 当无样本。
   - V2 页面复用既有质量、趋势、参与比例、账号、错误、调整、探活和调度组件；
     后台对账结果只作为 CLI/API 证据，不投影成页面事实。
   - V2 账号、错误、调整和探活表格统一复用共享排序组件；点击表头或使用键盘
@@ -591,9 +601,41 @@
   - 直接归属使用账号索引；探活归属同时匹配分组名称、平台和未删除状态。
   - 合并后统一过滤语音、Luna 和时间范围，再按原窗口限制、请求去重和权重汇总。
   - 避免相关 `OR EXISTS` 使每个账号重复扫描全局日志时间索引。
+- 探活事实先按账号用 `ROW_NUMBER()` 保留最近 `recentCallLimit` 条，再展开
+  `request_key`、`request_id` 和 `client_request_id` 三个关联键。
+  - 成功 TTFT 与失败请求分别聚合成账号级 JSONB map，查询时按账号一次 `LEFT JOIN`。
+  - 禁止恢复逐条事实的相关子查询，也禁止把 `request_id`/`client_request_id` 写成关联 `OR`；
+    两种写法都会在探活事实增长后把评分查询推过自动调度的 10 秒安全预算。
+- V2 自动优先级必须把当前作用域的 `platform` 和 `eligibleGroupIds` 下推到评分 SQL。
+  - 分组参数使用逗号分隔的 ID CSV，在 SQL 内转换为 `bigint[]`；不要把数组直接作为文本参数。
+  - 不得先查询全部平台、再在 JavaScript 中过滤；该做法只会白白扩大大作用域的扫描和内存开销。
+- 自动优先级每个终态都要留下可归因证据：查询耗时、查询起止时间、评分快照时间、阻断原因和恢复动作。
+  - 查询异常必须写入 failed plan，并保留有界 `scoreError`；不能只返回通用失败。
+  - `priority history` 的 `automation_blocked_reasons`、`score_query_duration_ms`、
+    `score_snapshot_age_seconds`、`score_error` 和 `recovery_action` 是首轮排查字段。
+  - 人类输出在每轮摘要下显示 `query`、`snapshotAge`、`reason` 和 `recovery`；
+    Web 调整记录表同步展示这些列，`score_error` 放在阻断原因提示中。
 - 性能验收通过正式只读 broker 固定同一截止时间，逐字段比较全部账号结果。
   - 同时检查实际查询耗时与 `EXPLAIN (ANALYZE, BUFFERS)` 的索引和扫描行数。
   - 不以减少样本、改变评分语义或仅放宽预算替代查询优化。
+
+### 样本陈旧与自动优先级失败的自愈顺序
+
+- 最新样本停滞且四个作用域持续出现自动调整失败时，按同一链路归因，不按平台分别猜配置：
+  1. 读取 `scores rank --over-api <absolute-http-URL>`，记录 `refreshedAt`、`queryDurationMs` 和账号数。
+  2. 对 Codex、Claude、Grok、DeepSeek 分别读取 `upstream-scheduling-v2 snapshot`、
+     `plan` 和 `priority history --scope <scope>`。
+  3. 若历史出现 `score-query-slow-or-unknown`、`score-query-failed` 或查询耗时接近
+     `automationSafety.maximumScoreQueryDurationMs`，进入评分 SQL 和大作用域下推检查。
+  4. 核对探活事实数量、是否按账号限量、成功/失败事实是否已预聚合，以及平台/分组是否已下推。
+  5. 修复代码后运行类型检查、定向测试、全量测试和 `deploy:validate`，再走 owning CLI 部署；
+     不直接查询 Sub2API 业务库，不放宽读超时或自动调度预算来掩盖慢查询。
+  6. 部署后重跑四个作用域的 snapshot、plan 和自动优先级轮次，要求全部成功或明确 `no-change`，
+     且查询耗时低于预算；同时确认 `scores rank` 的 `refreshedAt` 前进、样本时间持续更新。
+- 自动优先级只有在“查询成功、写入/回读成功、历史无阻断、新鲜样本持续产生”同时满足时才算恢复。
+  `planWrite=false` 不等于自动调度关闭；单次 `no-change` 也不等于查询恢复。
+- 不把本轮查询变快当成长期修复。必须用完整探活事实规模和全部作用域复验，防止只在 Codex
+  或旧样本量下偶然通过。
 
 ### 有效做法
 
@@ -641,6 +683,7 @@
   - Cookie 只留在进程环境，不进 argv、日志或磁盘。
 - 轮次摘要使用 `priority history --scope <codex|claude|grok|deepseek>`。
   - 人类输出有界，并披露 `omitted` 与 `displayOmitted`。
+  - 每轮第二行显示 `query`、`snapshotAge`、`reason` 和 `recovery`；失败轮次不得只显示状态。
   - 单账号前后值仍使用 `--account`。
 
 ### 失败或误判模式

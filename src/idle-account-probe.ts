@@ -3,6 +3,12 @@ import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-exec
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { ProbeIsolationScope, ProbeIsolationService } from "./probe-isolation";
 
+function boundedProbeError(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error))
+    .replace(/sk-[A-Za-z0-9_-]+/gu, "[REDACTED]")
+    .slice(0, 500);
+}
+
 const idleProbeCandidatesSql = `
 WITH target_accounts AS MATERIALIZED (
   SELECT a.id::int AS account_id, a.name AS account_name, a.platform,
@@ -494,8 +500,11 @@ export class IdleAccountProbeService {
     const results: Array<Record<string, unknown>> = [];
     let planned = 0;
     let ready = 0;
+    const repairedAccountIds = new Set<number>();
+    const repairFailures: Array<{ accountId: number; error: string }> = [];
     const unreadyAccountIds = new Set<number>();
     const modelUnavailableAccountIds = new Set<number>();
+    let repairBudget = policy.provisionCandidateLimit;
     try {
       for (let round = 1; round <= rounds; round += 1) {
         if (Date.now() - startedAt >= policy.roundTimeoutSeconds * 1000) {
@@ -504,15 +513,37 @@ export class IdleAccountProbeService {
         }
         const plan = await this.plan(accountIds, "automatic", scopeName);
         const plannedCandidates = plan.candidates as IdleProbeCandidate[];
-        const candidates = plannedCandidates
-          .filter((candidate) => candidate.status === "active" && candidate.schedulable === true)
-          .filter((candidate) => {
-            const binding = this.isolation!.get(candidate.accountId, isolationScope);
-            return binding !== null && candidate.groupIds.includes(binding.groupId);
-          });
+        const eligibleCandidates = plannedCandidates
+          .filter((candidate) => candidate.status === "active" && candidate.schedulable === true);
+        for (const candidate of eligibleCandidates) {
+          const binding = this.isolation!.get(candidate.accountId, isolationScope);
+          if (binding !== null && candidate.groupIds.includes(binding.groupId)) continue;
+          if (repairBudget <= 0) {
+            const error = "probe isolation repair budget exhausted";
+            if (!repairFailures.some((failure) => failure.accountId === candidate.accountId && failure.error === error)) {
+              repairFailures.push({ accountId: candidate.accountId, error });
+            }
+            unreadyAccountIds.add(candidate.accountId);
+            continue;
+          }
+          repairBudget -= 1;
+          try {
+            await this.isolation!.ensure(candidate.accountId, isolationScope);
+            repairedAccountIds.add(candidate.accountId);
+          } catch (error) {
+            repairFailures.push({ accountId: candidate.accountId, error: boundedProbeError(error) });
+            unreadyAccountIds.add(candidate.accountId);
+          }
+        }
+        const candidates = eligibleCandidates.filter((candidate) => {
+          if (repairedAccountIds.has(candidate.accountId)) return true;
+          const binding = this.isolation!.get(candidate.accountId, isolationScope);
+          return binding !== null && candidate.groupIds.includes(binding.groupId);
+        });
         planned += plannedCandidates.length;
         ready += candidates.length;
         for (const candidate of plannedCandidates) {
+          if (repairedAccountIds.has(candidate.accountId)) continue;
           const binding = this.isolation!.get(candidate.accountId, isolationScope);
           if (binding === null || !candidate.groupIds.includes(binding.groupId)) {
             unreadyAccountIds.add(candidate.accountId);
@@ -564,7 +595,7 @@ export class IdleAccountProbeService {
           && (response as Record<string, unknown>).ordinaryLogRecorded === true;
       });
       return {
-        ok: failed === 0,
+        ok: failed === 0 && repairFailures.length === 0,
         skipped: false,
         model: defaultProbeModel,
         rounds,
@@ -573,6 +604,8 @@ export class IdleAccountProbeService {
         failed,
         planned,
         ready,
+        repairedAccountIds: [...repairedAccountIds].sort((left, right) => left - right),
+        repairFailures,
         unreadyAccountIds: [...unreadyAccountIds].sort((left, right) => left - right),
         modelUnavailableAccountIds: [...modelUnavailableAccountIds].sort((left, right) => left - right),
         probeConcurrency: "all-ready-candidates",

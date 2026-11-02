@@ -46,6 +46,20 @@ test("V2 keeps successful reads and ordinary failures on the current page", asyn
   }
 });
 
+test("V2 exposes bounded non-JSON response diagnostics", async () => {
+  const failure = await requestHarness(new Response("upstream gateway exploded\nretry later", { status: 502, statusText: "Bad Gateway" }));
+  await expect(failure.requestJson("/api/v2/upstream-scheduling/snapshot?scope=codex"))
+    .rejects.toThrow("HTTP 502 Bad Gateway: upstream gateway exploded retry later");
+  const success = await requestHarness(new Response("<html>unexpected page</html>"));
+  await expect(success.requestJson("/api/v2/upstream-scheduling/scopes"))
+    .rejects.toThrow("response is not JSON: <html>unexpected page</html>");
+  const longBody = "x".repeat(400);
+  const longFailure = await requestHarness(new Response(longBody, { status: 503 }));
+  const error = await longFailure.requestJson("/api/v2/upstream-scheduling/scopes").catch((reason) => reason);
+  expect(error.message).toContain("HTTP 503");
+  expect(error.message.length).toBeLessThan(350);
+});
+
 test("upstream scheduling V2 is a Codex-first read-only page", async () => {
   const html = await Bun.file(new URL("./upstream-scheduling-v2.html", import.meta.url)).text();
   const script = await Bun.file(new URL("./upstream-scheduling-v2.js", import.meta.url)).text();

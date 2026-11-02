@@ -16,19 +16,56 @@ import {
 type Row = Record<string, unknown>;
 
 const recentAccountAggregateSql = `
-WITH probe_facts AS MATERIALIZED (
-  SELECT account_id, request_id, client_request_id,
-    COALESCE(NULLIF(request_id, ''), NULLIF(client_request_id, ''),
-      CONCAT('probe:', account_id::text, ':', completed_at::text)) AS request_key,
-    completed_at, quality_ok, ttft_ms
-  FROM jsonb_to_recordset($9::jsonb) AS p(
-    account_id bigint, request_id text, client_request_id text,
-    completed_at timestamptz, quality_ok boolean, ttft_ms numeric
-  )
-  WHERE account_id IS NOT NULL
-    AND completed_at IS NOT NULL
+WITH bounded_probe_facts AS MATERIALIZED (
+  SELECT *
+  FROM (
+    SELECT account_id, request_id, client_request_id,
+      COALESCE(NULLIF(request_id, ''), NULLIF(client_request_id, ''),
+        CONCAT('probe:', account_id::text, ':', completed_at::text)) AS request_key,
+      completed_at, quality_ok, ttft_ms,
+      ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY completed_at DESC) AS fact_rank
+    FROM jsonb_to_recordset($9::jsonb) AS p(
+      account_id bigint, request_id text, client_request_id text,
+      completed_at timestamptz, quality_ok boolean, ttft_ms numeric
+    )
+    WHERE account_id IS NOT NULL
+      AND completed_at IS NOT NULL
+  ) facts
+  WHERE fact_rank <= $1
+), probe_request_keys AS MATERIALIZED (
+  SELECT account_id, request_key, completed_at, quality_ok, ttft_ms
+  FROM bounded_probe_facts
+  UNION
+  SELECT account_id, request_id, completed_at, quality_ok, ttft_ms
+  FROM bounded_probe_facts
+  WHERE NULLIF(request_id, '') IS NOT NULL
+  UNION
+  SELECT account_id, client_request_id, completed_at, quality_ok, ttft_ms
+  FROM bounded_probe_facts
+  WHERE NULLIF(client_request_id, '') IS NOT NULL
+), successful_probe_ttft AS MATERIALIZED (
+  SELECT DISTINCT ON (account_id, request_key)
+    account_id, request_key, ttft_ms
+  FROM probe_request_keys
+  WHERE quality_ok = true
+    AND ttft_ms IS NOT NULL
+  ORDER BY account_id, request_key, completed_at DESC
+), probe_ttft_by_account AS MATERIALIZED (
+  SELECT account_id, jsonb_object_agg(request_key, ttft_ms::bigint) AS ttft_by_request
+  FROM successful_probe_ttft
+  GROUP BY account_id
+), failed_probe_requests AS MATERIALIZED (
+  SELECT DISTINCT account_id, request_key
+  FROM probe_request_keys
+  WHERE quality_ok IS DISTINCT FROM true
+), failed_requests_by_account AS MATERIALIZED (
+  SELECT account_id, jsonb_object_agg(request_key, true) AS failed_requests
+  FROM failed_probe_requests
+  GROUP BY account_id
 ), failed_probe_facts AS MATERIALIZED (
-  SELECT * FROM probe_facts WHERE quality_ok IS DISTINCT FROM true
+  SELECT account_id, request_key, completed_at
+  FROM bounded_probe_facts
+  WHERE quality_ok IS DISTINCT FROM true
 ), target_accounts AS (
   SELECT
     a.id AS account_id,
@@ -69,6 +106,19 @@ WITH probe_facts AS MATERIALIZED (
             selected_g.id::text = $3::text
             OR selected_g.name = $3::text
           )
+      )
+    )
+    AND ($10::text IS NULL OR a.platform = $10::text)
+    AND (
+      $11::text IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM account_groups scoped_ag
+        JOIN groups scoped_g
+          ON scoped_g.id = scoped_ag.group_id
+          AND scoped_g.deleted_at IS NULL
+        WHERE scoped_ag.account_id = a.id
+          AND scoped_g.id = ANY(string_to_array($11::text, ',')::bigint[])
       )
     )
   GROUP BY a.id
@@ -149,13 +199,7 @@ account_stats AS (
           u.request_id,
           u.created_at,
           u.stream,
-          COALESCE((
-            SELECT probe.ttft_ms::bigint FROM probe_facts probe
-            WHERE probe.account_id = a.account_id
-              AND probe.quality_ok = true
-              AND (probe.request_id = u.request_id OR probe.client_request_id = u.request_id)
-            ORDER BY probe.completed_at DESC LIMIT 1
-          ), u.first_token_ms::bigint) AS first_token_ms,
+          COALESCE((probe.ttft_by_request->>u.request_id)::bigint, u.first_token_ms::bigint) AS first_token_ms,
           u.input_tokens::bigint,
           u.output_tokens::bigint,
           u.actual_cost::numeric,
@@ -177,14 +221,14 @@ account_stats AS (
               CONCAT('api2business-probe-', a.platform, '-', a.account_id::text)
             )
         ) u
+        LEFT JOIN probe_ttft_by_account probe
+          ON probe.account_id = a.account_id
+        LEFT JOIN failed_requests_by_account failed
+          ON failed.account_id = a.account_id
         WHERE u.created_at >= NOW() - ($5::int * INTERVAL '1 hour')
           AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
           AND NOT ${audioRequestSql("u", false)}
-          AND NOT EXISTS (
-            SELECT 1 FROM failed_probe_facts failed
-            WHERE failed.account_id = a.account_id
-              AND (failed.request_id = u.request_id OR failed.client_request_id = u.request_id)
-          )
+          AND NOT COALESCE(failed.failed_requests ? u.request_id, false)
         ORDER BY u.created_at DESC
         LIMIT $1
       )
@@ -588,6 +632,7 @@ export async function collectRecentCallScoresFromDatabase(
   groupSelector: string | null = null,
   priority: Sub2ApiReadPriority = "manual",
   idleProbeFacts: Row[] = [],
+  scopeFilter: { platform: string; groupIds: number[] } | null = null,
 ): Promise<{
   ok: true;
   mode: string;
@@ -620,6 +665,7 @@ export async function collectRecentCallScoresFromDatabase(
       groupSelector,
       Math.min(recentCallLimit, config.sub2api.scorePolicy.failureBurstCallLimit),
       config.sub2api.scoreSamplePolicy,
+      scopeFilter,
     ]),
     kind: "scores.rank",
     sql: recentAccountAggregateSql,
@@ -633,6 +679,8 @@ export async function collectRecentCallScoresFromDatabase(
       config.sub2api.scoreSamplePolicy.decayStep,
       config.sub2api.scoreSamplePolicy.minimumWeight,
       JSON.stringify(idleProbeFacts),
+      scopeFilter?.platform ?? null,
+      scopeFilter?.groupIds.join(",") ?? null,
     ],
     priority,
     cacheMode: "bypass-cache",

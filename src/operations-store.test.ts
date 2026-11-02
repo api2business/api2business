@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { OperationsStore, authoritativeUsageBalance, postgresBigintArrayLiteral } from "./operations-store";
+import { OperationsStore, authoritativeUsageBalance, parsePlanJsonField, postgresBigintArrayLiteral } from "./operations-store";
 
 test("probe correlation is persisted as JSON, including an empty legacy evidence list", async () => {
   const calls: unknown[][] = [];
@@ -57,6 +57,18 @@ test("history pages limit rows before decoding evidence and retain independent t
 test("encodes account IDs as a PostgreSQL bigint array literal", () => {
   expect(postgresBigintArrayLiteral([49, 330, 307])).toBe("{49,330,307}");
   expect(() => postgresBigintArrayLiteral([0])).toThrow("positive integers");
+});
+
+test("corrupt priority plan JSON fails with its identity without echoing the body", () => {
+  expect(parsePlanJsonField("plan-1", "priorities", { 42: 100 })).toEqual({ 42: 100 });
+  try {
+    parsePlanJsonField("plan-1", "priorities", "{sensitive-unfinished-json");
+    throw new Error("expected invalid plan JSON to fail");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).toContain("priority plan plan-1 field priorities");
+    expect(message).not.toContain("sensitive-unfinished-json");
+  }
 });
 
 test("does not replace a wallet balance with New API key-only unlimited quota", () => {

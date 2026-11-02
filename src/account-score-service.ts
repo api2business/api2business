@@ -24,7 +24,7 @@ interface ScoreSnapshot {
 }
 
 export interface ScoreSnapshotStore {
-  recentIdleProbeFacts?(start: string, end: string): Promise<Array<Record<string, unknown>>>;
+  recentIdleProbeFacts?(start: string, end: string, maximumPerAccount?: number): Promise<Array<Record<string, unknown>>>;
   getSnapshot(key: string): Promise<Record<string, unknown> | null>;
   beginSnapshotRefresh(key: string, schemaVersion: string, startedAt: string): Promise<void>;
   completeSnapshot(key: string, schemaVersion: string, payload: Record<string, unknown>, capturedAt: string): Promise<void>;
@@ -130,7 +130,7 @@ export class AccountScoreService {
       const probeEnd = new Date();
       const probeStart = new Date(probeEnd.getTime() - this.config.sub2api.scoreSamplePolicy.retentionHours * 3_600_000);
       const idleProbeFacts = this.snapshotStore?.recentIdleProbeFacts
-        ? await this.snapshotStore.recentIdleProbeFacts(probeStart.toISOString(), probeEnd.toISOString())
+        ? await this.snapshotStore.recentIdleProbeFacts(probeStart.toISOString(), probeEnd.toISOString(), recentCallLimit)
         : [];
       const collected = await collectRecentCallScoresFromDatabase(
         this.config,

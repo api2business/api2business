@@ -310,10 +310,15 @@ test("idle probe does not claim an ordinary log when the gateway never responds"
   });
 });
 
-test("idle probe does not use a persisted key after its private group binding was removed", async () => {
+test("idle probe repairs a removed private group binding before probing", async () => {
   let probes = 0;
+  let ensures = 0;
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
+    ensure: async (accountId: number) => {
+      ensures += 1;
+      return { accountId, groupId: 51, keyCreated: false };
+    },
     probe: async () => {
       probes += 1;
       return { classification: "alive", ordinaryLogRecorded: true, qualityOk: true };
@@ -326,12 +331,62 @@ test("idle probe does not use a persisted key after its private group binding wa
 
   expect(await service.run([369], 1)).toMatchObject({
     ok: true,
+    attempted: 1,
+    succeeded: 1,
+    ready: 1,
+    repairedAccountIds: [369],
+    repairFailures: [],
+    unreadyAccountIds: [],
+    ordinaryLogRecorded: true,
+  });
+  expect(ensures).toBe(1);
+  expect(probes).toBe(1);
+});
+
+test("idle probe exposes a binding repair failure instead of only marking it unready", async () => {
+  const isolation = {
+    get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
+    ensure: async () => { throw new Error("探活隔离账号绑定阶段失败：write timeout sk-secret-value"); },
+    probe: async () => ({ classification: "alive", ordinaryLogRecorded: true, qualityOk: true }),
+  };
+  const service = new IdleAccountProbeService(config, reads([{
+    account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
+    account_status: "active", schedulable: true, group_ids: [2],
+  }]), {} as never, isolation as never);
+
+  expect(await service.run([369], 1)).toMatchObject({
+    ok: false,
     attempted: 0,
     ready: 0,
+    repairedAccountIds: [],
+    repairFailures: [{ accountId: 369, error: "探活隔离账号绑定阶段失败：write timeout [REDACTED]" }],
     unreadyAccountIds: [369],
-    ordinaryLogRecorded: false,
   });
-  expect(probes).toBe(0);
+});
+
+test("idle probe reports exhausted binding repair budget for every remaining account", async () => {
+  const ensured: number[] = [];
+  const isolation = {
+    get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
+    ensure: async (accountId: number) => {
+      ensured.push(accountId);
+      return { accountId, groupId: 51, keyCreated: false };
+    },
+    probe: async () => ({ classification: "alive", ordinaryLogRecorded: true, qualityOk: true }),
+  };
+  const service = new IdleAccountProbeService(config, reads([369, 370].map((accountId) => ({
+    account_id: accountId, account_name: `upstream-${accountId}`, platform: "openai", priority: 300,
+    account_status: "active", schedulable: true, group_ids: [2],
+  }))), {} as never, isolation as never);
+
+  expect(await service.run([369, 370], 1)).toMatchObject({
+    ok: false,
+    ready: 1,
+    repairedAccountIds: [369],
+    repairFailures: [{ accountId: 370, error: "probe isolation repair budget exhausted" }],
+    unreadyAccountIds: [370],
+  });
+  expect(ensured).toEqual([369]);
 });
 
 test("idle probe skips blocked accounts even when an explicit plan is stale", async () => {
@@ -378,7 +433,7 @@ test("idle probe sends every ready planned request concurrently", async () => {
   };
   const service = new IdleAccountProbeService(config, reads(rows), runtime as never, isolation as never);
   const running = service.run([], 1);
-  await Bun.sleep(5);
+  for (let waitedMs = 0; waitedMs < 100 && peak < 8; waitedMs += 5) await Bun.sleep(5);
   expect(peak).toBe(8);
   release();
   expect(await running).toMatchObject({ attempted: 8, succeeded: 8, probeConcurrency: "all-ready-candidates" });

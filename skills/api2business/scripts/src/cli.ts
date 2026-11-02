@@ -5,7 +5,7 @@ import { historicalBalanceHelp, nativeHelp, priorityHistoryHelp } from "./operat
 import { measureQuotaMonitor } from './quota-monitor-measure';
 import { randomUUID } from "node:crypto";
 import { AdminHttpClient } from "../../../../src/admin-http-client";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mergeAccountScores } from "../../../../src/account-score-aggregation";
 import { createEmbeddedContext } from "../../../../src/bootstrap";
 import { loadConfig, type EmbeddedCliTarget, type HttpCliTarget, type NativeServiceId } from "../../../../src/config";
@@ -169,6 +169,11 @@ function value(args: string[], name: string, signedNumber = false): string | nul
   return result;
 }
 
+export function normalizeCliArgs(args: string[], defaultConfigPath: string | null): string[] {
+  if (defaultConfigPath === null || args.includes("--config")) return args;
+  return ["--config", defaultConfigPath, ...args];
+}
+
 export function parseArgs(args: string[]): Parsed {
   const overApiUrl = value(args, "--over-api");
   if (value(args, "--target") !== null) throw new Error("--target 已退役；使用 --over-api <绝对 http(s) URL>");
@@ -181,7 +186,7 @@ export function parseArgs(args: string[]): Parsed {
     }
   }
   const configPath = value(args, "--config");
-  if (!configPath) throw new Error("--config is required");
+  if (!configPath) throw new Error("--config is required; run from the Api2Business repository root (where config/api2business.yaml exists) or pass --config <owning-YAML>");
   const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--click-selector", "--selector", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
   const flags = new Set(["--confirm", "--include-records", "--json", "--cache-only", "--refresh", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
@@ -544,6 +549,42 @@ export function selectPriorityHistory(value: Record<string, unknown>, scope: str
   };
 }
 
+function compactAge(value: unknown): string {
+  const seconds = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return "-";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${(seconds / 3600).toFixed(1)}h`;
+  return `${(seconds / 86400).toFixed(1)}d`;
+}
+
+function compactText(value: unknown, maximum = 96): string {
+  const text = String(value ?? "").trim();
+  if (text.length === 0) return "-";
+  return text.length <= maximum ? text : `${text.slice(0, maximum - 1)}…`;
+}
+
+export function priorityHistoryDiagnostics(row: Record<string, unknown>): Record<string, string> {
+  const duration = typeof row.score_query_duration_ms === "number"
+    ? row.score_query_duration_ms
+    : Number(row.score_query_duration_ms);
+  const query = Number.isFinite(duration) && duration >= 0 ? `${(duration / 1000).toFixed(2)}s` : "-";
+  const blocked = Array.isArray(row.automation_blocked_reasons)
+    ? row.automation_blocked_reasons.map(String).join(",")
+    : "";
+  const failure = compactText(row.failure_reason);
+  const scoreError = compactText(row.score_error);
+  const failureDetails = [failure, scoreError].filter((value) => value !== "-").join(" | ");
+  const reason = blocked
+    || compactText(failureDetails);
+  return {
+    query,
+    snapshotAge: compactAge(row.score_snapshot_age_seconds),
+    reason: compactText(reason),
+    recovery: compactText(row.recovery_action, 48),
+  };
+}
+
 function emitPriorityHistory(value: Record<string, unknown>, json: boolean, scope: string | null): void {
   const selected = selectPriorityHistory(value, scope);
   if (json) return emit(selected, true);
@@ -565,6 +606,7 @@ function emitPriorityHistory(value: Record<string, unknown>, json: boolean, scop
   for (const row of shown) {
     const counts = record(row.profile_changed_counts);
     const changed = scope !== null && counts && counts[scope] !== undefined ? counts[scope] : row.changed_count;
+    const diagnostics = priorityHistoryDiagnostics(row);
     console.log([
       String(row.created_at ?? "-").padEnd(25),
       String(row.status ?? "-").padEnd(8),
@@ -574,6 +616,7 @@ function emitPriorityHistory(value: Record<string, unknown>, json: boolean, scop
       String(row.write_mode ?? "-").padEnd(20),
       String(row.created_by ?? "-"),
     ].join("  "));
+    console.log(`  query=${diagnostics.query} snapshotAge=${diagnostics.snapshotAge} reason=${diagnostics.reason} recovery=${diagnostics.recovery}`);
   }
   if (displayOmitted > 0) console.log(`displayOmitted=${displayOmitted}; use --json for the full matching records`);
 }
@@ -1538,7 +1581,8 @@ export async function runCli(args: string[]): Promise<void> {
     }, wantsJson);
     if (args.includes("--help") && args.includes("observability")) return emit(observabilityHelp,wantsJson);
     if (args.includes("--help") || args.length === 0) return emit(help(), wantsJson);
-    const parsed = parseArgs(args);
+    const defaultConfigPath = existsSync("config/api2business.yaml") ? "config/api2business.yaml" : null;
+    const parsed = parseArgs(normalizeCliArgs(args, defaultConfigPath));
     if (parsed.cacheOnly && parsed.refresh) throw new Error("--refresh 与 --cache-only 不能同时使用");
     if ((parsed.cacheOnly || parsed.refresh) && !(parsed.command[0] === "upstream-scheduling-v2" && parsed.command[1] === "snapshot")) {
       throw new Error("--refresh/--cache-only 只适用于 upstream-scheduling-v2 snapshot");

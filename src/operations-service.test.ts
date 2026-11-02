@@ -69,6 +69,35 @@ test("priority history account filter returns one transition and hides other acc
   expect(summary.records[0]).not.toHaveProperty("account_change");
 });
 
+test("priority history exposes blocked score queries, duration and recovery action", async () => {
+  const store = { async priorityHistory() { return [
+    { id: "slow-round", status: "failed", created_by: "v2-scheduler:codex",
+      priorities: {},
+      result: {
+        queryDurationMs: 14731.6,
+        collectedAt: new Date(Date.now() - 5 * 3600_000).toISOString(),
+        automationSafety: { blockedReasons: ["score-query-slow-or-unknown"] },
+      },
+      apply_result: { writeMode: "cycle-skipped", reason: "score-query-slow-or-unknown" } },
+    { id: "error-round", status: "failed", created_by: "v2-scheduler:claude",
+      priorities: {},
+      result: { scoreError: "sub2api_read_query_timeout: query scores.rank exceeded 15000ms" },
+      apply_result: { writeMode: "score-query-failed", reason: "score-query-failed" } },
+  ]; } } as unknown as OperationsStore;
+  const service = new OperationsService({ operations: { auditLimit: 10 } } as AppConfig, store, unusedReads);
+  const result = await service.priorityHistory();
+  expect(result.records[0]).toMatchObject({
+    automation_blocked_reasons: ["score-query-slow-or-unknown"],
+    score_query_duration_ms: 14731.6,
+    recovery_action: "inspect-score-query-and-probe-volume",
+  });
+  expect(Number(result.records[0]?.score_snapshot_age_seconds)).toBeGreaterThan(4 * 3600);
+  expect(result.records[1]).toMatchObject({
+    score_error: "sub2api_read_query_timeout: query scores.rank exceeded 15000ms",
+    recovery_action: "inspect-score-refresh-error",
+  });
+});
+
 test("priority history labels a deepseek-only automatic round as deepseek", async () => {
   const store = { async priorityHistory() { return [
     { id: "ds-round", status: "applied", created_by: "v2-scheduler:deepseek",
@@ -277,14 +306,20 @@ test("V2 automatic priority plans persist only the requested scope", async () =>
     },
   } as unknown as AppConfig;
   const service = new OperationsService(config, store, unusedReads);
-  service.v2PriorityState = async () => ({
-    queryDurationMs: 10,
-    profiles: { codex: { changedCount: 0 } },
-    changes: [],
-    priorities: {},
-    changedCount: 1,
-  });
+  let scopeArguments: unknown[] = [];
+  service.v2PriorityState = async (...args: unknown[]) => {
+    scopeArguments = args;
+    return {
+      queryDurationMs: 10,
+      collectedAt: "2026-10-03T00:00:00.000Z",
+      profiles: { codex: { changedCount: 0 } },
+      changes: [],
+      priorities: {},
+      changedCount: 1,
+    };
+  };
   const result = await service.runV2AutomaticPriorityPlan("codex", 1000);
+  expect(scopeArguments).toEqual([1000, "automatic", null, null, { platform: "openai", groupIds: [2] }]);
   expect(result).toMatchObject({ ok: true, scope: "codex", writeMode: "no-change" });
   expect(created[0]?.operator).toBe("v2-scheduler:codex");
   expect((created[0]?.result as Record<string, unknown>).profiles).toEqual({ codex: { changedCount: 0 } });
@@ -337,6 +372,31 @@ test("探活轮次持久化原生关联证据与数值质量事实，不保留�
   expect(requestEvidence[1]).toMatchObject({ ...timeoutEvidence, qualityOk: undefined });
   expect(JSON.stringify(requestEvidence)).not.toContain("must-not-persist");
   expect(JSON.stringify(saved)).not.toContain("must-not-persist");
+});
+
+test("探活轮次把绑定修复失败写入 errorSummary", async () => {
+  let saved: Record<string, unknown> = {};
+  const store = { async addIdleProbeRound(input: Record<string, unknown>) { saved = input; } } as unknown as OperationsStore;
+  const service = new OperationsService({} as AppConfig, store, unusedReads);
+  const probe = (service as unknown as { idleProbe: { run: () => Promise<Record<string, unknown>> } }).idleProbe;
+  probe.run = async () => ({
+    ok: false,
+    planned: 1,
+    ready: 0,
+    attempted: 0,
+    succeeded: 0,
+    failed: 0,
+    repairedAccountIds: [],
+    repairFailures: [{ accountId: 1557, error: "探活隔离账号绑定阶段失败：write timeout" }],
+    unreadyAccountIds: [1557],
+    results: [],
+  });
+  await service.runIdleProbe([], 1, { operationId: "repair-failed-round", triggerType: "manual", scope: "deepseek" });
+  expect(saved).toMatchObject({
+    status: "failed",
+    unreadyCount: 1,
+    errorSummary: "repair account 1557: 探活隔离账号绑定阶段失败：write timeout; unready accounts: 1557",
+  });
 });
 
 test("pool quality keeps successful scopes when one platform times out", async () => {

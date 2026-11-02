@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assertSchedulingRuntimeQuery, parseArgs, poolQualityScope, selectPriorityHistory, summarizeWorkflowStatus } from "./cli";
+import { assertSchedulingRuntimeQuery, normalizeCliArgs, parseArgs, poolQualityScope, priorityHistoryDiagnostics, selectPriorityHistory, summarizeWorkflowStatus } from "./cli";
 import { webProbeElementArgs } from "./web-screenshot";
 
 test("historical balance CLI accepts signed USD without consuming the next option", () => {
@@ -25,6 +25,16 @@ test("historical balance CLI accepts signed USD without consuming the next optio
   expect(() => parseArgs(["--config", "config/api2business.yaml", "web", "screenshot", "--selector"])).toThrow("--selector requires a value");
 });
 
+test("CLI uses the repository config only when --config is omitted", () => {
+  const defaultConfig = "config/api2business.yaml";
+  expect(normalizeCliArgs(["scores", "rank"], defaultConfig)).toEqual(["--config", defaultConfig, "scores", "rank"]);
+  const explicit = ["--config", "config/custom.yaml", "scores", "rank"];
+  expect(normalizeCliArgs(explicit, defaultConfig)).toEqual(explicit);
+  expect(normalizeCliArgs(["scores", "rank"], null)).toEqual(["scores", "rank"]);
+  expect(() => parseArgs(normalizeCliArgs(["scores", "rank"], null)))
+    .toThrow("run from the Api2Business repository root");
+});
+
 test("priority history scope keeps matching rounds and discloses omissions", () => {
   const selected = selectPriorityHistory({
     ok: true,
@@ -40,6 +50,24 @@ test("priority history scope keeps matching rounds and discloses omissions", () 
   ]);
   expect(selected).toMatchObject({ scope: "deepseek", matchedCount: 2, omittedCount: 1 });
   expect(() => selectPriorityHistory({ records: [] }, "openai")).toThrow("codex, claude, grok, or deepseek");
+});
+
+test("priority history human diagnostics expose query, snapshot age, block and recovery", () => {
+  expect(priorityHistoryDiagnostics({
+    score_query_duration_ms: 14731.6,
+    score_snapshot_age_seconds: 18300,
+    automation_blocked_reasons: ["score-query-slow-or-unknown"],
+    recovery_action: "inspect-score-query-and-probe-volume",
+  })).toEqual({
+    query: "14.73s",
+    snapshotAge: "5.1h",
+    reason: "score-query-slow-or-unknown",
+    recovery: "inspect-score-query-and-probe-volume",
+  });
+  expect(priorityHistoryDiagnostics({
+    failure_reason: "score-query-failed",
+    score_error: "sub2api_read_query_timeout: query scores.rank exceeded 15000ms",
+  }).reason).toContain("sub2api_read_query_timeout");
 });
 
 test("pool quality reads the requested scope and runtime evidence accepts deepseek", () => {

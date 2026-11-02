@@ -103,6 +103,31 @@ function boundedErrorMessage(error: unknown): string {
     .slice(0, 500);
 }
 
+function idleProbeRoundErrorSummary(result: Record<string, unknown>): string | null {
+  const parts: string[] = [];
+  const repairFailures = records(result.repairFailures);
+  for (const failure of repairFailures.slice(0, 5)) {
+    const accountId = finiteNumber(failure.accountId);
+    const message = boundedErrorMessage(failure.error ?? "unknown repair failure");
+    parts.push(`${accountId === null ? "repair" : `repair account ${accountId}`}: ${message}`);
+  }
+  if (repairFailures.length > 5) parts.push(`repair failures omitted: ${repairFailures.length - 5}`);
+  const unready = Array.isArray(result.unreadyAccountIds)
+    ? result.unreadyAccountIds.map(finiteNumber).filter((accountId): accountId is number => accountId !== null)
+    : [];
+  if (unready.length > 0) {
+    parts.push(`unready accounts: ${unready.slice(0, 20).join(",")}${unready.length > 20 ? ` (+${unready.length - 20})` : ""}`);
+  }
+  const probeFailures = records(result.results).filter((item) => item.ok === false && item.error != null);
+  for (const failure of probeFailures.slice(0, 5)) {
+    const accountId = finiteNumber(failure.accountId);
+    parts.push(`${accountId === null ? "probe" : `probe account ${accountId}`}: ${boundedErrorMessage(failure.error)}`);
+  }
+  if (probeFailures.length > 5) parts.push(`probe failures omitted: ${probeFailures.length - 5}`);
+  if (parts.length === 0 && result.ok === false) parts.push("idle probe failed without a specific error");
+  return parts.length > 0 ? parts.join("; ").slice(0, 1500) : null;
+}
+
 export function accountPriorityTransition(changes: unknown, accountId: number): Record<string, unknown> | null {
   const match = records(changes).find((change) =>
     Number(change.accountId ?? change.account_id) === accountId);
@@ -225,10 +250,10 @@ export class OperationsService {
     this.bugTeamCostMonitor = new BugTeamCostMonitor(config, store);
   }
 
-  private async recentIdleProbeFacts(): Promise<Array<Record<string, unknown>>> {
+  private async recentIdleProbeFacts(maximumPerAccount = 2000): Promise<Array<Record<string, unknown>>> {
     const end = new Date();
     const start = new Date(end.getTime() - this.config.sub2api.scoreSamplePolicy.retentionHours * 3_600_000);
-    return await this.store.recentIdleProbeFacts(start.toISOString(), end.toISOString());
+    return await this.store.recentIdleProbeFacts(start.toISOString(), end.toISOString(), maximumPerAccount);
   }
 
   async createUpstreamBenchmark(accountId: number, model: string) {
@@ -344,7 +369,7 @@ export class OperationsService {
 
   async modelSyncPlan(scopeName = "codex", explicitAccountIds: number[] = []) {
     const { scope, config } = this.modelSyncScope(scopeName);
-    const idleProbeFacts = await this.recentIdleProbeFacts();
+    const idleProbeFacts = await this.recentIdleProbeFacts(config.automation.recentCallLimit);
     const ranking = await collectRecentCallScoresFromDatabase(
       this.config,
       config.automation.recentCallLimit,
@@ -353,6 +378,7 @@ export class OperationsService {
       null,
       "manual",
       idleProbeFacts,
+      { platform: scope.platform, groupIds: scope.eligibleGroupIds },
     );
     const eligible = records(ranking.accounts)
       .filter((row) => String(row.platform ?? "").toLowerCase() === scope.platform)
@@ -511,7 +537,7 @@ export class OperationsService {
           failedCount: failed,
           unreadyCount: Array.isArray(result.unreadyAccountIds) ? result.unreadyAccountIds.length : 0,
           durationMs: Number(result.durationMs ?? Date.now() - startedAt.getTime()),
-          errorSummary: null,
+          errorSummary: idleProbeRoundErrorSummary(result),
           requestEvidence: Array.isArray(result.results) ? result.results.flatMap((item) => {
             const response = item?.response;
             if (!response || typeof response !== "object") return [];
@@ -1263,8 +1289,9 @@ export class OperationsService {
     priority: Sub2ApiReadPriority = "manual",
     accountSelector: string | null = null,
     groupSelector: string | null = null,
+    scopeFilter: { platform: string; groupIds: number[] } | null = null,
   ): Promise<Record<string, unknown>> {
-    const idleProbeFacts = await this.recentIdleProbeFacts();
+    const idleProbeFacts = await this.recentIdleProbeFacts(recentCallLimit);
     const ranking = await collectRecentCallScoresFromDatabase(
       this.config,
       recentCallLimit,
@@ -1273,6 +1300,7 @@ export class OperationsService {
       groupSelector,
       priority,
       idleProbeFacts,
+      scopeFilter,
     );
     const usageRows = records(await this.store.getUpstreamUsageCache([]));
     const usageById = new Map(usageRows.map((row) => [Number(row.account_id), object(row.last_success_result ?? row.result)]));
@@ -1640,6 +1668,26 @@ export class OperationsService {
           ? JSON.parse(row.apply_result)
           : object(row.apply_result);
         const automationSafety = object(object(result).automationSafety);
+        const blockedReasons = Array.isArray(automationSafety.blockedReasons)
+          ? automationSafety.blockedReasons.map(String)
+          : [];
+        const scoreError = object(result).scoreError == null ? null : String(object(result).scoreError);
+        const scoreQueryDurationMs = finiteNumber(
+          object(result).scoreQueryDurationMs ?? object(result).queryDurationMs,
+        );
+        const scoreSnapshotAt = object(result).scoreSnapshotAt
+          ?? object(result).refreshedAt
+          ?? object(result).collectedAt
+          ?? null;
+        const scoreSnapshotMs = scoreSnapshotAt == null ? Number.NaN : Date.parse(String(scoreSnapshotAt));
+        const recordedRecoveryAction = object(result).recoveryAction;
+        const recoveryAction = typeof recordedRecoveryAction === "string" && recordedRecoveryAction.length > 0
+          ? recordedRecoveryAction
+          : blockedReasons.includes("score-query-slow-or-unknown")
+            ? "inspect-score-query-and-probe-volume"
+            : scoreError !== null
+              ? "inspect-score-refresh-error"
+              : null;
         const {
           priorities: _hidden,
           result: _hiddenResult,
@@ -1725,9 +1773,19 @@ export class OperationsService {
           profile_write_batch_counts: profileWriteBatchCounts,
           profile_statuses: profileStatuses,
           automation_mode: automationSafety.mode ?? null,
+          automation_blocked_reasons: blockedReasons,
           automation_batching_reasons: automationSafety.batchingReasons ?? [],
           automation_write_batch_size: Number(automationSafety.writeBatchSize ?? 0),
           automation_write_batch_count: batches.length,
+          score_query_duration_ms: scoreQueryDurationMs,
+          score_query_started_at: object(result).queryStartedAt ?? null,
+          score_query_completed_at: object(result).queryCompletedAt ?? null,
+          score_snapshot_at: scoreSnapshotAt,
+          score_snapshot_age_seconds: Number.isFinite(scoreSnapshotMs)
+            ? Math.max(0, Math.round((Date.now() - scoreSnapshotMs) / 1000))
+            : null,
+          score_error: scoreError,
+          recovery_action: recoveryAction,
           ...(accountChange ? { account_change: accountChange } : {}),
         };
       });
@@ -1781,7 +1839,46 @@ export class OperationsService {
     }
     return await this.store.withPriorityOptimizationQueue(async (queue) => {
       const operator = `v2-scheduler:${scopeName}`;
-      const candidate = await this.v2PriorityState(recentCallLimit, "automatic");
+      let candidate: Record<string, unknown>;
+      try {
+        candidate = await this.v2PriorityState(
+          recentCallLimit,
+          "automatic",
+          null,
+          null,
+          { platform: scope.platform, groupIds: scope.eligibleGroupIds },
+        );
+      } catch (error) {
+        const scoreError = boundedErrorMessage(error);
+        const failed = {
+          changedCount: 0,
+          candidateChangedCount: 0,
+          notSelectedChangedCount: 0,
+          writeMode: "score-query-failed",
+          verification: "not-started",
+          reason: "score-query-failed",
+          recoveryAction: "inspect-score-query-and-probe-volume",
+          scoreError,
+          scoreQueryDurationMs: null,
+          scoreSnapshotAt: null,
+          scope: scopeName,
+          scheduler: "upstream-scheduling-v2",
+          queue,
+        };
+        const plan = await this.store.createPlan({
+          operator,
+          recentCallLimit,
+          ttlMinutes: this.config.operations.planTtlMinutes,
+          priorities: {},
+          result: failed,
+          triggerType: "automatic",
+          executionStartedAt: new Date().toISOString(),
+        });
+        await this.store.finishPlan(plan.id, "failed", failed, this.config.operations.automationJitterPercent);
+        await this.store.audit("priority.automation.v2.run", "failed", operator,
+          { scope: scopeName, recentCallLimit }, { planId: plan.id, ...failed });
+        return { ok: false, due: true, planId: plan.id, ...failed };
+      }
       const scoped = filterPriorityPlanProfiles(candidate, new Set([scopeName]));
       const prepared = preparePriorityAutomationBatch(
         scoped,
@@ -1800,6 +1897,9 @@ export class OperationsService {
         scope: scopeName,
         scheduler: "upstream-scheduling-v2",
       };
+      const blockedReasons = Array.isArray(automationSafety.blockedReasons)
+        ? automationSafety.blockedReasons.map(String)
+        : [];
       const plan = await this.store.createPlan({
         operator,
         recentCallLimit,
@@ -1816,6 +1916,13 @@ export class OperationsService {
           notSelectedChangedCount: Number(result.notSelectedChangedCount ?? 0),
           writeMode: "cycle-skipped",
           verification: "not-started",
+          reason: blockedReasons.join(","),
+          recoveryAction: blockedReasons.includes("score-query-slow-or-unknown")
+            ? "inspect-score-query-and-probe-volume"
+            : null,
+          scoreQueryDurationMs: finiteNumber(scoped.queryDurationMs),
+          scoreSnapshotAt: scoped.refreshedAt ?? scoped.collectedAt ?? null,
+          scoreError: scoped.scoreError == null ? null : String(scoped.scoreError),
           safety: automationSafety,
           scope: scopeName,
           scheduler: "upstream-scheduling-v2",
@@ -1834,6 +1941,10 @@ export class OperationsService {
           writeMode: "no-change",
           verification: "not-started",
           verifiedCount: 0,
+          scoreQueryDurationMs: finiteNumber(scoped.queryDurationMs),
+          scoreSnapshotAt: scoped.refreshedAt ?? scoped.collectedAt ?? null,
+          scoreError: null,
+          recoveryAction: null,
           scope: scopeName,
           scheduler: "upstream-scheduling-v2",
           queue,
@@ -1851,6 +1962,10 @@ export class OperationsService {
         scheduler: "upstream-scheduling-v2",
         candidateChangedCount: Number(result.candidateChangedCount ?? confirmation.changedCount),
         notSelectedChangedCount: Number(result.notSelectedChangedCount ?? 0),
+        scoreQueryDurationMs: finiteNumber(scoped.queryDurationMs),
+        scoreSnapshotAt: scoped.refreshedAt ?? scoped.collectedAt ?? null,
+        scoreError: null,
+        recoveryAction: null,
       };
       await this.store.audit("priority.automation.v2.run", "succeeded", operator,
         { scope: scopeName, recentCallLimit }, { planId: plan.id, ...outcome });
@@ -1859,7 +1974,7 @@ export class OperationsService {
   }
 
   async procurement(budgetCny: number, operator: string, page = 1, pageSize = 10) {
-    const idleProbeFacts = await this.recentIdleProbeFacts();
+    const idleProbeFacts = await this.recentIdleProbeFacts(this.config.monitor.recentCallLimit);
     const ranking = await collectRecentCallScoresFromDatabase(
       this.config,
       this.config.monitor.recentCallLimit,

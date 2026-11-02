@@ -33,9 +33,12 @@ description: >-
   - 相对脚本路径离开仓库根目录时，Bun 报 `Module not found`。
   - 这表示脚本路径不存在，不表示命令未实现。
   - 绝对脚本路径可以启动 CLI。
-  - `--config` 仍必须指向 owning YAML。
+  - 仓库根执行时自动读取 `config/api2business.yaml`，不需要重复传 `--config`。
+  - 离开仓库根或使用自定义配置时，必须显式传 `--config <owning-YAML>`；
+    不存在跨目录的隐式配置回退。
 - 使用 `config/api2business.yaml` 保存唯一 L1 的运行配置；该文件不得提交。
-- 使用 `skills/api2business/scripts/api2business-cli.ts` 执行业务和生命周期操作。
+- 业务和生命周期入口固定为 `skills/api2business/scripts/api2business-cli.ts`；
+  不使用 `src/cli.ts`。
 
 ## 从零部署（Bootstrap）
 
