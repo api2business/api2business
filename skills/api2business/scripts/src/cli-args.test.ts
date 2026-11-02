@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { assertSchedulingRuntimeQuery, normalizeCliArgs, parseArgs, poolQualityScope, priorityHistoryDiagnostics, selectPriorityHistory, summarizeWorkflowStatus } from "./cli";
+import { operationHelp } from "./operation-help";
 import { webProbeElementArgs } from "./web-screenshot";
 
 test("historical balance CLI accepts signed USD without consuming the next option", () => {
@@ -33,6 +34,28 @@ test("CLI uses the repository config only when --config is omitted", () => {
   expect(normalizeCliArgs(["scores", "rank"], null)).toEqual(["scores", "rank"]);
   expect(() => parseArgs(normalizeCliArgs(["scores", "rank"], null)))
     .toThrow("run from the Api2Business repository root");
+});
+
+test("operation help returns action-specific contracts without loading config", () => {
+  const reconcile = operationHelp(["accounts", "idle-probe", "--scope", "codex", "reconcile", "--confirm", "--help"]);
+  expect(reconcile).toMatchObject({ ok: true, command: "accounts idle-probe reconcile" });
+  expect(String(reconcile?.usage)).toContain("--confirm");
+  expect(String(reconcile?.verification)).toContain("coverage");
+  expect(JSON.stringify(reconcile)).toContain("仓库根自动读取");
+
+  const snapshot = operationHelp(["upstream-scheduling-v2", "--scope", "codex", "snapshot", "--help"]);
+  expect(snapshot).toMatchObject({ ok: true, command: "upstream-scheduling-v2 snapshot" });
+  expect(String(snapshot?.usage)).toContain("--cache-only");
+  expect(String(snapshot?.verification)).toContain("complete=true");
+
+  const priorityRun = operationHelp(["upstream-scheduling-v2", "priority-run", "--help"]);
+  expect(priorityRun).toMatchObject({ ok: true, command: "upstream-scheduling-v2 priority-run" });
+  expect(String(priorityRun?.usage)).toContain("--confirm");
+
+  const rank = operationHelp(["scores", "rank", "--help"]);
+  expect(rank).toMatchObject({ ok: true, command: "scores rank" });
+  expect(String(rank?.verification)).toContain("refreshedAt");
+  expect(operationHelp(["scores", "get", "--help"])).toBeNull();
 });
 
 test("priority history scope keeps matching rounds and discloses omissions", () => {

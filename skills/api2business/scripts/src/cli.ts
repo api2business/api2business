@@ -1,7 +1,7 @@
 import { verifyObservationWindow } from "./observability-fixture";
 import { observabilityHelp, configureObservability, compactObservation, checkObservability } from "./observability";
 import { runWebScreenshot, webScreenshotHelp } from "./web-screenshot";
-import { historicalBalanceHelp, nativeHelp, priorityHistoryHelp } from "./operation-help";
+import { historicalBalanceHelp, nativeHelp, operationHelp, priorityHistoryHelp } from "./operation-help";
 import { measureQuotaMonitor } from './quota-monitor-measure';
 import { randomUUID } from "node:crypto";
 import { AdminHttpClient } from "../../../../src/admin-http-client";
@@ -1563,6 +1563,8 @@ export async function runMathProbeL0(
 export async function runCli(args: string[]): Promise<void> {
   const wantsJson = args.includes("--json");
   try {
+    const selectedOperationHelp = args.includes("--help") ? operationHelp(args) : null;
+    if (selectedOperationHelp) return emit(selectedOperationHelp, wantsJson);
     if (args.includes("--help") && args.some((item, index) => item === "priority" && args[index + 1] === "history")) return emit(priorityHistoryHelp(), wantsJson);
     if (args.includes("--help") && args.some((item, index) => item === "upstreams" && args[index + 1] === "initialize")) {
       return emit({ ok: true, command: "upstreams initialize",

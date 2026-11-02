@@ -39,6 +39,10 @@ description: >-
 - 使用 `config/api2business.yaml` 保存唯一 L1 的运行配置；该文件不得提交。
 - 业务和生命周期入口固定为 `skills/api2business/scripts/api2business-cli.ts`；
   不使用 `src/cli.ts`。
+- 某组命令的参数或复验方式不确定时，先执行 `<command> --help`；操作帮助不加载配置、
+  不连接运行面。
+  - `accounts idle-probe`、`upstream-scheduling-v2` 和 `scores rank` 均提供操作级帮助；
+    不能用根命令表猜参数或确认语义。
 
 ## 从零部署（Bootstrap）
 
