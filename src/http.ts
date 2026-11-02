@@ -1,4 +1,4 @@
-import type { OperationalObservability } from "./operational-observability";
+import { observationWindow, type OperationalObservability } from "./operational-observability";
 import { resolve } from "node:path";
 import type { AppConfig } from "./config";
 import type { ApplicationDispatcher } from "./dispatcher";
@@ -988,6 +988,14 @@ export function createHandler(
       }
       if (request.method === "GET" && url.pathname === "/api/admin/errors/aggregate") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        let window: ReturnType<typeof observationWindow> | null = null;
+        try {
+          if (url.searchParams.has("start") || url.searchParams.has("end")) {
+            window = observationWindow(url.searchParams.get("start"), url.searchParams.get("end"));
+          }
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
         const limit = positiveInteger(
           url.searchParams.get("limit"),
           config.monitor.errorAggregateLimit,
@@ -1004,10 +1012,20 @@ export function createHandler(
           top,
           url.searchParams.get("account"),
           url.searchParams.get("group"),
+          window?.start ?? null,
+          window?.end ?? null,
         ));
       }
       if (request.method === "GET" && url.pathname === "/api/admin/errors/diagnose") {
         if (!apiKey) return json({ ok: false, error: "unauthorized" }, 401);
+        let window: ReturnType<typeof observationWindow> | null = null;
+        try {
+          if (url.searchParams.has("start") || url.searchParams.has("end")) {
+            window = observationWindow(url.searchParams.get("start"), url.searchParams.get("end"));
+          }
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
         const limit = positiveInteger(
           url.searchParams.get("limit"),
           config.monitor.errorAggregateLimit,
@@ -1029,6 +1047,8 @@ export function createHandler(
             ? (url.searchParams.get("failoverRequestIds") ?? "")
               .split(",").filter((value) => /^[0-9a-f-]{36}$/iu.test(value))
             : null,
+          window?.start ?? null,
+          window?.end ?? null,
         ));
       }
       if (request.method === "GET" && url.pathname === "/api/admin/errors/cooldowns") {

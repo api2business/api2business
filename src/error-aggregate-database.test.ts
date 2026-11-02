@@ -4,7 +4,11 @@ import { errorAggregateQuery, projectErrorAggregateRow } from "./error-aggregate
 test("error aggregate is one bounded database query with recovered request detection", () => {
   expect(errorAggregateQuery).toContain("ORDER BY o.created_at DESC, o.id DESC");
   expect(errorAggregateQuery).toContain("LIMIT $1");
+  expect(errorAggregateQuery).toContain("selected_errors AS MATERIALIZED");
+  expect(errorAggregateQuery).toContain("usage_recovery_keys AS MATERIALIZED");
+  expect(errorAggregateQuery).toContain("terminal_policy_keys AS MATERIALIZED");
   expect(errorAggregateQuery).toContain("u.request_id = e.request_id");
+  expect(errorAggregateQuery).toContain("u.request_id = 'client:' ||");
   expect(errorAggregateQuery).toContain("GROUP BY request_key");
   expect(errorAggregateQuery).toContain("rank <= $4");
   expect(errorAggregateQuery).toContain("a.name = $2::text");
@@ -19,7 +23,10 @@ test("error aggregate is one bounded database query with recovered request detec
   expect(errorAggregateQuery).toContain("AND (NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)");
   expect(errorAggregateQuery).toContain("OR COALESCE(o.upstream_status_code, 0) >= 400");
   expect(errorAggregateQuery).toContain("OR (o.error_phase='request' AND o.error_type='cyber_policy')");
-  expect(errorAggregateQuery).toContain('e.request_id = terminal.request_id');
+  expect(errorAggregateQuery).toContain("o.created_at >= $5::timestamptz");
+  expect(errorAggregateQuery).toContain("o.created_at < $6::timestamptz");
+  expect(errorAggregateQuery).toContain('terminal.request_id = e.request_id');
+  expect(errorAggregateQuery).not.toContain("OR u.request_id IN");
   expect(errorAggregateQuery).not.toContain("error_body");
   expect(errorAggregateQuery).not.toContain("api_key_prefix");
 });

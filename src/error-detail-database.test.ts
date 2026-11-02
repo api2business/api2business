@@ -3,9 +3,16 @@ import { errorGetQuery, errorListQuery, projectErrorDetailRow } from "./error-de
 
 test("error detail queries are bounded and request scoped", () => {
   expect(errorListQuery).toContain("LIMIT $1");
+  expect(errorListQuery).toContain("selected_errors AS MATERIALIZED");
+  expect(errorListQuery).toContain("usage_recovery_keys AS MATERIALIZED");
+  expect(errorListQuery).toContain("terminal_policy_keys AS MATERIALIZED");
+  expect(errorListQuery).toContain("system_log_evidence AS MATERIALIZED");
+  expect(errorListQuery).toContain("ORDER BY o.created_at DESC, o.id DESC");
+  expect(errorListQuery).not.toContain("OR success.request_id IN");
+  expect(errorListQuery).not.toContain("WHERE (COALESCE(status_code, 0) >= 400");
   expect(errorListQuery).not.toContain("COALESCE(is_business_limited, false) = false");
-  expect(errorListQuery).toContain("COALESCE(status_code, 0) >= 400");
-  expect(errorListQuery).toContain("COALESCE(upstream_status_code, 0) >= 400");
+  expect(errorListQuery).toContain("COALESCE(o.status_code, 0) >= 400");
+  expect(errorListQuery).toContain("COALESCE(o.upstream_status_code, 0) >= 400");
   expect(errorGetQuery).toContain("WHERE request_id = $1");
   expect(errorGetQuery).toContain('o.request_id = terminal.request_id');
   expect(errorGetQuery).toContain("'badGateway'");

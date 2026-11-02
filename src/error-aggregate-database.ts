@@ -1,5 +1,4 @@
 import type { AppConfig } from "./config";
-import { terminalPolicyExistsSql, usageRequestMatchesSql } from "./request-terminal-policy";
 import type {
   Sub2ApiReadClient,
   Sub2ApiReadPriority,
@@ -24,7 +23,7 @@ WITH internal_probe_keys AS (
   FROM groups g
   WHERE $3::text IS NULL OR g.id::text = $3::text OR g.name = $3::text
 ),
-selected_errors AS (
+selected_errors AS MATERIALIZED (
   SELECT
     o.id,
     o.request_id,
@@ -54,18 +53,48 @@ selected_errors AS (
     AND (NOT (COALESCE(o.status_code, o.upstream_status_code, 0) BETWEEN 200 AND 399)
       OR COALESCE(o.upstream_status_code, 0) >= 400
       OR (o.error_phase='request' AND o.error_type='cyber_policy'))
+    AND ($5::timestamptz IS NULL OR o.created_at >= $5::timestamptz)
+    AND ($6::timestamptz IS NULL OR o.created_at < $6::timestamptz)
   ORDER BY o.created_at DESC, o.id DESC
   LIMIT $1
+),
+usage_recovery_keys AS MATERIALIZED (
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN usage_logs u ON u.request_id = e.request_id
+  WHERE e.request_id IS NOT NULL
+  UNION
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN ops_system_logs identity_log ON identity_log.request_id = e.request_id
+  JOIN usage_logs u ON u.request_id = 'client:' || NULLIF(identity_log.extra->>'client_request_id', '')
+  WHERE e.request_id IS NOT NULL
+),
+terminal_policy_keys AS MATERIALIZED (
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN ops_error_logs terminal ON terminal.request_id = e.request_id
+  WHERE e.request_id IS NOT NULL
+    AND terminal.error_phase = 'request' AND terminal.error_type = 'cyber_policy'
+  UNION
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN ops_system_logs identity_log ON identity_log.request_id = e.request_id
+  JOIN ops_error_logs terminal
+    ON terminal.request_id = 'client:' || NULLIF(identity_log.extra->>'client_request_id', '')
+  WHERE e.request_id IS NOT NULL
+    AND terminal.error_phase = 'request' AND terminal.error_type = 'cyber_policy'
 ),
 classified_errors AS (
   SELECT
     e.*,
     EXISTS (
-      SELECT 1
-      FROM usage_logs u
-      WHERE e.request_id IS NOT NULL
-        AND ${usageRequestMatchesSql("u.request_id", "e.request_id")}
-    ) AND NOT ${terminalPolicyExistsSql("e.request_id")} AS recovered,
+      SELECT 1 FROM usage_recovery_keys recovered_key
+      WHERE recovered_key.request_key = e.request_key
+    ) AND NOT EXISTS (
+      SELECT 1 FROM terminal_policy_keys terminal_key
+      WHERE terminal_key.request_key = e.request_key
+    ) AS recovered,
     CASE
       WHEN COALESCE(e.is_business_limited, false)
         OR LOWER(COALESCE(e.error_phase, '')) = 'business' THEN 'business_limit'
@@ -206,6 +235,8 @@ export async function collectErrorAggregateFromDatabase(
   top: number,
   accountSelector: string | null = null,
   groupSelector: string | null = null,
+  start: string | null = null,
+  end: string | null = null,
   priority: Sub2ApiReadPriority = "manual",
 ): Promise<Row> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 10000) {
@@ -222,10 +253,12 @@ export async function collectErrorAggregateFromDatabase(
       top,
       accountSelector,
       groupSelector,
+      start,
+      end,
     ]),
     kind: "errors.aggregate",
     sql: errorAggregateSql,
-    parameters: [limit, accountSelector, groupSelector, top],
+    parameters: [limit, accountSelector, groupSelector, top, start, end],
     priority,
     cacheMode: "prefer-cache",
   });
@@ -243,6 +276,8 @@ export async function collectErrorAggregateFromDatabase(
       top,
       accountSelector,
       groupSelector,
+      start,
+      end,
       groupFilterBasis: "request-group",
       probeNoiseExcluded: true,
       timezone: config.monitor.timezone,

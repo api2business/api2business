@@ -2025,6 +2025,8 @@ export class OperationsService {
     top: number,
     accountSelector: string | null,
     groupSelector: string | null,
+    start: string | null = null,
+    end: string | null = null,
   ) {
     return await collectErrorAggregateFromDatabase(
       this.config,
@@ -2033,6 +2035,8 @@ export class OperationsService {
       top,
       accountSelector,
       groupSelector,
+      start,
+      end,
       "manual",
     );
   }
@@ -2044,6 +2048,8 @@ export class OperationsService {
     groupSelector: string | null,
     modelSelector: string | null,
     failoverRequestIds: string[] | null,
+    start: string | null = null,
+    end: string | null = null,
   ) {
     return await collectErrorDiagnosisFromDatabase(
       this.config,
@@ -2054,6 +2060,8 @@ export class OperationsService {
       groupSelector,
       modelSelector,
       failoverRequestIds,
+      start,
+      end,
       "manual",
     );
   }

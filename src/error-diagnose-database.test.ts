@@ -6,8 +6,14 @@ import {
 
 test("error diagnosis uses one bounded query for signatures and failover chains", () => {
   expect(errorDiagnoseQuery).toContain("LIMIT $1");
+  expect(errorDiagnoseQuery).toContain("selected_errors AS MATERIALIZED");
+  expect(errorDiagnoseQuery).toContain("system_log_evidence AS MATERIALIZED");
+  expect(errorDiagnoseQuery).toContain("usage_recovery_keys AS MATERIALIZED");
+  expect(errorDiagnoseQuery).toContain("terminal_policy_keys AS MATERIALIZED");
   expect(errorDiagnoseQuery).toContain("u.request_id = e.request_id");
-  expect(errorDiagnoseQuery).toContain('e.request_id = terminal.request_id');
+  expect(errorDiagnoseQuery).toContain("u.request_id = 'client:' ||");
+  expect(errorDiagnoseQuery).toContain('terminal.request_id = e.request_id');
+  expect(errorDiagnoseQuery).not.toContain("OR u.request_id IN");
   expect(errorDiagnoseQuery).toContain("GROUP BY request_key");
   expect(errorDiagnoseQuery).toContain("COUNT(DISTINCT account_id)");
   expect(errorDiagnoseQuery).toContain("rank <= $4");
@@ -20,6 +26,8 @@ test("error diagnosis uses one bounded query for signatures and failover chains"
   expect(errorDiagnoseQuery).toContain("request_group.id = o.group_id");
   expect(errorDiagnoseQuery).toContain("api2business-probe-%");
   expect(errorDiagnoseQuery).toContain("COALESCE(o.upstream_status_code, 0) >= 400");
+  expect(errorDiagnoseQuery).toContain("o.created_at >= $8::timestamptz");
+  expect(errorDiagnoseQuery).toContain("o.created_at < $9::timestamptz");
   expect(errorDiagnoseQuery).toContain("probe.id = o.api_key_id");
   expect(errorDiagnoseQuery).not.toContain("account_groups");
   expect(errorDiagnoseQuery).not.toContain("api_key_prefix");

@@ -62,8 +62,8 @@ JSONB_BUILD_OBJECT(
   'contains524', message_text LIKE '%524%'
 )`;
 
-const baseProjectionSql = `
-WITH enriched AS (
+function enrichmentSelectSql(source: string): string {
+  return `
   SELECT
     o.*,
     a.name AS account_name,
@@ -89,7 +89,11 @@ WITH enriched AS (
   LEFT JOIN api_keys k ON k.id = o.api_key_id
   LEFT JOIN users u ON u.id = o.user_id
   LEFT JOIN groups g ON g.id = o.group_id
-)`;
+`;
+}
+
+const baseProjectionSql = `
+WITH enriched AS (${enrichmentSelectSql("ops_error_logs o")})`;
 
 const projectionColumnsSql = `
   id,
@@ -154,14 +158,81 @@ const projectionColumnsSql = `
 `;
 
 const errorListSql = `
-${baseProjectionSql}
+WITH selected_errors AS MATERIALIZED (
+  SELECT o.*, COALESCE(o.request_id, 'error:' || o.id::text) AS request_key
+  FROM ops_error_logs o
+  WHERE COALESCE(o.status_code, 0) >= 400
+    OR COALESCE(o.upstream_status_code, 0) >= 400
+    OR o.error_type = 'cyber_policy'
+  ORDER BY o.created_at DESC, o.id DESC
+  LIMIT $1
+), usage_recovery_keys AS MATERIALIZED (
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN usage_logs success ON success.request_id = e.request_id
+  WHERE e.request_id IS NOT NULL
+  UNION
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN ops_system_logs identity_log ON identity_log.request_id = e.request_id
+  JOIN usage_logs success
+    ON success.request_id = 'client:' || NULLIF(identity_log.extra->>'client_request_id', '')
+  WHERE e.request_id IS NOT NULL
+), terminal_policy_keys AS MATERIALIZED (
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN ops_error_logs terminal ON terminal.request_id = e.request_id
+  WHERE e.request_id IS NOT NULL
+    AND terminal.error_phase = 'request' AND terminal.error_type = 'cyber_policy'
+  UNION
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN ops_system_logs identity_log ON identity_log.request_id = e.request_id
+  JOIN ops_error_logs terminal
+    ON terminal.request_id = 'client:' || NULLIF(identity_log.extra->>'client_request_id', '')
+  WHERE e.request_id IS NOT NULL
+    AND terminal.error_phase = 'request' AND terminal.error_type = 'cyber_policy'
+), system_log_evidence AS MATERIALIZED (
+  SELECT
+    evidence.request_id,
+    STRING_AGG(evidence.message, ' ' ORDER BY evidence.created_at, evidence.id) AS system_log_text,
+    BOOL_OR(LOWER(evidence.message) LIKE '%upstream_failover_switching%') AS failover_observed
+  FROM ops_system_logs evidence
+  WHERE evidence.request_id IN (
+    SELECT request_id FROM selected_errors WHERE request_id IS NOT NULL
+  )
+  GROUP BY evidence.request_id
+), enriched AS (
+  SELECT
+    o.*,
+    a.name AS account_name,
+    owner.email AS user_email,
+    k.name AS api_key_name,
+    k.deleted_at IS NOT NULL AS api_key_deleted,
+    request_group.name AS group_name,
+    COALESCE(o.error_message, '') || ' ' ||
+      COALESCE(o.error_body, '') || ' ' ||
+      COALESCE(o.upstream_error_message, '') || ' ' ||
+      COALESCE(o.upstream_error_detail, '') AS message_text,
+    COALESCE(log_evidence.system_log_text, '') AS system_log_text,
+    EXISTS (
+      SELECT 1 FROM usage_recovery_keys recovered_key
+      WHERE recovered_key.request_key = o.request_key
+    ) AND NOT EXISTS (
+      SELECT 1 FROM terminal_policy_keys terminal_key
+      WHERE terminal_key.request_key = o.request_key
+    ) AS recovered,
+    COALESCE(log_evidence.failover_observed, false) AS failover_observed
+  FROM selected_errors o
+  LEFT JOIN accounts a ON a.id = o.account_id
+  LEFT JOIN api_keys k ON k.id = o.api_key_id
+  LEFT JOIN users owner ON owner.id = o.user_id
+  LEFT JOIN groups request_group ON request_group.id = o.group_id
+  LEFT JOIN system_log_evidence log_evidence ON log_evidence.request_id = o.request_id
+)
 SELECT ${projectionColumnsSql}
 FROM enriched
-  WHERE (COALESCE(status_code, 0) >= 400
-    OR COALESCE(upstream_status_code, 0) >= 400
-    OR error_type = 'cyber_policy')
 ORDER BY created_at DESC, id DESC
-LIMIT $1
 `;
 
 const errorGetSql = `

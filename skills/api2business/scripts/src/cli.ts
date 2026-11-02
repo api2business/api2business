@@ -307,8 +307,8 @@ function help(): Record<string, unknown> {
       "reads status --over-api <absolute-http(s)-URL>",
       "reads runtime --group <positive-id> --platform openai|anthropic|grok|deepseek --over-api <absolute-http(s)-URL> (read-only live availability/concurrency/native version)",
       "observability report|costs|get|check|configure --help",
-      "errors aggregate [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
-      "errors diagnose [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
+      "errors aggregate [--start ISO --end ISO] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
+      "errors diagnose [--start ISO --end ISO] [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors cooldowns [--since <ISO>] [--until <ISO>] [--limit N] [--account <id-or-name>] [--model <exact-id>]",
       "errors inspect --request-id <request-id>",
       "errors list [--limit N]",
@@ -1375,6 +1375,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       parsed.top ?? config.monitor.errorAggregateTop,
       parsed.account,
       parsed.group,
+      parsed.start,
+      parsed.end,
     );
   }
   if (group === "errors" && action === "diagnose") {
@@ -1385,6 +1387,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
       parsed.group,
       parsed.model,
       parsed.requestId ? [parsed.requestId] : null,
+      parsed.start,
+      parsed.end,
     );
   }
   if (group === "errors" && action === "cooldowns") {
@@ -1395,7 +1399,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (group === "errors" && action === "inspect") {
     if (!parsed.requestId) throw new Error("errors inspect requires --request-id");
     const [diagnosis, detail] = await Promise.all([
-      client.errorDiagnose(1, parsed.top ?? config.monitor.errorAggregateTop, null, null, null, [parsed.requestId]),
+      client.errorDiagnose(1, parsed.top ?? config.monitor.errorAggregateTop, null, null, null, [parsed.requestId], null, null),
       client.errorRequest(parsed.requestId),
     ]);
     return {

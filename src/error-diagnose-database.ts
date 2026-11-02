@@ -1,5 +1,4 @@
 import type { AppConfig } from "./config";
-import { terminalPolicyExistsSql, usageRequestMatchesSql } from "./request-terminal-policy";
 import type {
   Sub2ApiReadClient,
   Sub2ApiReadPriority,
@@ -24,7 +23,7 @@ WITH internal_probe_keys AS (
   FROM groups g
   WHERE $3::text IS NULL OR g.id::text = $3::text OR g.name = $3::text
 ),
-selected_errors AS (
+selected_errors AS MATERIALIZED (
   SELECT
     o.id,
     o.request_id,
@@ -47,11 +46,6 @@ selected_errors AS (
     o.error_body,
     o.upstream_error_message,
     o.upstream_error_detail,
-    COALESCE((
-      SELECT STRING_AGG(l.message, ' ' ORDER BY l.created_at, l.id)
-      FROM ops_system_logs l
-      WHERE l.request_id = o.request_id
-    ), '') AS system_log_text,
     o.created_at,
     LOWER(
       COALESCE(o.error_message, '') || ' ' ||
@@ -75,28 +69,63 @@ selected_errors AS (
     )
     AND ($6::text IS NULL OR o.request_id::text = ANY(string_to_array($6::text, ',')))
     AND ($7::text IS NULL OR LOWER(COALESCE(o.requested_model, o.model, 'unknown')) = LOWER($7::text))
+    AND ($8::timestamptz IS NULL OR o.created_at >= $8::timestamptz)
+    AND ($9::timestamptz IS NULL OR o.created_at < $9::timestamptz)
   ORDER BY o.created_at DESC, o.id DESC
   LIMIT $1
+),
+system_log_evidence AS MATERIALIZED (
+  SELECT
+    evidence.request_id,
+    STRING_AGG(evidence.message, ' ' ORDER BY evidence.created_at, evidence.id) AS system_log_text,
+    BOOL_OR(evidence.message LIKE '%upstream_failover_switching') AS failover_event,
+    BOOL_OR(evidence.message LIKE '%failover_aborted_client_disconnected') AS failover_aborted
+  FROM ops_system_logs evidence
+  WHERE evidence.request_id IN (
+    SELECT request_id FROM selected_errors WHERE request_id IS NOT NULL
+  )
+  GROUP BY evidence.request_id
+),
+usage_recovery_keys AS MATERIALIZED (
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN usage_logs u ON u.request_id = e.request_id
+  WHERE e.request_id IS NOT NULL
+  UNION
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN ops_system_logs identity_log ON identity_log.request_id = e.request_id
+  JOIN usage_logs u ON u.request_id = 'client:' || NULLIF(identity_log.extra->>'client_request_id', '')
+  WHERE e.request_id IS NOT NULL
+),
+terminal_policy_keys AS MATERIALIZED (
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN ops_error_logs terminal ON terminal.request_id = e.request_id
+  WHERE e.request_id IS NOT NULL
+    AND terminal.error_phase = 'request' AND terminal.error_type = 'cyber_policy'
+  UNION
+  SELECT DISTINCT e.request_key
+  FROM selected_errors e
+  JOIN ops_system_logs identity_log ON identity_log.request_id = e.request_id
+  JOIN ops_error_logs terminal
+    ON terminal.request_id = 'client:' || NULLIF(identity_log.extra->>'client_request_id', '')
+  WHERE e.request_id IS NOT NULL
+    AND terminal.error_phase = 'request' AND terminal.error_type = 'cyber_policy'
 ),
 classified AS (
   SELECT
     e.*,
+    COALESCE(log_evidence.system_log_text, '') AS system_log_text,
     EXISTS (
-      SELECT 1 FROM usage_logs u
-      WHERE e.request_id IS NOT NULL AND ${usageRequestMatchesSql("u.request_id", "e.request_id")}
-    ) AND NOT ${terminalPolicyExistsSql("e.request_id")} AS recovered,
-    EXISTS (
-      SELECT 1 FROM ops_system_logs system_log
-      WHERE e.request_id IS NOT NULL
-        AND system_log.request_id = e.request_id
-        AND system_log.message LIKE '%upstream_failover_switching'
-    ) AS failover_event,
-    EXISTS (
-      SELECT 1 FROM ops_system_logs system_log
-      WHERE e.request_id IS NOT NULL
-        AND system_log.request_id = e.request_id
-        AND system_log.message LIKE '%failover_aborted_client_disconnected'
-    ) AS failover_aborted,
+      SELECT 1 FROM usage_recovery_keys recovered_key
+      WHERE recovered_key.request_key = e.request_key
+    ) AND NOT EXISTS (
+      SELECT 1 FROM terminal_policy_keys terminal_key
+      WHERE terminal_key.request_key = e.request_key
+    ) AS recovered,
+    COALESCE(log_evidence.failover_event, false) AS failover_event,
+    COALESCE(log_evidence.failover_aborted, false) AS failover_aborted,
     CASE
       WHEN COALESCE(e.upstream_status_code, e.status_code) = 429 THEN 'rate_limited'
       WHEN COALESCE(e.upstream_status_code, e.status_code) = 502 THEN 'upstream_502'
@@ -158,6 +187,7 @@ classified AS (
       END
     ) AS signature
   FROM selected_errors e
+  LEFT JOIN system_log_evidence log_evidence ON log_evidence.request_id = e.request_id
 ),
 error_chains AS (
   SELECT
@@ -410,6 +440,8 @@ export async function collectErrorDiagnosisFromDatabase(
   groupSelector: string | null = null,
   modelSelector: string | null = null,
   failoverRequestIds: string[] | null = null,
+  start: string | null = null,
+  end: string | null = null,
   priority: Sub2ApiReadPriority = "manual",
 ): Promise<Row> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 10000) {
@@ -428,6 +460,8 @@ export async function collectErrorDiagnosisFromDatabase(
       groupSelector,
       modelSelector,
       failoverRequestIds,
+      start,
+      end,
     ]),
     kind: "errors.diagnose",
     sql: errorDiagnoseSql,
@@ -439,6 +473,8 @@ export async function collectErrorDiagnosisFromDatabase(
       top,
       failoverRequestIds === null ? null : failoverRequestIds.join(","),
       modelSelector,
+      start,
+      end,
     ],
     priority,
     cacheMode: "prefer-cache",
@@ -462,6 +498,8 @@ export async function collectErrorDiagnosisFromDatabase(
     accountSelector,
     groupSelector,
     modelSelector,
+    start,
+    end,
     groupFilterBasis: "request-group",
     probeNoiseExcluded: true,
     timezone: config.monitor.timezone,
