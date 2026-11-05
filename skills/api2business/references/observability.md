@@ -30,6 +30,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 显式窗口同时传 `--start` 和 `--end`，使用带时区的 ISO 时间。
 - 默认输出最多十条钱包及成本明细，保留总数、省略数和报告 ID。
   - 完整详情用 `--include-records`，不要把省略误判为服务端缺数据。
+  - 跨窗口脚本统一读取 `walletRecords`、`walletSummary`、`cost.accountRecords` 和
+    `cost.accountSummary`；限长与完整模式都保留这些结构，不再按 `wallets` 的数组/对象形态分支。
 - `check` 逐轮保留额度、候选和 broker 的时间、耗时及错误。
   - 某次失败不会终止后续采集，也不会被后续成功覆盖。
   - 无收费推理、余额采样、充值或调度操作。
@@ -39,6 +41,10 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - `costs` 默认独立读取过去 168 小时的逐日成本与共享钱包余额。
   - 绕开错误日志、SLO 和用户归因查询，避免服务质量长窗口失败同时阻断充值分析。
   - 保留钱包关联账号、优先级、余额来源时间、逐日已知成本和缺失记录数。
+  - JSON 始终提供稳定投影：`walletRecords`、`walletSummary`、`cost.accountRecords`、
+    `cost.accountSummary`。自动任务不得再根据七日/短窗口返回数组或对象的不同形态写分支。
+  - `walletSummary.total/omitted` 与 `cost.accountSummary.total/omitted` 表示完整集合和当前投影省略数；
+    `--full` 只展开记录，不改字段身份。
   - `recent24Hours` 精确读取结束时刻之前 24 小时，含成本覆盖与实际覆盖秒数。
     - 不把今天截至当前的日历桶当作最近 24 小时。
   - 同金额倍率的重复采样压缩为变化点，保留历史时序，不用当前倍率倒填历史。

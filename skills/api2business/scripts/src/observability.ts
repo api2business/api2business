@@ -34,11 +34,20 @@ export function configureObservability(configPath:string,file:string,confirm:boo
     .map(([field,after])=>({field,before:previousSettings[field] ?? null,after}));
   return {ok:true,applied:confirm,settings,changes,restartRequired:confirm,valuesPrinted:false};
 }
-export function compactObservation(report:Row,full:boolean) {
-  if (full) return report;
-  const compact=(items:unknown) => { const rows=Array.isArray(items)?items:[];return {records:rows.slice(0,10),total:rows.length,omitted:Math.max(0,rows.length-10)}; };
-  return {...report,wallets:Array.isArray(report.wallets)?compact(report.wallets):report.wallets?{...report.wallets,wallets:compact(report.wallets.wallets)}:undefined,
-    cost:report.cost?{...report.cost,accounts:compact(report.cost.accounts)}:undefined};
+export function compactObservation(report:Row,full:boolean):Row {
+  const rows=(items:unknown):Row[]=>Array.isArray(items)?items:Array.isArray((items as Row)?.records)?(items as Row).records:Array.isArray((items as Row)?.wallets)?(items as Row).wallets:[];
+  const bounded=(items:unknown)=>{
+    const values=rows(items);
+    return {records:full?values:values.slice(0,10),total:values.length,omitted:full?0:Math.max(0,values.length-10)};
+  };
+  const wallets=bounded(report.wallets);
+  const costAccounts=bounded(report.cost?.accounts);
+  const normalized={...report,walletRecords:wallets.records,walletSummary:{total:wallets.total,omitted:wallets.omitted},
+    cost:report.cost?{...report.cost,accountRecords:costAccounts.records,accountSummary:{total:costAccounts.total,omitted:costAccounts.omitted}}:undefined};
+  if (full) return normalized;
+  const compactWallets={records:wallets.records,total:wallets.total,omitted:wallets.omitted};
+  return {...normalized,wallets:Array.isArray(report.wallets)?compactWallets:report.wallets?{...report.wallets,wallets:compactWallets}:undefined,
+    cost:normalized.cost?{...normalized.cost,accounts:{records:costAccounts.records,total:costAccounts.total,omitted:costAccounts.omitted}}:undefined};
 }
 export async function checkObservability(client:AdminHttpClient,rounds:number) {
   if (!Number.isInteger(rounds)||rounds<1||rounds>10) throw new Error('--rounds must be 1..10');
