@@ -7,6 +7,12 @@
   [自动运维的模型范围](../../../docs/specs/operational-observability.md#自动运维的模型范围)。
 - 不处置事项和协助范围只见
   [巡检处置范围](../../../docs/specs/operational-observability.md#巡检处置范围)。
+- 余额存在但消耗停滞的判定与上游可用性维护见
+  [余额存在但消耗停滞](../../../docs/specs/operational-observability.md#余额存在但消耗停滞)。
+- QQ 渠道新上游与零余额复活建议见
+  [上游与调度](upstream-scheduling.md#qq-渠道上游发现与零余额复活建议)。
+- 运维工具/技能摩擦必须在本轮改进并复验，规则见
+  [自动运维工具与技能自助改进](../SKILL.md#自动运维工具与技能自助改进)。
 - Web 入口由 owning YAML 的公开域名解析，路径 `/observability`。
   - 页面 URL 的 `report` 参数读取冻结报告，刷新按钮另建最近两小时报告。
 - 所有 Sub2API 数据均由单连接 broker 读取；不允许旁路 SQL。
