@@ -1,5 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import { queryUpstreamUsage, queryUpstreamUsageConcurrently } from "./upstream-usage";
+import {
+  queryUpstreamUsage,
+  queryUpstreamUsageConcurrently,
+  summarizeQuotaProviderCoverage,
+  type QuotaWindowObservation,
+  type UpstreamUsageResult,
+} from "./upstream-usage";
 
 const originalFetch = globalThis.fetch;
 const target = {
@@ -10,6 +16,95 @@ const target = {
 };
 
 afterEach(() => { globalThis.fetch = originalFetch; });
+
+function quotaWindow(window: QuotaWindowObservation["window"], remainingPercent: number): QuotaWindowObservation {
+  return {
+    window,
+    limit: 100,
+    used: 100 - remainingPercent,
+    remaining: remainingPercent,
+    usedPercent: 100 - remainingPercent,
+    remainingPercent,
+    unit: "USD",
+    resetAt: null,
+    observedAt: "2026-11-08T06:00:00.000Z",
+    source: "test",
+    status: "ok",
+    complete: true,
+    missingReason: null,
+  };
+}
+
+function coverageResult(
+  accountId: number,
+  provider: UpstreamUsageResult["provider"],
+  baseUrl: string,
+  windows: QuotaWindowObservation[],
+): UpstreamUsageResult {
+  return {
+    accountId,
+    accountName: String(accountId),
+    baseUrl,
+    walletKey: baseUrl,
+    status: "active",
+    schedulable: true,
+    apiAmountUsdTotal: 0,
+    ok: windows.length > 0,
+    provider,
+    quota: { limit: null, used: null, remaining: null, unlimited: null, unit: null },
+    usage: { inputTokens: null, outputTokens: null, totalTokens: null, costUsd: null, actualCostUsd: null, requestCount: null },
+    quotaWindows: windows,
+    lowQuotaWarnings: windows
+      .filter((item) => item.remainingPercent !== null && item.remainingPercent <= 20)
+      .map((item) => ({ window: item.window, remainingPercent: item.remainingPercent!, resetAt: null, thresholdPercent: 20 })),
+    billingMultiplier: { value: null, source: null, scope: null, observedAt: null, group: null, user: null, peak: null },
+    window: { days: 1, records: null, complete: windows.length > 0 },
+    queriedAt: "2026-11-08T06:00:00.000Z",
+    durationMs: 1,
+    warning: null,
+    error: windows.length > 0 ? null : "quota endpoint denied",
+  };
+}
+
+test("summarizes OpenCode and CommandCode coverage including failed accounts inferred from exact endpoints", () => {
+  const openCodeTarget = "https://opencode.ai/zen/go/v1";
+  const commandCodeTarget = "https://api.commandcode.ai/provider/v1";
+  const coverage = summarizeQuotaProviderCoverage([
+    coverageResult(1, "opencode-go", openCodeTarget, [
+      quotaWindow("five_hour", 100), quotaWindow("weekly", 0), quotaWindow("monthly", 15),
+    ]),
+    coverageResult(2, "unknown", openCodeTarget, []),
+    coverageResult(3, "command-code", commandCodeTarget, [
+      quotaWindow("five_hour", 81), quotaWindow("weekly", 56), quotaWindow("monthly", 50),
+    ]),
+    coverageResult(4, "unknown", "https://unrelated.example.com/v1", []),
+  ]);
+
+  expect(coverage).toEqual([
+    {
+      provider: "opencode-go",
+      accountCount: 2,
+      succeeded: 1,
+      failed: 1,
+      windows: [
+        { window: "five_hour", observed: 1, unknown: 1, lowQuotaWarnings: 0 },
+        { window: "weekly", observed: 1, unknown: 1, lowQuotaWarnings: 1 },
+        { window: "monthly", observed: 1, unknown: 1, lowQuotaWarnings: 1 },
+      ],
+    },
+    {
+      provider: "command-code",
+      accountCount: 1,
+      succeeded: 1,
+      failed: 0,
+      windows: [
+        { window: "five_hour", observed: 1, unknown: 0, lowQuotaWarnings: 0 },
+        { window: "weekly", observed: 1, unknown: 0, lowQuotaWarnings: 0 },
+        { window: "monthly", observed: 1, unknown: 0, lowQuotaWarnings: 0 },
+      ],
+    },
+  ]);
+});
 
 test("queries Sub2API usage from the control origin and parses quota", async () => {
   const requests: string[] = [];
@@ -343,6 +438,206 @@ test("parses current Sub2API subscription windows", async () => {
 
   const result = await queryUpstreamUsage(target, { timeoutMs: 100, days: 30 });
   expect(result.quota).toEqual({ limit: 100, used: 30, remaining: 70, unlimited: false, unit: "USD" });
+});
+
+test("parses OpenCode Go rolling, weekly and monthly quota windows", async () => {
+  const requests: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    requests.push(url);
+    return new Response(JSON.stringify({
+      usage: {
+        rolling: { status: "ok", percent: 85, resets_at: "2026-11-08T07:00:00Z" },
+        weekly: { status: "rate-limited", percent: 100, resets_at: "2026-11-09T00:00:00Z" },
+        monthly: { status: "ok", percent: 40, resets_at: "2026-12-01T00:00:00Z" },
+      },
+      fetched_at: "2026-11-08T04:40:00Z",
+    }), { status: 200 });
+  }) as typeof fetch;
+
+  const result = await queryUpstreamUsage({
+    id: 1552,
+    name: "opencode",
+    baseUrl: "https://opencode.ai/zen/go/v1",
+    apiKey: "sk-test-secret-value",
+  }, { timeoutMs: 100, days: 1, lowQuotaRemainingPercent: 20 });
+
+  expect(requests).toEqual(["https://opencode.ai/zen/go/v1/usage?days=1"]);
+  expect(result.ok).toBe(true);
+  expect(result.provider).toBe("opencode-go");
+  expect(result.window.complete).toBe(true);
+  expect(result.quotaWindows.map((window) => ({
+    window: window.window,
+    remainingPercent: window.remainingPercent,
+    resetAt: window.resetAt,
+    source: window.source,
+    observedAt: window.observedAt,
+  }))).toEqual([
+    { window: "five_hour", remainingPercent: 15, resetAt: "2026-11-08T07:00:00.000Z", source: "opencode:/v1/usage", observedAt: "2026-11-08T04:40:00.000Z" },
+    { window: "weekly", remainingPercent: 0, resetAt: "2026-11-09T00:00:00.000Z", source: "opencode:/v1/usage", observedAt: "2026-11-08T04:40:00.000Z" },
+    { window: "monthly", remainingPercent: 60, resetAt: "2026-12-01T00:00:00.000Z", source: "opencode:/v1/usage", observedAt: "2026-11-08T04:40:00.000Z" },
+  ]);
+  expect(result.lowQuotaWarnings.map((warning) => warning.window)).toEqual(["five_hour", "weekly"]);
+});
+
+test("parses CommandCode quota summary from the official origin endpoint", async () => {
+  const requests: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/provider/v1/usage?days=1")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/alpha/usage/summary")) {
+      return new Response(JSON.stringify({
+        data: {
+          usage_limits: [
+            { window: "5h", used_percent: 30, resets_at: "2026-11-08T08:00:00Z" },
+            { window: "weekly", used_percent: 70, resets_at: "2026-11-10T08:00:00Z" },
+            { window: "monthly", used_percent: 50, resets_at: "2026-12-01T00:00:00Z" },
+          ],
+        },
+        observed_at: "2026-11-08T04:41:00Z",
+      }), { status: 200 });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  const result = await queryUpstreamUsage({
+    id: 1580,
+    name: "command-code",
+    baseUrl: "https://api.commandcode.ai/provider/v1",
+    apiKey: "sk-test-secret-value",
+  }, { timeoutMs: 100, days: 1, lowQuotaRemainingPercent: 20 });
+
+  expect(requests).toEqual([
+    "https://api.commandcode.ai/provider/v1/usage?days=1",
+    "https://api.commandcode.ai/alpha/usage/summary",
+  ]);
+  expect(result.ok).toBe(true);
+  expect(result.provider).toBe("command-code");
+  expect(result.quotaWindows.map((window) => [window.window, window.remainingPercent])).toEqual([
+    ["five_hour", 70],
+    ["weekly", 30],
+    ["monthly", 50],
+  ]);
+  expect(result.lowQuotaWarnings).toEqual([]);
+});
+
+test("falls back to CommandCode billing endpoints when usage summary has no quota windows", async () => {
+  const requests: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/provider/v1/usage?days=1")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/alpha/usage/summary")) {
+      return new Response(JSON.stringify({ totalMonthlyCredits: 200, totalCredits: 80 }), { status: 200 });
+    }
+    if (url.endsWith("/alpha/billing/credits")) {
+      return new Response(JSON.stringify({
+        credits: {
+          belowThreshold: true,
+          creditThreshold: 10,
+          monthlyCredits: 30,
+        },
+        windowLimits: {
+          limited: true,
+          exceeded: false,
+          fiveHour: { used: 18, cap: 20, exceeded: false, resetAt: "2026-11-08T09:00:00Z" },
+          weekly: { used: 25, cap: 50, exceeded: false, resetAt: "2026-11-10T09:00:00Z" },
+        },
+      }), { status: 200 });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  const result = await queryUpstreamUsage({
+    id: 1580,
+    name: "command-code",
+    baseUrl: "https://api.commandcode.ai/provider/v1",
+    apiKey: "sk-test-secret-value",
+  }, { timeoutMs: 100, days: 1, lowQuotaRemainingPercent: 20 });
+
+  expect(requests).toEqual([
+    "https://api.commandcode.ai/provider/v1/usage?days=1",
+    "https://api.commandcode.ai/alpha/usage/summary",
+    "https://api.commandcode.ai/alpha/billing/credits",
+  ]);
+  expect(result.ok).toBe(true);
+  expect(result.provider).toBe("command-code");
+  expect(result.quotaWindows.find((window) => window.window === "five_hour")?.remainingPercent).toBe(10);
+  expect(result.quotaWindows.find((window) => window.window === "monthly")).toMatchObject({
+    remaining: 30,
+    remainingPercent: null,
+    unit: "credits",
+    status: "low",
+    complete: false,
+    missingReason: "upstream-monthly-limit-or-percent-missing",
+  });
+  expect(result.lowQuotaWarnings).toHaveLength(1);
+  expect(result.window.complete).toBe(false);
+  expect(result.warning).toContain("monthly");
+});
+
+test("warns when CommandCode weekly usage exceeds its cap", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/provider/v1/usage?days=1")) return new Response("not found", { status: 404 });
+    if (url.endsWith("/alpha/usage/summary")) return new Response(JSON.stringify({}), { status: 200 });
+    if (url.endsWith("/alpha/billing/credits")) {
+      return new Response(JSON.stringify({
+        credits: { belowThreshold: false, monthlyCredits: 34.98 },
+        windowLimits: {
+          limited: true,
+          exceeded: true,
+          fiveHour: { used: 0, cap: 14, exceeded: false, resetAt: 0 },
+          weekly: { used: 35.011, cap: 35, exceeded: true, resetAt: "2026-11-09T01:00:00Z" },
+        },
+      }), { status: 200 });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  const result = await queryUpstreamUsage({
+    id: 1556,
+    name: "command-code",
+    baseUrl: "https://api.commandcode.ai/provider/v1",
+    apiKey: "sk-test-secret-value",
+  }, { timeoutMs: 100, days: 1, lowQuotaRemainingPercent: 20 });
+
+  const weekly = result.quotaWindows.find((window) => window.window === "weekly");
+  const fiveHour = result.quotaWindows.find((window) => window.window === "five_hour");
+  expect(fiveHour?.resetAt).toBeNull();
+  expect(weekly).toMatchObject({ status: "rate-limited", complete: true });
+  expect(weekly?.remainingPercent).toBe(-0.031);
+  expect(result.lowQuotaWarnings).toEqual([expect.objectContaining({
+    window: "weekly",
+    remainingPercent: -0.031,
+    thresholdPercent: 20,
+  })]);
+});
+
+test("keeps absent provider quota windows unknown instead of zero", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => new Response(JSON.stringify(
+    String(input).endsWith("/v1/usage?days=1")
+      ? { data: { monthly: { status: "ok", percent: 25 } } }
+      : {},
+  ))) as unknown as typeof fetch;
+
+  const result = await queryUpstreamUsage({
+    id: 1552,
+    name: "opencode",
+    baseUrl: "https://opencode.ai/zen/go/v1",
+    apiKey: "sk-test-secret-value",
+  }, { timeoutMs: 100, days: 1 });
+
+  expect(result.ok).toBe(true);
+  expect(result.quotaWindows.find((window) => window.window === "five_hour")).toMatchObject({
+    remainingPercent: null,
+    complete: false,
+    missingReason: "upstream-response-missing-window",
+  });
+  expect(result.quotaWindows.find((window) => window.window === "monthly")?.remainingPercent).toBe(75);
+  expect(result.window.complete).toBe(false);
+  expect(result.warning).toContain("five_hour");
 });
 
 test("redacts API keys from upstream failures", async () => {
