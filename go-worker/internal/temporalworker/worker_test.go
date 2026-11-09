@@ -34,6 +34,7 @@ operations:
       claude: { enabled: true, platform: anthropic, idleProbeIntervalSeconds: 300, features: { priorityAutomation: true, idleProbe: true } }
       grok: { enabled: true, platform: grok, features: { priorityAutomation: true, idleProbe: true } }
       deepseek: { enabled: true, platform: deepseek, features: { priorityAutomation: true, idleProbe: true } }
+      opencode: { enabled: true, platform: opencode_go, features: { priorityAutomation: true, idleProbe: true } }
   upstreamManagement: { quotaSampleIntervalSeconds: 300, quotaSampleTimeoutSeconds: 240 }
 temporal:
   addressEnv: TEMPORAL_ADDRESS
@@ -177,6 +178,26 @@ func TestExecuteOperationRejectsIdentityMismatch(t *testing.T) {
 	_, err := activity.executeOperationHTTP(context.Background(), OperationRequest{OperationID: "expected"})
 	if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
 		t.Fatalf("expected identity mismatch, got %v", err)
+	}
+}
+
+func TestExecuteOperationRejectsOpenCodeIdleProbe(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		called = true
+		_ = json.NewEncoder(response).Encode(map[string]any{"ok": true, "operationId": "blocked", "result": nil})
+	}))
+	defer server.Close()
+	activity := Activities{cfg: Config{APIBaseURL: server.URL}, http: server.Client()}
+	_, err := activity.executeOperationHTTP(context.Background(), OperationRequest{
+		OperationID: "blocked",
+		Command:     map[string]any{"kind": "account.idle-probe.run", "scope": "opencode"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "prohibited") {
+		t.Fatalf("expected opencode idle probe prohibition, got %v", err)
+	}
+	if called {
+		t.Fatal("opencode idle probe must not reach the API")
 	}
 }
 

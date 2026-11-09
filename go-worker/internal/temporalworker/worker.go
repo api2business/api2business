@@ -35,6 +35,9 @@ func (a Activities) ExecuteOperation(ctx context.Context, operation OperationReq
 }
 
 func (a Activities) executeOperationHTTP(ctx context.Context, operation OperationRequest) (any, error) {
+	if scope := prohibitedIdleProbeScope(operation); scope != "" {
+		return nil, fmt.Errorf("idle probe is prohibited for scope %s", scope)
+	}
 	payload, err := json.Marshal(operation)
 	if err != nil {
 		return nil, err
@@ -66,6 +69,18 @@ func (a Activities) executeOperationHTTP(ctx context.Context, operation Operatio
 		return nil, errors.New("worker operation identity mismatch")
 	}
 	return envelope.Result, nil
+}
+
+func prohibitedIdleProbeScope(operation OperationRequest) string {
+	if operation.Command == nil {
+		return ""
+	}
+	kind, _ := operation.Command["kind"].(string)
+	scope, _ := operation.Command["scope"].(string)
+	if kind == "account.idle-probe.run" && scope == "opencode" {
+		return scope
+	}
+	return ""
 }
 
 func startWorkflow(c client.Client, options client.StartWorkflowOptions, workflowName string, input ScheduleInput) error {
