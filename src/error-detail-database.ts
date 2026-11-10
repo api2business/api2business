@@ -154,6 +154,12 @@ const projectionColumnsSql = `
   recovered,
   failover_observed,
   created_at,
+  duration_ms,
+  time_to_first_token_ms,
+  auth_latency_ms,
+  routing_latency_ms,
+  upstream_latency_ms,
+  response_latency_ms,
   ${stablePhraseSql} AS stable_phrases
 `;
 
@@ -302,6 +308,12 @@ export function projectErrorDetailRow(row: Row, timezone: string): Row {
       String(row.error_type ?? "").toLowerCase() === "cyber_policy",
     stablePhrases: row.stable_phrases ?? {},
     responseEvidence: projectResponseEvidence(row),
+    durationMs: integer(row.duration_ms),
+    timeToFirstTokenMs: integer(row.time_to_first_token_ms),
+    authLatencyMs: integer(row.auth_latency_ms),
+    routingLatencyMs: integer(row.routing_latency_ms),
+    upstreamLatencyMs: integer(row.upstream_latency_ms),
+    responseLatencyMs: integer(row.response_latency_ms),
     createdAt: timestamp(row.created_at, timezone),
   };
 }

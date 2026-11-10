@@ -571,6 +571,7 @@ operations:
     quotaMonitor:
       # 只隐藏额度监控展示与汇总，不停止采样、不改变调度。
       excludedWalletKeys: []
+      lowRemainingPercent: 20
     rechargeCandidates:
       lowBalanceCny: 10
       lookbackHours: 24

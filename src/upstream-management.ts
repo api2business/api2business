@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { readApiKeyCutoffEvents, recordApiKeyCutoffEvent, type ApiKeyCutoffTrigger } from "./api-key-cutoff-ledger";
 import {
   queryUpstreamUsageConcurrently,
+  summarizeQuotaProviderCoverage,
   type UpstreamUsageResult,
   type UpstreamUsageTarget,
 } from "./upstream-usage";
@@ -1097,7 +1098,18 @@ export class UpstreamManagementService {
       concurrency: settings.usageConcurrency,
       timeoutMs: settings.usageTimeoutMs,
       days: settings.usageDays,
+      lowQuotaRemainingPercent: settings.quotaMonitor.lowRemainingPercent,
     });
+    const quotaProviderCoverage = summarizeQuotaProviderCoverage(results);
+    const quotaWindowCoverage = quotaProviderCoverage.flatMap((provider) => provider.windows.map((window) => ({
+      provider: provider.provider,
+      ...window,
+    })));
+    const lowQuotaWarnings = results.flatMap((result) => result.lowQuotaWarnings.map((warning) => ({
+      accountId: result.accountId,
+      provider: result.provider,
+      ...warning,
+    })));
     return {
       ok: true,
       operation: "usage",
@@ -1116,6 +1128,9 @@ export class UpstreamManagementService {
       upstreamConcurrency: settings.usageConcurrency,
       apiAmountUsdTotal: Number(query.rows[0]?.api_amount_usd_total ?? 0),
       results,
+      quotaProviderCoverage,
+      quotaWindowCoverage,
+      lowQuotaWarnings,
       valuesRedacted: true,
     };
   }

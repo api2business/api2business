@@ -189,14 +189,23 @@ test("failover template uses the Sub2API native error_code schema", async () => 
 test("usage target discovery uses one queued database read", async () => {
   const originalFetch = globalThis.fetch;
   let databaseQueries = 0;
-  globalThis.fetch = (async () => new Response(JSON.stringify({ mode: "unrestricted", usage: { total_tokens: 5 } }))) as unknown as typeof fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    usage: {
+      rolling: { percent: 90, resets_at: "2026-11-10T15:00:00Z" },
+      weekly: { percent: 40, resets_at: "2026-11-16T00:00:00Z" },
+      monthly: { percent: 20, resets_at: "2026-12-01T00:00:00Z" },
+    },
+  }))) as unknown as typeof fetch;
   try {
     const config = loadConfig("config/api2business.example.yaml");
     const reads = {
       async query() {
         databaseQueries += 1;
         return {
-          rows: [{ id: 8, name: "example", base_url: "https://api.example.com/v1", api_key: "sk-secret" }],
+          rows: [
+            { id: 8, name: "example-a", base_url: "https://opencode.ai/zen/go/v1", api_key: "sk-secret-a" },
+            { id: 9, name: "example-b", base_url: "https://opencode.ai/zen/go/v1", api_key: "sk-secret-b" },
+          ],
           queueDurationMs: 1,
           queryDurationMs: 2,
           totalDurationMs: 3,
@@ -212,7 +221,21 @@ test("usage target discovery uses one queued database read", async () => {
     const result = await service.usage([8]);
     expect(databaseQueries).toBe(1);
     expect(result.databaseQueries).toBe(1);
-    expect(result.targetCount).toBe(1);
+    expect(result.targetCount).toBe(2);
+    expect(result.quotaProviderCoverage).toEqual([expect.objectContaining({
+      provider: "opencode-go",
+      accountCount: 2,
+      succeeded: 2,
+      failed: 0,
+    })]);
+    expect(result.quotaWindowCoverage).toContainEqual(expect.objectContaining({
+      provider: "opencode-go",
+      window: "five_hour",
+      observed: 2,
+      unknown: 0,
+      lowQuotaWarnings: 2,
+    }));
+    expect(result.lowQuotaWarnings).toHaveLength(2);
     expect(JSON.stringify(result)).not.toContain("sk-secret");
   } finally {
     globalThis.fetch = originalFetch;

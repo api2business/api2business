@@ -95,6 +95,10 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 重启重置计数，不能拼接不同进程的累计值。
 - 新采集部署不足窗口长度时，管理接口 SLO 显示覆盖不足。
   - 无样本、采集写入失败和重启间隙都不能显示达标。
+- `errors aggregate` 的账户或分组选择器存在但窗口内无错误时返回零值，不返回 HTTP 500。
+  - `accountSelectorMatches` 或 `groupSelectorMatches` 为 `1` 且错误为零，表示有效空窗口；
+    不能把该空窗口解释为整个系统没有错误。
+  - 选择器零匹配仍需显式失败，不能把拼错或不存在的账户/分组投影成零错误。
 - 共享钱包的余额只计一次，保留贡献账号、源时间与冲突标记。
   - `null` 不能经 `Number(null)` 变成零。
   - 陈旧的正余额是旧证据，不能当成此刻可用额度保证。

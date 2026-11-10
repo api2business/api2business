@@ -6,12 +6,19 @@ import { compactObservation,checkObservability } from '../skills/api2business/sc
 import { observabilitySql } from './observability-sql';
 import type { AppConfig } from './config';
 import type { AdminHttpClient } from './admin-http-client';
-import { dailyWalletCosts } from './observability-costs';
+import { dailyCostSql,dailyWalletCosts } from './observability-costs';
 const settings={sub2apiSuccessPercent:95,sub2apiTtftP95Ms:30000,api2businessNon5xxPercent:99.9,api2businessLatencyP95Ms:3000,walletFreshnessSeconds:3600,retentionDays:30};
 const config={observability:settings,sub2api:{newApiCredentials:[{baseUrl:'https://alias.example',walletKey:'https://wallet.example'}]}} as AppConfig;
 const at='2026-10-07T04:00:00.000Z';
 const account=(id:number,url='https://wallet.example')=>({id,base_url:url,active:true,type:'apikey',platform:'openai'});
 const cache=(id:number,remaining:number|null,sourceAt='2026-10-07T03:30:00.000Z')=>({account_id:id,queried_at:sourceAt,last_success_at:sourceAt,last_success_result:{ok:true,quota:{remaining,unit:'USD'},billingMultiplier:{value:0.5,observedAt:'2026-10-07T00:00:00.000Z'}},result:{ok:false}});
+test('daily costs use bounded rate intervals instead of rescanning rates per usage row',()=>{
+ expect(dailyCostSql).toContain('rate_intervals AS MATERIALIZED');
+ expect(dailyCostSql).toContain('LEAD(at) OVER (PARTITION BY account_id ORDER BY at,rate_cny)');
+ expect(dailyCostSql).toContain('rate.at<=u.created_at');
+ expect(dailyCostSql).toContain('rate.next_at IS NULL OR u.created_at<rate.next_at');
+ expect(dailyCostSql).not.toContain('LEFT JOIN LATERAL');
+});
 test('daily wallet costs retain usable partial evidence without inventing complete totals',()=>{
  const wallets=walletGovernance([account(1),account(2,'https://alias.example')],[cache(1,5)],config,at).wallets;
  const result=dailyWalletCosts([
@@ -49,11 +56,16 @@ test('observability report keeps user balance and TTFT attribution for diagnosis
  expect(observabilitySql).toContain('%api key 额度已用完%');
  expect(observabilitySql).toContain('ttftBreakdown');
  expect(observabilitySql).toContain('percentile_cont(0.95) WITHIN GROUP (ORDER BY s.first_token_ms)');
+ expect(observabilitySql).toContain('success_request_ids AS MATERIALIZED');
+ expect(observabilitySql).toContain('error_request_identities AS MATERIALIZED');
+ expect(observabilitySql).toContain('request_recovery AS MATERIALIZED');
+ expect(observabilitySql).toContain('JOIN success_request_ids success_identity USING (identity_request_id)');
+ expect(observabilitySql).not.toContain('JOIN success s ON');
 });
 test('explicit upstream failures survive a recorded HTTP 200 without overriding exact success',()=>{
  expect(observabilitySql).toContain('OR COALESCE(upstream_status_code,0)>=400');
  expect(observabilitySql).toContain("LOWER(COALESCE(error_type,'')) <> 'failover_event'");
- expect(observabilitySql).toContain('NOT EXISTS (SELECT 1 FROM success s WHERE (s.request_id = e.request_id');
+ expect(observabilitySql).toContain('NOT EXISTS (SELECT 1 FROM request_recovery recovered WHERE recovered.request_id=e.request_id)');
 });
 test('native terminal policy refusals do not become successes through zero-token usage',()=>{
  expect(observabilitySql).toContain("OR (error_phase='request' AND error_type='cyber_policy')");

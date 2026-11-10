@@ -18,6 +18,9 @@ test("error detail queries are bounded and request scoped", () => {
   expect(errorGetQuery).toContain("'badGateway'");
   expect(errorGetQuery).toContain("'gatewayTimeout'");
   expect(errorGetQuery).toContain("'streamInterrupted'");
+  expect(errorGetQuery).toContain("time_to_first_token_ms");
+  expect(errorGetQuery).toContain("upstream_latency_ms");
+  expect(errorGetQuery).toContain("response_latency_ms");
   expect(errorListQuery).not.toContain("SET TRANSACTION READ ONLY");
 });
 
@@ -35,6 +38,9 @@ test("error detail projection masks identity and excludes bodies", () => {
     upstream_status_code: 503,
     recovered: false,
     stable_phrases: { modelNotFound: true },
+    time_to_first_token_ms: "43",
+    upstream_latency_ms: "524",
+    response_latency_ms: null,
     created_at: new Date("2026-07-27T08:03:34Z"),
     error_body: "must not escape",
   }, "Asia/Shanghai");
@@ -43,6 +49,9 @@ test("error detail projection masks identity and excludes bodies", () => {
   expect(row.statusCode).toBe(503);
   expect(row.recordedStatusCode).toBe(499);
   expect(row.upstreamStatusCode).toBe(503);
+  expect(row.timeToFirstTokenMs).toBe(43);
+  expect(row.upstreamLatencyMs).toBe(524);
+  expect(row.responseLatencyMs).toBeNull();
   expect(row).not.toHaveProperty("error_body");
 });
 

@@ -170,6 +170,10 @@ ranked_dimensions AS (
   FROM dimension_rows
 )
 SELECT
+  CASE WHEN $2::text IS NULL THEN NULL
+    ELSE (SELECT COUNT(*)::int FROM target_accounts) END AS account_selector_matches,
+  CASE WHEN $3::text IS NULL THEN NULL
+    ELSE (SELECT COUNT(*)::int FROM request_groups) END AS group_selector_matches,
   (SELECT COUNT(*)::int FROM selected_errors) AS sampled_error_rows,
   (SELECT COUNT(*)::int FROM request_facts) AS distinct_requests,
   (SELECT COUNT(*) FILTER (WHERE NOT recovered)::int FROM request_facts) AS customer_visible_requests,
@@ -217,6 +221,14 @@ function timestamp(value: unknown, timezone: string): string | null {
 
 export function projectErrorAggregateRow(row: Row, timezone: string): Row {
   return {
+    accountSelectorMatches: row.account_selector_matches === null
+      || row.account_selector_matches === undefined
+      ? null
+      : integer(row.account_selector_matches),
+    groupSelectorMatches: row.group_selector_matches === null
+      || row.group_selector_matches === undefined
+      ? null
+      : integer(row.group_selector_matches),
     sampledErrorRows: integer(row.sampled_error_rows),
     distinctRequests: integer(row.distinct_requests),
     customerVisibleRequests: integer(row.customer_visible_requests),
@@ -263,12 +275,12 @@ export async function collectErrorAggregateFromDatabase(
     cacheMode: "prefer-cache",
   });
   const rows = query.rows;
-    if (accountSelector !== null && integer(rows[0]?.sampled_error_rows) === 0) {
-      throw new Error(`account selector resolved no recent errors: ${accountSelector}`);
-    }
-    if (groupSelector !== null && integer(rows[0]?.sampled_error_rows) === 0) {
-      throw new Error(`group selector resolved no recent errors: ${groupSelector}`);
-    }
+  if (accountSelector !== null && integer(rows[0]?.account_selector_matches) === 0) {
+    throw new Error(`account selector did not match an account: ${accountSelector}`);
+  }
+  if (groupSelector !== null && integer(rows[0]?.group_selector_matches) === 0) {
+    throw new Error(`group selector did not match a group: ${groupSelector}`);
+  }
   return {
       ok: true,
       mode: "error-aggregate-postgresql",

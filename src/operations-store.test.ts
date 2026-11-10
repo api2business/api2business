@@ -1,6 +1,16 @@
 import { expect, test } from "bun:test";
 import { OperationsStore, authoritativeUsageBalance, parsePlanJsonField, postgresBigintArrayLiteral } from "./operations-store";
 
+test("legacy pool quality platforms do not block migration while new writes stay constrained", async () => {
+  const statements: string[] = [];
+  const sql = { async unsafe(statement: string) { statements.push(statement); return []; } };
+  const store = new OperationsStore("postgres://unused", (() => sql) as never);
+  await store.migrate();
+  expect(statements).toHaveLength(1);
+  expect(statements[0]).toContain("api2business_pool_quality_samples_platform_check");
+  expect(statements[0]).toContain("CHECK (platform IN ('codex','claude','grok','deepseek')) NOT VALID");
+});
+
 test("probe correlation is persisted as JSON, including an empty legacy evidence list", async () => {
   const calls: unknown[][] = [];
   const sql = async (_parts: TemplateStringsArray, ...values: unknown[]) => { calls.push(values); return []; };

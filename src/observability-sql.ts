@@ -48,6 +48,23 @@ errors AS (
     -- zero-token usage row were persisted. Upstream attempt errors are not final.
     AND NOT ${terminalPolicyExistsSql("u.request_id", "errors")}
   ORDER BY request_id,created_at DESC,id DESC
+), success_request_ids AS MATERIALIZED (
+  SELECT request_id AS identity_request_id FROM success
+  UNION
+  SELECT 'client:' || NULLIF(identity_log.extra->>'client_request_id','')
+  FROM ops_system_logs identity_log
+  WHERE identity_log.request_id IN (SELECT request_id FROM success)
+    AND NULLIF(identity_log.extra->>'client_request_id','') IS NOT NULL
+), error_request_identities AS MATERIALIZED (
+  SELECT e.request_id, e.request_id AS identity_request_id FROM errors e
+  UNION
+  SELECT e.request_id, 'client:' || NULLIF(identity_log.extra->>'client_request_id','')
+  FROM errors e JOIN ops_system_logs identity_log ON identity_log.request_id=e.request_id
+  WHERE NULLIF(identity_log.extra->>'client_request_id','') IS NOT NULL
+), request_recovery AS MATERIALIZED (
+  SELECT DISTINCT identity.request_id
+  FROM error_request_identities identity
+  JOIN success_request_ids success_identity USING (identity_request_id)
 ), customer_billing AS (
   SELECT DISTINCT ON (e.request_id) e.* FROM errors e
   WHERE e.api_user_id IS NOT NULL AND NULLIF(TRIM(e.request_id),'') IS NOT NULL
@@ -74,7 +91,7 @@ errors AS (
       WHEN e.error_phase IN ('internal','network') THEN 'infrastructure_other'
       ELSE 'unknown' END AS family
   FROM errors e WHERE NULLIF(TRIM(e.request_id),'') IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM success s WHERE ${usageRequestMatchesSql("s.request_id", "e.request_id")})
+    AND NOT EXISTS (SELECT 1 FROM request_recovery recovered WHERE recovered.request_id=e.request_id)
     AND NOT EXISTS (SELECT 1 FROM customer_billing b WHERE b.request_id=e.request_id)
   ORDER BY e.request_id,e.created_at DESC,e.id DESC
 ), task_scope_luna_requests AS (
@@ -135,7 +152,7 @@ SELECT jsonb_build_object(
   'excludedAudioRecords',(SELECT COUNT(*) FROM usage_source u WHERE NOT probe AND ${audioRequestSql("u")})
     +(SELECT COUNT(*) FROM error_source e WHERE NOT probe AND ${audioRequestSql("e", true)}),
   'excludedProbeRecords',(SELECT COUNT(*) FROM usage_source WHERE probe)+(SELECT COUNT(*) FROM error_source WHERE probe),
-  'recoveredRequests',(SELECT COUNT(DISTINCT e.request_id) FROM errors e JOIN success s ON ${usageRequestMatchesSql("s.request_id", "e.request_id")}),
+  'recoveredRequests',(SELECT COUNT(*) FROM request_recovery),
   'errorFamilies',COALESCE((SELECT jsonb_agg(t) FROM (SELECT family,COUNT(*)::int AS requests FROM failure GROUP BY family ORDER BY COUNT(*) DESC) t),'[]'::jsonb),
   'businessLimitBreakdown',COALESCE((SELECT jsonb_agg(t) FROM (
     SELECT api_user_id AS user_id,api_user_email AS user_email,api_key_id,api_key_name,

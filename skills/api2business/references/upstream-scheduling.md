@@ -462,6 +462,7 @@
 - 自动调整每轮有界超时，失败后跳过本轮并从结束时间计算下一轮。
 - 任何真实写操作先展示计划，再显式确认并回读验证。
 - 单个请求的切号判定优先使用 `errors inspect --request-id <request-id> --over-api <absolute-http(s)-URL>`；该入口并行取得诊断链和请求详情。需要只看聚合诊断时才使用 `errors diagnose --request-id <request-id> --over-api <absolute-http(s)-URL>`，不要用大范围错误列表推断单请求是否命中模板。
+  - 请求详情同时返回总耗时、TTFT、认证、路由、上游和响应阶段耗时；这些字段用于区分响应提交阶段与模板缺失，不能单独证明模板命中或未命中。
 - 按模型排障使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api <absolute-http(s)-URL>`。返回的模型 × 账号 × 链矩阵与样本链均来自已持久化尝试；运行面未记录的候选排除原因必须标记为未知，不能反推。
 - 精确诊断中的 `responseEvidence` 只展示限长脱敏摘要；`available=false` 表示运行面没有持久化可读正文，不能把包装层错误文本当作供应商业务原因。
 

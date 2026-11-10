@@ -47,6 +47,7 @@ export interface UpstreamManagementConfig {
   quotaSampleTimeoutSeconds: number;
   quotaMonitor: {
     excludedWalletKeys: string[];
+    lowRemainingPercent: number;
   };
   rechargeCandidates: {
     lowBalanceCny: number;
@@ -814,6 +815,9 @@ export function loadConfig(path: string): AppConfig {
     : strings(quotaMonitor, "excludedWalletKeys", "operations.upstreamManagement.quotaMonitor")
       .map((wallet) => normalizeUpstreamWallet(wallet))
       .filter(Boolean);
+  const lowQuotaRemainingPercent = quotaMonitor.lowRemainingPercent === undefined
+    ? 20
+    : numberValue(quotaMonitor, "lowRemainingPercent", "operations.upstreamManagement.quotaMonitor", 0, 100);
   const oauthEconomics = object(operations.oauthEconomics, "operations.oauthEconomics");
   const idealApiUsdPerAccount = object(
     oauthEconomics.idealApiUsdPerAccount,
@@ -1182,7 +1186,10 @@ export function loadConfig(path: string): AppConfig {
         usageDays: integerValue(upstreamManagement, "usageDays", "operations.upstreamManagement", 1, 90),
         quotaSampleIntervalSeconds,
         quotaSampleTimeoutSeconds,
-        quotaMonitor: { excludedWalletKeys: [...new Set(excludedQuotaWalletKeys)] },
+        quotaMonitor: {
+          excludedWalletKeys: [...new Set(excludedQuotaWalletKeys)],
+          lowRemainingPercent: lowQuotaRemainingPercent,
+        },
         rechargeCandidates: (() => {
           const value = object(upstreamManagement.rechargeCandidates, "operations.upstreamManagement.rechargeCandidates");
           return {
