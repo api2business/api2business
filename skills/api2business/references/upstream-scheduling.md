@@ -301,6 +301,20 @@
   - `in-flight` 跳过是轮次并发保护，不是探活业务失败。轮次只有在计划中的未就绪账号不被
     计为成功，且每个已尝试账号具备普通请求记录、`ordinaryLogRecorded` 和最终轮次记录时，
     才能标记成功；HTTP 受理或工作流 `running` 不能单独完成验收。
+  - 探活请求必须携带固定缓存前缀，避免短探活在 OpenAI 系上游持续记为
+    `cache_read=0` 并触发供应商的零缓存保护。
+    - 固定前缀由探活 system message 和确定性 history 组成，长度必须明显超过上游
+      1024 token 的最小缓存长度；当前实现使用 256 个固定算术示例，约 3500 token。
+    - 前缀必须是纯常量：时间戳、随机 nonce、账号 ID、分组、租户、请求 ID 和运行状态
+      不得进入前缀；易变内容只能放在前缀之后的最终问题里。
+    - 同一探活器在不同轮次、不同进程和重启后必须生成完全相同的
+      `cachePrefixFingerprint`；改变前缀内容必须视为缓存契约变更并同步更新测试。
+    - 探活结果必须区分 `requestKind=probe`，并记录 `cachePrefixFingerprint`、
+      `cacheReadTokens`、`cacheReadField` 和 `cacheHit`。上游未返回缓存字段时三者保持
+      `null`，不得把缺失当作 `0`；只有明确返回 `cached_tokens > 0` 才能记为命中。
+    - 缓存读取字段优先读取 `input_tokens_details.cached_tokens`，其次读取
+      `prompt_tokens_details.cached_tokens`、`cache_read_input_tokens`、
+      `cache_read_tokens` 和 `cached_tokens`；原始字段名保留在 `cacheReadField` 便于审计。
   - 探活专用 Key 的用量和错误记录以 `api_key_id` 归属账号；Sub2API 对路由失败可能不写
     `account_id`，评分和候选查询必须通过 `api2business-probe-<accountId>` 或平台命名的
     私有分组回补账号归属。失败记录不能因 `account_id` 为空而从样本、失败率或 TTFT 证据中

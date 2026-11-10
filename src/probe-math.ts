@@ -1,10 +1,111 @@
-import { randomInt } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 
 export const MATH_PROBE_SYSTEM_PROMPT = [
   "你是 API 探活计算器。",
   "计算下面两个两位整数的和。",
   "只输出最终结果的十进制整数，不要解释。不得输出思考过程、推导、等式、Markdown、XML/JSON 标签、标点、单位、前后缀或任何其他文字；除这个整数外不得包含任何其他字符。",
 ].join("");
+
+// 固定前缀用于让上游 prompt cache 命中。OpenAI 系列模型只对达到最小缓存长度
+// 的前缀做缓存；探活原本只有不到一百个 token，每次都会以 cache_read=0 计费，
+// 连续探活会被上游的零缓存保护识别为异常流量。以下内容必须保持常量：
+// 不包含时间、账号 ID、随机数或任何供应商/租户信息。
+export const PROBE_CACHE_HISTORY_INTRO = [
+  "下面是一组固定的算术格式示例，只用于稳定请求前缀。",
+  "示例按固定编号连续排列，编号只用于保持前缀一致，不代表任何运行顺序或状态。",
+  "每个示例都遵循同一规则：只给出两个两位整数相加后的十进制结果。",
+  "示例不涉及账号、租户、时间、网络环境或任何运行状态。",
+].join("");
+
+export interface ProbeCacheHistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+function probeCacheExample(index: number): { prompt: string; answer: number } {
+  // 纯函数生成，确保不同进程、不同机器和重启后得到完全相同的前缀。
+  const left = 10 + ((index * 37 + 11) % 90);
+  const right = 10 + ((index * 53 + 29) % 90);
+  return {
+    prompt: `Example ${String(index + 1).padStart(3, "0")}: ${left} + ${right} = ?`,
+    answer: left + right,
+  };
+}
+
+function buildProbeCacheHistory(): ProbeCacheHistoryMessage[] {
+  const messages: ProbeCacheHistoryMessage[] = [
+    { role: "user", content: PROBE_CACHE_HISTORY_INTRO },
+    { role: "assistant", content: "收到。后续每个问题都只输出最终十进制整数。" },
+  ];
+  // 256 个示例保证内容本身在常见分词器下明显超过 1024 token 的最小缓存长度；
+  // 即使供应商只统计 content、不统计消息开销，也能稳定形成可缓存前缀。
+  for (let index = 0; index < 256; index += 1) {
+    const example = probeCacheExample(index);
+    messages.push({ role: "user", content: example.prompt });
+    messages.push({ role: "assistant", content: String(example.answer) });
+  }
+  return messages;
+}
+
+export const PROBE_CACHE_HISTORY: readonly ProbeCacheHistoryMessage[] = Object.freeze(buildProbeCacheHistory());
+
+export const PROBE_CACHE_PREFIX_FINGERPRINT = createHash("sha256")
+  .update(JSON.stringify({ system: MATH_PROBE_SYSTEM_PROMPT, history: PROBE_CACHE_HISTORY }))
+  .digest("hex");
+
+// 稳定路由键让上游把重复探活放进同一缓存分片；它不是 prompt 内容，也不含账号信息。
+export const PROBE_CACHE_ROUTING_KEY = "api2business-idle-probe-v1";
+
+export type MathProbeTransport = "responses" | "chat_completions";
+
+export interface MathProbeRequestInput {
+  model: string;
+  question: string;
+  transport: MathProbeTransport;
+  reasoningEffort?: "low" | "medium" | "high";
+  maxOutputTokens?: number;
+}
+
+export interface MathProbeRequestBody {
+  body: Record<string, unknown>;
+  cachePrefixFingerprint: string;
+}
+
+export function buildMathProbeRequestBody(input: MathProbeRequestInput): MathProbeRequestBody {
+  const maxOutputTokens = input.maxOutputTokens ?? 256;
+  if (input.transport === "chat_completions") {
+    return {
+      cachePrefixFingerprint: PROBE_CACHE_PREFIX_FINGERPRINT,
+      body: {
+        model: input.model,
+        messages: [
+          { role: "system", content: MATH_PROBE_SYSTEM_PROMPT },
+          ...PROBE_CACHE_HISTORY,
+          { role: "user", content: input.question },
+        ],
+        max_tokens: maxOutputTokens,
+        stream: true,
+      },
+    };
+  }
+  return {
+    cachePrefixFingerprint: PROBE_CACHE_PREFIX_FINGERPRINT,
+    body: {
+      model: input.model,
+      instructions: MATH_PROBE_SYSTEM_PROMPT,
+      input: [
+        ...PROBE_CACHE_HISTORY,
+        { role: "user", content: input.question },
+      ],
+      reasoning: { effort: input.reasoningEffort ?? "low" },
+      max_output_tokens: maxOutputTokens,
+      prompt_cache_key: PROBE_CACHE_ROUTING_KEY,
+      prompt_cache_retention: "24h",
+      store: false,
+      stream: true,
+    },
+  };
+}
 
 export interface MathProbeQuestion {
   questionId: string;

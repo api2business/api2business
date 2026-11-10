@@ -2,7 +2,13 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, renameSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { AppConfig } from "./config";
-import { createMathProbeQuestion, MATH_PROBE_SYSTEM_PROMPT, parseMathProbeAnswer } from "./probe-math";
+import {
+  buildMathProbeRequestBody,
+  createMathProbeQuestion,
+  parseMathProbeAnswer,
+  PROBE_CACHE_PREFIX_FINGERPRINT,
+  type MathProbeTransport,
+} from "./probe-math";
 import type { Paginated, Sub2ApiClient } from "./sub2api-client";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 
@@ -69,6 +75,14 @@ interface ProbeStreamResult {
   finishReason: string | null;
   refusal: string | null;
   streamed: boolean;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheReadField: string | null;
+}
+
+function nonNegativeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function visibleText(value: unknown): string {
@@ -119,6 +133,10 @@ async function readProbeStream(response: Response, startedAt: number): Promise<P
     finishReason: null,
     refusal: null,
     streamed: false,
+    inputTokens: null,
+    outputTokens: null,
+    cacheReadTokens: null,
+    cacheReadField: null,
   };
 
   const decoder = new TextDecoder();
@@ -132,6 +150,35 @@ async function readProbeStream(response: Response, startedAt: number): Promise<P
   let finishReason: string | null = null;
   let refusal: string | null = null;
   let sawSse = false;
+  let inputTokens: number | null = null;
+  let outputTokens: number | null = null;
+  let cacheReadTokens: number | null = null;
+  let cacheReadField: string | null = null;
+
+  const consumeUsage = (value: unknown): void => {
+    const usage = row(value);
+    if (Object.keys(usage).length === 0) return;
+    inputTokens ??= nonNegativeNumber(usage.input_tokens) ?? nonNegativeNumber(usage.prompt_tokens);
+    outputTokens ??= nonNegativeNumber(usage.output_tokens) ?? nonNegativeNumber(usage.completion_tokens);
+    if (cacheReadTokens !== null) return;
+    const inputDetails = row(usage.input_tokens_details);
+    const promptDetails = row(usage.prompt_tokens_details);
+    const candidates: Array<[string, unknown]> = [
+      ["input_tokens_details.cached_tokens", inputDetails.cached_tokens],
+      ["prompt_tokens_details.cached_tokens", promptDetails.cached_tokens],
+      ["cache_read_input_tokens", usage.cache_read_input_tokens],
+      ["cache_read_tokens", usage.cache_read_tokens],
+      ["cached_tokens", usage.cached_tokens],
+    ];
+    for (const [field, candidate] of candidates) {
+      const parsed = nonNegativeNumber(candidate);
+      if (parsed !== null) {
+        cacheReadTokens = parsed;
+        cacheReadField = field;
+        return;
+      }
+    }
+  };
 
   const appendVisible = (text: string): void => {
     if (text.length === 0) return;
@@ -148,6 +195,7 @@ async function readProbeStream(response: Response, startedAt: number): Promise<P
     if (typeof message.content === "string" || Array.isArray(message.content)) appendVisible(visibleText(message.content));
     if (typeof choice.finish_reason === "string") finishReason = choice.finish_reason;
     refusal ??= findRefusal(payload);
+    consumeUsage(payload.usage);
 
     if (type === "response.output_text.delta" && typeof payload.delta === "string") appendVisible(payload.delta);
     if (type === "response.output_text.done" && answerText.length === 0 && typeof payload.text === "string") appendVisible(payload.text);
@@ -159,6 +207,7 @@ async function readProbeStream(response: Response, startedAt: number): Promise<P
       : payload.object === "response"
         ? payload
         : {};
+    consumeUsage(responseNode.usage);
     if (answerText.length === 0 && Array.isArray(responseNode.output)) appendVisible(findResponseText(responseNode.output));
     if (typeof responseNode.status === "string" && ["completed", "incomplete", "failed", "cancelled"].includes(responseNode.status)) {
       terminalReceived = true;
@@ -252,6 +301,10 @@ async function readProbeStream(response: Response, startedAt: number): Promise<P
     finishReason,
     refusal,
     streamed: sawSse,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheReadField,
   };
 }
 
@@ -674,6 +727,13 @@ export class ProbeIsolationService {
         ordinaryLogRecorded: false,
         responseBytes: 0,
         errorMarker: "isolation-not-ready",
+        requestKind: "probe",
+        cachePrefixFingerprint: PROBE_CACHE_PREFIX_FINGERPRINT,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheReadField: null,
+        cacheHit: null,
       };
     }
     const ensured = {
@@ -681,13 +741,23 @@ export class ProbeIsolationService {
       record: stored,
     };
     const requestId = crypto.randomUUID();
+    const transport: MathProbeTransport = ensured.record.platform === "deepseek" ? "chat_completions" : "responses";
+    const probeRequest = buildMathProbeRequestBody({
+      model,
+      question: question.prompt,
+      transport,
+      reasoningEffort,
+      maxOutputTokens: 256,
+    });
     const requestEvidence = { accountId, groupId: ensured.binding.groupId, model,
       startedAt: new Date(startedAt).toISOString(), requestId,
-      questionId: question.questionId, questionPrompt: question.prompt, expectedAnswer: question.expectedAnswer };
+      questionId: question.questionId, questionPrompt: question.prompt, expectedAnswer: question.expectedAnswer,
+      requestKind: "probe", transport,
+      cachePrefixFingerprint: probeRequest.cachePrefixFingerprint };
     let response: Response;
     let stream: ProbeStreamResult;
     try {
-      const chatCompletions = ensured.record.platform === "deepseek";
+      const chatCompletions = transport === "chat_completions";
       response = await fetch(`${this.config.sub2api.idleProbe.isolation.gatewayBaseUrl}${chatCompletions ? "/chat/completions" : "/responses"}`, {
         method: "POST",
         headers: {
@@ -696,27 +766,10 @@ export class ProbeIsolationService {
           "x-request-id": requestId,
           authorization: `Bearer ${ensured.record.apiKey}`,
         },
-        body: JSON.stringify(chatCompletions
-          ? {
-              model,
-              messages: [
-                { role: "system", content: MATH_PROBE_SYSTEM_PROMPT },
-                { role: "user", content: question.prompt },
-              ],
-              max_tokens: 256,
-              stream: true,
-            }
-          : {
-              model,
-              instructions: MATH_PROBE_SYSTEM_PROMPT,
-              input: question.prompt,
-              reasoning: { effort: reasoningEffort },
-              max_output_tokens: 256,
-              // TTFT is emitted by Sub2API only for streaming responses. Keep
-              // the probe body streaming so every successful probe contributes
-              // a first-token sample to every platform scope.
-              stream: true,
-            }),
+        // TTFT is emitted by Sub2API only for streaming responses. Keep the
+        // probe body streaming so every successful probe contributes a
+        // first-token sample to every platform scope.
+        body: JSON.stringify(probeRequest.body),
         signal: AbortSignal.timeout(Math.min(timeoutMs, this.remainingTimeout(deadline) ?? timeoutMs)),
       });
       stream = await readProbeStream(response, startedAt);
@@ -745,6 +798,11 @@ export class ProbeIsolationService {
         responseBytes: 0,
         errorMarker: timeoutError(error) ? "request-timeout" : "transport-error",
         error: errorMessage(error),
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheReadField: null,
+        cacheHit: null,
       };
     }
     const completedAt = Date.now();
@@ -788,6 +846,11 @@ export class ProbeIsolationService {
       durationMs: completedAt - startedAt,
       ordinaryLogRecorded: !accountRoutingFailed,
       responseBytes: stream.body.length,
+      inputTokens: stream.inputTokens,
+      outputTokens: stream.outputTokens,
+      cacheReadTokens: stream.cacheReadTokens,
+      cacheReadField: stream.cacheReadField,
+      cacheHit: stream.cacheReadTokens === null ? null : stream.cacheReadTokens > 0,
       errorMarker: success ? null : accountRoutingFailed ? "no-available-account" : ["invalid_api_key", "insufficient", "rate_limit", "temporarily", "overloaded", "model_not_found"]
         .find((marker) => lowered.includes(marker)) ?? "upstream-error",
     };

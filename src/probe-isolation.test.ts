@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "./config";
 import { ProbeIsolationService } from "./probe-isolation";
-import { MATH_PROBE_SYSTEM_PROMPT } from "./probe-math";
+import { MATH_PROBE_SYSTEM_PROMPT, PROBE_CACHE_HISTORY, PROBE_CACHE_PREFIX_FINGERPRINT } from "./probe-math";
 
 type Row = Record<string, unknown>;
 
@@ -25,6 +25,16 @@ function answerFromPrompt(prompt: string): number {
   const match = /^(\d+) \+ (\d+)$/u.exec(prompt);
   if (!match) throw new Error(`unexpected math probe prompt: ${prompt}`);
   return Number(match[1]) + Number(match[2]);
+}
+
+function finalChatQuestion(body: unknown): string {
+  const messages = (body as { messages: Array<{ role: string; content: string }> }).messages;
+  return String(messages.at(-1)?.content);
+}
+
+function finalResponsesQuestion(body: unknown): string {
+  const input = (body as { input: Array<{ role: string; content: string }> }).input;
+  return String(input.at(-1)?.content);
 }
 
 function chatMathStream(answer: number): string {
@@ -207,7 +217,7 @@ test("DeepSeek probe uses Chat Completions and the configured probe model", asyn
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     requestUrl = String(input);
     requestBody = String(init?.body ?? "");
-    const prompt = String((JSON.parse(requestBody) as { messages: Array<{ content: string }> }).messages[1]?.content);
+    const prompt = finalChatQuestion(JSON.parse(requestBody));
     return new Response(chatMathStream(answerFromPrompt(prompt)), { status: 200, headers: { "content-type": "text/event-stream" } });
   }) as unknown as typeof fetch;
   try {
@@ -218,6 +228,7 @@ test("DeepSeek probe uses Chat Completions and the configured probe model", asyn
       model: "deepseek-flash",
       messages: [
         { role: "system", content: MATH_PROBE_SYSTEM_PROMPT },
+        ...PROBE_CACHE_HISTORY,
         { role: "user", content: expect.stringMatching(/^\d+ \+ \d+$/u) },
       ],
       max_tokens: 256,
@@ -311,7 +322,7 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     requestUrl = String(input);
     requestBody = String(init?.body ?? "");
     sentRequestId = new Headers(init?.headers).get("x-request-id") ?? "";
-    const prompt = String((JSON.parse(requestBody) as { input: string }).input);
+    const prompt = finalResponsesQuestion(JSON.parse(requestBody));
     return new Response(responsesMathStream(answerFromPrompt(prompt)), {
       status: 200,
       headers: { "X-Client-Request-ID": "native-probe-correlation", "content-type": "text/event-stream" },
@@ -340,13 +351,20 @@ test("probe uses the ordinary gateway Responses path instead of the admin accoun
     expect(JSON.parse(requestBody)).toMatchObject({
       model: "gpt-5.6-terra",
       instructions: MATH_PROBE_SYSTEM_PROMPT,
-      input: expect.stringMatching(/^\d+ \+ \d+$/u),
+      input: [
+        ...PROBE_CACHE_HISTORY,
+        { role: "user", content: expect.stringMatching(/^\d+ \+ \d+$/u) },
+      ],
       reasoning: { effort: "low" },
       max_output_tokens: 256,
       stream: true,
     });
     expect(requestBody).toContain('"stream":true');
     expect(requestBody).not.toContain('"stream":false');
+    expect(result.cachePrefixFingerprint).toBe(PROBE_CACHE_PREFIX_FINGERPRINT);
+    expect(result.requestKind).toBe("probe");
+    expect(result.cacheReadTokens).toBeNull();
+    expect(result.cacheHit).toBeNull();
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -366,6 +384,90 @@ test("probe does not treat a completed empty response as healthy", async () => {
       qualityOk: false,
       answerRaw: "",
       ttftMs: null,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("probe keeps cache read unknown when the upstream omits usage", async () => {
+  const { service } = fixture();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(responsesMathStream(35), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  })) as unknown as typeof fetch;
+  try {
+    await service.ensure(42);
+    expect(await service.probe(42, "gpt-5.6-terra", 1000)).toMatchObject({
+      cacheReadTokens: null,
+      cacheReadField: null,
+      cacheHit: null,
+      cachePrefixFingerprint: PROBE_CACHE_PREFIX_FINGERPRINT,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("probe separates zero cache read from a verified cache hit", async () => {
+  const { service } = fixture();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    const cachedTokens = calls === 1 ? 0 : 1500;
+    const stream = [
+      `event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", delta: "35" })}\n\n`,
+      `event: response.completed\ndata: ${JSON.stringify({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          usage: {
+            input_tokens: 2048,
+            output_tokens: 2,
+            input_tokens_details: { cached_tokens: cachedTokens },
+          },
+        },
+      })}\n\n`,
+    ].join("");
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+  }) as unknown as typeof fetch;
+  try {
+    await service.ensure(42);
+    const first = await service.probe(42, "gpt-5.6-terra", 1000);
+    const second = await service.probe(42, "gpt-5.6-terra", 1000);
+    expect(first).toMatchObject({ cacheReadTokens: 0, cacheHit: false, cacheReadField: "input_tokens_details.cached_tokens" });
+    expect(second).toMatchObject({ cacheReadTokens: 1500, cacheHit: true, cacheReadField: "input_tokens_details.cached_tokens" });
+    expect(first.cachePrefixFingerprint).toBe(second.cachePrefixFingerprint);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("chat completions probe records prompt cache details", async () => {
+  const { state, service } = fixture();
+  state.account = { id: 42, platform: "deepseek", type: "apikey", group_ids: [131] };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    const stream = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "35" } }] })}\n\n`,
+      `data: ${JSON.stringify({
+        choices: [{ delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 2048, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 1500 } },
+      })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join("");
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+  }) as unknown as typeof fetch;
+  try {
+    await service.ensure(42, { platform: "deepseek", eligibleGroupIds: [131], bindingGroupIds: [] });
+    expect(await service.probe(42, "deepseek-flash", 1000)).toMatchObject({
+      cacheReadTokens: 1500,
+      cacheHit: true,
+      cacheReadField: "prompt_tokens_details.cached_tokens",
+      inputTokens: 2048,
+      outputTokens: 2,
     });
   } finally {
     globalThis.fetch = originalFetch;
