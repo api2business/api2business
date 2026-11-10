@@ -29,6 +29,8 @@ describe("upstream scheduling v2 probe cache UI", () => {
     expect(script).toContain("data-probe-detail-row=");
     expect(script).toContain("probe-detail-table");
     expect(script).toContain("probe-account-name");
+    expect(script).toContain("detail.cacheState === 'miss' ? '未命中'");
+    expect(script).toContain("Number(cache.hitCount ?? 0) > 0 ? 'hit' : 'miss'");
     expect(script).toContain("本轮未保存逐账号缓存证据");
     expect(script).toContain("命中 ${number(cache.hitCount)} · 未命中 ${number(cache.missCount)} · 未知 ${number(cache.unknownCount)} · 分母 ${number(known)}");
   });
@@ -39,6 +41,7 @@ describe("upstream scheduling v2 probe cache UI", () => {
     expect(css).toContain("@media (max-width: 560px)");
     expect(css).toContain(".score-profile-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; overflow: visible; }");
     expect(css).toContain(".probe-cache-table { min-width: 1280px; }");
+    expect(css).toContain('.probe-cache-rate[data-state="miss"]');
     expect(css).toContain(".probe-detail-table .probe-account-name");
     expect(css).toContain("overflow-wrap: anywhere");
   });
