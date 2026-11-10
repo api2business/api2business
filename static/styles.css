@@ -962,8 +962,9 @@ button:disabled { cursor: wait; opacity: .48; }
   .pool-error-detail dl { grid-template-columns: 1fr; padding: 10px; }
 }
 @media (max-width: 560px) {
-  .table-pagination { width: 100%; display: grid; grid-template-columns: minmax(68px, 1fr) auto minmax(68px, 1fr); }
-  .table-pagination .query-command { width: 100%; }
+  .table-pagination { width: 100%; display: grid; grid-template-columns: minmax(58px, auto) minmax(0, 1fr) minmax(58px, auto); align-items: center; gap: 6px; white-space: normal; }
+  .table-pagination .query-command { width: 100%; min-width: 0; padding-inline: 8px; white-space: nowrap; }
+  .table-pagination .section-state { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
   .table-toolbar-side > .select-field { width: 100%; justify-content: space-between; }
   .record-table-controls { flex-wrap: wrap; }
   .refresh-clock { grid-template-columns: minmax(0, 1fr); align-items: start; }
@@ -1070,6 +1071,39 @@ body[data-page="upstream-scheduling-v2"] .unified-upstream-table .group-list spa
   .probe-cache-overview { padding: 14px; }
   .probe-cache-cards { grid-template-columns: minmax(0, 1fr); }
   .probe-cache-card > strong { font-size: 32px; }
+  .probe-cache-section .table-wrap,
+  .probe-detail-panel .table-wrap { overflow: visible; border: 0; }
+  .probe-cache-section .probe-cache-table,
+  .probe-detail-table { display: block; width: 100%; min-width: 0; border-collapse: separate; }
+  .probe-cache-table thead,
+  .probe-detail-table thead { display: none; }
+  .probe-cache-table tbody,
+  .probe-detail-table tbody { display: grid; gap: 10px; }
+  .probe-cache-table tr.probe-main-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--line); background: var(--line); }
+  .probe-cache-table tr.probe-main-row > td { display: block; min-width: 0; height: auto; padding: 9px 10px; white-space: normal; overflow-wrap: anywhere; background: #121613; }
+  .probe-cache-table tr.probe-main-row > td:nth-child(1),
+  .probe-cache-table tr.probe-main-row > td:nth-child(4),
+  .probe-cache-table tr.probe-main-row > td:nth-child(5),
+  .probe-cache-table tr.probe-main-row > td:nth-child(11) { grid-column: 1 / -1; }
+  .probe-cache-table tr.probe-main-row > td::before,
+  .probe-detail-table tr.probe-detail-data-row > td::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--muted); font: 10px/1.2 var(--mono); }
+  .probe-cache-table tr.probe-main-row > td:nth-child(11)::before { display: none; }
+  .probe-cache-table tr.probe-main-row .probe-detail-toggle { width: 100%; min-height: 34px; }
+  .probe-cache-table tr.probe-detail-row { display: block; }
+  .probe-cache-table tr.probe-detail-row[hidden] { display: none; }
+  .probe-cache-table tr.probe-detail-row > td { display: block; width: 100%; padding: 0 !important; }
+  .probe-cache-table tbody > tr:not(.probe-main-row):not(.probe-detail-row),
+  .probe-detail-table tbody > tr:not(.probe-detail-data-row) { display: block; border: 1px solid var(--line); background: #0b0e0c; }
+  .probe-cache-table tbody > tr:not(.probe-main-row):not(.probe-detail-row) > td,
+  .probe-detail-table tbody > tr:not(.probe-detail-data-row) > td { display: block; width: 100%; }
+  .probe-detail-panel { padding: 10px; border-left-width: 2px; }
+  .probe-detail-head { display: grid; gap: 5px; }
+  .probe-detail-table tr.probe-detail-data-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--line); background: var(--line); }
+  .probe-detail-table tr.probe-detail-data-row > td { display: block; min-width: 0; height: auto; padding: 9px 10px; white-space: normal; overflow-wrap: anywhere; background: #0b0e0c; font-variant-numeric: tabular-nums; }
+  .probe-detail-table tr.probe-detail-data-row > td:nth-child(1),
+  .probe-detail-table tr.probe-detail-data-row > td:nth-child(6) { grid-column: 1 / -1; }
+  .probe-detail-table .probe-account-name { max-width: none; }
+  .probe-detail-empty { display: block; width: 100%; }
   .score-profile-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; overflow: visible; }
   .score-profile-switch .profile-tab { min-width: 0; width: 100%; height: auto; min-height: 34px; padding: 6px 4px; white-space: normal; line-height: 1.15; }
   body[data-page="upstream-scheduling-v2"] .unified-upstream-table td:first-child,

@@ -27,6 +27,9 @@ describe("upstream scheduling v2 probe cache UI", () => {
     expect(script).toContain("缓存读取 / 重新计费");
     expect(script).toContain("data-probe-detail=");
     expect(script).toContain("data-probe-detail-row=");
+    expect(script).toContain('data-label="开始时间"');
+    expect(script).toContain('data-label="缓存读取 token"');
+    expect(script).toContain('probe-detail-data-row');
     expect(script).toContain("probe-detail-table");
     expect(script).toContain("probe-account-name");
     expect(script).toContain("detail.cacheState === 'miss' ? '未命中'");
@@ -44,6 +47,8 @@ describe("upstream scheduling v2 probe cache UI", () => {
     expect(css).toContain('.probe-cache-rate[data-state="miss"]');
     expect(css).toContain(".probe-detail-table .probe-account-name");
     expect(css).toContain("overflow-wrap: anywhere");
+    expect(css).toContain(".probe-cache-table tr.probe-main-row { display: grid;");
+    expect(css).toContain(".table-pagination .section-state { min-width: 0; white-space: normal;");
   });
 
   test("busts the frontend module cache with the new page revision", async () => {
@@ -52,8 +57,8 @@ describe("upstream scheduling v2 probe cache UI", () => {
       read("../static/app.js"),
     ]);
 
-    expect(html).toContain('/styles.css?v=probe-cache-ui-1');
-    expect(html).toContain('/app.js?v=probe-cache-ui-1');
-    expect(app).toContain("upstream-scheduling-v2.js?v=probe-cache-ui-1");
+    expect(html).toContain('/styles.css?v=probe-cache-ui-2');
+    expect(html).toContain('/app.js?v=probe-cache-ui-2');
+    expect(app).toContain("upstream-scheduling-v2.js?v=probe-cache-ui-2");
   });
 });
