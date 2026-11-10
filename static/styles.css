@@ -1084,6 +1084,7 @@ body[data-page="upstream-scheduling-v2"] .unified-upstream-table .group-list spa
   .probe-cache-table tr.probe-main-row > td:nth-child(1),
   .probe-cache-table tr.probe-main-row > td:nth-child(4),
   .probe-cache-table tr.probe-main-row > td:nth-child(5),
+  .probe-cache-table tr.probe-main-row > td:nth-child(10),
   .probe-cache-table tr.probe-main-row > td:nth-child(11) { grid-column: 1 / -1; }
   .probe-cache-table tr.probe-main-row > td::before,
   .probe-detail-table tr.probe-detail-data-row > td::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--muted); font: 10px/1.2 var(--mono); }

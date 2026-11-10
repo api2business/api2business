@@ -57,8 +57,8 @@ describe("upstream scheduling v2 probe cache UI", () => {
       read("../static/app.js"),
     ]);
 
-    expect(html).toContain('/styles.css?v=probe-cache-ui-2');
-    expect(html).toContain('/app.js?v=probe-cache-ui-2');
-    expect(app).toContain("upstream-scheduling-v2.js?v=probe-cache-ui-2");
+    expect(html).toContain('/styles.css?v=probe-cache-ui-3');
+    expect(html).toContain('/app.js?v=probe-cache-ui-3');
+    expect(app).toContain("upstream-scheduling-v2.js?v=probe-cache-ui-3");
   });
 });
