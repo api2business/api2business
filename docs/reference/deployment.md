@@ -68,7 +68,12 @@ docker compose ps
 ```bash
 bun run deploy:validate
 curl -fsS https://<host>/health
+bun run deploy:verify -- --base-url https://<host> --snapshot-json <snapshot.json>
 ```
 
 - 首次发布还应验证登录、主要数据页、异步 worker 作业和持久化缓存。
+- 每次原生发布后必须运行 `deploy:verify`。
+  - 页面必须包含“探活缓存命中”摘要卡，且 `app.js`、页面模块和 HTML 使用同一个前端 revision。
+  - 提供的 snapshot 必须是 `cache.state=hit|stale|refreshed`、`cache.complete=true`，并包含 `data.probeHistory.cacheSummary`。
+  - 发布校验失败时，先比对镜像、提交和前端 revision；不得用浏览器刷新或手改文案掩盖旧 bundle。
 - 验证失败时保留旧版本服务，先定位源码、镜像、配置、Secret 或网络中的首个断点。
