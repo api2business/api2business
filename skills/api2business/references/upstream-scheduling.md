@@ -315,6 +315,17 @@
     - 缓存读取字段优先读取 `input_tokens_details.cached_tokens`，其次读取
       `prompt_tokens_details.cached_tokens`、`cache_read_input_tokens`、
       `cache_read_tokens` 和 `cached_tokens`；原始字段名保留在 `cacheReadField` 便于审计。
+    - 探活历史必须持久化 `cacheReadTokens`、`cacheReadField`、`cacheHit`、`inputTokens`、
+      `outputTokens`、`cachePrefixFingerprint` 和账号名称；不得只留在一次性响应中。
+    - 页面命中率只按 `cacheHit` 已知的请求计算，`null` 单独计为未知且不进入分母。
+      自动探活和手动探活分别聚合，不合并成一个比例；摘要与每轮行同时显示分母。
+    - 重新计费输入 token 在缓存读取量是输入总量子集时取
+      `max(0, inputTokens - cacheReadTokens)`；`cache_read_input_tokens` 或
+      `cache_read_tokens` 等独立计数字段直接使用 `inputTokens`。任一输入缺失时显示未知，
+      不得写 0。
+    - 旧轮次缺少可靠缓存字段时显示未知；不得根据缺失值反推未命中。没有逐账号证据的
+      已尝试轮次按实际尝试数计为未知，未尝试的空轮次显示“无请求”，两者都不写 0。
+      页面现有 V2 读模型缓存继续使用独立名称，不与“探活缓存命中”混用。
   - 探活专用 Key 的用量和错误记录以 `api_key_id` 归属账号；Sub2API 对路由失败可能不写
     `account_id`，评分和候选查询必须通过 `api2business-probe-<accountId>` 或平台命名的
     私有分组回补账号归属。失败记录不能因 `account_id` 为空而从样本、失败率或 TTFT 证据中

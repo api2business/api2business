@@ -10,6 +10,10 @@ import {
   collectErrorRequestFromDatabase,
 } from "./error-detail-database";
 import {
+  summarizeProbeCacheEvidence,
+  summarizeProbeCacheRecords,
+} from "./idle-probe-cache-summary";
+import {
   OperationsStore,
   type CashDirection,
   type PriorityOptimizationQueueLease,
@@ -336,9 +340,15 @@ export class OperationsService {
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new Error("idle probe history page size must be from 1 to 100");
     const rows = await this.store.idleProbeHistoryPage(pageSize, (page - 1) * pageSize, scopeName) as Array<Record<string, unknown>>;
     const total = Number(rows[0]?.total_count ?? 0);
-    return {
-      ok: true,
-      records: rows.map((row) => ({
+    const records = rows.map((row) => {
+      const requestEvidence = typeof row.request_evidence === "string"
+        ? JSON.parse(row.request_evidence)
+        : row.request_evidence ?? [];
+      const attempted = Number(row.attempted_count);
+      const planned = Number(row.planned_count);
+      const expected = Number.isFinite(attempted) && attempted > 0 ? attempted : Number.isFinite(planned) && planned > 0 ? planned : 0;
+      const evidenceCount = Array.isArray(requestEvidence) ? requestEvidence.length : 0;
+      return {
         operationId: row.operation_id,
         triggerType: row.trigger_type,
         startedAt: row.started_at,
@@ -352,8 +362,14 @@ export class OperationsService {
         unready: Number(row.unready_count),
         durationMs: Number(row.duration_ms),
         errorSummary: row.error_summary,
-        requestEvidence: typeof row.request_evidence === "string" ? JSON.parse(row.request_evidence) : row.request_evidence ?? [],
-      })),
+        requestEvidence,
+        cache: summarizeProbeCacheEvidence(requestEvidence, Math.max(0, expected - evidenceCount)),
+      };
+    });
+    return {
+      ok: true,
+      records,
+      cacheSummary: summarizeProbeCacheRecords(records),
       pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
       valuesPrinted: false,
     };
@@ -546,15 +562,21 @@ export class OperationsService {
               qualityOk, ordinaryLogRecorded, answerClassification, answerRaw, parsedAnswer,
               expectedAnswer, questionPrompt, classification, httpStatus, terminalStatus,
               finishReason, refusal, ttftMs, durationMs, endToEndMs,
+              requestKind, transport, cachePrefixFingerprint, inputTokens, outputTokens,
+              cacheReadTokens, cacheReadField, cacheHit, errorMarker,
             } = response;
             return (typeof clientRequestId === "string" && clientRequestId.trim())
               || (typeof requestId === "string" && requestId.trim())
               ? [{
-                  accountId, groupId, model, startedAt, completedAt, clientRequestId, requestId,
+                  accountId,
+                  accountName: typeof item?.accountName === "string" ? item.accountName.slice(0, 300) : null,
+                  groupId, model, startedAt, completedAt, clientRequestId, requestId,
                   qualityOk, ordinaryLogRecorded, answerClassification,
                   answerRaw: typeof answerRaw === "string" ? answerRaw.slice(0, 512) : null,
                   parsedAnswer, expectedAnswer, questionPrompt, classification, httpStatus,
                   terminalStatus, finishReason, refusal, ttftMs, durationMs, endToEndMs,
+                  requestKind, transport, cachePrefixFingerprint, inputTokens, outputTokens,
+                  cacheReadTokens, cacheReadField, cacheHit, errorMarker,
                 }] : [];
           }) : [],
         });

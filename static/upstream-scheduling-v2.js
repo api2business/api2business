@@ -6,7 +6,7 @@ import { sampleTimeDisplay } from './sample-time.js'
 import { bindTableSortHeaders, sortTableRows, updateTableSortHeaders } from './table-sort.js?v=table-sort-v1'
 
 const $ = (selector) => document.querySelector(selector)
-const state = { scopes: [], activeScope: null, snapshot: null, accounts: [], accountPage: 1, errorPage: 1, historyPage: 1, probePage: 1, filter: '', scopeRequestId: 0, refreshTimer: null, refreshCountdownTimer: null, refreshDueAt: null, accountSort: { key: 'score', direction: 'desc' }, errorSort: { key: 'createdAt', direction: 'desc' }, historySort: { key: 'started_at', direction: 'desc' }, probeSort: { key: 'startedAt', direction: 'desc' }, modelSyncSort: { key: 'startedAt', direction: 'desc' } }
+const state = { scopes: [], activeScope: null, snapshot: null, accounts: [], accountPage: 1, errorPage: 1, historyPage: 1, probePage: 1, probeHistory: null, probeExpanded: new Set(), filter: '', scopeRequestId: 0, refreshTimer: null, refreshCountdownTimer: null, refreshDueAt: null, accountSort: { key: 'score', direction: 'desc' }, errorSort: { key: 'createdAt', direction: 'desc' }, historySort: { key: 'started_at', direction: 'desc' }, probeSort: { key: 'startedAt', direction: 'desc' }, modelSyncSort: { key: 'startedAt', direction: 'desc' } }
 const accountPageSize = 10
 const errorPageSize = 20
 const historyPageSize = 10
@@ -44,7 +44,7 @@ function updateScopeDeepLink(scope, navigation = 'replace') {
   const current = `${location.pathname}${location.search}${location.hash}`
   if (next !== current) history[`${navigation}State`]({ scope }, '', next)
 }
-function resetScopePaging() { state.accountPage = 1; state.errorPage = 1; state.historyPage = 1; state.probePage = 1 }
+function resetScopePaging() { state.accountPage = 1; state.errorPage = 1; state.historyPage = 1; state.probePage = 1; state.probeHistory = null; state.probeExpanded.clear() }
 
 function renderRefreshCountdown() {
   const target = $('#v2-refresh-countdown')
@@ -299,12 +299,83 @@ function renderHistory(records) {
 
 function renderScopeFeatures(features = {}, automation) { const write = features.planWrite === true || features.priorityAutomation === true || features.upstreamWrite === true; $('#v2-write-state').textContent = write ? '写入受控' : '写入关闭'; $('#v2-write-state').dataset.state = write ? 'warning' : 'success'; $('#v2-automation-enabled').value = String(features.priorityAutomation === true); $('#v2-automation-plan').value = String(features.planWrite === true); $('#v2-automation-interval').value = automation?.interval_seconds == null ? '' : String(automation.interval_seconds); $('#v2-automation-state').textContent = `自动优先级调度：${features.priorityAutomation === true ? '作用域已开启' : '作用域关闭'} · 探活：${features.idleProbe === true ? '作用域已开启' : '作用域关闭'} · 上游写入：${features.upstreamWrite === true ? '作用域已开启' : '作用域关闭'}` }
 
+function probeStatusLabel(status) { return ({ succeeded: '成功', partial: '部分成功', failed: '失败', skipped: '跳过' })[status] ?? String(status ?? '—') }
+
+function probeTokenSummary(value, knownCount) {
+  return value == null ? '未知' : `${number(value)}（${number(knownCount)} 条）`
+}
+
+function renderProbeCacheSummary(summary = {}) {
+  for (const [key, prefix] of [['automatic', 'auto'], ['manual', 'manual']]) {
+    const card = summary?.[key] ?? {}
+    const known = Number(card.knownCount ?? 0)
+    const requestCount = Number(card.requestCount ?? 0)
+    const noRequests = requestCount === 0
+    const allUnknown = !noRequests && known === 0
+    $(`#v2-probe-${prefix}-rate`).textContent = noRequests ? '无请求' : known > 0 ? percent(card.hitRate, 0) : '未知'
+    $(`#v2-probe-${prefix}-denom`).textContent = noRequests
+      ? '本页无探活请求'
+      : `已知 ${number(known)} 条 · 分母 ${number(known)}${allUnknown ? ` · 全部未知 ${number(card.unknownCount)} 条` : ''}`
+    $(`#v2-probe-${prefix}-hit`).textContent = noRequests ? '—' : number(card.hitCount)
+    $(`#v2-probe-${prefix}-miss`).textContent = noRequests ? '—' : number(card.missCount)
+    $(`#v2-probe-${prefix}-unknown`).textContent = noRequests ? '—' : number(card.unknownCount)
+    $(`#v2-probe-${prefix}-tokens`).textContent = noRequests
+      ? '本页无探活请求'
+      : `缓存读取 ${probeTokenSummary(card.cacheReadTokens, card.cacheReadKnownCount)} · 重新计费 ${probeTokenSummary(card.rebilledInputTokens, card.rebilledKnownCount)}`
+  }
+}
+
+function prepareProbeTable() {
+  const table = $('#v2-probe-table')
+  if (!table) return
+  table.classList.add('probe-cache-table')
+  table.closest('section')?.classList.add('probe-cache-section')
+  const header = table.querySelector('thead tr')
+  if (!header || header.dataset.probeCacheLayout === 'ready') return
+  header.dataset.probeCacheLayout = 'ready'
+  header.innerHTML = '<th data-sort-key="startedAt" aria-sort="descending" tabindex="0">开始时间</th><th data-sort-key="triggerType" aria-sort="none" tabindex="0">方式</th><th data-sort-key="status" aria-sort="none" tabindex="0">状态</th><th data-sort-key="cacheRate" aria-sort="none" tabindex="0">探活缓存命中</th><th data-sort-key="cacheReadTokens" aria-sort="none" tabindex="0">缓存读取 / 重新计费</th><th data-sort-key="plannedReady" aria-sort="none" tabindex="0">计划 / 就绪</th><th data-sort-key="outcomes" aria-sort="none" tabindex="0">成功 / 失败</th><th data-sort-key="unready" aria-sort="none" tabindex="0">未就绪</th><th data-sort-key="completedAt" aria-sort="none" tabindex="0">完成时间</th><th data-sort-key="durationMs" aria-sort="none" tabindex="0">耗时</th><th aria-sort="none">明细</th>'
+}
+
 function renderProbeHistory(history = {}) {
+  renderProbeCacheSummary(history.cacheSummary ?? {})
   const rows = Array.isArray(history.records) ? history.records : []
   const pagination = history.pagination ?? { page: 1, totalPages: 1, total: 0 }
   state.probePage = Number(pagination.page ?? 1)
-  const sorted = sortTableRows(rows, state.probeSort, (row, key) => row[key], (a, b) => String(a.startedAt ?? '').localeCompare(String(b.startedAt ?? '')))
-  $('#v2-probe-body').innerHTML = sorted.length ? sorted.map((row) => `<tr><td>${escapeHtml(time(row.startedAt))}</td><td>${row.triggerType === 'automatic' ? '自动' : '手动'}</td><td>${escapeHtml(row.status)}</td><td>${number(row.planned)}</td><td>${number(row.ready)}</td><td>${number(row.succeeded)}</td><td>${number(row.failed)}</td><td>${number(row.unready)}</td><td>${escapeHtml(time(row.completedAt))}</td><td>${number(Number(row.durationMs) / 1000, 1)} 秒</td></tr>`).join('') : '<tr><td colspan="10" class="empty">当前作用域暂无探活记录</td></tr>'
+  state.probeHistory = history
+  const sorted = sortTableRows(rows, state.probeSort, (row, key) => ({
+    startedAt: row.startedAt,
+    triggerType: row.triggerType,
+    status: row.status,
+    cacheRate: row.cache?.hitRate ?? -1,
+    cacheReadTokens: row.cache?.cacheReadTokens ?? -1,
+    plannedReady: `${row.planned ?? 0}/${row.ready ?? 0}`,
+    outcomes: `${row.succeeded ?? 0}/${row.failed ?? 0}`,
+    unready: row.unready,
+    completedAt: row.completedAt,
+    durationMs: row.durationMs,
+    details: '',
+  })[key], (a, b) => String(a.startedAt ?? '').localeCompare(String(b.startedAt ?? '')))
+  $('#v2-probe-body').innerHTML = sorted.length ? sorted.flatMap((row, index) => {
+    const cache = row.cache ?? {}
+    const known = Number(cache.knownCount ?? 0)
+    const requestCount = Number(cache.requestCount ?? 0)
+    const noRequests = requestCount === 0
+    const rateState = noRequests ? 'empty' : known > 0 ? (Number(cache.hitCount ?? 0) > 0 ? 'hit' : 'miss') : 'unknown'
+    const rateLabel = noRequests ? '无请求' : known > 0 ? percent(cache.hitRate, 0) : '未知'
+    const detailId = `v2-probe-detail-${String(row.operationId ?? index).replace(/[^a-zA-Z0-9_-]/gu, '-')}`
+    const expanded = state.probeExpanded.has(String(row.operationId ?? index))
+    const detailRows = Array.isArray(cache.accounts) ? cache.accounts : []
+    const detailMarkup = detailRows.length ? detailRows.map((detail) => {
+      const cacheLabel = detail.cacheState === 'hit' ? '命中' : detail.cacheState === 'miss' ? '未命中' : '未知'
+      const qualityLabel = detail.qualityOk === true ? '响应正确' : detail.qualityOk === false ? '响应异常' : '质量未知'
+      const accountName = detail.accountName || (detail.accountId == null ? '账号未知' : `账号 #${detail.accountId}`)
+      return `<tr><td><span class="probe-account-name">${escapeHtml(accountName)}<small>#${escapeHtml(detail.accountId ?? '—')}</small></span></td><td>${escapeHtml(detail.model ?? '—')}</td><td><span class="probe-cache-rate" data-state="${escapeHtml(detail.cacheState ?? 'unknown')}">${cacheLabel}</span></td><td title="${escapeHtml(detail.cacheReadField ?? '上游未返回缓存字段')}">${detail.cacheReadTokens == null ? '未知' : number(detail.cacheReadTokens)}</td><td>${detail.rebilledInputTokens == null ? '未知' : number(detail.rebilledInputTokens)}</td><td>${detail.httpStatus == null ? 'HTTP 未知' : `HTTP ${escapeHtml(detail.httpStatus)}`} · ${qualityLabel}${detail.errorMarker ? `<small>${escapeHtml(detail.errorMarker)}</small>` : ''}</td><td>${detail.durationMs == null ? '—' : `${number(Number(detail.durationMs) / 1000, 1)} 秒`}</td></tr>`
+    }).join('') : `<tr><td colspan="7" class="probe-detail-empty">${noRequests ? '本轮无探活请求，未触发账号探活。' : `本轮未保存逐账号缓存证据；${number(cache.unknownCount)} 条请求按未知处理。`}</td></tr>`
+    const cacheCounts = noRequests ? '本轮无探活请求' : `命中 ${number(cache.hitCount)} · 未命中 ${number(cache.missCount)} · 未知 ${number(cache.unknownCount)} · 分母 ${number(known)}`
+    const mainRow = `<tr><td>${escapeHtml(time(row.startedAt))}</td><td>${row.triggerType === 'automatic' ? '自动' : '手动'}</td><td>${escapeHtml(probeStatusLabel(row.status))}</td><td class="probe-cache-cell"><span class="probe-cache-rate" data-state="${rateState}">${rateLabel}</span><small>${cacheCounts}</small></td><td class="probe-token-cell">${noRequests ? '—' : cache.cacheReadTokens == null ? '未知' : number(cache.cacheReadTokens)}<small>${noRequests ? '未产生缓存读取' : `重新计费 ${cache.rebilledInputTokens == null ? '未知' : number(cache.rebilledInputTokens)}${Number(cache.unknownCount ?? 0) > 0 ? ` · ${number(cache.unknownCount)} 条未知` : ''}`}</small></td><td>${number(row.planned)} / ${number(row.ready)}</td><td>${number(row.succeeded)} / ${number(row.failed)}</td><td>${number(row.unready)}</td><td>${escapeHtml(time(row.completedAt))}</td><td>${number(Number(row.durationMs) / 1000, 1)} 秒</td><td><button class="query-command probe-detail-toggle" type="button" data-probe-detail="${escapeHtml(row.operationId ?? index)}" aria-expanded="${expanded}" aria-controls="${escapeHtml(detailId)}">${expanded ? '收起' : '明细'}</button></td></tr>`
+    const detailRow = `<tr id="${escapeHtml(detailId)}" class="probe-detail-row" data-probe-detail-row="${escapeHtml(row.operationId ?? index)}"${expanded ? '' : ' hidden'}><td colspan="11"><div class="probe-detail-panel"><div class="probe-detail-head"><strong>本轮账号明细</strong><span>${noRequests ? '本轮无探活请求' : `已知 ${number(known)} 条 · 命中 ${number(cache.hitCount)} · 未命中 ${number(cache.missCount)} · 未知 ${number(cache.unknownCount)} · 命中率 ${known > 0 ? percent(cache.hitRate, 0) : '未知'}`}</span><small>${noRequests ? '未产生缓存读取或重新计费输入' : `缓存读取 ${cache.cacheReadTokens == null ? '未知' : number(cache.cacheReadTokens)} · 重新计费输入 ${cache.rebilledInputTokens == null ? '未知' : number(cache.rebilledInputTokens)}`}</small></div><div class="table-wrap"><table class="data-table probe-detail-table"><thead><tr><th>账号</th><th>模型</th><th>探活缓存</th><th>缓存读取 token</th><th>重新计费输入 token</th><th>HTTP / 质量</th><th>耗时</th></tr></thead><tbody>${detailMarkup}</tbody></table></div></div></td></tr>`
+    return [mainRow, detailRow]
+  }).join('') : '<tr><td colspan="11" class="empty">当前作用域暂无探活记录</td></tr>'
   updateTableSortHeaders($('#v2-probe-table'), state.probeSort)
   $('#v2-probe-page').textContent = `${state.snapshot?.features?.idleProbe === true ? '自动探活已开启' : '自动探活关闭'} · ${state.probePage} / ${number(pagination.totalPages)} · ${number(pagination.total)} 条`
   $('#v2-probe-prev').disabled = state.probePage <= 1
@@ -326,7 +397,10 @@ function renderModelSync(history = {}) {
 async function loadProbeHistory(page) {
   const scope = state.activeScope
   const data = await requestJson(`/api/v2/upstream-scheduling/probe-history?scope=${encodeURIComponent(scope)}&page=${page}`)
-  if (scope === state.activeScope) renderProbeHistory(data)
+  if (scope === state.activeScope) {
+    state.probeHistory = data
+    renderProbeHistory(data)
+  }
 }
 
 function renderSnapshot(data) {
@@ -341,7 +415,7 @@ function renderSnapshot(data) {
   $('#v2-data-state').textContent = data.data?.status ?? '不可用'
   $('#v2-data-state').dataset.state = data.data?.status === 'ready' ? 'ready' : 'unavailable'
   const cacheState = String(data.cache?.state ?? 'refreshed')
-  const cacheLabel = cacheState === 'hit' ? '缓存命中' : cacheState === 'stale' ? '陈旧缓存 · 后台刷新' : '刚完成刷新'
+  const cacheLabel = cacheState === 'hit' ? 'V2 读模型缓存命中' : cacheState === 'stale' ? 'V2 读模型陈旧 · 后台刷新' : 'V2 读模型刚完成刷新'
   $('#v2-data-detail').textContent = `${number(state.accounts.length)} 个账号 · ${cacheLabel}`
   $('#v2-account-state-detail').textContent = `${number(state.accounts.length)} 个账号 · 最近样本 ${number(data.data?.recentCallLimit)} · 额度缓存 ${number(quotaCoverage.cachedAccountCount)} / ${number(quotaCoverage.accountCount)} · 数值 ${number(quotaCoverage.numericAccountCount)} · 不限额 ${number(quotaCoverage.unlimitedAccountCount)} · 不可用 ${number(unavailableCount)} · 缺失 ${number(missingCount)}${quotaCoverage.cacheRowsComplete ? ' · 缓存覆盖完整' : ''}`
   renderScopeFeatures(data.features, data.data?.automation)
@@ -350,6 +424,7 @@ function renderSnapshot(data) {
   renderAccounts()
   renderErrors(data.data?.errors ?? {})
   renderHistory(data.data?.priorityHistory ?? [])
+  state.probeHistory = data.data?.probeHistory ?? null
   renderProbeHistory(data.data?.probeHistory ?? {})
   renderModelSync(data.data?.modelSyncHistory ?? {})
   performance.mark(`upstream-scheduling-v2:${data.scope}:rendered`)
@@ -397,8 +472,21 @@ function bindControls() {
   bindTableSortHeaders($('#v2-account-table'), () => state.accountSort, (next) => { state.accountSort = next; state.accountPage = 1; renderAccounts() })
   bindTableSortHeaders($('#v2-error-table'), () => state.errorSort, (next) => { state.errorSort = next; renderErrors(state.snapshot?.data?.errors ?? {}) })
   bindTableSortHeaders($('#v2-history-table'), () => state.historySort, (next) => { state.historySort = next; state.historyPage = 1; renderHistory(state.snapshot?.data?.priorityHistory ?? []) })
-  bindTableSortHeaders($('#v2-probe-table'), () => state.probeSort, (next) => { state.probeSort = next; renderProbeHistory(state.snapshot?.data?.probeHistory ?? {}) })
+  $('#v2-probe-body').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-probe-detail]')
+    if (!button) return
+    const operationId = String(button.dataset.probeDetail ?? '')
+    const detail = $(`[data-probe-detail-row="${CSS.escape(operationId)}"]`)
+    if (!detail) return
+    const expanded = !state.probeExpanded.has(operationId)
+    if (expanded) state.probeExpanded.add(operationId)
+    else state.probeExpanded.delete(operationId)
+    detail.hidden = !expanded
+    button.setAttribute('aria-expanded', String(expanded))
+    button.textContent = expanded ? '收起' : '明细'
+  })
+  bindTableSortHeaders($('#v2-probe-table'), () => state.probeSort, (next) => { state.probeSort = next; state.probePage = 1; renderProbeHistory(state.probeHistory ?? state.snapshot?.data?.probeHistory ?? {}) })
   bindTableSortHeaders($('#v2-model-sync-table'), () => state.modelSyncSort, (next) => { state.modelSyncSort = next; renderModelSync(state.snapshot?.data?.modelSyncHistory ?? {}) })
 }
 
-export async function upstreamSchedulingV2Page() { bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); window.addEventListener('popstate', () => { const fallback = state.scopes.find((scope) => scope.enabled)?.name ?? null; const next = scopeFromLocation(fallback); if (!next || next === state.activeScope) return; clearAutoRefresh(); state.activeScope = next; resetScopePaging(); renderScopeSwitch(); void loadScope() }); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = Array.isArray(data.scopes) ? data.scopes : []; const fallback = typeof data.defaultScope === 'string' ? data.defaultScope : state.scopes.find((scope) => scope.enabled)?.name ?? null; state.activeScope = scopeFromLocation(fallback); updateScopeDeepLink(state.activeScope); renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }
+export async function upstreamSchedulingV2Page() { prepareProbeTable(); bindControls(); $('#v2-probe-prev').addEventListener('click', () => void loadProbeHistory(state.probePage - 1)); $('#v2-probe-next').addEventListener('click', () => void loadProbeHistory(state.probePage + 1)); window.addEventListener('popstate', () => { const fallback = state.scopes.find((scope) => scope.enabled)?.name ?? null; const next = scopeFromLocation(fallback); if (!next || next === state.activeScope) return; clearAutoRefresh(); state.activeScope = next; resetScopePaging(); renderScopeSwitch(); void loadScope() }); try { const data = await requestJson('/api/v2/upstream-scheduling/scopes'); state.scopes = Array.isArray(data.scopes) ? data.scopes : []; const fallback = typeof data.defaultScope === 'string' ? data.defaultScope : state.scopes.find((scope) => scope.enabled)?.name ?? null; state.activeScope = scopeFromLocation(fallback); updateScopeDeepLink(state.activeScope); renderScopeSwitch(); await loadScope() } catch (error) { $('#v2-data-state').textContent = '读取失败'; $('#v2-data-state').dataset.state = 'unavailable'; $('#v2-data-detail').textContent = error instanceof Error ? error.message : String(error) } }

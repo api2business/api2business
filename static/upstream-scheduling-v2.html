@@ -8,8 +8,8 @@
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
   <link rel="apple-touch-icon" href="/favicon-192.png" />
   <title>上游调度 V2 | Api2Business</title>
-  <link rel="stylesheet" href="/styles.css?v=v2-links-2" />
-  <script src="/app.js?v=v2-links-2" type="module"></script>
+  <link rel="stylesheet" href="/styles.css?v=probe-cache-ui-1" />
+  <script src="/app.js?v=probe-cache-ui-1" type="module"></script>
 </head>
 <body data-page="upstream-scheduling-v2">
   <div data-shell></div>
@@ -30,6 +30,41 @@
       </section>
       <div class="page-actions score-head-actions"><div class="refresh-clock score-head-clock"><span>数据新鲜度</span><strong id="v2-snapshot-time">尚无成功快照</strong><small id="v2-snapshot-detail">最近快照：尚无成功时间</small><small id="v2-data-detail">等待读取</small><small id="v2-write-state" class="v2-write-state" data-state="success">写入关闭</small></div><label class="score-auto-refresh"><span>自动刷新</span><select id="v2-refresh-interval" aria-label="上游调度 V2 缓存自动刷新间隔"><option value="30" selected>30 秒</option><option value="60">60 秒</option><option value="120">2 分钟</option><option value="300">5 分钟</option><option value="0">关闭</option></select></label><span id="v2-refresh-countdown" class="oauth-refresh-countdown" aria-live="polite">下次刷新 --:--</span><span id="v2-data-state" class="state-badge" data-state="refreshing">读取中</span><button id="v2-refresh" class="icon-command" type="button" title="刷新 V2 读模型" aria-label="刷新 V2 读模型">↻</button></div>
     </header>
+
+    <section class="probe-cache-overview" aria-labelledby="v2-probe-cache-title">
+      <header class="probe-cache-overview-head">
+        <div>
+          <p class="eyebrow">PROBE CACHE / KNOWN-ONLY RATE</p>
+          <h2 id="v2-probe-cache-title">探活缓存命中</h2>
+          <p>自动探活与手动探活分开统计；未知缓存结果不计入命中率分母。数据来自当前页最近轮次。</p>
+        </div>
+        <a class="query-command" href="#v2-probe-table">查看轮次明细</a>
+      </header>
+      <div class="probe-cache-cards">
+        <article class="probe-cache-card" data-trigger="automatic">
+          <header><span>自动探活</span><small>本页轮次</small></header>
+          <strong id="v2-probe-auto-rate">未知</strong>
+          <p id="v2-probe-auto-denom">已知 0 条 · 分母 0</p>
+          <dl>
+            <div><dt>命中</dt><dd id="v2-probe-auto-hit">—</dd></div>
+            <div><dt>未命中</dt><dd id="v2-probe-auto-miss">—</dd></div>
+            <div><dt>未知</dt><dd id="v2-probe-auto-unknown">—</dd></div>
+          </dl>
+          <p id="v2-probe-auto-tokens" class="probe-cache-tokens">缓存读取 — · 重新计费 —</p>
+        </article>
+        <article class="probe-cache-card" data-trigger="manual">
+          <header><span>手动探活</span><small>本页轮次</small></header>
+          <strong id="v2-probe-manual-rate">未知</strong>
+          <p id="v2-probe-manual-denom">已知 0 条 · 分母 0</p>
+          <dl>
+            <div><dt>命中</dt><dd id="v2-probe-manual-hit">—</dd></div>
+            <div><dt>未命中</dt><dd id="v2-probe-manual-miss">—</dd></div>
+            <div><dt>未知</dt><dd id="v2-probe-manual-unknown">—</dd></div>
+          </dl>
+          <p id="v2-probe-manual-tokens" class="probe-cache-tokens">缓存读取 — · 重新计费 —</p>
+        </article>
+      </div>
+    </section>
 
     <section class="quota-monitor unified-quota-monitor" aria-label="作用域资产与实时成本">
       <div class="quota-monitor-copy"><p class="eyebrow">LIVE QUOTA / 1H ROLLING</p><h2>资产与成本总览</h2><p id="v2-quota-monitor-state">正在读取持久化采样</p></div>

@@ -344,15 +344,85 @@ test("探活记录按轮次分页，不展开普通请求明细", async () => {
   const result = await service.idleProbeHistory(2, 10);
   expect(query).toEqual([10, 10]);
   expect(result).toMatchObject({
-    records: [{ planned: 10, ready: 9, succeeded: 8, failed: 1, durationMs: 12000 }],
+    records: [{
+      planned: 10, ready: 9, succeeded: 8, failed: 1, durationMs: 12000,
+      cache: { requestCount: 9, knownCount: 0, unknownCount: 9, hitRate: null },
+    }],
+    cacheSummary: {
+      automatic: { requestCount: 9, knownCount: 0, unknownCount: 9, hitRate: null },
+      manual: { requestCount: 0, knownCount: 0, hitRate: null },
+    },
     pagination: { page: 2, pageSize: 10, total: 11, totalPages: 2 },
+  });
+});
+
+test("空探活轮次保持无请求状态，不写成未命中或零命中", async () => {
+  const store = {
+    async idleProbeHistoryPage() {
+      return [{
+        operation_id: "probe-round-empty", trigger_type: "automatic",
+        started_at: "2026-08-04T11:00:00Z", completed_at: null,
+        status: "skipped", planned_count: 0, ready_count: 0, attempted_count: 0,
+        succeeded_count: 0, failed_count: 0, unready_count: 0, duration_ms: 0,
+        error_summary: null, total_count: 1, request_evidence: [],
+      }];
+    },
+  } as unknown as OperationsStore;
+  const service = new OperationsService({} as AppConfig, store, unusedReads);
+  const result = await service.idleProbeHistory(1, 10);
+
+  expect(result.records[0]?.cache).toMatchObject({
+    requestCount: 0, knownCount: 0, hitCount: 0, missCount: 0, unknownCount: 0, hitRate: null,
+  });
+  expect(result.cacheSummary?.automatic).toMatchObject({ requestCount: 0, hitRate: null });
+});
+
+test("探活记录分别聚合自动与手动的已知缓存结果", async () => {
+  const store = {
+    async idleProbeHistoryPage() {
+      return [{
+        operation_id: "probe-round-auto", trigger_type: "automatic",
+        started_at: "2026-08-04T10:00:00Z", completed_at: "2026-08-04T10:00:12Z",
+        status: "succeeded", planned_count: 3, ready_count: 3, attempted_count: 3,
+        succeeded_count: 3, failed_count: 0, unready_count: 0, duration_ms: 12000,
+        error_summary: null, total_count: 2,
+        request_evidence: [
+          { accountId: 1, accountName: "a", cacheHit: true, cacheReadTokens: 1500, inputTokens: 2048 },
+          { accountId: 2, accountName: "b", cacheHit: false, cacheReadTokens: 0, inputTokens: 2048 },
+          { accountId: 3, accountName: "c", cacheHit: null, cacheReadTokens: null },
+        ],
+      }, {
+        operation_id: "probe-round-manual", trigger_type: "manual",
+        started_at: "2026-08-04T10:01:00Z", completed_at: "2026-08-04T10:01:05Z",
+        status: "succeeded", planned_count: 1, ready_count: 1, attempted_count: 1,
+        succeeded_count: 1, failed_count: 0, unready_count: 0, duration_ms: 5000,
+        error_summary: null, total_count: 2,
+        request_evidence: [
+          { accountId: 4, accountName: "d", cacheHit: true, cacheReadTokens: 900, inputTokens: 1400 },
+        ],
+      }];
+    },
+  } as unknown as OperationsStore;
+  const service = new OperationsService({} as AppConfig, store, unusedReads);
+  const result = await service.idleProbeHistory(1, 10);
+
+  expect(result.records[0]?.cache).toMatchObject({
+    knownCount: 2, hitCount: 1, missCount: 1, unknownCount: 1, hitRate: 0.5,
+  });
+  expect(result.cacheSummary?.automatic).toMatchObject({
+    knownCount: 2, hitCount: 1, missCount: 1, unknownCount: 1, hitRate: 0.5,
+  });
+  expect(result.cacheSummary?.manual).toMatchObject({
+    knownCount: 1, hitCount: 1, missCount: 0, unknownCount: 0, hitRate: 1,
   });
 });
 
 test("探活轮次持久化原生关联证据与数值质量事实，不保留自由响应字段", async () => {
   const evidence = { accountId: 42, groupId: 51, model: "grok-test",
     startedAt: "2026-01-01T01:00:00Z", completedAt: "2026-01-01T01:00:01Z",
-    clientRequestId: "native-id" };
+    clientRequestId: "native-id", requestKind: "probe", transport: "responses",
+    cachePrefixFingerprint: "prefix-fingerprint", inputTokens: 2048, outputTokens: 2,
+    cacheReadTokens: 1500, cacheReadField: "input_tokens_details.cached_tokens", cacheHit: true };
   const timeoutEvidence = { ...evidence, accountId: 43, clientRequestId: null, requestId: "original-timeout-request" };
   let saved: Record<string, unknown> = {};
   const store = { async addIdleProbeRound(input: Record<string, unknown>) { saved = input; } } as unknown as OperationsStore;
@@ -368,7 +438,16 @@ test("探活轮次持久化原生关联证据与数值质量事实，不保留�
   expect(Array.isArray(requestEvidence)).toBe(true);
   if (!Array.isArray(requestEvidence)) throw new Error("requestEvidence must be persisted as an array");
   expect(requestEvidence).toHaveLength(2);
-  expect(requestEvidence[0]).toMatchObject({ ...evidence, qualityOk: undefined });
+  expect(requestEvidence[0]).toMatchObject({
+    ...evidence,
+    accountName: null,
+    qualityOk: undefined,
+    cacheReadTokens: 1500,
+    cacheReadField: "input_tokens_details.cached_tokens",
+    cacheHit: true,
+    requestKind: "probe",
+    cachePrefixFingerprint: "prefix-fingerprint",
+  });
   expect(requestEvidence[1]).toMatchObject({ ...timeoutEvidence, qualityOk: undefined });
   expect(JSON.stringify(requestEvidence)).not.toContain("must-not-persist");
   expect(JSON.stringify(saved)).not.toContain("must-not-persist");

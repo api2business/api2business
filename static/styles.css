@@ -1007,3 +1007,71 @@ body[data-page="quota-monitor"] .page-head > div { min-width: 0; }
   .quota-monitor-actions .quota-refresh-interval { grid-column: 1 / -1; }
   .quota-monitor-actions .query-command { width: 100%; min-width: 0; padding-inline: 8px; }
 }
+
+/* 探活缓存：先看已知结果命中率，再进入轮次与账号明细。 */
+.probe-cache-overview { margin-top: 20px; padding: 18px 18px 16px; border: 1px solid var(--line); background: linear-gradient(135deg, rgba(185,228,71,.045), transparent 48%), var(--surface); }
+.probe-cache-overview-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.probe-cache-overview-head > div { min-width: 0; }
+.probe-cache-overview-head h2 { margin: 0; font-size: 21px; }
+.probe-cache-overview-head p:last-child { max-width: 780px; margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.probe-cache-overview-head .query-command { flex: 0 0 auto; text-decoration: none; }
+.probe-cache-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 15px; }
+.probe-cache-card { min-width: 0; display: grid; gap: 6px; padding: 14px 15px; border: 1px solid var(--line); border-left: 3px solid var(--muted); background: #121613; }
+.probe-cache-card[data-trigger="automatic"] { border-left-color: var(--signal); }
+.probe-cache-card[data-trigger="manual"] { border-left-color: var(--info); }
+.probe-cache-card > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.probe-cache-card > header span { font-weight: 700; }
+.probe-cache-card > header small { color: var(--muted); font: 10px/1.2 var(--mono); }
+.probe-cache-card > strong { color: var(--paper); font: 750 36px/1 var(--mono); }
+.probe-cache-card > p { margin: 0; color: var(--muted); font: 11px/1.4 var(--mono); }
+.probe-cache-card dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 4px 0 2px; background: var(--line); }
+.probe-cache-card dl div { min-width: 0; padding: 8px 9px; background: #121613; }
+.probe-cache-card dt { color: var(--muted); font: 10px/1.2 var(--mono); }
+.probe-cache-card dd { margin: 4px 0 0; font: 700 15px/1.1 var(--mono); }
+.probe-cache-card .probe-cache-tokens { overflow-wrap: anywhere; }
+
+.probe-cache-table { min-width: 1280px; }
+.probe-cache-table th:nth-child(1) { width: 138px; }
+.probe-cache-table th:nth-child(2) { width: 70px; }
+.probe-cache-table th:nth-child(3) { width: 92px; }
+.probe-cache-table th:nth-child(4) { width: 158px; }
+.probe-cache-table th:nth-child(5) { width: 190px; }
+.probe-cache-table th:nth-child(11) { width: 76px; }
+.probe-cache-rate { display: inline-flex; align-items: center; min-height: 22px; padding: 0 7px; border: 1px solid var(--line); border-radius: 3px; font: 700 11px/1 var(--mono); }
+.probe-cache-rate[data-state="hit"] { border-color: rgba(185,228,71,.45); color: var(--signal); background: rgba(185,228,71,.08); }
+.probe-cache-rate[data-state="miss"] { border-color: rgba(255,107,74,.4); color: #ff9a82; background: rgba(255,107,74,.08); }
+.probe-cache-rate[data-state="unknown"] { color: var(--muted); }
+.probe-cache-rate[data-state="empty"] { border-style: dashed; color: var(--muted); }
+.probe-cache-cell small, .probe-token-cell small { display: block; margin-top: 4px; color: var(--muted); font: 10px/1.25 var(--mono); white-space: normal; }
+.probe-detail-toggle { min-width: 58px; height: 28px; padding-inline: 8px; font-size: 11px; }
+.probe-detail-row > td { height: auto; padding: 0 !important; white-space: normal; background: #0d100e; }
+.probe-detail-panel { padding: 14px; border-left: 3px solid var(--info); }
+.probe-detail-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 18px; margin-bottom: 10px; }
+.probe-detail-head strong { font-size: 13px; }
+.probe-detail-head span, .probe-detail-head small { color: var(--muted); font: 10px/1.35 var(--mono); }
+.probe-detail-table { min-width: 980px; border: 1px solid var(--line); }
+.probe-detail-table td { height: 44px; font-size: 11px; }
+.probe-detail-table .probe-account-name { display: block; max-width: 260px; white-space: normal; overflow-wrap: anywhere; }
+.probe-detail-table .probe-account-name small { display: block; margin-top: 3px; color: var(--muted); font: 10px/1.2 var(--mono); }
+.probe-detail-empty { padding: 16px !important; color: var(--muted); text-align: center; }
+.probe-detail-cache-field { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+
+body[data-page="upstream-scheduling-v2"] .unified-upstream-table td:first-child,
+body[data-page="upstream-scheduling-v2"] .unified-upstream-table th:first-child { width: 300px; }
+body[data-page="upstream-scheduling-v2"] .unified-upstream-table td:first-child .upstream-account-link,
+body[data-page="upstream-scheduling-v2"] .unified-upstream-table td:first-child > strong { display: -webkit-box; overflow: hidden; white-space: normal; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+body[data-page="upstream-scheduling-v2"] .unified-upstream-table .group-list span { overflow-wrap: anywhere; }
+
+@media (max-width: 900px) {
+  .probe-cache-overview-head { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .probe-cache-overview-head .query-command { min-height: 34px; }
+}
+@media (max-width: 560px) {
+  .probe-cache-overview { padding: 14px; }
+  .probe-cache-cards { grid-template-columns: minmax(0, 1fr); }
+  .probe-cache-card > strong { font-size: 32px; }
+  .score-profile-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; overflow: visible; }
+  .score-profile-switch .profile-tab { min-width: 0; width: 100%; height: auto; min-height: 34px; padding: 6px 4px; white-space: normal; line-height: 1.15; }
+  body[data-page="upstream-scheduling-v2"] .unified-upstream-table td:first-child,
+  body[data-page="upstream-scheduling-v2"] .unified-upstream-table th:first-child { width: 210px; }
+}
