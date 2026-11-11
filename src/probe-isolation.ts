@@ -344,7 +344,7 @@ export interface ProbeIsolationBinding {
 }
 
 export interface ProbeIsolationScope {
-  platform: "openai" | "anthropic" | "grok" | "deepseek";
+  platform: "openai" | "anthropic" | "grok" | "deepseek" | "opencode_go";
   eligibleGroupIds: number[];
   /**
    * 账号已经拥有的业务分组之外，需要补绑的分组。

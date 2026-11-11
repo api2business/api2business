@@ -172,7 +172,7 @@ export interface UpstreamSchedulingV2Features {
 
 export interface UpstreamSchedulingV2Scope {
   enabled: boolean;
-  platform: "openai" | "anthropic" | "grok" | "deepseek";
+  platform: "openai" | "anthropic" | "grok" | "deepseek" | "opencode_go";
   eligibleGroupIds: number[];
   idleProbeIntervalSeconds?: number;
   features: UpstreamSchedulingV2Features;
@@ -643,8 +643,8 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
     const scope = object(rawScope, scopePath);
     const features = object(scope.features, `${scopePath}.features`);
     const platform = stringValue(scope, "platform", scopePath);
-    if (!["openai", "anthropic", "grok", "deepseek"].includes(platform)) {
-      throw new Error(`${scopePath}.platform must be openai, anthropic, grok, or deepseek`);
+    if (!["openai", "anthropic", "grok", "deepseek", "opencode_go"].includes(platform)) {
+      throw new Error(`${scopePath}.platform must be openai, anthropic, grok, deepseek, or opencode_go`);
     }
     const eligibleGroupIds = integers(scope, "eligibleGroupIds", scopePath, 1, Number.MAX_SAFE_INTEGER);
     if (eligibleGroupIds.length === 0) throw new Error(`${scopePath}.eligibleGroupIds must not be empty`);
