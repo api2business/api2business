@@ -100,6 +100,51 @@
     继续处理同批其他账号；轮次以 `succeeded`、`partial` 或 `failed` 反映真实结果。
   - 选择游标和批次结果都按作用域持久化，手动单账号试点必须先用 `plan` 核对，
     再带 `--confirm` 执行；自动批次不得绕过同一原生单账号安全边界。
+
+### 模型同步平台禁令与别名收敛
+
+- 自动同步平台禁令和模型别名只来自 owning YAML 的
+  `operations.upstreamSchedulingV2.modelSyncPolicy`；代码不得另写平台黑名单或别名表。
+
+  ```yaml
+  modelSyncPolicy:
+    automaticDisabledPlatforms: [ deepseek, opencode_go, command_code ]
+    canonicalModels:
+      deepseek-v4.1-flash:
+        aliases:
+          - DeepSeek-V4.1-Flash-1017
+          - DeepSeek-V4.1-Flash
+          - deepseek-v4.1-flash-1017
+  ```
+
+- DeepSeek、OpenCode 和 CommandCode 的 `modelSyncAutomation` 必须保持关闭。
+  - 作用域平台命中 `automaticDisabledPlatforms` 且自动开关为真时，`config validate` 直接失败。
+  - worker 的 Temporal 计划创建、自动轮次和只读 plan 再做一次防御性判断；即使绕过配置校验，
+    也不得启动或保留自动同步。
+  - 缺少 `modelSyncPolicy` 时只允许自动同步全部关闭的旧配置；任作用域开启自动同步即失败。
+  - CommandCode 当前没有作用域时，不为关闭自动同步而新增作用域；未来新增作用域自动受同一校验约束。
+- 禁止自动同步不等于禁止手动同步。
+  - 手动同步先用 `upstream-scheduling-v2 model-sync plan` 或 `upstreams models sync` 无确认模式核对账号。
+  - 再带 `--confirm` 执行，等待终态，并用 Sub2API 原生单账号回读映射和非映射字段。
+  - 单账号试点通过后才扩大账号范围；不把 HTTP 受理或任务提交当成同步完成。
+- 写回 `model_mapping` 前按政策归一化模型族：
+
+  | 上游实际模型 | 映射键 | 映射值选择 |
+  | --- | --- | --- |
+  | `deepseek-v4.1-flash` | `deepseek-v4.1-flash` | 使用该实际 ID |
+  | `deepseek/deepseek-v4.1-flash` | `deepseek-v4.1-flash` | CommandCode 等有前缀上游使用该带前缀 ID |
+  | `DeepSeek-V4.1-Flash` | `deepseek-v4.1-flash` | 优先 canonical；无 canonical 时才使用真实 1017 变体 |
+  | `DeepSeek-V4.1-Flash-1017` | `deepseek-v4.1-flash` | 优先 canonical；不存在时使用该实际 ID |
+  | `deepseek-v4.1-flash-1017` | `deepseek-v4.1-flash` | 优先 canonical；不存在时使用该实际 ID |
+
+- 三个 alias 不得再作为独立 `model_mapping` 键出现。
+  - 写后校验必须比较完整期望映射，不能继续假设 `persisted[model] === model`。
+  - 归一化按相同上游模型列表重复执行必须得到相同结果。
+  - `base_url`、API key/token、header、分组、并发、优先级和账号状态不得变化。
+- 最近 7 天有真实请求使用旧变体名时，可临时保留 alias 指向 canonical，但必须记录影响和移除时间；
+  没有真实流量时直接移除。任何情况下都不得恢复自动同步。
+- 防复活检查至少覆盖：配置三平台拒绝、OpenAI 允许、缺策略时不静默开放、worker 只启动允许平台、
+  别名归一化、CommandCode 前缀、仅 1017 例外、幂等和非映射字段不变。
 - 作用域筛选与账号写入必须分离：
   - `eligibleGroupIds` 只决定评分、探活或优先级计划的候选范围，不得直接作为账号分组写入参数。
   - 任何账号分组 mutation 都必须使用已经回读并明确命名的 `bindingGroupIds`；作用域探活没有业务分组时显式传空数组，不能从候选白名单推导分组。

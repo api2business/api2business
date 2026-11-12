@@ -6,6 +6,10 @@ import { DateTime } from "luxon";
 import { parse } from "yaml";
 import { validateFailoverRules, type FailoverRule } from "./failover-rules";
 import { normalizeUpstreamWallet } from "./upstream-valuation";
+import {
+  automaticModelSyncDisabledByPolicy,
+  type ModelSyncPolicy,
+} from "./model-sync-policy";
 
 export type IdentityField = "username" | "email" | "emailLocalPart";
 export type OAuthPlanType = "k12" | "plus" | "free" | "team";
@@ -172,7 +176,7 @@ export interface UpstreamSchedulingV2Features {
 
 export interface UpstreamSchedulingV2Scope {
   enabled: boolean;
-  platform: "openai" | "anthropic" | "grok" | "deepseek" | "opencode_go";
+  platform: "openai" | "anthropic" | "grok" | "deepseek" | "opencode_go" | "command_code";
   eligibleGroupIds: number[];
   idleProbeIntervalSeconds?: number;
   features: UpstreamSchedulingV2Features;
@@ -191,6 +195,7 @@ export interface UpstreamSchedulingV2Config {
     batchSize: number;
     intervalSeconds: number;
   };
+  modelSyncPolicy?: ModelSyncPolicy;
   scopes: Record<string, UpstreamSchedulingV2Scope>;
 }
 
@@ -631,6 +636,38 @@ function readPriorityPlanPolicy(raw: unknown, path: string): PriorityPlanPolicy 
   };
 }
 
+function readModelSyncPolicy(value: unknown, path: string): ModelSyncPolicy {
+  const root = object(value, path);
+  const automaticDisabledPlatforms = strings(root, "automaticDisabledPlatforms", path).map((platform) => platform.trim());
+  if (new Set(automaticDisabledPlatforms.map((platform) => platform.toLowerCase())).size !== automaticDisabledPlatforms.length) {
+    throw new Error(`${path}.automaticDisabledPlatforms must not contain duplicates`);
+  }
+  for (const platform of automaticDisabledPlatforms) {
+    if (!/^[a-z][a-z0-9_-]*$/u.test(platform)) {
+      throw new Error(`${path}.automaticDisabledPlatforms contains invalid platform: ${platform}`);
+    }
+  }
+
+  const canonicalValue = object(root.canonicalModels, `${path}.canonicalModels`);
+  const canonicalModels: ModelSyncPolicy["canonicalModels"] = {};
+  const seenModels = new Set<string>();
+  for (const [canonical, rawDefinition] of Object.entries(canonicalValue)) {
+    if (!canonical.trim()) throw new Error(`${path}.canonicalModels contains an empty model name`);
+    const definitionPath = `${path}.canonicalModels.${canonical}`;
+    const definition = object(rawDefinition, definitionPath);
+    const aliases = strings(definition, "aliases", definitionPath).map((alias) => alias.trim());
+    if (aliases.length === 0) throw new Error(`${definitionPath}.aliases must not be empty`);
+    if (new Set(aliases).size !== aliases.length) throw new Error(`${definitionPath}.aliases must not contain duplicates`);
+    for (const model of [canonical, ...aliases]) {
+      if (seenModels.has(model)) throw new Error(`${path}.canonicalModels contains duplicate model or alias: ${model}`);
+      seenModels.add(model);
+    }
+    canonicalModels[canonical] = { aliases };
+  }
+  if (Object.keys(canonicalModels).length === 0) throw new Error(`${path}.canonicalModels must not be empty`);
+  return { automaticDisabledPlatforms, canonicalModels };
+}
+
 function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedulingV2Config {
   const root = object(value, path);
   const scopesValue = object(root.scopes, `${path}.scopes`);
@@ -643,8 +680,8 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
     const scope = object(rawScope, scopePath);
     const features = object(scope.features, `${scopePath}.features`);
     const platform = stringValue(scope, "platform", scopePath);
-    if (!["openai", "anthropic", "grok", "deepseek", "opencode_go"].includes(platform)) {
-      throw new Error(`${scopePath}.platform must be openai, anthropic, grok, deepseek, or opencode_go`);
+    if (!["openai", "anthropic", "grok", "deepseek", "opencode_go", "command_code"].includes(platform)) {
+      throw new Error(`${scopePath}.platform must be openai, anthropic, grok, deepseek, opencode_go, or command_code`);
     }
     const eligibleGroupIds = integers(scope, "eligibleGroupIds", scopePath, 1, Number.MAX_SAFE_INTEGER);
     if (eligibleGroupIds.length === 0) throw new Error(`${scopePath}.eligibleGroupIds must not be empty`);
@@ -667,6 +704,21 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
     };
   }
   if (Object.keys(scopes).length === 0) throw new Error(`${path}.scopes must contain at least one scope`);
+  const modelSyncPolicy = root.modelSyncPolicy === undefined
+    ? undefined
+    : readModelSyncPolicy(root.modelSyncPolicy, `${path}.modelSyncPolicy`);
+  if (!modelSyncPolicy) {
+    const enabledScope = Object.entries(scopes).find(([, scope]) => scope.features.modelSyncAutomation);
+    if (enabledScope) {
+      throw new Error(`${path}.modelSyncPolicy is required when ${path}.scopes.${enabledScope[0]}.features.modelSyncAutomation is true`);
+    }
+  } else {
+    for (const [name, scope] of Object.entries(scopes)) {
+      if (scope.features.modelSyncAutomation && automaticModelSyncDisabledByPolicy(scope.platform, modelSyncPolicy)) {
+        throw new Error(`${path}.scopes.${name}.features.modelSyncAutomation is forbidden for platform ${scope.platform}; see ${path}.modelSyncPolicy.automaticDisabledPlatforms`);
+      }
+    }
+  }
   const defaultScope = stringValue(root, "defaultScope", path);
   if (!scopes[defaultScope]) throw new Error(`${path}.defaultScope references missing scope: ${defaultScope}`);
   const enabled = booleanValue(root, "enabled", path);
@@ -687,6 +739,7 @@ function readUpstreamSchedulingV2(value: unknown, path: string): UpstreamSchedul
       batchSize: integerValue(object(root.modelSync, `${path}.modelSync`), "batchSize", `${path}.modelSync`, 1, 10),
       intervalSeconds: integerValue(object(root.modelSync, `${path}.modelSync`), "intervalSeconds", `${path}.modelSync`, 60, 86400),
     },
+    ...(modelSyncPolicy ? { modelSyncPolicy } : {}),
     scopes,
   };
 }

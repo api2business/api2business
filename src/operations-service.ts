@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import type { AppConfig, UpstreamSchedulingV2Scope } from "./config";
+import { automaticModelSyncAllowed } from "./model-sync-policy";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
 import { collectErrorAggregateFromDatabase } from "./error-aggregate-database";
@@ -416,7 +417,7 @@ export class OperationsService {
       ok: true,
       scope: scopeName,
       platform: scope.platform,
-      automaticEnabled: scope.features.modelSyncAutomation,
+      automaticEnabled: automaticModelSyncAllowed(scope, config.modelSyncPolicy),
       batchSize: config.modelSync.batchSize,
       intervalSeconds: config.modelSync.intervalSeconds,
       cursorBefore: cursor,
@@ -429,7 +430,7 @@ export class OperationsService {
 
   async runModelSync(scopeName = "codex", triggerType: "manual" | "automatic" = "manual", explicitAccountIds: number[] = []) {
     const { scope, config } = this.modelSyncScope(scopeName);
-    if (triggerType === "automatic" && !scope.features.modelSyncAutomation) {
+    if (triggerType === "automatic" && !automaticModelSyncAllowed(scope, config.modelSyncPolicy)) {
       return { ok: true, skipped: true, scope: scopeName, reason: "scope model sync automation is disabled", valuesPrinted: false };
     }
     if (!this.runtime) throw new Error("Sub2API runtime mutation service 不可用");
@@ -453,7 +454,11 @@ export class OperationsService {
       attemptedCount += 1;
       await this.store.updateModelSyncAccount({ roundId, accountId, status: "running" });
       try {
-        const result = await this.runtime.syncUpstreamModels([accountId], this.config.operations.upstreamManagement.mutationTimeoutMs);
+        const result = await this.runtime.syncUpstreamModels(
+          [accountId],
+          this.config.operations.upstreamManagement.mutationTimeoutMs,
+          config.modelSyncPolicy,
+        );
         const row = records(result.results)[0] ?? {};
         const modelCountBefore = Number(row.modelCountBefore ?? 0);
         const modelCount = Number(row.modelCount ?? row.persistedModelCount ?? 0);
@@ -508,7 +513,7 @@ export class OperationsService {
     return {
       ok: true,
       scope: scopeName,
-      automaticEnabled: scheduling?.scopes[scopeName]?.features.modelSyncAutomation === true,
+      automaticEnabled: automaticModelSyncAllowed(scheduling?.scopes[scopeName], scheduling?.modelSyncPolicy),
       batchSize: scheduling?.modelSync.batchSize ?? 10,
       intervalSeconds: scheduling?.modelSync.intervalSeconds ?? 600,
       records: recordsOut,

@@ -31,6 +31,22 @@
   features.idleProbe 打开自动探活；探活记录、普通请求记录和轮次终态缺一不可。
   - worker 允许列表与页面 `profiles` 投影的对齐只见
     [上游与调度](../../skills/api2business/references/upstream-scheduling.md#失败或误判模式)。
+- 模型同步的平台禁令与别名收敛由
+  `operations.upstreamSchedulingV2.modelSyncPolicy` 唯一声明；DeepSeek、OpenCode 和
+  CommandCode 一律不得开启自动同步上游模型。
+- `automaticDisabledPlatforms` 命中作用域平台时，配置校验必须失败，worker 和 Temporal
+  也不得创建或保留自动计划；缺少策略时只能兼容自动同步全部关闭的旧配置。
+- 禁止自动同步不等于禁止手动同步；手动同步仍须单账号试点、workflow 或命令终态核对，
+  并在写后回读映射。详细字段、别名表和防复活要求见
+  [上游与调度](../../skills/api2business/references/upstream-scheduling.md#模型同步平台禁令与别名收敛)。
+- `canonicalModels` 把
+  `DeepSeek-V4.1-Flash-1017`、`DeepSeek-V4.1-Flash` 和
+  `deepseek-v4.1-flash-1017` 收敛为唯一键 `deepseek-v4.1-flash`。
+  - 映射值必须是该账号上游真实支持的模型 ID；DeepSeek 优先无前缀 canonical，
+    CommandCode 优先其带前缀 canonical，OpenCode 使用账号实际上游 ID。
+  - 只有上游不存在 canonical 时，才允许 value 使用 `deepseek-v4.1-flash-1017`。
+  - 归一化必须幂等，且不得改动 `base_url`、API key/token、header、分组、并发、
+    优先级等非映射字段。
 - 共享钱包别名、账号余额投影、失败保留和额度缓存的唯一口径见
   [额度监控](../../skills/api2business/references/quota-monitoring.md)；本规格只要求
   充值账本、账号成本和质量样本保持各自边界，不把共享余额重复计入这些数据面。

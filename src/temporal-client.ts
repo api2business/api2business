@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Client, Connection } from "@temporalio/client";
 import type { AppConfig } from "./config";
 import type { AppCommand, OperationRequest } from "./contracts";
+import { automaticModelSyncAllowed } from "./model-sync-policy";
 
 function errorField(error: unknown, field: "name" | "message" | "code"): string | null {
   if (!error || typeof error !== "object") return null;
@@ -228,7 +229,7 @@ export class TemporalGateway {
   async ensureUpstreamModelSyncSchedule(scopeName: string): Promise<{ started: boolean; workflowId: string; enabled: boolean }> {
     const scope = this.config.operations.upstreamSchedulingV2?.scopes[scopeName];
     const workflowId = `${this.runtime.scoreScheduleWorkflowId}-upstream-model-sync-${scopeName}-v1`;
-    if (!scope?.enabled || scope.features.modelSyncAutomation !== true) {
+    if (!automaticModelSyncAllowed(scope, this.config.operations.upstreamSchedulingV2?.modelSyncPolicy)) {
       try {
         const handle = this.client.workflow.getHandle(workflowId);
         const description = await handle.describe();

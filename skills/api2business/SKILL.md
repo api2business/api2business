@@ -172,6 +172,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - 退役删除按 `operations.accountLifecycle.deleteBatchSize` 分批调用原生批量接口；单批失败会跳过并继续，终态只以排队回读为准，失败且有剩余账号时复用原计划恢复。
 - 上游、评分、优先级、探活、定时稳定性观察和截图报错归因的唯一业务权威是
   [上游与调度](references/upstream-scheduling.md)。
+- 模型同步平台禁令、DeepSeek 别名收敛和手动同步要求见
+  [上游与调度](references/upstream-scheduling.md#模型同步平台禁令与别名收敛)。
 - 该参考同时定义 API-key 切号模板的平台边界、成本补齐、评分分层和 V2 迁移；本技能只
   保留入口和命令，不复制第二套算法或状态机。
 - 数值语义探活、TTFT 证据、缺失样本和评分参与边界只见上述参考，本技能不复制评分算法。

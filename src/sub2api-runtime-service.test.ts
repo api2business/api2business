@@ -1,6 +1,16 @@
 import { expect, test } from "bun:test";
 import { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
 import type { Sub2ApiClient } from "./sub2api-client";
+import type { ModelSyncPolicy } from "./model-sync-policy";
+
+const deepSeekPolicy: ModelSyncPolicy = {
+  automaticDisabledPlatforms: ["deepseek", "opencode_go", "command_code"],
+  canonicalModels: {
+    "deepseek-v4.1-flash": {
+      aliases: ["DeepSeek-V4.1-Flash-1017", "DeepSeek-V4.1-Flash", "deepseek-v4.1-flash-1017"],
+    },
+  },
+};
 
 test("syncs upstream models through native bulk merge without replacing account credentials", async () => {
   const calls: Array<{ method: string; path: string; body?: Record<string, unknown> }> = [];
@@ -49,6 +59,65 @@ test("failed upstream model discovery preserves the last available model mapping
     .rejects.toThrow("upstream model list HTTP 503");
   expect(writes).toEqual(["/admin/accounts/479/models/sync-upstream"]);
   expect(mapping).toEqual({ "gpt-6.1-sol": "gpt-6.1-sol" });
+});
+
+test("syncs DeepSeek aliases under the canonical model key", async () => {
+  const calls: Array<{ path: string; body?: Record<string, unknown> }> = [];
+  let mapping: Record<string, string> = {
+    "DeepSeek-V4.1-Flash": "DeepSeek-V4.1-Flash",
+    "deepseek-v4.1-flash": "deepseek-v4.1-flash",
+  };
+  const client = {
+    mutate: async (_method: string, path: string, body?: Record<string, unknown>) => {
+      calls.push({ path, body });
+      if (path.endsWith("/models/sync-upstream")) {
+        return { models: ["DeepSeek-V4.1-Flash", "deepseek-v4.1-flash-1017", "deepseek-v4.1-flash"] };
+      }
+      mapping = ((body?.credentials as Record<string, unknown>).model_mapping ?? {}) as Record<string, string>;
+      return { success: 1, failed: 0, success_ids: [1620] };
+    },
+    getAccount: async () => ({
+      id: 1620,
+      platform: "deepseek",
+      priority: 100,
+      credentials: { base_url: "https://deepseek.example", model_mapping: mapping },
+    }),
+  } as unknown as Sub2ApiClient;
+
+  const output = await new Sub2ApiRuntimeService(client).syncUpstreamModels([1620], 120000, deepSeekPolicy);
+  expect((calls[1]?.body?.credentials as Record<string, unknown>).model_mapping).toEqual({
+    "deepseek-v4.1-flash": "deepseek-v4.1-flash",
+  });
+  expect(output.results).toEqual([expect.objectContaining({
+    accountId: 1620,
+    platform: "deepseek",
+    mappingAfter: { "deepseek-v4.1-flash": "deepseek-v4.1-flash" },
+    canonicalMappings: [{ canonical: "deepseek-v4.1-flash", value: "deepseek-v4.1-flash" }],
+  })]);
+});
+
+test("rejects model sync when a non-mapping account field changes", async () => {
+  let mapping: Record<string, string> = {};
+  let reads = 0;
+  const client = {
+    mutate: async (_method: string, path: string, body?: Record<string, unknown>) => {
+      if (path.endsWith("/models/sync-upstream")) return { models: ["deepseek-v4.1-flash"] };
+      mapping = ((body?.credentials as Record<string, unknown>).model_mapping ?? {}) as Record<string, string>;
+      return { success: 1, failed: 0, success_ids: [1621] };
+    },
+    getAccount: async () => {
+      reads += 1;
+      return {
+        id: 1621,
+        platform: "deepseek",
+        priority: reads === 1 ? 100 : 99,
+        credentials: { base_url: "https://deepseek.example", model_mapping: mapping },
+      };
+    },
+  } as unknown as Sub2ApiClient;
+
+  await expect(new Sub2ApiRuntimeService(client).syncUpstreamModels([1621], 120000, deepSeekPolicy))
+    .rejects.toThrow("changed non-mapping account fields");
 });
 
 test("imports Grok OAuth through native batch create and preserves Grok fields", async () => {

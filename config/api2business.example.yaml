@@ -473,6 +473,15 @@ operations:
     modelSync:
       batchSize: 10
       intervalSeconds: 600
+    # 自动模型同步禁令与模型别名收敛的唯一声明来源。
+    modelSyncPolicy:
+      automaticDisabledPlatforms: [ deepseek, opencode_go, command_code ]
+      canonicalModels:
+        deepseek-v4.1-flash:
+          aliases:
+            - DeepSeek-V4.1-Flash-1017
+            - DeepSeek-V4.1-Flash
+            - deepseek-v4.1-flash-1017
     scopes:
       codex:
         enabled: true
@@ -525,7 +534,7 @@ operations:
           priorityAutomation: true
           idleProbe: true
           upstreamWrite: false
-          modelSyncAutomation: true
+          modelSyncAutomation: false
   databaseUrlEnv: API2BUSINESS_DATABASE_URL
   databasePrepareStatements: true
   ledgerYamlPath: /var/lib/api2business/sub2api-pool.yaml
