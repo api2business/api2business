@@ -24,6 +24,7 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability check --rounds 3 --over-api <absolute-http(s)-URL> --json
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability report --over-api <absolute-http(s)-URL> --json
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability costs --over-api <absolute-http(s)-URL> --json
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability probe-costs --days 7 --over-api <absolute-http(s)-URL> --json
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability get --id <报告ID> --over-api <absolute-http(s)-URL> --json
 ```
 
@@ -52,6 +53,12 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 未来 24 小时预算的取数和余量只见
     [运维观测规格](../../../docs/specs/operational-observability.md)，不在这里另写公式。
   - 历史不足时的估算、备付与不处置例外统一服从上述规格，不另设规则。
+- `probe-costs` 默认读取配置时区最近七个自然日的探活成本、分布与阈值判断。
+  - `--days` 可设 1–90，`--end` 使用带时区 ISO；省略结束时刻时以当前时刻为 `asOf`。
+  - 每日与窗口均保留未知成本、缺失记录、覆盖率和部分日标记。
+  - 正式页面的“探活成本”区块读取同一 API；刷新按钮同时刷新报告和探活成本。
+  - 指标、未知处理、预算与趋势语义只引用
+    [探活成本](../../../docs/specs/operational-observability.md#探活成本)，不在本文复制公式。
 - 成本范围、非 API-key 的“不需对账”和覆盖率分母只见
   [钱包与实际成本](../../../docs/specs/operational-observability.md#钱包与实际成本)。
 - `upstream-scheduling-v2 snapshot` 的缓存读取、刷新与互斥参数只见
@@ -85,6 +92,8 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - `api2businessLatencyP95Ms`：管理接口 P95 毫秒目标。
   - `walletFreshnessSeconds`：余额证据陈旧阈值。
   - `retentionDays`：管理 API 请求观测保留天数。
+  - `probeCostDailyBudgetCny`：每日探活成本预算，`null` 表示只报趋势。
+  - `probeCostTrendFactor`：相对近七个完整日中位数的趋势倍数。
 - 未配置时不启动请求采集，报告入口明确返回未配置。
 - 独立系统目标仅用于显示；不作为调度、充值或发布门禁。
 

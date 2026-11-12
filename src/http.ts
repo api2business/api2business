@@ -968,6 +968,17 @@ export function createHandler(
           throw error;
         }
       }
+      if (request.method === "GET" && url.pathname === "/api/observability/probe-costs") {
+        if (!observability) return json({ok:false,error:"observability unavailable"},503);
+        const days = positiveInteger(url.searchParams.get("days") ?? "7",1);
+        if (days === null || days > 90) return json({ok:false,error:"days must be an integer from 1 to 90"},400);
+        try {
+          return json(await observability.probeCosts(days,url.searchParams.get("end"),url.searchParams.get("refresh") === "1"));
+        } catch (error) {
+          if (error instanceof Error && /invalid probe cost|days must/u.test(error.message)) return json({ok:false,error:error.message},400);
+          throw error;
+        }
+      }
       if (request.method === "GET" && url.pathname === "/api/observability/report") {
         if (!observability) return json({ ok:false,error:"observability unavailable" },503);
         try { return json(await observability.report(url.searchParams.get("start"),url.searchParams.get("end"))); }

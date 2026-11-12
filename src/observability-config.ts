@@ -5,6 +5,8 @@ export interface ObservabilityConfig {
   api2businessLatencyP95Ms: number;
   walletFreshnessSeconds: number;
   retentionDays: number;
+  probeCostDailyBudgetCny: number | null;
+  probeCostTrendFactor: number;
 }
 
 export function parseObservabilityConfig(input: unknown): ObservabilityConfig | null {
@@ -22,5 +24,18 @@ export function parseObservabilityConfig(input: unknown): ObservabilityConfig | 
       throw new Error(`observability.${key} must be between ${min} and ${max}`);
     }
   }
-  return Object.fromEntries(Object.keys(limits).map(key => [key, row[key]])) as unknown as ObservabilityConfig;
+  const budget = row.probeCostDailyBudgetCny;
+  if (budget !== null && budget !== undefined
+    && (typeof budget !== "number" || !Number.isFinite(budget) || budget <= 0)) {
+    throw new Error("observability.probeCostDailyBudgetCny must be null or a positive number");
+  }
+  const trendFactor = row.probeCostTrendFactor;
+  if (typeof trendFactor !== "number" || !Number.isFinite(trendFactor) || trendFactor <= 0 || trendFactor > 100) {
+    throw new Error("observability.probeCostTrendFactor must be a number greater than 0 and at most 100");
+  }
+  return {
+    ...Object.fromEntries(Object.keys(limits).map(key => [key, row[key]])),
+    probeCostDailyBudgetCny: budget === undefined ? null : budget,
+    probeCostTrendFactor: trendFactor,
+  } as unknown as ObservabilityConfig;
 }
