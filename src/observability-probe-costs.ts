@@ -352,7 +352,7 @@ export function probeCostReport(facts: Row, cache: Row[], config: AppConfig, opt
       status,
       recommendations,
       recommendationsAdditive: false,
-      recommendationBasis: "预计节省按当前评估日已知成本估算，优化项可能重叠，不可直接相加。",
+      recommendationBasis: "预计节省按评估日成本（含覆盖率折算）估算，优化项可能重叠，不可直接相加。",
       policy: dailyBudgetCny === null
         ? "未配置每日预算；只按趋势阈值判断，实测基线待裁决建议值。"
         : "每日预算和趋势阈值均来自 owning YAML。",
