@@ -111,6 +111,8 @@
     automaticDisabledPlatforms: [ deepseek, opencode_go, command_code ]
     canonicalModels:
       deepseek-v4.1-flash:
+        # 仅近 7 天仍有旧名真实流量时声明；到期后手动同步会移除别名键。
+        retainAliasesUntil: 2026-11-26T00:00:00Z
         aliases:
           - DeepSeek-V4.1-Flash-1017
           - DeepSeek-V4.1-Flash
@@ -137,12 +139,17 @@
   | `DeepSeek-V4.1-Flash-1017` | `deepseek-v4.1-flash` | 优先 canonical；不存在时使用该实际 ID |
   | `deepseek-v4.1-flash-1017` | `deepseek-v4.1-flash` | 优先 canonical；不存在时使用该实际 ID |
 
-- 三个 alias 不得再作为独立 `model_mapping` 键出现。
+- 默认情况下三个 alias 不得再作为独立 `model_mapping` 键出现。
   - 写后校验必须比较完整期望映射，不能继续假设 `persisted[model] === model`。
   - 归一化按相同上游模型列表重复执行必须得到相同结果。
   - `base_url`、API key/token、header、分组、并发、优先级和账号状态不得变化。
-- 最近 7 天有真实请求使用旧变体名时，可临时保留 alias 指向 canonical，但必须记录影响和移除时间；
-  没有真实流量时直接移除。任何情况下都不得恢复自动同步。
+- 最近 7 天有真实请求使用旧变体名时，可临时保留 alias，但有两项硬性要求：
+  - 在 `canonicalModels.<canonical>.retainAliasesUntil` 声明带时区的 ISO-8601 到期时间；
+    该字段是唯一过渡开关，缺省时不保留 alias。
+  - 保留期间每个 alias 都必须指向与该 canonical 键相同的实际上游值，不得保留旧值。
+  - 到期后的下一次手动同步必须只写 canonical 键，并回读确认别名键消失。
+  - 移除时间、影响范围和旧名流量证据写入 TaskTree 或执行记录，不能只留在聊天。
+  - 任何情况下都不得恢复自动同步。
 - 防复活检查至少覆盖：配置三平台拒绝、OpenAI 允许、缺策略时不静默开放、worker 只启动允许平台、
   别名归一化、CommandCode 前缀、仅 1017 例外、幂等和非映射字段不变。
 - 作用域筛选与账号写入必须分离：

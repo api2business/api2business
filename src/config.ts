@@ -658,11 +658,20 @@ function readModelSyncPolicy(value: unknown, path: string): ModelSyncPolicy {
     const aliases = strings(definition, "aliases", definitionPath).map((alias) => alias.trim());
     if (aliases.length === 0) throw new Error(`${definitionPath}.aliases must not be empty`);
     if (new Set(aliases).size !== aliases.length) throw new Error(`${definitionPath}.aliases must not contain duplicates`);
+    const retainAliasesUntil = definition.retainAliasesUntil === undefined
+      ? undefined
+      : stringValue(definition, "retainAliasesUntil", definitionPath).trim();
+    if (retainAliasesUntil && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u.test(retainAliasesUntil)) {
+      throw new Error(`${definitionPath}.retainAliasesUntil must be an ISO-8601 timestamp with timezone`);
+    }
+    if (retainAliasesUntil && !Number.isFinite(Date.parse(retainAliasesUntil))) {
+      throw new Error(`${definitionPath}.retainAliasesUntil must be a valid timestamp`);
+    }
     for (const model of [canonical, ...aliases]) {
       if (seenModels.has(model)) throw new Error(`${path}.canonicalModels contains duplicate model or alias: ${model}`);
       seenModels.add(model);
     }
-    canonicalModels[canonical] = { aliases };
+    canonicalModels[canonical] = { aliases, ...(retainAliasesUntil ? { retainAliasesUntil } : {}) };
   }
   if (Object.keys(canonicalModels).length === 0) throw new Error(`${path}.canonicalModels must not be empty`);
   return { automaticDisabledPlatforms, canonicalModels };

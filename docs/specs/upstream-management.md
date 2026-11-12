@@ -47,6 +47,8 @@
   - 只有上游不存在 canonical 时，才允许 value 使用 `deepseek-v4.1-flash-1017`。
   - 归一化必须幂等，且不得改动 `base_url`、API key/token、header、分组、并发、
     优先级等非映射字段。
+  - 近 7 天确有旧变体真实流量时，只允许通过 `retainAliasesUntil` 限时保留别名；
+    保留的别名必须指向 canonical 的实际上游值，到期后的手动同步必须移除别名键。
 - 共享钱包别名、账号余额投影、失败保留和额度缓存的唯一口径见
   [额度监控](../../skills/api2business/references/quota-monitoring.md)；本规格只要求
   充值账本、账号成本和质量样本保持各自边界，不把共享余额重复计入这些数据面。

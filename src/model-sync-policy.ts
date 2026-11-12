@@ -1,5 +1,6 @@
 export interface ModelSyncCanonicalModel {
   aliases: string[];
+  retainAliasesUntil?: string;
 }
 
 export interface ModelSyncPolicy {
@@ -76,6 +77,7 @@ export function normalizeModelMapping(
   models: string[],
   platform: string | null | undefined,
   policy: ModelSyncPolicy | null | undefined,
+  now: Date = new Date(),
 ): Record<string, string> {
   const orderedModels = [...new Set(models.map((model) => model.trim()).filter(Boolean))];
   if (!policy) return Object.fromEntries(orderedModels.map((model) => [model, model]));
@@ -91,7 +93,13 @@ export function normalizeModelMapping(
     familyCandidates.set(canonical, [...(familyCandidates.get(canonical) ?? []), model]);
   }
   for (const [canonical, candidates] of familyCandidates) {
-    mapping[canonical] = preferredCanonicalValue(canonical, candidates, normalizedPlatform(platform));
+    const value = preferredCanonicalValue(canonical, candidates, normalizedPlatform(platform));
+    mapping[canonical] = value;
+    const definition = policy.canonicalModels[canonical];
+    const retainUntil = definition?.retainAliasesUntil ? Date.parse(definition.retainAliasesUntil) : Number.NaN;
+    if (Number.isFinite(retainUntil) && now.getTime() < retainUntil) {
+      for (const alias of definition?.aliases ?? []) mapping[alias] = value;
+    }
   }
   return mapping;
 }

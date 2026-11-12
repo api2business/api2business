@@ -120,6 +120,51 @@ test("rejects model sync when a non-mapping account field changes", async () => 
     .rejects.toThrow("changed non-mapping account fields");
 });
 
+test("persists temporary aliases pointing at the canonical upstream value", async () => {
+  let mapping: Record<string, string> = {};
+  const calls: Array<Record<string, unknown>> = [];
+  const client = {
+    mutate: async (_method: string, path: string, body?: Record<string, unknown>) => {
+      if (path.endsWith("/models/sync-upstream")) {
+        return { models: ["DeepSeek-V4.1-Flash", "deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash"] };
+      }
+      calls.push(body ?? {});
+      mapping = ((body?.credentials as Record<string, unknown>).model_mapping ?? {}) as Record<string, string>;
+      return { success: 1, failed: 0, success_ids: [1622] };
+    },
+    getAccount: async () => ({
+      id: 1622,
+      platform: "command_code",
+      credentials: { base_url: "https://command.example", model_mapping: mapping },
+    }),
+  } as unknown as Sub2ApiClient;
+  const transitional: ModelSyncPolicy = {
+    ...deepSeekPolicy,
+    canonicalModels: {
+      "deepseek-v4.1-flash": {
+        ...deepSeekPolicy.canonicalModels["deepseek-v4.1-flash"]!,
+        retainAliasesUntil: "2999-01-01T00:00:00Z",
+      },
+    },
+  };
+  const output = await new Sub2ApiRuntimeService(client).syncUpstreamModels([1622], 120000, transitional);
+  expect(calls[0]?.credentials).toEqual({ model_mapping: {
+    "deepseek-v4.1-flash": "deepseek/deepseek-v4.1-flash",
+    "DeepSeek-V4.1-Flash-1017": "deepseek/deepseek-v4.1-flash",
+    "DeepSeek-V4.1-Flash": "deepseek/deepseek-v4.1-flash",
+    "deepseek-v4.1-flash-1017": "deepseek/deepseek-v4.1-flash",
+  } });
+  expect(output.results).toEqual([expect.objectContaining({
+    mappingAfter: {
+      "deepseek-v4.1-flash": "deepseek/deepseek-v4.1-flash",
+      "DeepSeek-V4.1-Flash-1017": "deepseek/deepseek-v4.1-flash",
+      "DeepSeek-V4.1-Flash": "deepseek/deepseek-v4.1-flash",
+      "deepseek-v4.1-flash-1017": "deepseek/deepseek-v4.1-flash",
+    },
+    canonicalMappings: [{ canonical: "deepseek-v4.1-flash", value: "deepseek/deepseek-v4.1-flash" }],
+  })]);
+});
+
 test("imports Grok OAuth through native batch create and preserves Grok fields", async () => {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
   const client = { mutate: async (_method: string, path: string, body: Record<string, unknown>) => {

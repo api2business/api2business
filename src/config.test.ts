@@ -91,4 +91,20 @@ describe("model sync policy validation", () => {
       raw.operations.upstreamSchedulingV2.scopes.codex.features = { ...features, modelSyncAutomation: true };
     })).toThrow("modelSyncPolicy is required");
   });
+
+  test("accepts a timezone-qualified alias retention expiry", () => {
+    const config = loadExampleWithMutation((raw) => {
+      const canonicalModels = raw.operations.upstreamSchedulingV2.modelSyncPolicy?.canonicalModels as Record<string, Record<string, unknown>>;
+      canonicalModels["deepseek-v4.1-flash"]!.retainAliasesUntil = "2026-11-26T00:00:00Z";
+    });
+    expect(config.operations.upstreamSchedulingV2?.modelSyncPolicy?.canonicalModels["deepseek-v4.1-flash"]?.retainAliasesUntil)
+      .toBe("2026-11-26T00:00:00Z");
+  });
+
+  test("rejects an alias retention expiry without timezone", () => {
+    expect(() => loadExampleWithMutation((raw) => {
+      const canonicalModels = raw.operations.upstreamSchedulingV2.modelSyncPolicy?.canonicalModels as Record<string, Record<string, unknown>>;
+      canonicalModels["deepseek-v4.1-flash"]!.retainAliasesUntil = "2026-11-26T00:00:00";
+    })).toThrow("retainAliasesUntil must be an ISO-8601 timestamp with timezone");
+  });
 });

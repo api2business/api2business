@@ -101,3 +101,25 @@ test("normalization is idempotent and preserves unrelated models", () => {
   expect(twice).toEqual(once);
   expect(once["glm-5.1"]).toBe("glm-5.1");
 });
+
+test("retains aliases only until the policy expiry, all pointing at the canonical upstream value", () => {
+  const transitional: ModelSyncPolicy = {
+    ...policy,
+    canonicalModels: {
+      "deepseek-v4.1-flash": {
+        ...policy.canonicalModels["deepseek-v4.1-flash"]!,
+        retainAliasesUntil: "2026-11-26T00:00:00Z",
+      },
+    },
+  };
+  const models = ["DeepSeek-V4.1-Flash-1017", "DeepSeek-V4.1-Flash", "deepseek-v4.1-flash-1017", "deepseek-v4.1-flash"];
+  expect(normalizeModelMapping(models, "deepseek", transitional, new Date("2026-11-12T00:00:00Z"))).toEqual({
+    "deepseek-v4.1-flash": "deepseek-v4.1-flash",
+    "DeepSeek-V4.1-Flash-1017": "deepseek-v4.1-flash",
+    "DeepSeek-V4.1-Flash": "deepseek-v4.1-flash",
+    "deepseek-v4.1-flash-1017": "deepseek-v4.1-flash",
+  });
+  expect(normalizeModelMapping(models, "deepseek", transitional, new Date("2026-11-26T00:00:00Z"))).toEqual({
+    "deepseek-v4.1-flash": "deepseek-v4.1-flash",
+  });
+});

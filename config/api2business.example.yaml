@@ -478,6 +478,8 @@ operations:
       automaticDisabledPlatforms: [ deepseek, opencode_go, command_code ]
       canonicalModels:
         deepseek-v4.1-flash:
+          # 仅因近 7 天仍有旧名真实流量而临时保留；到期后的手动同步会移除别名键。
+          retainAliasesUntil: 2026-11-26T00:00:00Z
           aliases:
             - DeepSeek-V4.1-Flash-1017
             - DeepSeek-V4.1-Flash
