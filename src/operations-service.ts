@@ -562,7 +562,7 @@ export class OperationsService {
               qualityOk, ordinaryLogRecorded, answerClassification, answerRaw, parsedAnswer,
               expectedAnswer, questionPrompt, classification, httpStatus, terminalStatus,
               finishReason, refusal, ttftMs, durationMs, endToEndMs,
-              requestKind, transport, cachePrefixFingerprint, inputTokens, outputTokens,
+              requestKind, transport, cacheMode, cachePrefixFingerprint, inputTokens, outputTokens,
               cacheReadTokens, cacheReadField, cacheHit, errorMarker,
             } = response;
             return (typeof clientRequestId === "string" && clientRequestId.trim())
@@ -575,7 +575,7 @@ export class OperationsService {
                   answerRaw: typeof answerRaw === "string" ? answerRaw.slice(0, 512) : null,
                   parsedAnswer, expectedAnswer, questionPrompt, classification, httpStatus,
                   terminalStatus, finishReason, refusal, ttftMs, durationMs, endToEndMs,
-                  requestKind, transport, cachePrefixFingerprint, inputTokens, outputTokens,
+                  requestKind, transport, cacheMode, cachePrefixFingerprint, inputTokens, outputTokens,
                   cacheReadTokens, cacheReadField, cacheHit, errorMarker,
                 }] : [];
           }) : [],

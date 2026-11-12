@@ -303,6 +303,13 @@
     才能标记成功；HTTP 受理或工作流 `running` 不能单独完成验收。
   - 探活请求必须携带固定缓存前缀，避免短探活在 OpenAI 系上游持续记为
     `cache_read=0` 并触发供应商的零缓存保护。
+  - 成本优化只允许对“近 24 小时已知缓存读取样本 >= 20 且命中数为 0”的账号使用紧凑前缀。
+    - 紧凑前缀是同一确定性示例序列的截断，仍明显高于常见上游 1024 token 的最小缓存长度；
+      上游一旦恢复缓存能力，紧凑前缀仍可命中，不改变前缀的常量性质。
+    - 任何有过命中、或缓存字段未知的账号必须继续使用完整前缀；不得为了省钱牺牲已有缓存命中，
+      也不得把未知缓存证据当作零命中。
+    - 切换依据只取账号级、已知字段的 24 小时样本；阈值与选择规则只以
+      `src/idle-account-probe.ts` 的 `selectProbeCacheMode` 为准，不在文档或前端另写一套判定。
 - 探活轮次启动时先以 monitor-user 的实时余额为准；余额耗尽自动补到 owning YAML
   配置的 `idleProbe.isolation.userBalance`，再执行专用 Key 请求。不得仅依赖
   `.state/idle-probe/probe-keys.json` 的 `funded` 历史标记，也不得把余额修复当作
@@ -320,7 +327,8 @@
       `prompt_tokens_details.cached_tokens`、`cache_read_input_tokens`、
       `cache_read_tokens` 和 `cached_tokens`；原始字段名保留在 `cacheReadField` 便于审计。
     - 探活历史必须持久化 `cacheReadTokens`、`cacheReadField`、`cacheHit`、`inputTokens`、
-      `outputTokens`、`cachePrefixFingerprint` 和账号名称；不得只留在一次性响应中。
+      `outputTokens`、`cacheMode`、`cachePrefixFingerprint` 和账号名称；不得只留在一次性响应中。
+      `cacheMode` 区分完整前缀与紧凑前缀，页面必须显示紧凑前缀条数，便于核对省钱动作的范围。
     - 页面命中率只按 `cacheHit` 已知的请求计算，`null` 单独计为未知且不进入分母。
       自动探活和手动探活分别聚合，不合并成一个比例；摘要与每轮行同时显示分母。
     - 重新计费输入 token 在缓存读取量是输入总量子集时取

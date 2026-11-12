@@ -7,6 +7,8 @@ import {
   createMathProbeQuestion,
   parseMathProbeAnswer,
   PROBE_CACHE_PREFIX_FINGERPRINT,
+  PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT,
+  type MathProbeCacheMode,
   type MathProbeTransport,
 } from "./probe-math";
 import type { Paginated, Sub2ApiClient } from "./sub2api-client";
@@ -753,6 +755,7 @@ export class ProbeIsolationService {
     model: string,
     timeoutMs: number,
     reasoningEffort: "low" | "medium" | "high" = "low",
+    cacheMode: MathProbeCacheMode = "full",
   ): Promise<Record<string, unknown>> {
     const startedAt = Date.now();
     const question = createMathProbeQuestion();
@@ -780,7 +783,9 @@ export class ProbeIsolationService {
         responseBytes: 0,
         errorMarker: "isolation-not-ready",
         requestKind: "probe",
-        cachePrefixFingerprint: PROBE_CACHE_PREFIX_FINGERPRINT,
+        cacheMode,
+        cachePrefixFingerprint: cacheMode === "compact"
+          ? PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT : PROBE_CACHE_PREFIX_FINGERPRINT,
         inputTokens: null,
         outputTokens: null,
         cacheReadTokens: null,
@@ -800,11 +805,12 @@ export class ProbeIsolationService {
       transport,
       reasoningEffort,
       maxOutputTokens: 256,
+      cacheMode,
     });
     const requestEvidence = { accountId, groupId: ensured.binding.groupId, model,
       startedAt: new Date(startedAt).toISOString(), requestId,
       questionId: question.questionId, questionPrompt: question.prompt, expectedAnswer: question.expectedAnswer,
-      requestKind: "probe", transport,
+      requestKind: "probe", transport, cacheMode,
       cachePrefixFingerprint: probeRequest.cachePrefixFingerprint };
     let response: Response;
     let stream: ProbeStreamResult;

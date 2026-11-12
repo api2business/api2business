@@ -94,3 +94,13 @@ describe("idle probe cache summary", () => {
     expect(summary.manual).toMatchObject({ knownCount: 1, hitCount: 1, missCount: 0, unknownCount: 0, hitRate: 1 });
   });
 });
+
+test("compact prefix usage stays visible without changing the hit-rate denominator", () => {
+  const summary = summarizeProbeCacheEvidence([
+    { accountId: 1, cacheMode: "compact", cacheHit: false, cacheReadTokens: 0, inputTokens: 1200, outputTokens: 3 },
+    { accountId: 1, cacheMode: "compact", cacheHit: true, cacheReadTokens: 2400, inputTokens: 1200, outputTokens: 3 },
+    { accountId: 2, cacheMode: "full", cacheHit: true, cacheReadTokens: 2400, inputTokens: 1200, outputTokens: 3 },
+  ]);
+  expect(summary).toMatchObject({ knownCount: 3, hitCount: 2, compactPrefixCount: 2, hitRate: 2 / 3 });
+  expect(summary.accounts.map((account) => account.cacheMode)).toEqual(["compact", "compact", "full"]);
+});

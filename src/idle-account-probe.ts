@@ -1,6 +1,7 @@
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
+import type { MathProbeCacheMode } from "./probe-math";
 import type { ProbeIsolationScope, ProbeIsolationService, ProbeMonitorBalance } from "./probe-isolation";
 
 function boundedProbeError(error: unknown): string {
@@ -44,16 +45,40 @@ WITH target_accounts AS MATERIALIZED (
       CONCAT('api2business-probe-', ta.platform, '-', ta.account_id::text)
     )
 ), usage_events AS (
-  SELECT ta.account_id, u.created_at
+  SELECT ta.account_id, u.created_at, u.cache_read_tokens
   FROM target_accounts ta
   JOIN usage_logs u ON u.account_id = ta.account_id
     AND u.created_at >= NOW() - INTERVAL '8 hours'
   UNION ALL
-  SELECT pg.account_id, u.created_at
+  SELECT pg.account_id, u.created_at, u.cache_read_tokens
   FROM probe_groups pg
   JOIN usage_logs u ON u.account_id IS NULL
     AND u.group_id = pg.group_id
     AND u.created_at >= NOW() - INTERVAL '8 hours'
+), cache_evidence AS (
+  -- Only records whose upstream actually returned a cache field can prove a miss.
+  -- Unknown cache evidence must never be treated as zero, otherwise a provider that
+  -- omits the field would silently lose its full cache prefix.
+  SELECT ta.account_id,
+    COUNT(*) FILTER (WHERE u.cache_read_tokens IS NOT NULL)::int AS cache_known_samples,
+    COUNT(*) FILTER (WHERE u.cache_read_tokens > 0)::int AS cache_hit_samples
+  FROM target_accounts ta
+  LEFT JOIN usage_logs u ON u.account_id = ta.account_id
+    AND u.created_at >= NOW() - INTERVAL '24 hours'
+  GROUP BY ta.account_id
+  UNION ALL
+  SELECT pg.account_id,
+    COUNT(*) FILTER (WHERE u.cache_read_tokens IS NOT NULL)::int AS cache_known_samples,
+    COUNT(*) FILTER (WHERE u.cache_read_tokens > 0)::int AS cache_hit_samples
+  FROM probe_groups pg
+  JOIN usage_logs u ON u.account_id IS NULL
+    AND u.group_id = pg.group_id
+    AND u.created_at >= NOW() - INTERVAL '24 hours'
+  GROUP BY pg.account_id
+), cache_by_account AS (
+  SELECT account_id, SUM(cache_known_samples)::int AS cache_known_samples,
+    SUM(cache_hit_samples)::int AS cache_hit_samples
+  FROM cache_evidence GROUP BY account_id
 ), error_events AS (
   SELECT ta.account_id, o.created_at, o.error_message, o.error_phase,
     o.error_type, o.error_body, o.upstream_error_message, o.upstream_error_detail
@@ -111,12 +136,15 @@ SELECT ta.account_id, ta.account_name, ta.platform, ta.priority,
   ta.account_status, ta.schedulable, ta.rate_limit_reset_at,
   ta.overload_until, ta.temp_unschedulable_until, ta.group_ids,
   ta.model_mapping_keys,
-  COALESCE(sc.available_sample_count, 0)::int AS available_sample_count
+  COALESCE(sc.available_sample_count, 0)::int AS available_sample_count,
+  COALESCE(cb.cache_known_samples, 0)::int AS cache_known_samples,
+  COALESCE(cb.cache_hit_samples, 0)::int AS cache_hit_samples
 FROM target_accounts ta
 LEFT JOIN sample_counts sc ON sc.account_id = ta.account_id
 LEFT JOIN recent_usage ru ON ru.account_id = ta.account_id
 LEFT JOIN recent_errors re ON re.account_id = ta.account_id
 LEFT JOIN recent_activity ra ON ra.account_id = ta.account_id
+LEFT JOIN cache_by_account cb ON cb.account_id = ta.account_id
 WHERE $6::boolean OR COALESCE(sc.available_sample_count, 0) < 100
   OR ru.account_id IS NULL OR re.account_id IS NULL
 ORDER BY COALESCE(ra.latest_at, '-infinity'::timestamptz), ta.account_id
@@ -138,6 +166,21 @@ export interface IdleProbeCandidate {
   availableSampleCount: number;
   groupIds: number[];
   probeModel?: string | null;
+  probeCacheMode?: MathProbeCacheMode;
+  probeCacheKnownSamples?: number;
+  probeCacheHitSamples?: number;
+}
+
+// A compact prefix is only ever a cost measure for accounts where the provider
+// demonstrably returned cache fields but every one of them was zero. Reaching the
+// sample floor keeps one bad hour from flipping the contract; any observed hit, or
+// unknown cache evidence, keeps the full cacheable prefix so hit rate cannot regress.
+export const PROBE_COMPACT_CACHE_MIN_KNOWN_SAMPLES = 20;
+
+export function selectProbeCacheMode(knownSamples: number, hitSamples: number): MathProbeCacheMode {
+  const known = Number.isFinite(knownSamples) ? Math.max(0, Math.trunc(knownSamples)) : 0;
+  const hits = Number.isFinite(hitSamples) ? Math.max(0, Math.trunc(hitSamples)) : 0;
+  return known >= PROBE_COMPACT_CACHE_MIN_KNOWN_SAMPLES && hits === 0 ? "compact" : "full";
 }
 
 const defaultProbeModels = ["gpt-6.1-sol", "gpt-5.6-terra", "gpt-5.6-sol"] as const;
@@ -319,6 +362,12 @@ export class IdleAccountProbeService {
         || row.temp_unschedulable_until != null,
       availableSampleCount: Number(row.available_sample_count ?? 0),
       groupIds: numericIds(row.group_ids),
+      probeCacheKnownSamples: Number(row.cache_known_samples ?? 0),
+      probeCacheHitSamples: Number(row.cache_hit_samples ?? 0),
+      probeCacheMode: selectProbeCacheMode(
+        Number(row.cache_known_samples ?? 0),
+        Number(row.cache_hit_samples ?? 0),
+      ),
         probeModel: selectIdleProbeModel(
           row.model_mapping_keys,
           policy.platformModels?.[String(row.platform)]?.[0] ?? policy.model,
@@ -566,6 +615,7 @@ export class IdleAccountProbeService {
                 candidate.probeModel ?? policy.model,
                 policy.accountTimeoutMs,
                 policy.reasoningEffort,
+                candidate.probeCacheMode ?? "full",
               );
               return {
                 accountId: candidate.accountId,

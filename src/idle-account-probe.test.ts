@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AppConfig } from "./config";
-import { IdleAccountProbeService, idleProbeCandidatesSql, idleProbeRequestJitterMs, idleProbeRollingUsageSql, selectIdleProbeModel } from "./idle-account-probe";
+import { IdleAccountProbeService, idleProbeCandidatesSql, idleProbeRequestJitterMs, idleProbeRollingUsageSql, PROBE_COMPACT_CACHE_MIN_KNOWN_SAMPLES, selectIdleProbeModel, selectProbeCacheMode } from "./idle-account-probe";
 import type { Sub2ApiReadClient } from "./sub2api-read-executor";
 
 const config = {
@@ -59,6 +59,7 @@ test("idle probe selects only normal schedulable API-key accounts", async () => 
     accountId: 369, accountName: "upstream plus 0.05", platform: "openai", priority: 300,
     status: "active", schedulable: true, hadRuntimeBlock: false, availableSampleCount: 4,
     groupIds: [2, 3, 51], probeModel: "gpt-6.1-sol",
+    probeCacheKnownSamples: 0, probeCacheHitSamples: 0, probeCacheMode: "full",
   }]);
 });
 
@@ -459,4 +460,51 @@ test("idle probe sends every ready planned request concurrently", async () => {
   expect(peak).toBe(8);
   release();
   expect(await running).toMatchObject({ attempted: 8, succeeded: 8, probeConcurrency: "all-ready-candidates" });
+});
+
+test("cache mode never sacrifices an observed hit and requires known zero samples", () => {
+  expect(PROBE_COMPACT_CACHE_MIN_KNOWN_SAMPLES).toBe(20);
+  expect(selectProbeCacheMode(0, 0)).toBe("full");
+  expect(selectProbeCacheMode(19, 0)).toBe("full");
+  expect(selectProbeCacheMode(20, 1)).toBe("full");
+  expect(selectProbeCacheMode(327, 255)).toBe("full");
+  expect(selectProbeCacheMode(20, 0)).toBe("compact");
+  expect(selectProbeCacheMode(311, 0)).toBe("compact");
+  expect(selectProbeCacheMode(Number.NaN, 0)).toBe("full");
+});
+
+test("cache evidence SQL is account-scoped, 24 hours, and counts only explicit cache fields", () => {
+  expect(idleProbeCandidatesSql).toContain("cache_known_samples");
+  expect(idleProbeCandidatesSql).toContain("cache_hit_samples");
+  expect(idleProbeCandidatesSql).toContain("COUNT(*) FILTER (WHERE u.cache_read_tokens IS NOT NULL)");
+  expect(idleProbeCandidatesSql).toContain("COUNT(*) FILTER (WHERE u.cache_read_tokens > 0)");
+  expect(idleProbeCandidatesSql).toContain("u.created_at >= NOW() - INTERVAL '24 hours'");
+  expect(idleProbeCandidatesSql).not.toContain("cache_read_tokens IS NULL AS");
+});
+
+test("compact cache mode is applied only to the planned candidate and stays visible in evidence", async () => {
+  const rows = [
+    { account_id: 1, account_name: "cached", platform: "anthropic", priority: 300, account_status: "active",
+      schedulable: true, group_ids: [101], cache_known_samples: 300, cache_hit_samples: 240 },
+    { account_id: 2, account_name: "never-cached", platform: "anthropic", priority: 300, account_status: "active",
+      schedulable: true, group_ids: [102], cache_known_samples: 320, cache_hit_samples: 0 },
+    { account_id: 3, account_name: "unknown-cache", platform: "anthropic", priority: 300, account_status: "active",
+      schedulable: true, group_ids: [103], cache_known_samples: 0, cache_hit_samples: 0 },
+  ];
+  const modes: Array<{ accountId: number; mode: string | undefined }> = [];
+  const isolation = {
+    get: (accountId: number) => ({ accountId, groupId: accountId + 100, keyCreated: false }),
+    probe: async (accountId: number, _model: string, _timeout: number, _reasoning: string, mode: string) => {
+      modes.push({ accountId, mode });
+      return { classification: "alive", ordinaryLogRecorded: true, qualityOk: true, cacheMode: mode };
+    },
+  };
+  const service = new IdleAccountProbeService(config, reads(rows), { recoverAccounts: async () => {} } as never, isolation as never);
+  const result = await service.run([], 1);
+  expect(result).toMatchObject({ attempted: 3, succeeded: 3 });
+  expect(modes.sort((left, right) => left.accountId - right.accountId))
+    .toEqual([{ accountId: 1, mode: "full" }, { accountId: 2, mode: "compact" }, { accountId: 3, mode: "full" }]);
+  const candidates = (result.results as Array<Record<string, unknown>>);
+  expect(candidates.every((item) => item.response
+    && typeof item.response === "object")).toBe(true);
 });

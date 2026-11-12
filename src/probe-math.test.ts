@@ -8,6 +8,8 @@ import {
   PROBE_CACHE_HISTORY,
   PROBE_CACHE_PREFIX_FINGERPRINT,
   PROBE_CACHE_ROUTING_KEY,
+  PROBE_COMPACT_CACHE_HISTORY,
+  PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT,
 } from "./probe-math";
 
 test("math probe system prompt requires one bare decimal integer", () => {
@@ -95,4 +97,37 @@ test("math probe request body appends the variable question after the fixed pref
   const chat = buildMathProbeRequestBody({ model: "deepseek-flash", question: "12 + 34", transport: "chat_completions" });
   expect((chat.body.messages as Array<{ role: string; content: string }>).at(-1)).toEqual({ role: "user", content: "12 + 34" });
   expect((chat.body.messages as Array<{ role: string; content: string }>)[0]).toEqual({ role: "system", content: MATH_PROBE_SYSTEM_PROMPT });
+});
+
+test("compact probe prefix is a strict deterministic truncation of the cached prefix", () => {
+  expect(PROBE_COMPACT_CACHE_HISTORY.length).toBe(128 * 2 + 2);
+  expect(PROBE_COMPACT_CACHE_HISTORY).toEqual(PROBE_CACHE_HISTORY.slice(0, PROBE_COMPACT_CACHE_HISTORY.length));
+  const characters = PROBE_COMPACT_CACHE_HISTORY.reduce((total, message) => total + message.content.length, 0);
+  // Still comfortably above the ~1024-token minimum so a recovered provider can cache it.
+  expect(characters).toBeGreaterThanOrEqual(3000);
+  expect(PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT)
+    .toBe(createHash("sha256")
+      .update(JSON.stringify({ system: MATH_PROBE_SYSTEM_PROMPT, history: PROBE_COMPACT_CACHE_HISTORY }))
+      .digest("hex"));
+  expect(PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT).not.toBe(PROBE_CACHE_PREFIX_FINGERPRINT);
+  const serialized = JSON.stringify(PROBE_COMPACT_CACHE_HISTORY);
+  expect(serialized).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u);
+  expect(serialized).not.toMatch(/sk-[A-Za-z0-9_-]+/u);
+  expect(serialized).not.toMatch(/account|api2business-probe|groupId|requestId/iu);
+});
+
+test("cache mode selects the prefix without touching the variable question", () => {
+  const full = buildMathProbeRequestBody({ model: "claude-sonnet-5-5", question: "12 + 34", transport: "responses" });
+  const compact = buildMathProbeRequestBody({ model: "claude-sonnet-5-5", question: "12 + 34", transport: "responses", cacheMode: "compact" });
+  expect(full.cachePrefixFingerprint).toBe(PROBE_CACHE_PREFIX_FINGERPRINT);
+  expect(compact.cachePrefixFingerprint).toBe(PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT);
+  expect((full.body.input as unknown[]).length - (compact.body.input as unknown[]).length)
+    .toBe(PROBE_CACHE_HISTORY.length - PROBE_COMPACT_CACHE_HISTORY.length);
+  expect((full.body.input as Array<{ role: string; content: string }>).at(-1))
+    .toEqual({ role: "user", content: "12 + 34" });
+  expect((compact.body.input as Array<{ role: string; content: string }>).at(-1))
+    .toEqual({ role: "user", content: "12 + 34" });
+  const chat = buildMathProbeRequestBody({ model: "deepseek-flash", question: "12 + 34", transport: "chat_completions", cacheMode: "compact" });
+  expect(chat.cachePrefixFingerprint).toBe(PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT);
+  expect((chat.body.messages as unknown[]).length).toBe(PROBE_COMPACT_CACHE_HISTORY.length + 2);
 });

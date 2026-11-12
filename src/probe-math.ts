@@ -32,14 +32,14 @@ function probeCacheExample(index: number): { prompt: string; answer: number } {
   };
 }
 
-function buildProbeCacheHistory(): ProbeCacheHistoryMessage[] {
+function buildProbeCacheHistory(exampleCount = 256): ProbeCacheHistoryMessage[] {
   const messages: ProbeCacheHistoryMessage[] = [
     { role: "user", content: PROBE_CACHE_HISTORY_INTRO },
     { role: "assistant", content: "收到。后续每个问题都只输出最终十进制整数。" },
   ];
   // 256 个示例保证内容本身在常见分词器下明显超过 1024 token 的最小缓存长度；
   // 即使供应商只统计 content、不统计消息开销，也能稳定形成可缓存前缀。
-  for (let index = 0; index < 256; index += 1) {
+  for (let index = 0; index < exampleCount; index += 1) {
     const example = probeCacheExample(index);
     messages.push({ role: "user", content: example.prompt });
     messages.push({ role: "assistant", content: String(example.answer) });
@@ -53,6 +53,20 @@ export const PROBE_CACHE_PREFIX_FINGERPRINT = createHash("sha256")
   .update(JSON.stringify({ system: MATH_PROBE_SYSTEM_PROMPT, history: PROBE_CACHE_HISTORY }))
   .digest("hex");
 
+// 零命中账号使用的紧凑前缀：仍是同一套确定性算术示例的前缀截断，只是把示例数减半。
+// 长度必须继续明显高于常见上游 1024 token 的最小缓存长度，这样一旦上游恢复缓存能力
+// 仍然可以命中；它只在连续 24 小时已知缓存样本全部为 0 的账号上启用，任何有过命中或
+// 缓存字段未知的账号继续使用完整前缀，命中率不会被这次省钱改动牺牲。
+export const PROBE_COMPACT_CACHE_HISTORY: readonly ProbeCacheHistoryMessage[] = Object.freeze(
+  buildProbeCacheHistory(128),
+);
+
+export const PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT = createHash("sha256")
+  .update(JSON.stringify({ system: MATH_PROBE_SYSTEM_PROMPT, history: PROBE_COMPACT_CACHE_HISTORY }))
+  .digest("hex");
+
+export type MathProbeCacheMode = "full" | "compact";
+
 // 稳定路由键让上游把重复探活放进同一缓存分片；它不是 prompt 内容，也不含账号信息。
 export const PROBE_CACHE_ROUTING_KEY = "api2business-idle-probe-v1";
 
@@ -64,6 +78,7 @@ export interface MathProbeRequestInput {
   transport: MathProbeTransport;
   reasoningEffort?: "low" | "medium" | "high";
   maxOutputTokens?: number;
+  cacheMode?: MathProbeCacheMode;
 }
 
 export interface MathProbeRequestBody {
@@ -73,14 +88,17 @@ export interface MathProbeRequestBody {
 
 export function buildMathProbeRequestBody(input: MathProbeRequestInput): MathProbeRequestBody {
   const maxOutputTokens = input.maxOutputTokens ?? 256;
+  const compact = input.cacheMode === "compact";
+  const history = compact ? PROBE_COMPACT_CACHE_HISTORY : PROBE_CACHE_HISTORY;
+  const fingerprint = compact ? PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT : PROBE_CACHE_PREFIX_FINGERPRINT;
   if (input.transport === "chat_completions") {
     return {
-      cachePrefixFingerprint: PROBE_CACHE_PREFIX_FINGERPRINT,
+      cachePrefixFingerprint: fingerprint,
       body: {
         model: input.model,
         messages: [
           { role: "system", content: MATH_PROBE_SYSTEM_PROMPT },
-          ...PROBE_CACHE_HISTORY,
+          ...history,
           { role: "user", content: input.question },
         ],
         max_tokens: maxOutputTokens,
@@ -89,12 +107,12 @@ export function buildMathProbeRequestBody(input: MathProbeRequestInput): MathPro
     };
   }
   return {
-    cachePrefixFingerprint: PROBE_CACHE_PREFIX_FINGERPRINT,
+    cachePrefixFingerprint: fingerprint,
     body: {
       model: input.model,
       instructions: MATH_PROBE_SYSTEM_PROMPT,
       input: [
-        ...PROBE_CACHE_HISTORY,
+        ...history,
         { role: "user", content: input.question },
       ],
       reasoning: { effort: input.reasoningEffort ?? "low" },

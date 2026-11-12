@@ -1,4 +1,5 @@
 export type ProbeCacheState = "hit" | "miss" | "unknown";
+export type ProbeCacheMode = "full" | "compact";
 
 export interface ProbeCacheAccountDetail {
   accountId: number | null;
@@ -11,6 +12,7 @@ export interface ProbeCacheAccountDetail {
   outputTokens: number | null;
   rebilledInputTokens: number | null;
   cacheReadField: string | null;
+  cacheMode: ProbeCacheMode | null;
   classification: string | null;
   qualityOk: boolean | null;
   httpStatus: number | null;
@@ -30,6 +32,7 @@ export interface ProbeCacheSummary {
   cacheReadKnownCount: number;
   rebilledInputTokens: number | null;
   rebilledKnownCount: number;
+  compactPrefixCount: number;
   accounts: ProbeCacheAccountDetail[];
 }
 
@@ -90,6 +93,7 @@ export function emptyProbeCacheSummary(): ProbeCacheSummary {
     cacheReadKnownCount: 0,
     rebilledInputTokens: null,
     rebilledKnownCount: 0,
+    compactPrefixCount: 0,
     accounts: [],
   };
 }
@@ -110,6 +114,7 @@ export function projectProbeCacheAccount(evidenceValue: unknown): ProbeCacheAcco
     outputTokens: finiteNumber(evidence.outputTokens),
     rebilledInputTokens: rebilledTokens(evidence, inputTokens, cacheReadTokens),
     cacheReadField: text(evidence.cacheReadField, 120),
+    cacheMode: evidence.cacheMode === "compact" ? "compact" : evidence.cacheMode === "full" ? "full" : null,
     classification: text(evidence.classification, 80),
     qualityOk: typeof evidence.qualityOk === "boolean" ? evidence.qualityOk : null,
     httpStatus: httpStatus !== null && Number.isSafeInteger(httpStatus) ? httpStatus : null,
@@ -143,6 +148,7 @@ export function summarizeProbeCacheEvidence(evidenceValue: unknown, missingCount
     cacheReadKnownCount: cacheReadValues.length,
     rebilledInputTokens: rebilledValues.length > 0 ? rebilledValues.reduce((total, value) => total + value, 0) : null,
     rebilledKnownCount: rebilledValues.length,
+    compactPrefixCount: accounts.filter((account) => account.cacheMode === "compact").length,
     accounts,
   };
 }
@@ -157,6 +163,7 @@ export function mergeProbeCacheSummaries(values: ProbeCacheSummary[]): ProbeCach
     summary.unknownCount += value.unknownCount;
     summary.cacheReadKnownCount += value.cacheReadKnownCount;
     summary.rebilledKnownCount += value.rebilledKnownCount;
+    summary.compactPrefixCount += Number.isFinite(value.compactPrefixCount) ? value.compactPrefixCount : 0;
     if (value.cacheReadTokens !== null) summary.cacheReadTokens = (summary.cacheReadTokens ?? 0) + value.cacheReadTokens;
     if (value.rebilledInputTokens !== null) summary.rebilledInputTokens = (summary.rebilledInputTokens ?? 0) + value.rebilledInputTokens;
     summary.accounts.push(...value.accounts);
