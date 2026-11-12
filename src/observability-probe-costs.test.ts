@@ -29,6 +29,13 @@ test('probe and user cost predicates are inverse and stay separate',()=>{
   expect(dailyCostSql).toContain("AND p.id IS NULL AND LOWER(COALESCE(g.name,'')) NOT LIKE 'api2business-probe-%'");
 });
 
+test('probe costs resolve rates through bounded intervals instead of per-row rescans',()=>{
+  expect(probeCostSql).toContain("rate_intervals AS MATERIALIZED");
+  expect(probeCostSql).toContain("LEAD(at) OVER (PARTITION BY account_id ORDER BY at,rate_cny)");
+  expect(probeCostSql).toContain("AND (rate.next_at IS NULL OR u.created_at<rate.next_at)");
+  expect(probeCostSql).not.toContain("LEFT JOIN LATERAL");
+});
+
 test('daily buckets use configured timezone boundaries, tokens and partial-day flag',()=>{
   const data=report({probeCosts:[cost('2026-11-14',1,2,'gpt-probe',{records:2,input_tokens:100,output_tokens:20,historical_records:2,historical_cost_cny:8})]});
   expect(data.days).toHaveLength(7);

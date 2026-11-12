@@ -37,12 +37,15 @@ export const probeCostSql = `WITH ${observedRateEventsSql}, probe_keys AS (
   LEFT JOIN groups g ON g.id=u.group_id
   WHERE u.created_at >= $1::timestamptz AND u.created_at < $2::timestamptz
     AND (p.id IS NOT NULL OR LOWER(COALESCE(g.name,'')) LIKE 'api2business-probe-%')
+), rate_intervals AS MATERIALIZED (
+  SELECT account_id,at,rate_cny,
+    LEAD(at) OVER (PARTITION BY account_id ORDER BY at,rate_cny) AS next_at
+  FROM rate_events
 ), cost_usage AS (
   SELECT u.*,rate.rate_cny,rate.at AS rate_at FROM usage u
-  LEFT JOIN LATERAL (
-    SELECT r.rate_cny,r.at FROM rate_events r WHERE r.account_id=u.account_id AND r.at<=u.created_at
-    ORDER BY r.at DESC LIMIT 1
-  ) rate ON true
+  LEFT JOIN rate_intervals rate ON rate.account_id=u.account_id
+    AND rate.at<=u.created_at
+    AND (rate.next_at IS NULL OR u.created_at<rate.next_at)
 ), probe_costs AS (
   SELECT day,account_id,group_id,model,COUNT(*)::int AS records,
     SUM(input_tokens)::bigint AS input_tokens,SUM(output_tokens)::bigint AS output_tokens,
