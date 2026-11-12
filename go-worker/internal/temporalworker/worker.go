@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -37,6 +38,9 @@ func (a Activities) ExecuteOperation(ctx context.Context, operation OperationReq
 func (a Activities) executeOperationHTTP(ctx context.Context, operation OperationRequest) (any, error) {
 	if scope := prohibitedIdleProbeScope(operation); scope != "" {
 		return nil, fmt.Errorf("idle probe is prohibited for scope %s", scope)
+	}
+	if scope := prohibitedModelSyncScope(operation, a.cfg); scope != "" {
+		return nil, fmt.Errorf("model sync automation is prohibited for scope %s", scope)
 	}
 	payload, err := json.Marshal(operation)
 	if err != nil {
@@ -79,6 +83,24 @@ func prohibitedIdleProbeScope(operation OperationRequest) string {
 	scope, _ := operation.Command["scope"].(string)
 	if kind == "account.idle-probe.run" && scope == "opencode" {
 		return scope
+	}
+	return ""
+}
+
+func prohibitedModelSyncScope(operation OperationRequest, cfg Config) string {
+	if operation.Command == nil {
+		return ""
+	}
+	kind, _ := operation.Command["kind"].(string)
+	scope, _ := operation.Command["scope"].(string)
+	if kind != "upstream.model-sync.v2.run" || scope == "" {
+		return ""
+	}
+	platform, _ := operation.Command["platform"].(string)
+	for _, disabled := range cfg.V2AutomaticDisabledPlatforms {
+		if strings.EqualFold(strings.TrimSpace(platform), disabled) {
+			return scope
+		}
 	}
 	return ""
 }
@@ -302,6 +324,7 @@ func ensureSchedules(c client.Client, cfg Config, replaceQuota bool) error {
 			ActivityStartToCloseTimeout: cfg.ActivityTimeout,
 			MaximumAttempts:             1,
 			Scope:                       scope,
+			Platform:                    cfg.V2ScopePlatforms[scope],
 		}); err != nil {
 			return err
 		}

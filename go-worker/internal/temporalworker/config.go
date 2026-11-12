@@ -24,7 +24,9 @@ type Config struct {
 	V2ModelSyncBatchSize, V2ModelSyncIntervalSeconds            int
 	V2ScopeNames, V2PriorityAutomationScopes, V2IdleProbeScopes []string
 	V2ModelSyncScopes                                           []string
+	V2AutomaticDisabledPlatforms                                []string
 	V2IdleProbeIntervals                                        map[string]int
+	V2ScopePlatforms                                            map[string]string
 	AutomaticRefreshEnabled                                     bool
 	IdleProbeIntervalSeconds, IdleProbeTimeoutSeconds           int
 	BugTeamCostMonitorEnabled                                   bool
@@ -55,6 +57,9 @@ type fileConfig struct {
 				BatchSize       int `yaml:"batchSize"`
 				IntervalSeconds int `yaml:"intervalSeconds"`
 			} `yaml:"modelSync"`
+			ModelSyncPolicy struct {
+				AutomaticDisabledPlatforms []string `yaml:"automaticDisabledPlatforms"`
+			} `yaml:"modelSyncPolicy"`
 			Scopes map[string]struct {
 				Enabled                  bool   `yaml:"enabled"`
 				Platform                 string `yaml:"platform"`
@@ -165,9 +170,19 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 		host = "127.0.0.1"
 	}
 	var v2ScopeNames, v2PriorityAutomationScopes, v2IdleProbeScopes, v2ModelSyncScopes []string
+	automaticDisabledPlatforms := make(map[string]struct{})
+	for _, platform := range raw.Operations.UpstreamSchedulingV2.ModelSyncPolicy.AutomaticDisabledPlatforms {
+		normalized := strings.ToLower(strings.TrimSpace(platform))
+		if normalized == "" {
+			return Config{}, errors.New("operations.upstreamSchedulingV2.modelSyncPolicy.automaticDisabledPlatforms contains an empty platform")
+		}
+		automaticDisabledPlatforms[normalized] = struct{}{}
+	}
 	v2IdleProbeIntervals := make(map[string]int)
+	v2ScopePlatforms := make(map[string]string)
 	for name, scope := range raw.Operations.UpstreamSchedulingV2.Scopes {
 		v2ScopeNames = append(v2ScopeNames, name)
+		v2ScopePlatforms[name] = strings.ToLower(strings.TrimSpace(scope.Platform))
 		intervalSeconds := scope.IdleProbeIntervalSeconds
 		if intervalSeconds <= 0 {
 			intervalSeconds = raw.Sub2API.IdleProbe.IntervalSeconds
@@ -186,8 +201,13 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 			if scope.Features.IdleProbe && (scope.Platform == "openai" || scope.Platform == "anthropic" || scope.Platform == "grok" || scope.Platform == "deepseek") {
 				v2IdleProbeScopes = append(v2IdleProbeScopes, name)
 			}
-			if scope.Features.ModelSyncAutomation && (scope.Platform == "openai" || scope.Platform == "anthropic" || scope.Platform == "grok") {
-				v2ModelSyncScopes = append(v2ModelSyncScopes, name)
+			if scope.Features.ModelSyncAutomation {
+				if _, disabled := automaticDisabledPlatforms[strings.ToLower(strings.TrimSpace(scope.Platform))]; disabled {
+					continue
+				}
+				if scope.Platform == "openai" || scope.Platform == "anthropic" || scope.Platform == "grok" {
+					v2ModelSyncScopes = append(v2ModelSyncScopes, name)
+				}
 			}
 		}
 	}
@@ -195,6 +215,11 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 	sort.Strings(v2IdleProbeScopes)
 	sort.Strings(v2ModelSyncScopes)
 	sort.Strings(v2ScopeNames)
+	disabledPlatforms := make([]string, 0, len(automaticDisabledPlatforms))
+	for platform := range automaticDisabledPlatforms {
+		disabledPlatforms = append(disabledPlatforms, platform)
+	}
+	sort.Strings(disabledPlatforms)
 	return Config{
 		Address: address, Namespace: raw.Temporal.Namespace, TaskQueue: target.TemporalTaskQueue,
 		ScoreScheduleWorkflowID: target.ScoreScheduleWorkflowID,
@@ -202,21 +227,23 @@ func LoadConfig(args []string, get func(string) string) (Config, error) {
 		HealthHost: target.WorkerHealthHost, HealthPort: target.WorkerHealthPort,
 		RefreshIntervalMinutes: raw.Monitor.RefreshIntervalMinutes, AutomaticRefreshEnabled: raw.Monitor.AutomaticRefresh.Enabled,
 		ActivityTimeout: raw.Temporal.ActivityTimeout, WorkflowExecutionTimeout: raw.Temporal.WorkflowExecutionTimeout,
-		SubmissionTimeout:           time.Duration(raw.Temporal.SubmissionTimeoutMS) * time.Millisecond,
-		MaximumAttempts:             raw.Temporal.Retry.MaximumAttempts,
-		QuotaIntervalSeconds:        raw.Operations.UpstreamManagement.QuotaSampleIntervalSeconds,
-		QuotaTimeoutSeconds:         raw.Operations.UpstreamManagement.QuotaSampleTimeoutSeconds,
-		V2AutomationIntervalSeconds: raw.Operations.UpstreamSchedulingV2.Automation.IntervalSeconds,
-		V2AutomationRecentCallLimit: raw.Operations.UpstreamSchedulingV2.Automation.RecentCallLimit,
-		V2ModelSyncBatchSize:        raw.Operations.UpstreamSchedulingV2.ModelSync.BatchSize,
-		V2ModelSyncIntervalSeconds:  raw.Operations.UpstreamSchedulingV2.ModelSync.IntervalSeconds,
-		V2PriorityAutomationScopes:  v2PriorityAutomationScopes,
-		V2IdleProbeScopes:           v2IdleProbeScopes,
-		V2IdleProbeIntervals:        v2IdleProbeIntervals,
-		V2ScopeNames:                v2ScopeNames,
-		V2ModelSyncScopes:           v2ModelSyncScopes,
-		IdleProbeIntervalSeconds:    raw.Sub2API.IdleProbe.IntervalSeconds,
-		IdleProbeTimeoutSeconds:     raw.Sub2API.IdleProbe.RoundTimeoutSeconds,
-		BugTeamCostMonitorEnabled:   raw.BugTeam.Monitor.Enabled, BugTeamCostIntervalSeconds: raw.BugTeam.Monitor.SampleIntervalSeconds,
+		SubmissionTimeout:            time.Duration(raw.Temporal.SubmissionTimeoutMS) * time.Millisecond,
+		MaximumAttempts:              raw.Temporal.Retry.MaximumAttempts,
+		QuotaIntervalSeconds:         raw.Operations.UpstreamManagement.QuotaSampleIntervalSeconds,
+		QuotaTimeoutSeconds:          raw.Operations.UpstreamManagement.QuotaSampleTimeoutSeconds,
+		V2AutomationIntervalSeconds:  raw.Operations.UpstreamSchedulingV2.Automation.IntervalSeconds,
+		V2AutomationRecentCallLimit:  raw.Operations.UpstreamSchedulingV2.Automation.RecentCallLimit,
+		V2ModelSyncBatchSize:         raw.Operations.UpstreamSchedulingV2.ModelSync.BatchSize,
+		V2ModelSyncIntervalSeconds:   raw.Operations.UpstreamSchedulingV2.ModelSync.IntervalSeconds,
+		V2PriorityAutomationScopes:   v2PriorityAutomationScopes,
+		V2IdleProbeScopes:            v2IdleProbeScopes,
+		V2IdleProbeIntervals:         v2IdleProbeIntervals,
+		V2ScopePlatforms:             v2ScopePlatforms,
+		V2ScopeNames:                 v2ScopeNames,
+		V2ModelSyncScopes:            v2ModelSyncScopes,
+		V2AutomaticDisabledPlatforms: disabledPlatforms,
+		IdleProbeIntervalSeconds:     raw.Sub2API.IdleProbe.IntervalSeconds,
+		IdleProbeTimeoutSeconds:      raw.Sub2API.IdleProbe.RoundTimeoutSeconds,
+		BugTeamCostMonitorEnabled:    raw.BugTeam.Monitor.Enabled, BugTeamCostIntervalSeconds: raw.BugTeam.Monitor.SampleIntervalSeconds,
 	}, nil
 }

@@ -121,8 +121,11 @@
 
 - DeepSeek、OpenCode 和 CommandCode 的 `modelSyncAutomation` 必须保持关闭。
   - 作用域平台命中 `automaticDisabledPlatforms` 且自动开关为真时，`config validate` 直接失败。
-  - worker 的 Temporal 计划创建、自动轮次和只读 plan 再做一次防御性判断；即使绕过配置校验，
+  - TypeScript worker 和 L1 实际使用的 Go worker 都从同一 YAML 读取禁用平台清单。
+  - 两者在 Temporal 计划创建、自动轮次和只读 plan 再做一次防御性判断；即使绕过配置校验，
     也不得启动或保留自动同步。
+  - Go worker 的启动和周期计划巡检会终止禁用平台的旧 `model-sync` 工作流；
+    重建 L1 后必须用 Temporal 计划状态确认旧 DeepSeek、OpenCode 计划不再运行。
   - 缺少 `modelSyncPolicy` 时只允许自动同步全部关闭的旧配置；任作用域开启自动同步即失败。
   - CommandCode 当前没有作用域时，不为关闭自动同步而新增作用域；未来新增作用域自动受同一校验约束。
 - 禁止自动同步不等于禁止手动同步。

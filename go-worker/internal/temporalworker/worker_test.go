@@ -29,12 +29,14 @@ operations:
   upstreamSchedulingV2:
     enabled: true
     automation: { intervalSeconds: 120, recentCallLimit: 1000 }
+    modelSyncPolicy:
+      automaticDisabledPlatforms: [ deepseek, opencode_go, command_code ]
     scopes:
       codex: { enabled: true, platform: openai, features: { priorityAutomation: true, idleProbe: true } }
       claude: { enabled: true, platform: anthropic, idleProbeIntervalSeconds: 300, features: { priorityAutomation: true, idleProbe: true } }
       grok: { enabled: true, platform: grok, features: { priorityAutomation: true, idleProbe: true } }
-      deepseek: { enabled: true, platform: deepseek, features: { priorityAutomation: true, idleProbe: true } }
-      opencode: { enabled: true, platform: opencode_go, features: { priorityAutomation: true, idleProbe: true } }
+      deepseek: { enabled: true, platform: deepseek, features: { priorityAutomation: true, idleProbe: true, modelSyncAutomation: true } }
+      opencode: { enabled: true, platform: opencode_go, features: { priorityAutomation: true, idleProbe: true, modelSyncAutomation: true } }
   upstreamManagement: { quotaSampleIntervalSeconds: 300, quotaSampleTimeoutSeconds: 240 }
 temporal:
   addressEnv: TEMPORAL_ADDRESS
@@ -74,6 +76,54 @@ runtime:
 	}
 	if cfg.V2IdleProbeIntervals["codex"] != 60 || cfg.V2IdleProbeIntervals["claude"] != 300 || cfg.V2IdleProbeIntervals["grok"] != 60 {
 		t.Fatalf("unexpected scoped idle probe intervals: %#v", cfg.V2IdleProbeIntervals)
+	}
+	if len(cfg.V2ModelSyncScopes) != 0 {
+		t.Fatalf("expected disabled platforms to produce no automatic model sync scopes, got %#v", cfg.V2ModelSyncScopes)
+	}
+	if strings.Join(cfg.V2AutomaticDisabledPlatforms, ",") != "command_code,deepseek,opencode_go" {
+		t.Fatalf("expected YAML-owned disabled platforms, got %#v", cfg.V2AutomaticDisabledPlatforms)
+	}
+}
+
+func TestModelSyncAutomationAllowedOnlyForUnlistedPlatforms(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "api2business.yaml")
+	data := `
+monitor: { refreshIntervalMinutes: 5, automaticRefresh: { enabled: false } }
+sub2api: { idleProbe: { intervalSeconds: 60, roundTimeoutSeconds: 50 } }
+operations:
+  upstreamSchedulingV2:
+    enabled: true
+    automation: { intervalSeconds: 120, recentCallLimit: 1000 }
+    modelSync: { batchSize: 10, intervalSeconds: 600 }
+    modelSyncPolicy: { automaticDisabledPlatforms: [ deepseek, opencode_go, command_code ] }
+    scopes:
+      codex: { enabled: true, platform: openai, features: { modelSyncAutomation: true } }
+      deepseek: { enabled: true, platform: deepseek, features: { modelSyncAutomation: true } }
+  upstreamManagement: { quotaSampleIntervalSeconds: 300, quotaSampleTimeoutSeconds: 240 }
+temporal: { addressEnv: TEMPORAL_ADDRESS, namespace: unidesk, submissionTimeoutMs: 10000, workflowExecutionTimeout: 12m, activityStartToCloseTimeout: 10m, retry: { maximumAttempts: 2 } }
+runtime: { serverTargets: { native: { listenHost: 127.0.0.1, listenPort: 8080, workerHealthHost: 127.0.0.1, workerHealthPort: 8081, temporalTaskQueue: api2business-native, scoreScheduleWorkflowId: score, adminTokenEnv: API_TOKEN } } }
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig([]string{"--config", path, "--runtime", "native"}, func(key string) string {
+		return map[string]string{"TEMPORAL_ADDRESS": "127.0.0.1:7233", "API_TOKEN": "test-token"}[key]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(cfg.V2ModelSyncScopes, ",") != "codex" {
+		t.Fatalf("expected only Codex model sync, got %#v", cfg.V2ModelSyncScopes)
+	}
+	if scope := prohibitedModelSyncScope(OperationRequest{Command: map[string]any{
+		"kind": "upstream.model-sync.v2.run", "scope": "deepseek", "platform": "deepseek",
+	}}, cfg); scope != "deepseek" {
+		t.Fatalf("expected deepseek model sync to be prohibited, got %q", scope)
+	}
+	if scope := prohibitedModelSyncScope(OperationRequest{Command: map[string]any{
+		"kind": "upstream.model-sync.v2.run", "scope": "codex", "platform": "openai",
+	}}, cfg); scope != "" {
+		t.Fatalf("expected OpenAI model sync to remain allowed, got %q", scope)
 	}
 }
 

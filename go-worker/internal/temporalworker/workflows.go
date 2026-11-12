@@ -23,6 +23,7 @@ type ScheduleInput struct {
 	ActivityStartToCloseTimeout string `json:"activityStartToCloseTimeout"`
 	MaximumAttempts             int32  `json:"maximumAttempts"`
 	Scope                       string `json:"scope,omitempty"`
+	Platform                    string `json:"platform,omitempty"`
 	RecentCallLimit             int    `json:"recentCallLimit,omitempty"`
 }
 type ApiKeyCutoffWorkflowResult struct {
@@ -275,7 +276,7 @@ func UpstreamSchedulingV2ModelSyncScheduleWorkflow(ctx workflow.Context, input S
 	for iteration := 0; iteration < 5000; iteration++ {
 		request := OperationRequest{
 			OperationID: fmt.Sprintf("%s:model-sync-v2:%s:%d", workflow.GetInfo(ctx).WorkflowExecution.RunID, input.Scope, iteration),
-			Command:     map[string]any{"kind": "upstream.model-sync.v2.run", "scope": input.Scope},
+			Command:     map[string]any{"kind": "upstream.model-sync.v2.run", "scope": input.Scope, "platform": input.Platform},
 		}
 		_ = workflow.ExecuteActivity(ctx, "executeOperation", request).Get(ctx, nil)
 		if err := workflow.Sleep(ctx, time.Duration(intervalMS)*time.Millisecond); err != nil {
