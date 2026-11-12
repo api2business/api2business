@@ -93,6 +93,21 @@ test('trend threshold from owning YAML produces more than three actionable savin
   expect(data.budget.policy).toContain('未配置每日预算');
 });
 
+test('partial days and missing rate evidence still produce a bounded verdict',()=>{
+  const baselineDays=days.slice(-14,-7).map(day=>cost(day.day,1,2,'gpt-probe',{records:1,historical_records:1,
+    historical_cost_cny:1,first_at:`${day.day}T01:00:00.000Z`}));
+  const budgeted={...config,observability:{...settings,probeCostDailyBudgetCny:5}} as AppConfig;
+  const data=probeCostReport({days,accounts,groups,probeCosts:[...baselineDays,
+    cost('2026-11-13',1,2,'gpt-probe',{records:6,historical_records:3,historical_cost_cny:7,rate_fallback_records:3,
+      fallback_cost_usd:0,first_at:'2026-11-13T01:00:00.000Z'}),
+    cost('2026-11-14',1,2,'gpt-probe',{records:1,historical_records:1,historical_cost_cny:0.2}),
+  ]},[],budgeted,{days:7,asOf:'2026-11-14T04:00:00.000Z',timezone:'Asia/Shanghai'});
+  expect(data.days.at(-1)).toMatchObject({day:'2026-11-14',dayComplete:false});
+  expect(data.budget).toMatchObject({evaluationDay:'2026-11-13',evaluationCostCny:null,
+    evaluationKnownCostCny:7,evaluationEstimatedCostCny:14,evaluationBasis:'estimated',overBudget:true,status:'exceeded'});
+  expect(data.budget.recommendations.length).toBeGreaterThanOrEqual(3);
+});
+
 test('configured budget is evaluated without inventing a threshold',()=>{
   const budgeted={...config,observability:{...settings,probeCostDailyBudgetCny:5}} as AppConfig;
   const data=probeCostReport({days,accounts,groups,probeCosts:[

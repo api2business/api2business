@@ -285,21 +285,32 @@ export function probeCostReport(facts: Row, cache: Row[], config: AppConfig, opt
     byUpstream: dimension(selectedRows, base => String(base.upstreamKey), base => String(base.upstreamLabel), PROBE_COST_TOP_N, totalKnownCost),
   };
 
-  const evaluation = dayReports.at(-1) ?? null;
+  // Judge the latest finished day. Today's bucket is partial, so comparing it with a
+  // full-day budget would understate the cost; the partial day stays visible in days[].
+  const evaluation = [...dayReports].reverse().find(day => day.dayComplete && day.requests > 0)
+    ?? dayReports.at(-1) ?? null;
   const dailyBudgetCny = config.observability?.probeCostDailyBudgetCny ?? null;
   const trendFactor = config.observability?.probeCostTrendFactor ?? null;
   const evaluationCostCny = evaluation?.costCny ?? null;
+  const evaluationKnownCny = evaluation?.knownCostCny ?? null;
+  const evaluationCoverage = evaluation?.coveragePercent ?? null;
+  // Known cost is a hard lower bound; scaling by coverage gives a conservative upper
+  // estimate. Engage a verdict only when that bound settles it, never by inventing cost.
+  const evaluationEstimatedCny = evaluationKnownCny !== null && evaluationCoverage !== null && evaluationCoverage > 0
+    ? round(evaluationKnownCny / evaluationCoverage * 100) : null;
+  const evaluationBasisCny = evaluationCostCny ?? evaluationEstimatedCny ?? evaluationKnownCny;
   const baselineMedianCny = summary.baseline7dMedianCny;
   const trendThresholdCny = baselineMedianCny !== null && trendFactor !== null ? round(baselineMedianCny * trendFactor) : null;
-  const overBudget = dailyBudgetCny === null || evaluationCostCny === null ? null : evaluationCostCny > dailyBudgetCny;
-  const trendExceeded = trendThresholdCny === null || evaluationCostCny === null ? null : evaluationCostCny > trendThresholdCny;
+  const exceeds = (threshold: number | null) => threshold === null || evaluationKnownCny === null ? null
+    : evaluationKnownCny > threshold ? true
+      : evaluationEstimatedCny !== null && evaluationEstimatedCny <= threshold ? false : null;
+  const overBudget = exceeds(dailyBudgetCny);
+  const trendExceeded = exceeds(trendThresholdCny);
   let status: "exceeded" | "within" | "insufficient_data" = "insufficient_data";
-  if (evaluationCostCny !== null) {
-    if (overBudget === true || trendExceeded === true) status = "exceeded";
-    else if ((overBudget === false || dailyBudgetCny === null)
-      && (trendExceeded === false || trendThresholdCny === null)
-      && evaluation && evaluation.missingRecords === 0) status = "within";
-  }
+  if (overBudget === true || trendExceeded === true) status = "exceeded";
+  else if (evaluation !== null && (dailyBudgetCny !== null || trendThresholdCny !== null)
+    && (overBudget === false || dailyBudgetCny === null)
+    && (trendExceeded === false || trendThresholdCny === null)) status = "within";
   const recommendations = status !== "exceeded" ? [] : [
     { code:"reduce-frequency", title:"降低探活频率", action:"将非关键账号的轮次或扫描频率下调 20%，优先保留刚失败和刚切号账号。", expectedSavingPercent:20 },
     { code:"improve-cache", title:"提高探活缓存命中", action:"复用探活 Prompt 前缀并排查重复探活，减少每轮重复的输入 token。", expectedSavingPercent:15 },
@@ -307,7 +318,7 @@ export function probeCostReport(facts: Row, cache: Row[], config: AppConfig, opt
     { code:"cheaper-route", title:"改用更便宜模型或上游", action:"按 Top 模型与上游分布，把非关键探活切到低成本模型或更低单价上游。", expectedSavingPercent:20 },
     { code:"retry-control", title:"治理失败重试与重复请求", action:"核对超时后的重复探活和失败重试，避免同一账号同轮重复计费。", expectedSavingPercent:10 },
     { code:"isolation-audit", title:"核对探活账号分组隔离", action:"确认探活 Key、用户和分组均隔离，避免真实用户流量混入而低估或高估成本。", expectedSavingPercent:0 },
-  ].map(item => ({ ...item, estimatedSavingCny: evaluationCostCny === null ? null : round(evaluationCostCny * item.expectedSavingPercent / 100) }));
+  ].map(item => ({ ...item, estimatedSavingCny: evaluationBasisCny === null ? null : round(evaluationBasisCny * item.expectedSavingPercent / 100) }));
 
   return {
     ok: true,
@@ -329,6 +340,10 @@ export function probeCostReport(facts: Row, cache: Row[], config: AppConfig, opt
       evaluationDay: evaluation?.day ?? null,
       evaluationDayComplete: evaluation?.dayComplete ?? null,
       evaluationCostCny,
+      evaluationKnownCostCny: evaluationKnownCny,
+      evaluationEstimatedCostCny: evaluationEstimatedCny,
+      evaluationCoveragePercent: evaluationCoverage,
+      evaluationBasis: evaluationCostCny !== null ? "exact" : evaluationEstimatedCny !== null ? "estimated" : "known_only",
       baseline7dMedianCny: baselineMedianCny,
       baseline7dDays: summary.baseline7dDays,
       trendThresholdCny,
