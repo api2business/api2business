@@ -142,12 +142,7 @@ export class Sub2ApiRuntimeService {
     for (const accountId of ids) {
       const before = await this.client.getAccount(accountId, timeoutMs);
       const beforeCredentials = record(before?.credentials) ?? {};
-      const beforeStableCredentials = { ...beforeCredentials };
-      delete beforeStableCredentials.model_mapping;
       const beforeMapping = record(beforeCredentials.model_mapping) ?? {};
-      const beforeStableAccount = { ...(before ?? {}) };
-      delete beforeStableAccount.credentials;
-      delete beforeStableAccount.updated_at;
       const result = await this.client.mutate<Record<string, unknown>>(
         "POST", `/admin/accounts/${accountId}/models/sync-upstream`, undefined, undefined, timeoutMs,
       );
@@ -162,6 +157,17 @@ export class Sub2ApiRuntimeService {
       }
       const platform = typeof before?.platform === "string" ? before.platform : "";
       const mapping = normalizeModelMapping(models, platform, modelSyncPolicy);
+
+      // Model discovery also refreshes upstream metadata such as extra.upstream_model_metadata.
+      // Use the post-discovery account as the mutation baseline so only the following bulk
+      // mapping merge is checked for unrelated field changes.
+      const discoveryBaseline = await this.client.getAccount(accountId, timeoutMs);
+      const discoveryCredentials = record(discoveryBaseline?.credentials) ?? {};
+      const discoveryStableCredentials = { ...discoveryCredentials };
+      delete discoveryStableCredentials.model_mapping;
+      const discoveryStableAccount = { ...(discoveryBaseline ?? {}) };
+      delete discoveryStableAccount.credentials;
+      delete discoveryStableAccount.updated_at;
 
       // The native single-account PUT treats credentials as a partial merge only
       // for sensitive keys. Non-sensitive keys such as base_url would be dropped.
@@ -189,10 +195,10 @@ export class Sub2ApiRuntimeService {
       const afterStableAccount = { ...(after ?? {}) };
       delete afterStableAccount.credentials;
       delete afterStableAccount.updated_at;
-      if (canonicalJson(beforeStableAccount) !== canonicalJson(afterStableAccount)) {
+      if (canonicalJson(discoveryStableAccount) !== canonicalJson(afterStableAccount)) {
         throw new Error(`upstream model mapping update changed non-mapping account fields for account ${accountId}`);
       }
-      if (canonicalJson(beforeStableCredentials) !== canonicalJson(afterStableCredentials)) {
+      if (canonicalJson(discoveryStableCredentials) !== canonicalJson(afterStableCredentials)) {
         throw new Error(`upstream model mapping update changed non-mapping credentials for account ${accountId}`);
       }
       const persistedMapping = record(afterCredentials.model_mapping) ?? {};

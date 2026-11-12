@@ -110,7 +110,7 @@ test("rejects model sync when a non-mapping account field changes", async () => 
       return {
         id: 1621,
         platform: "deepseek",
-        priority: reads === 1 ? 100 : 99,
+        priority: reads === 3 ? 99 : 100,
         credentials: { base_url: "https://deepseek.example", model_mapping: mapping },
       };
     },
@@ -118,6 +118,31 @@ test("rejects model sync when a non-mapping account field changes", async () => 
 
   await expect(new Sub2ApiRuntimeService(client).syncUpstreamModels([1621], 120000, deepSeekPolicy))
     .rejects.toThrow("changed non-mapping account fields");
+});
+
+test("accepts upstream metadata refreshed by model discovery without relaxing the mapping-write check", async () => {
+  let mapping: Record<string, string> = {};
+  let reads = 0;
+  const client = {
+    mutate: async (_method: string, path: string, body?: Record<string, unknown>) => {
+      if (path.endsWith("/models/sync-upstream")) return { models: ["deepseek-v4.1-flash"] };
+      mapping = ((body?.credentials as Record<string, unknown>).model_mapping ?? {}) as Record<string, string>;
+      return { success: 1, failed: 0, success_ids: [1623] };
+    },
+    getAccount: async () => {
+      reads += 1;
+      return {
+        id: 1623,
+        platform: "deepseek",
+        priority: 100,
+        extra: reads === 1 ? { upstream_model_metadata: { synced_at: "before" } } : { upstream_model_metadata: { synced_at: "after" } },
+        credentials: { base_url: "https://deepseek.example", model_mapping: mapping },
+      };
+    },
+  } as unknown as Sub2ApiClient;
+  const output = await new Sub2ApiRuntimeService(client).syncUpstreamModels([1623], 120000, deepSeekPolicy);
+  expect(output).toEqual(expect.objectContaining({ ok: true, persisted: true }));
+  expect(reads).toBe(3);
 });
 
 test("persists temporary aliases pointing at the canonical upstream value", async () => {
