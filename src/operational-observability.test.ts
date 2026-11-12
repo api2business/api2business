@@ -7,7 +7,7 @@ import { observabilitySql } from './observability-sql';
 import type { AppConfig } from './config';
 import type { AdminHttpClient } from './admin-http-client';
 import { dailyWalletCosts } from './observability-costs';
-const settings={sub2apiSuccessPercent:95,sub2apiTtftP95Ms:30000,api2businessNon5xxPercent:99.9,api2businessLatencyP95Ms:3000,walletFreshnessSeconds:3600,retentionDays:30};
+const settings={sub2apiSuccessPercent:95,sub2apiTtftP95Ms:30000,api2businessNon5xxPercent:99.9,api2businessLatencyP95Ms:3000,walletFreshnessSeconds:3600,retentionDays:30,probeCostDailyBudgetCny:null,probeCostTrendFactor:1.5};
 const config={observability:settings,sub2api:{newApiCredentials:[{baseUrl:'https://alias.example',walletKey:'https://wallet.example'}]}} as AppConfig;
 const at='2026-10-07T04:00:00.000Z';
 const account=(id:number,url='https://wallet.example')=>({id,base_url:url,active:true,type:'apikey',platform:'openai'});

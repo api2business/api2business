@@ -8,6 +8,7 @@ export const observabilityHelp={ok:true,commands:[
   'observability configure --file settings.json [--confirm] (合并所给字段，默认预览；--confirm 写入后重启 API)',
   'observability report [--start ISO --end ISO] --over-api <absolute-http(s)-URL> [--include-records] (default: last 2 hours)',
   'observability costs [--start ISO --end ISO] --over-api <absolute-http(s)-URL> [--include-records] (默认过去七天逐日实际成本、共享钱包余额及缺失记录)',
+  'observability probe-costs [--days 1..90] [--end ISO] --over-api <absolute-http(s)-URL> [--json] (默认七天；按配置时区统计探活额度、成本覆盖和分布)',
   'observability verify --over-api <absolute-http(s)-URL> (read-only SQL fixtures, no business records)',
   'observability get --id UUID --over-api <absolute-http(s)-URL> [--include-records] (frozen report)',
   'observability check [--rounds 3] --over-api <absolute-http(s)-URL> (read-only quota/recharge/broker sampling)',

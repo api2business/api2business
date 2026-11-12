@@ -54,6 +54,7 @@ interface Parsed {
   tail: number | null;
   top: number | null;
   calls: number | null;
+  days: number | null;
   account: string | null;
   group: string | null;
   start: string | null;
@@ -187,7 +188,7 @@ export function parseArgs(args: string[]): Parsed {
   }
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required; run from the Api2Business repository root (where config/api2business.yaml exists) or pass --config <owning-YAML>");
-  const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--click-selector", "--selector", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
+  const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--days", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--click-selector", "--selector", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
   const flags = new Set(["--confirm", "--include-records", "--json", "--cache-only", "--refresh", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -239,6 +240,7 @@ export function parseArgs(args: string[]): Parsed {
     tail: integer("--tail"),
     top: integer("--top"),
     calls: integer("--calls"),
+    days: integer("--days"),
     account: value(args, "--account"),
     accounts: value(args, "--accounts"),
     group: value(args, "--group"),
@@ -306,7 +308,7 @@ function help(): Record<string, unknown> {
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok|deepseek] [--accounts id,...] [--confirm] --over-api <absolute-http(s)-URL>",
       "reads status --over-api <absolute-http(s)-URL>",
       "reads runtime --group <positive-id> --platform openai|anthropic|grok|deepseek --over-api <absolute-http(s)-URL> (read-only live availability/concurrency/native version)",
-      "observability report|costs|get|check|configure --help",
+      "observability report|costs|probe-costs|get|check|configure --help",
       "errors aggregate [--start ISO --end ISO] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors diagnose [--start ISO --end ISO] [--request-id <request-id>] [--model <exact-id>] [--limit N] [--top N] [--account <id-or-name>] [--group <id-or-exact-name>]",
       "errors cooldowns [--since <ISO>] [--until <ISO>] [--limit N] [--account <id-or-name>] [--model <exact-id>]",
@@ -862,9 +864,14 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (parsed.command[1] === "verify") return await verifyObservationWindow(client, config);
     if (parsed.command[1] === "report") return compactObservation(await client.observationReport(parsed.start,parsed.end),parsed.includeRecords);
     if (parsed.command[1] === "costs") return compactObservation(await client.observationCosts(parsed.start,parsed.end),parsed.includeRecords);
+    if (parsed.command[1] === "probe-costs") {
+      const days = parsed.days ?? 7;
+      if (days < 1 || days > 90) throw new Error("observability probe-costs --days must be from 1 to 90");
+      return await client.observationProbeCosts(days,parsed.end);
+    }
     if (parsed.command[1] === "get" && parsed.id) return compactObservation(await client.observationGet(parsed.id),parsed.includeRecords);
     if (parsed.command[1] === "check") return await checkObservability(client,parsed.rounds ?? 3);
-    throw new Error("observability requires report, costs, get --id, check, verify or configure --file");
+    throw new Error("observability requires report, costs, probe-costs, get --id, check, verify or configure --file");
   }
   const [group, action] = parsed.command;
   if (group === "web" && action === "screenshot") return await runWebScreenshot(parsed, config, target);

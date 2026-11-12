@@ -6,6 +6,7 @@ import { configuredWalletKey, preferSharedWalletBalance, usageBalanceSourceAt } 
 import { readUpstreamValuationPolicy } from "./upstream-valuation";
 import { statSync } from "node:fs";
 import { dailyCostSql, dailyWalletCosts } from "./observability-costs";
+import { probeCostReport, probeCostSql } from "./observability-probe-costs";
 import { taskScopeSourceCoverage, sourceCoverageFacts, sourceCoverageSql } from "./observability-source-coverage";
 
 type Row = Record<string, any>;
@@ -168,6 +169,7 @@ export class OperationalObservability {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private pending = new Set<Promise<void>>();
   private beat: Promise<void> | null = null;
+  private probeCostCache = new Map<string, { expiresAt: number; payload: Row }>();
   constructor(private config: AppConfig, private store: OperationsStore, private reads: Sub2ApiReadClient) {}
   async start() {
     if (!this.config.observability) return;
@@ -229,6 +231,32 @@ export class OperationalObservability {
       valuesPrinted:false};
     await this.store.completeSnapshot(`observability:${id}`,"observability.costs.v1",payload,capturedAt);
     return payload;
+  }
+  async probeCosts(days = 7,end?: string | null,refresh = false) {
+    if (!this.config.observability) throw new Error("observability is not configured in owning YAML");
+    if (!Number.isInteger(days) || days < 1 || days > 90) throw new Error("days must be an integer from 1 to 90");
+    if (end && !/T.*(?:Z|[+-]\d{2}:\d{2})$/u.test(end)) throw new Error("invalid probe cost end: timezone is required");
+    const until = end ? Date.parse(end) : Date.now();
+    if (!Number.isFinite(until) || until > Date.now() + 1000) throw new Error("invalid probe cost end");
+    const asOf = new Date(until).toISOString();
+    const key = `${days}:${end ?? "live"}`;
+    const cached = this.probeCostCache.get(key);
+    if (!refresh && cached && cached.expiresAt > Date.now()) return cached.payload;
+    const queryStart = new Date(until - (days + 9) * 86_400_000).toISOString();
+    const rates = await this.store.observedCostRates(queryStart, asOf);
+    const query = await this.reads.query<Row>({ key:`observability.probe-costs:${days}:${asOf}`,
+      kind:"observability.probe-costs",sql:probeCostSql,
+      parameters:[queryStart,asOf,JSON.stringify(rates.map((rate:Row)=>({...rate,at:iso(rate.at)}))),this.config.monitor.timezone],
+      priority:"manual",cacheMode:"bypass-cache" });
+    const payload = probeCostReport(row(query.rows[0]?.facts),await this.store.getUpstreamUsageCache([]),this.config,{
+      days,asOf,timezone:this.config.monitor.timezone,
+    });
+    const sources = { queryStartedAt:query.queryStartedAt,queryCompletedAt:query.queryCompletedAt,
+      queueDurationMs:query.queueDurationMs,queryDurationMs:query.queryDurationMs };
+    const result = { ...payload, sources };
+    this.probeCostCache.set(key,{ expiresAt:Date.now()+60_000,payload:result });
+    if (this.probeCostCache.size > 24) this.probeCostCache.delete(this.probeCostCache.keys().next().value!);
+    return result;
   }
   async report(start?: string | null,end?: string | null) {
     if (!this.config.observability) throw new Error("observability is not configured in owning YAML");

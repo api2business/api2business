@@ -385,6 +385,11 @@ export class AdminHttpClient {
     if (end) query.set("end",end);
     return this.request(`/api/observability/costs?${query}`,{},60000);
   }
+  observationProbeCosts(days = 7,end?: string | null): Promise<Record<string,unknown>> {
+    const query=new URLSearchParams({days:String(days)});
+    if (end) query.set("end",end);
+    return this.request(`/api/observability/probe-costs?${query}`,{},60000);
+  }
   observationGet(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/observability/reports/${encodeURIComponent(id)}`);
   }

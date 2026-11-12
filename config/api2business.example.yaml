@@ -778,3 +778,5 @@ observability:
   api2businessLatencyP95Ms: 3000
   walletFreshnessSeconds: 3600
   retentionDays: 30
+  probeCostDailyBudgetCny: null
+  probeCostTrendFactor: 1.5
