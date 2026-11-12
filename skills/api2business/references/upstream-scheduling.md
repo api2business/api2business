@@ -303,6 +303,10 @@
     才能标记成功；HTTP 受理或工作流 `running` 不能单独完成验收。
   - 探活请求必须携带固定缓存前缀，避免短探活在 OpenAI 系上游持续记为
     `cache_read=0` 并触发供应商的零缓存保护。
+- 探活轮次启动时先以 monitor-user 的实时余额为准；余额耗尽自动补到 owning YAML
+  配置的 `idleProbe.isolation.userBalance`，再执行专用 Key 请求。不得仅依赖
+  `.state/idle-probe/probe-keys.json` 的 `funded` 历史标记，也不得把余额修复当作
+  业务成功；请求、普通用量、答案和轮次终态仍须全部成立。
     - 固定前缀由探活 system message 和确定性 history 组成，长度必须明显超过上游
       1024 token 的最小缓存长度；当前实现使用 256 个固定算术示例，约 3500 token。
     - 前缀必须是纯常量：时间戳、随机 nonce、账号 ID、分组、租户、请求 ID 和运行状态

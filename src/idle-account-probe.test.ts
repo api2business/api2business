@@ -290,6 +290,28 @@ test("idle probe keeps concurrent rounds independent across scheduling scopes", 
   expect(await first).toMatchObject({ skipped: false, attempted: 1, succeeded: 1 });
 });
 
+test("idle probe reconciles the monitor wallet before a round", async () => {
+  let balanceChecks = 0;
+  const isolation = {
+    ensureMonitorBalance: async () => {
+      balanceChecks += 1;
+      return { userId: 61, balanceUsd: 100, targetBalanceUsd: 100, replenished: true, observedAt: new Date().toISOString() };
+    },
+    get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),
+    probe: async () => ({ classification: "alive", ordinaryLogRecorded: true, qualityOk: true }),
+  };
+  const service = new IdleAccountProbeService(config, reads([{
+    account_id: 369, account_name: "upstream plus 0.05", platform: "openai", priority: 300,
+    account_status: "active", schedulable: true, group_ids: [51],
+  }]), {} as never, isolation as never);
+
+  expect(await service.run([369], 1)).toMatchObject({
+    ok: true,
+    monitorBalance: { userId: 61, balanceUsd: 100, replenished: true },
+  });
+  expect(balanceChecks).toBe(1);
+});
+
 test("idle probe does not claim an ordinary log when the gateway never responds", async () => {
   const isolation = {
     get: () => ({ accountId: 369, groupId: 51, keyCreated: false }),

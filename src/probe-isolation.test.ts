@@ -521,7 +521,7 @@ test("probe does not claim an account sample when the private group has no avail
   }
 });
 
-test("an exhausted monitor user is not automatically replenished", async () => {
+test("an exhausted monitor user is replenished to the configured target", async () => {
   const { state, service } = fixture();
   await service.ensure(42);
   const originalFetch = globalThis.fetch;
@@ -534,12 +534,33 @@ test("an exhausted monitor user is not automatically replenished", async () => {
     });
     expect(service.get(42)).toMatchObject({ accountId: 42, groupId: 51 });
     state.users[0]!.balance = 0;
-    await service.ensure(42);
-    expect(state.users[0]?.balance).toBe(0);
+    expect(await service.ensureMonitorBalance()).toMatchObject({
+      userId: 61,
+      balanceUsd: 100,
+      targetBalanceUsd: 100,
+      replenished: true,
+    });
+    expect(state.users[0]?.balance).toBe(100);
+    expect(state.userUpdates).toEqual([expect.objectContaining({ balance: 100 })]);
     expect(service.get(42)).toMatchObject({ accountId: 42, groupId: 51 });
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("a funded monitor user is not topped up again", async () => {
+  const { state, service } = fixture();
+  await service.ensure(42);
+  state.users[0]!.balance = 12.5;
+
+  expect(await service.ensureMonitorBalance()).toMatchObject({
+    userId: 61,
+    balanceUsd: 12.5,
+    targetBalanceUsd: 100,
+    replenished: false,
+  });
+  expect(state.users[0]?.balance).toBe(12.5);
+  expect(state.userUpdates).toEqual([]);
 });
 
 test("probe isolation persists generated credentials before a remote credential-stage failure", async () => {

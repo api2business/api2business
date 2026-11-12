@@ -1,7 +1,7 @@
 import type { AppConfig } from "./config";
 import type { Sub2ApiReadClient, Sub2ApiReadPriority } from "./sub2api-read-executor";
 import type { Sub2ApiRuntimeService } from "./sub2api-runtime-service";
-import type { ProbeIsolationScope, ProbeIsolationService } from "./probe-isolation";
+import type { ProbeIsolationScope, ProbeIsolationService, ProbeMonitorBalance } from "./probe-isolation";
 
 function boundedProbeError(error: unknown): string {
   return (error instanceof Error ? error.message : String(error))
@@ -505,7 +505,14 @@ export class IdleAccountProbeService {
     const unreadyAccountIds = new Set<number>();
     const modelUnavailableAccountIds = new Set<number>();
     let repairBudget = policy.provisionCandidateLimit;
+    let monitorBalance: ProbeMonitorBalance | null = null;
+    let monitorBalanceError: string | null = null;
     try {
+      try {
+        monitorBalance = await this.isolation!.ensureMonitorBalance?.() ?? null;
+      } catch (error) {
+        monitorBalanceError = error instanceof Error ? error.message : String(error);
+      }
       for (let round = 1; round <= rounds; round += 1) {
         if (Date.now() - startedAt >= policy.roundTimeoutSeconds * 1000) {
           results.push({ round, skipped: true, reason: "round-timeout" });
@@ -608,6 +615,8 @@ export class IdleAccountProbeService {
         repairFailures,
         unreadyAccountIds: [...unreadyAccountIds].sort((left, right) => left - right),
         modelUnavailableAccountIds: [...modelUnavailableAccountIds].sort((left, right) => left - right),
+        monitorBalance,
+        monitorBalanceError,
         probeConcurrency: "all-ready-candidates",
         requestJitterMs: { minimum: policy.requestJitterMinMs, maximum: policy.requestJitterMaxMs },
         durationMs: Date.now() - startedAt,

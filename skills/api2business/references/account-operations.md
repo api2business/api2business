@@ -61,6 +61,11 @@
   `submitted` 或 `running` 当作探活成功。
 - `accounts idle-probe coverage --scope <codex|claude|grok|deepseek> --window-minutes <N> --over-api <absolute-http(s)-URL>`
   只读核对指定作用域在窗口内的专用 Key 记录；省略作用域时使用 owning YAML 默认作用域。
+- 每个 `accounts idle-probe run` 轮次开始前必须回读共享 monitor-user 的实时余额；
+  余额 `<= 0` 时按 `idleProbe.isolation.userBalance` 补到目标值，并把回读结果投影为
+  `monitorBalance`。持久化 `funded=true` 只是历史写入证据，不能跳过实时余额检查。
+- 余额补充仍走 Sub2API 原生 admin API 并保留常规审计；补充后继续同一轮探活，
+  不能把“余额已修复”单独当作探活成功，仍须核对专用 Key 用量、HTTP、答案和终态。
 - 自动探活前必须先完成同作用域的手动探活，并核对 HTTP、`ordinaryLogRecorded` 和轮次
   终态；工作流 `running` 或 in-flight 跳过只表示并发保护，不是业务失败。
 - 探活请求进入普通用量和错误记录；覆盖必须按专用 Key 归因的账号级记录验收，不能用

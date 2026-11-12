@@ -353,6 +353,14 @@ export interface ProbeIsolationScope {
   bindingGroupIds?: number[];
 }
 
+export interface ProbeMonitorBalance {
+  userId: number;
+  balanceUsd: number;
+  targetBalanceUsd: number;
+  replenished: boolean;
+  observedAt: string;
+}
+
 interface ProbeIsolationRecordResult {
   binding: ProbeIsolationBinding;
   record: ProbeKeyRecord;
@@ -468,7 +476,7 @@ export class ProbeIsolationService {
     const listed = await this.admin.request<Paginated<Row>>(`/admin/users?search=${encodeURIComponent(MONITOR_EMAIL)}&page=1&page_size=100`, {}, true, this.remainingTimeout(deadline));
     let user = pageItems(listed).find((item) => String(item.email ?? "") === MONITOR_EMAIL);
     let userId = id(user?.id);
-    let funded = file.monitor?.funded === true;
+    let funded = false;
     if (userId === null) {
       user = await this.admin.mutate<Row>("POST", "/admin/users", {
         email: MONITOR_EMAIL,
@@ -484,6 +492,8 @@ export class ProbeIsolationService {
       userId = id(user.id);
       funded = true;
     } else {
+      const observedBalance = Number(user?.balance);
+      funded = Number.isFinite(observedBalance) && observedBalance > 0;
       const allowedGroups = [...new Set([...ids(user?.allowed_groups), groupId])];
       const needsUpdate = !ids(user?.allowed_groups).includes(groupId)
         || Number(user?.concurrency) !== this.config.sub2api.idleProbe.concurrency
@@ -505,6 +515,48 @@ export class ProbeIsolationService {
     file.monitor = monitor;
     this.writeFile(file);
     return monitor;
+  }
+
+  /**
+   * Reconcile the shared monitor wallet before a probe round. The persisted
+   * `funded` flag is evidence from an earlier write, not current authority:
+   * probe traffic continuously consumes this wallet, so a ready account record
+   * must not suppress a live balance check.
+   */
+  async ensureMonitorBalance(deadline?: number): Promise<ProbeMonitorBalance | null> {
+    if (!this.config.sub2api.idleProbe.isolation.enabled) return null;
+    return await this.inLock(async () => {
+      const file = this.readFile();
+      const monitor = file.monitor;
+      if (!monitor || !Number.isSafeInteger(monitor.userId) || monitor.userId <= 0) return null;
+      const targetBalanceUsd = this.config.sub2api.idleProbe.isolation.userBalance;
+      const observed = row(await this.admin.request<Row>(`/admin/users/${monitor.userId}`, {}, true, this.remainingTimeout(deadline)));
+      const before = Number(observed.balance);
+      if (!Number.isFinite(before)) throw new Error(`monitor-user ${monitor.userId} 余额回读无效`);
+      let balanceUsd = before;
+      let replenished = false;
+      if (before <= 0) {
+        const updated = row(await this.admin.mutate<Row>("PUT", `/admin/users/${monitor.userId}`, {
+          balance: targetBalanceUsd,
+        }, undefined, this.remainingTimeout(deadline)));
+        balanceUsd = Number(updated.balance);
+        if (!Number.isFinite(balanceUsd) || balanceUsd <= 0) {
+          throw new Error(`monitor-user ${monitor.userId} 余额补充后未恢复为正数`);
+        }
+        replenished = true;
+      }
+      if (file.monitor?.funded !== true) {
+        file.monitor = { ...monitor, funded: true };
+        this.writeFile(file);
+      }
+      return {
+        userId: monitor.userId,
+        balanceUsd,
+        targetBalanceUsd,
+        replenished,
+        observedAt: new Date().toISOString(),
+      };
+    });
   }
 
   private async ensureUserAndKey(accountId: number, groupId: number, stored: ProbeKeyRecord | undefined, file: ProbeKeyFile, deadline?: number): Promise<{ record: ProbeKeyRecord; keyCreated: boolean }> {
