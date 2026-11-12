@@ -231,7 +231,7 @@ export class OperationsStore {
         DROP CONSTRAINT IF EXISTS api2business_pool_quality_samples_platform_check;
       ALTER TABLE api2business_pool_quality_samples
         ADD CONSTRAINT api2business_pool_quality_samples_platform_check
-        CHECK (platform IN ('codex','claude','grok','deepseek'));
+        CHECK (platform IN ('codex','claude','grok','deepseek','opencode')) NOT VALID;
       ALTER TABLE api2business_pool_quality_samples
         DROP CONSTRAINT IF EXISTS api2business_pool_quality_samples_pkey;
       ALTER TABLE api2business_pool_quality_samples
