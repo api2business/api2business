@@ -478,7 +478,7 @@ operations:
         enabled: true
         platform: openai
         eligibleGroupIds: [ 2, 3 ]
-        idleProbeIntervalSeconds: 60
+        idleProbeIntervalSeconds: 90
         features:
           scoreRead: true
           planRead: true
@@ -504,7 +504,7 @@ operations:
         enabled: true
         platform: grok
         eligibleGroupIds: [ 62 ]
-        idleProbeIntervalSeconds: 60
+        idleProbeIntervalSeconds: 90
         features:
           scoreRead: true
           planRead: true
@@ -517,7 +517,7 @@ operations:
         enabled: true
         platform: deepseek
         eligibleGroupIds: [ 131 ]
-        idleProbeIntervalSeconds: 60
+        idleProbeIntervalSeconds: 90
         features:
           scoreRead: true
           planRead: true

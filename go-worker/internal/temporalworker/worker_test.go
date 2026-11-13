@@ -135,6 +135,20 @@ func TestReplacingScheduleOptionsTerminatesStaleCadence(t *testing.T) {
 	}
 }
 
+func TestCadenceScheduleOptionsReplaceOnlyOnStartup(t *testing.T) {
+	startup := cadenceScheduleOptions("idle-probe", "queue", true)
+	if startup.WorkflowIDConflictPolicy != enumspb.WORKFLOW_ID_CONFLICT_POLICY_TERMINATE_EXISTING {
+		t.Fatalf("startup must replace a stale cadence: %#v", startup)
+	}
+	watchdog := cadenceScheduleOptions("idle-probe", "queue", false)
+	if watchdog.WorkflowIDConflictPolicy != enumspb.WORKFLOW_ID_CONFLICT_POLICY_UNSPECIFIED {
+		t.Fatalf("watchdog must not terminate a healthy cadence: %#v", watchdog)
+	}
+	if watchdog.WorkflowIDReusePolicy != enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE {
+		t.Fatalf("watchdog must keep duplicate execution handling: %#v", watchdog)
+	}
+}
+
 func TestScopedAutomationIntervalHasSafeMinimum(t *testing.T) {
 	if got := scopedAutomationIntervalMilliseconds(1000); got != minimumScopedAutomationIntervalMilliseconds {
 		t.Fatalf("poll interval was not clamped: %d", got)

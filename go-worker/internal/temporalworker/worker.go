@@ -183,7 +183,14 @@ func retireReplacedSchedulingWorkflows(c client.Client, cfg Config) error {
 	return nil
 }
 
-func ensureSchedules(c client.Client, cfg Config, replaceQuota bool) error {
+func cadenceScheduleOptions(id, taskQueue string, replaceRunning bool) client.StartWorkflowOptions {
+	if replaceRunning {
+		return replacingScheduleOptions(id, taskQueue)
+	}
+	return scheduleOptions(id, taskQueue)
+}
+
+func ensureSchedules(c client.Client, cfg Config, replaceRunning bool) error {
 	base := cfg.ScoreScheduleWorkflowID
 	identities := configuredScheduleIdentities(cfg)
 	if cfg.AutomaticRefreshEnabled && cfg.RefreshIntervalMinutes > 0 {
@@ -207,10 +214,7 @@ func ensureSchedules(c client.Client, cfg Config, replaceQuota bool) error {
 		// cannot leave the old timer alive indefinitely. The watchdog only
 		// restores a missing execution; replacing it every 30 seconds would
 		// cancel every in-flight sampling round.
-		quotaOptions := scheduleOptions(identities.Quota, cfg.TaskQueue)
-		if replaceQuota {
-			quotaOptions = replacingScheduleOptions(identities.Quota, cfg.TaskQueue)
-		}
+		quotaOptions := cadenceScheduleOptions(identities.Quota, cfg.TaskQueue, replaceRunning)
 		if err := startWorkflow(c, quotaOptions, "upstreamQuotaScheduleWorkflow", ScheduleInput{IntervalMS: cfg.QuotaIntervalSeconds * 1000, RoundTimeoutMS: cfg.QuotaTimeoutSeconds * 1000, ActivityStartToCloseTimeout: cfg.ActivityTimeout, MaximumAttempts: int32(cfg.MaximumAttempts)}); err != nil {
 			return err
 		}
@@ -234,9 +238,10 @@ func ensureSchedules(c client.Client, cfg Config, replaceQuota bool) error {
 			if configured, ok := cfg.V2IdleProbeIntervals[scope]; ok && configured > 0 {
 				intervalSeconds = configured
 			}
-			// Round timeout and interval are workflow inputs. Recreate the schedule on
-			// startup so configuration changes do not remain pinned to stale inputs.
-			if err := startWorkflow(c, replacingScheduleOptions(workflowID, cfg.TaskQueue), "upstreamSchedulingV2IdleProbeScheduleWorkflow", ScheduleInput{
+			// Round timeout and interval are workflow inputs. Startup replaces a
+			// running schedule so configuration changes do not remain pinned to
+			// stale inputs; the watchdog only restores a missing execution.
+			if err := startWorkflow(c, cadenceScheduleOptions(workflowID, cfg.TaskQueue, replaceRunning), "upstreamSchedulingV2IdleProbeScheduleWorkflow", ScheduleInput{
 				IntervalMS:                  intervalSeconds * 1000,
 				RoundTimeoutMS:              cfg.IdleProbeTimeoutSeconds * 1000,
 				ActivityStartToCloseTimeout: cfg.ActivityTimeout,

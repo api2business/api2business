@@ -29,6 +29,15 @@ test('probe and user cost predicates are inverse and stay separate',()=>{
   expect(dailyCostSql).toContain("AND p.id IS NULL AND LOWER(COALESCE(g.name,'')) NOT LIKE 'api2business-probe-%'");
 });
 
+test('wallet valuation prices accounts whose provider multiplier is unknown',()=>{
+  expect(probeCostSql).toContain('wallet_rate_cny');
+  expect(probeCostSql).toContain('COALESCE(rate.rate_cny,u.rate_multiplier*rate.wallet_rate_cny)');
+  expect(dailyCostSql).toContain('COALESCE(rate.rate_cny,u.rate_multiplier*rate.wallet_rate_cny)');
+  const data=report({probeCosts:[cost('2026-11-14',1,2,'gpt-probe',{historical_records:1,
+    historical_cost_cny:2,wallet_rate_records:1})]});
+  expect(data.summary.walletRateRecords).toBe(1);
+});
+
 test('probe costs resolve rates through bounded intervals instead of per-row rescans',()=>{
   expect(probeCostSql).toContain("rate_intervals AS MATERIALIZED");
   expect(probeCostSql).toContain("LEAD(at) OVER (PARTITION BY account_id ORDER BY at,rate_cny)");

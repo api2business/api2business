@@ -231,7 +231,7 @@ export class OperationsStore {
         DROP CONSTRAINT IF EXISTS api2business_pool_quality_samples_platform_check;
       ALTER TABLE api2business_pool_quality_samples
         ADD CONSTRAINT api2business_pool_quality_samples_platform_check
-        CHECK (platform IN ('codex','claude','grok','deepseek'));
+        CHECK (platform IN ('codex','claude','grok','deepseek','opencode')) NOT VALID;
       ALTER TABLE api2business_pool_quality_samples
         DROP CONSTRAINT IF EXISTS api2business_pool_quality_samples_pkey;
       ALTER TABLE api2business_pool_quality_samples
@@ -570,13 +570,43 @@ export class OperationsStore {
 
   async observedCostRates(start: string, end: string) {
     return await this.readQuery(() => this.sql`
-      WITH events AS MATERIALIZED (
+      WITH raw AS MATERIALIZED (
         SELECT s.sampled_at AS at, (i->>'accountId')::bigint AS account_id,
-          (i->>'costRateCnyPerApiUsd')::double precision AS rate_cny
+          CASE WHEN (i->>'costRateCnyPerApiUsd')::numeric>0
+            THEN (i->>'costRateCnyPerApiUsd')::double precision END AS rate_cny,
+          CASE WHEN s.cny_per_usd>0 THEN s.cny_per_usd::double precision END AS wallet_rate_cny
         FROM api2business_upstream_quota_samples s,
           LATERAL jsonb_array_elements(s.account_cost_inputs) i
-        WHERE s.sampled_at<${end} AND i->>'source'='detected'
-          AND (i->>'costRateCnyPerApiUsd')::numeric>0
+        WHERE s.sampled_at<${end} AND s.sampled_at>=${start}::timestamptz - interval '30 days'
+      ), anchored AS MATERIALIZED (
+        SELECT account_id,at,rate_cny,wallet_rate_cny FROM raw
+        UNION ALL
+        SELECT c.account_id,w.at,NULL::double precision,w.cny_per_usd::double precision
+        FROM api2business_upstream_usage_cache c
+        JOIN LATERAL (
+          SELECT s.sampled_at AS at,s.cny_per_usd FROM api2business_upstream_quota_samples s
+          WHERE s.wallet_key=COALESCE(c.result->>'walletKey','') AND s.cny_per_usd>0
+          ORDER BY s.sampled_at LIMIT 1
+        ) w ON true
+        WHERE NOT EXISTS (SELECT 1 FROM raw r WHERE r.account_id=c.account_id)
+      ), per_sample AS (
+        SELECT account_id,at,MAX(rate_cny) AS rate_cny,MAX(wallet_rate_cny) AS wallet_rate_cny
+        FROM anchored GROUP BY account_id,at
+      ), filled AS (
+        SELECT account_id,at,rate_cny,wallet_rate_cny,
+          COUNT(rate_cny) OVER w AS rate_group,COUNT(wallet_rate_cny) OVER w AS wallet_group
+        FROM per_sample WINDOW w AS (PARTITION BY account_id ORDER BY at)
+      ), carried AS (
+        SELECT account_id,at,
+          MAX(rate_cny) OVER (PARTITION BY account_id,rate_group) AS rate_cny,
+          MAX(wallet_rate_cny) OVER (PARTITION BY account_id,wallet_group) AS wallet_rate_cny
+        FROM filled
+      ), changes AS (
+        SELECT *,LAG(rate_cny) OVER w AS previous_rate,LAG(wallet_rate_cny) OVER w AS previous_wallet_rate
+        FROM carried WINDOW w AS (PARTITION BY account_id ORDER BY at)
+      ), events AS MATERIALIZED (
+        SELECT account_id,at,rate_cny,wallet_rate_cny FROM changes
+        WHERE previous_rate IS DISTINCT FROM rate_cny OR previous_wallet_rate IS DISTINCT FROM wallet_rate_cny
       ), anchor AS (
         SELECT DISTINCT ON (account_id) * FROM events WHERE at<${start}
         ORDER BY account_id,at DESC

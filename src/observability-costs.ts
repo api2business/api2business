@@ -15,9 +15,9 @@ export const dailyCostSql = `WITH ${observedRateEventsSql}, probe_keys AS (
   WHERE u.created_at >= $1::timestamptz AND u.created_at < $2::timestamptz
     AND p.id IS NULL AND LOWER(COALESCE(g.name,'')) NOT LIKE 'api2business-probe-%'
 ), cost_usage AS (
-  SELECT u.*,rate.rate_cny,rate.at AS rate_at FROM usage u
+  SELECT u.*,COALESCE(rate.rate_cny,u.rate_multiplier*rate.wallet_rate_cny) AS rate_cny,rate.at AS rate_at FROM usage u
   LEFT JOIN LATERAL (
-    SELECT r.rate_cny,r.at FROM rate_events r WHERE r.account_id=u.account_id AND r.at<=u.created_at
+    SELECT r.rate_cny,r.wallet_rate_cny,r.at FROM rate_events r WHERE r.account_id=u.account_id AND r.at<=u.created_at
     ORDER BY r.at DESC LIMIT 1
   ) rate ON true
 ), costs AS (

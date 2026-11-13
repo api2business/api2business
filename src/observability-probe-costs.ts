@@ -38,11 +38,12 @@ export const probeCostSql = `WITH ${observedRateEventsSql}, probe_keys AS (
   WHERE u.created_at >= $1::timestamptz AND u.created_at < $2::timestamptz
     AND (p.id IS NOT NULL OR LOWER(COALESCE(g.name,'')) LIKE 'api2business-probe-%')
 ), rate_intervals AS MATERIALIZED (
-  SELECT account_id,at,rate_cny,
+  SELECT account_id,at,rate_cny,wallet_rate_cny,
     LEAD(at) OVER (PARTITION BY account_id ORDER BY at,rate_cny) AS next_at
   FROM rate_events
 ), cost_usage AS (
-  SELECT u.*,rate.rate_cny,rate.at AS rate_at FROM usage u
+  SELECT u.*,rate.rate_cny AS provider_rate_cny,
+    COALESCE(rate.rate_cny,u.rate_multiplier*rate.wallet_rate_cny) AS rate_cny,rate.at AS rate_at FROM usage u
   LEFT JOIN rate_intervals rate ON rate.account_id=u.account_id
     AND rate.at<=u.created_at
     AND (rate.next_at IS NULL OR u.created_at<rate.next_at)
@@ -55,6 +56,9 @@ export const probeCostSql = `WITH ${observedRateEventsSql}, probe_keys AS (
       AND rate_multiplier IS NOT NULL AND rate_multiplier>0 AND rate_cny IS NULL)::int AS rate_fallback_records,
     COUNT(*) FILTER (WHERE actual_cost IS NOT NULL AND actual_cost>=0
       AND rate_multiplier IS NOT NULL AND rate_multiplier>0 AND rate_cny>0)::int AS historical_records,
+    COUNT(*) FILTER (WHERE actual_cost IS NOT NULL AND actual_cost>=0
+      AND rate_multiplier IS NOT NULL AND rate_multiplier>0 AND rate_cny>0
+      AND provider_rate_cny IS NULL)::int AS wallet_rate_records,
     SUM(actual_cost / NULLIF(rate_multiplier,0) * rate_cny)
       FILTER (WHERE actual_cost IS NOT NULL AND actual_cost>=0
         AND rate_multiplier IS NOT NULL AND rate_multiplier>0 AND rate_cny>0)::float8 AS historical_cost_cny,
@@ -93,6 +97,7 @@ interface CostResolution {
   missingRecords: number;
   knownCostCny: number;
   fallbackRecords: number;
+  walletRateRecords: number;
   missingReasons: Record<string, number>;
 }
 
@@ -100,7 +105,7 @@ interface DayBucket { day: string; startAt: string; endAt: string }
 
 function emptyMetrics() {
   return { requests:0,inputTokens:0,outputTokens:0,knownRecords:0,missingRecords:0,knownCostCny:0,
-    activeAccountIds:new Set<number>(),missingReasons:{} as Record<string,number> };
+    walletRateRecords:0,activeAccountIds:new Set<number>(),missingReasons:{} as Record<string,number> };
 }
 
 type Metrics = ReturnType<typeof emptyMetrics>;
@@ -117,6 +122,7 @@ function metricsRow(metrics: Metrics) {
     outputTokens: metrics.outputTokens,
     knownRecords: metrics.knownRecords,
     missingRecords: metrics.missingRecords,
+    walletRateRecords: metrics.walletRateRecords,
     knownCostCny: round(metrics.knownCostCny),
     costCny: records > 0 && metrics.missingRecords === 0 ? round(metrics.knownCostCny) : null,
     coveragePercent: percent(metrics.knownRecords, records),
@@ -152,6 +158,7 @@ function resolveCost(cost: Row, cacheRate: { value: number | null; observedAt: s
     missingRecords,
     knownCostCny: Number(cost.historical_cost_cny ?? 0) + fallbackCost,
     fallbackRecords,
+    walletRateRecords: Math.min(historical, Math.max(0, Number(cost.wallet_rate_records ?? 0))),
     missingReasons,
   };
 }
@@ -163,6 +170,7 @@ function addCost(target: Metrics, base: Row, resolution: CostResolution) {
   target.knownRecords += resolution.knownRecords;
   target.missingRecords += resolution.missingRecords;
   target.knownCostCny += resolution.knownCostCny;
+  target.walletRateRecords += resolution.walletRateRecords;
   target.activeAccountIds.add(Number(base.accountId));
   addReasons(target.missingReasons, resolution.missingReasons);
 }

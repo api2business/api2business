@@ -79,6 +79,10 @@ WITH target_accounts AS MATERIALIZED (
   SELECT account_id, SUM(cache_known_samples)::int AS cache_known_samples,
     SUM(cache_hit_samples)::int AS cache_hit_samples
   FROM cache_evidence GROUP BY account_id
+), platform_cache AS (
+  SELECT COALESCE(SUM(cache_known_samples), 0)::int AS platform_cache_known_samples,
+    COALESCE(SUM(cache_hit_samples), 0)::int AS platform_cache_hit_samples
+  FROM cache_evidence
 ), error_events AS (
   SELECT ta.account_id, o.created_at, o.error_message, o.error_phase,
     o.error_type, o.error_body, o.upstream_error_message, o.upstream_error_detail
@@ -138,13 +142,15 @@ SELECT ta.account_id, ta.account_name, ta.platform, ta.priority,
   ta.model_mapping_keys,
   COALESCE(sc.available_sample_count, 0)::int AS available_sample_count,
   COALESCE(cb.cache_known_samples, 0)::int AS cache_known_samples,
-  COALESCE(cb.cache_hit_samples, 0)::int AS cache_hit_samples
+  COALESCE(cb.cache_hit_samples, 0)::int AS cache_hit_samples,
+  pc.platform_cache_known_samples, pc.platform_cache_hit_samples
 FROM target_accounts ta
 LEFT JOIN sample_counts sc ON sc.account_id = ta.account_id
 LEFT JOIN recent_usage ru ON ru.account_id = ta.account_id
 LEFT JOIN recent_errors re ON re.account_id = ta.account_id
 LEFT JOIN recent_activity ra ON ra.account_id = ta.account_id
 LEFT JOIN cache_by_account cb ON cb.account_id = ta.account_id
+CROSS JOIN platform_cache pc
 WHERE $6::boolean OR COALESCE(sc.available_sample_count, 0) < 100
   OR ru.account_id IS NULL OR re.account_id IS NULL
 ORDER BY COALESCE(ra.latest_at, '-infinity'::timestamptz), ta.account_id
@@ -169,18 +175,28 @@ export interface IdleProbeCandidate {
   probeCacheMode?: MathProbeCacheMode;
   probeCacheKnownSamples?: number;
   probeCacheHitSamples?: number;
+  probeCachePlatformHitSamples?: number;
 }
 
-// A compact prefix is only ever a cost measure for accounts where the provider
-// demonstrably returned cache fields but every one of them was zero. Reaching the
-// sample floor keeps one bad hour from flipping the contract; any observed hit, or
-// unknown cache evidence, keeps the full cacheable prefix so hit rate cannot regress.
+// A compact prefix is a cost measure for accounts or platforms without observed
+// cache benefit. If the platform has any cache hit, only accounts with enough
+// explicit zero-hit samples are compacted; unknown account evidence keeps the
+// full prefix so an existing hit rate cannot regress.
 export const PROBE_COMPACT_CACHE_MIN_KNOWN_SAMPLES = 20;
 
-export function selectProbeCacheMode(knownSamples: number, hitSamples: number): MathProbeCacheMode {
+export function selectProbeCacheMode(
+  knownSamples: number,
+  hitSamples: number,
+  platformHitSamples: number,
+): MathProbeCacheMode {
   const known = Number.isFinite(knownSamples) ? Math.max(0, Math.trunc(knownSamples)) : 0;
   const hits = Number.isFinite(hitSamples) ? Math.max(0, Math.trunc(hitSamples)) : 0;
-  return known >= PROBE_COMPACT_CACHE_MIN_KNOWN_SAMPLES && hits === 0 ? "compact" : "full";
+  const platformHits = Number.isFinite(platformHitSamples)
+    ? Math.max(0, Math.trunc(platformHitSamples))
+    : 0;
+  if (hits > 0) return "full";
+  if (platformHits === 0) return "compact";
+  return known >= PROBE_COMPACT_CACHE_MIN_KNOWN_SAMPLES ? "compact" : "full";
 }
 
 const defaultProbeModels = ["gpt-6.1-sol", "gpt-5.6-terra", "gpt-5.6-sol"] as const;
@@ -364,9 +380,11 @@ export class IdleAccountProbeService {
       groupIds: numericIds(row.group_ids),
       probeCacheKnownSamples: Number(row.cache_known_samples ?? 0),
       probeCacheHitSamples: Number(row.cache_hit_samples ?? 0),
+      probeCachePlatformHitSamples: Number(row.platform_cache_hit_samples ?? 0),
       probeCacheMode: selectProbeCacheMode(
         Number(row.cache_known_samples ?? 0),
         Number(row.cache_hit_samples ?? 0),
+        Number(row.platform_cache_hit_samples ?? 0),
       ),
         probeModel: selectIdleProbeModel(
           row.model_mapping_keys,

@@ -316,7 +316,7 @@ function renderProbeCacheSummary(summary = {}) {
     const compact = Number(card.compactPrefixCount ?? 0)
     $(`#v2-probe-${prefix}-denom`).textContent = noRequests
       ? '本页无探活请求'
-      : `已知 ${number(known)} 条 · 分母 ${number(known)}${allUnknown ? ` · 全部未知 ${number(card.unknownCount)} 条` : ''}${compact > 0 ? ` · 紧凑前缀 ${number(compact)} 条（历史零命中）` : ''}`
+      : `已知 ${number(known)} 条 · 分母 ${number(known)}${allUnknown ? ` · 全部未知 ${number(card.unknownCount)} 条` : ''}${compact > 0 ? ` · 紧凑前缀 ${number(compact)} 条` : ''}`
     $(`#v2-probe-${prefix}-hit`).textContent = noRequests ? '—' : number(card.hitCount)
     $(`#v2-probe-${prefix}-miss`).textContent = noRequests ? '—' : number(card.missCount)
     $(`#v2-probe-${prefix}-unknown`).textContent = noRequests ? '—' : number(card.unknownCount)

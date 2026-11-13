@@ -3,14 +3,19 @@ import { terminalPolicyExistsSql, usageRequestMatchesSql } from "./request-termi
 
 // Keep only changes in the evidenced rate. Repeated quota samples are not new
 // billing epochs; scanning all of them for every usage row makes week-long reads slow.
+// `wallet_rate_cny` is the owning valuation for the account's wallet (CNY per API
+// USD).  It is request-independent, so a missing provider multiplier can still be
+// priced at the request-time sale multiplier without backfilling a current rate.
 export const observedRateEventsSql = `rate_samples AS (
-  SELECT DISTINCT account_id,at,rate_cny FROM jsonb_to_recordset($3::jsonb)
-    AS r(account_id bigint,at timestamptz,rate_cny double precision)
+  SELECT DISTINCT account_id,at,rate_cny,wallet_rate_cny FROM jsonb_to_recordset($3::jsonb)
+    AS r(account_id bigint,at timestamptz,rate_cny double precision,wallet_rate_cny double precision)
 ), rate_changes AS (
-  SELECT *,LAG(rate_cny) OVER (PARTITION BY account_id ORDER BY at,rate_cny) AS previous_rate
+  SELECT *,LAG(rate_cny) OVER (PARTITION BY account_id ORDER BY at,rate_cny,wallet_rate_cny) AS previous_rate,
+    LAG(wallet_rate_cny) OVER (PARTITION BY account_id ORDER BY at,rate_cny,wallet_rate_cny) AS previous_wallet_rate
   FROM rate_samples
 ), rate_events AS MATERIALIZED (
-  SELECT account_id,at,rate_cny FROM rate_changes WHERE previous_rate IS DISTINCT FROM rate_cny
+  SELECT account_id,at,rate_cny,wallet_rate_cny FROM rate_changes
+  WHERE previous_rate IS DISTINCT FROM rate_cny OR previous_wallet_rate IS DISTINCT FROM wallet_rate_cny
 )`;
 
 // Both event sources use the same half-open window. No recent-N truncation.
@@ -92,9 +97,9 @@ errors AS (
   SELECT f.* FROM failure f
   WHERE NOT EXISTS (SELECT 1 FROM task_scope_luna_requests l WHERE l.request_id=f.request_id)
 ), cost_usage AS (
-  SELECT u.*, rate.rate_cny,rate.at AS rate_at FROM usage u
+  SELECT u.*,COALESCE(rate.rate_cny,u.rate_multiplier*rate.wallet_rate_cny) AS rate_cny,rate.at AS rate_at FROM usage u
   LEFT JOIN LATERAL (
-    SELECT r.rate_cny,r.at FROM rate_events r WHERE r.account_id=u.account_id AND r.at<=u.created_at
+    SELECT r.rate_cny,r.wallet_rate_cny,r.at FROM rate_events r WHERE r.account_id=u.account_id AND r.at<=u.created_at
     ORDER BY r.at DESC LIMIT 1
   ) rate ON true
 ), cost AS (
