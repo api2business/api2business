@@ -979,6 +979,14 @@ export function createHandler(
           throw error;
         }
       }
+      if (request.method === "GET" && url.pathname === "/api/observability/consumption-stalls") {
+        if (!observability) return json({ok:false,error:"observability unavailable"},503);
+        try { return json(await observability.consumptionStalls(url.searchParams.get("start"),url.searchParams.get("end"))); }
+        catch (error) {
+          if (error instanceof Error && /invalid observation window|start and end must/u.test(error.message)) return json({ok:false,error:error.message},400);
+          throw error;
+        }
+      }
       if (request.method === "GET" && url.pathname === "/api/observability/report") {
         if (!observability) return json({ ok:false,error:"observability unavailable" },503);
         try { return json(await observability.report(url.searchParams.get("start"),url.searchParams.get("end"))); }

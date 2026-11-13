@@ -379,6 +379,12 @@ export class AdminHttpClient {
     if (end) query.set("end",end);
     return this.request(`/api/observability/report?${query}`,{},60000);
   }
+  observationConsumptionStalls(start?: string | null,end?: string | null): Promise<Record<string,unknown>> {
+    const query=new URLSearchParams();
+    if (start) query.set("start",start);
+    if (end) query.set("end",end);
+    return this.request(`/api/observability/consumption-stalls?${query}`,{},60000);
+  }
   observationCosts(start?: string | null,end?: string | null): Promise<Record<string,unknown>> {
     const query=new URLSearchParams();
     if (start) query.set("start",start);

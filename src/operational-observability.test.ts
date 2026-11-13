@@ -7,11 +7,20 @@ import { observabilitySql } from './observability-sql';
 import type { AppConfig } from './config';
 import type { AdminHttpClient } from './admin-http-client';
 import { dailyWalletCosts } from './observability-costs';
+import { consumptionStallWalletAccounts, parseConsumptionStallAccountFacts } from './consumption-stall';
 const settings={sub2apiSuccessPercent:95,sub2apiTtftP95Ms:30000,api2businessNon5xxPercent:99.9,api2businessLatencyP95Ms:3000,walletFreshnessSeconds:3600,retentionDays:30,probeCostDailyBudgetCny:null,probeCostTrendFactor:1.5};
 const config={observability:settings,sub2api:{newApiCredentials:[{baseUrl:'https://alias.example',walletKey:'https://wallet.example'}]}} as AppConfig;
 const at='2026-10-07T04:00:00.000Z';
 const account=(id:number,url='https://wallet.example')=>({id,base_url:url,active:true,type:'apikey',platform:'openai'});
 const cache=(id:number,remaining:number|null,sourceAt='2026-10-07T03:30:00.000Z')=>({account_id:id,queried_at:sourceAt,last_success_at:sourceAt,last_success_result:{ok:true,quota:{remaining,unit:'USD'},billingMultiplier:{value:0.5,observedAt:'2026-10-07T00:00:00.000Z'}},result:{ok:false}});
+test('consumption-stall account facts preserve wallet association and balance freshness',()=>{
+ const facts=parseConsumptionStallAccountFacts([
+  {accountId:37,platform:'openai',status:'active',baseUrl:'https://alias.example',priority:300,groupIds:[2],modelMappingKeys:['gpt-5'],currentRecords:0,previousRecords:0,currentCostUsd:0,previousCostUsd:0,currentCostKnownRecords:0,previousCostKnownRecords:0},
+ ]);
+ const wallets=walletGovernance(consumptionStallWalletAccounts(facts),[cache(37,44.76)],config,at).wallets;
+ expect(wallets).toHaveLength(1);
+ expect(wallets[0]).toMatchObject({walletKey:'https://wallet.example',accountIds:[37],platforms:['openai'],remainingUsd:44.76,state:'known',freshness:'fresh'});
+});
 test('daily wallet costs retain usable partial evidence without inventing complete totals',()=>{
  const wallets=walletGovernance([account(1),account(2,'https://alias.example')],[cache(1,5)],config,at).wallets;
  const result=dailyWalletCosts([

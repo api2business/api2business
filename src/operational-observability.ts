@@ -8,13 +8,26 @@ import { statSync } from "node:fs";
 import { dailyCostSql, dailyWalletCosts } from "./observability-costs";
 import { probeCostReport, probeCostSql } from "./observability-probe-costs";
 import { taskScopeSourceCoverage, sourceCoverageFacts, sourceCoverageSql } from "./observability-source-coverage";
+import {
+  consumptionStallSql,
+  consumptionStallWalletAccounts,
+  evaluateConsumptionStalls,
+  parseConsumptionStallAccountFacts,
+  parseConsumptionStallDemandFacts,
+  type ConsumptionStallWallet,
+} from "./consumption-stall";
 
 type Row = Record<string, any>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 const finite = (value: unknown): number | null => value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
 const iso = (value: unknown): string | null => value instanceof Date ? value.toISOString() : Number.isFinite(Date.parse(String(value))) ? new Date(String(value)).toISOString() : null;
 
-export function observationWindow(start?: string | null, end?: string | null, now = Date.now()) {
+export function observationWindow(start?: string | null, end?: string | null, now = Date.now()): {
+  start: string;
+  end: string;
+  boundary: "[start,end)";
+  seconds: number;
+} {
   if (Boolean(start) !== Boolean(end)) throw new Error("start and end must be supplied together");
   if ([start,end].some(value => value && !/T.*(?:Z|[+-]\d{2}:\d{2})$/u.test(value))) throw new Error("invalid observation window: timezone is required");
   const until = end ? Date.parse(end) : now;
@@ -258,6 +271,30 @@ export class OperationalObservability {
     if (this.probeCostCache.size > 24) this.probeCostCache.delete(this.probeCostCache.keys().next().value!);
     return result;
   }
+  async consumptionStalls(start?: string | null,end?: string | null) {
+    if (!this.config.observability) throw new Error("observability is not configured in owning YAML");
+    const window=observationWindow(start,end);
+    const previousEnd=window.start;
+    const previousStart=new Date(Date.parse(window.start)-window.seconds*1000).toISOString();
+    const previousWindow={...window,start:previousStart,end:previousEnd};
+    const query=await this.reads.query<Row>({key:`observability.consumption-stalls:${previousStart}:${window.end}`,
+      kind:"observability.consumption-stalls",sql:consumptionStallSql,
+      parameters:[previousStart,window.start,window.end],priority:"manual",cacheMode:"bypass-cache"});
+    const facts=row(query.rows[0]?.facts);
+    const accounts=parseConsumptionStallAccountFacts(facts.accounts);
+    const demand=parseConsumptionStallDemandFacts(facts.demand);
+    const cache=await this.store.getUpstreamUsageCache([]);
+    const observedAt=new Date().toISOString();
+    const wallets=walletGovernance(consumptionStallWalletAccounts(accounts),cache,this.config,observedAt).wallets as ConsumptionStallWallet[];
+    const report=evaluateConsumptionStalls({accounts,demand,wallets,config:this.config.observability,
+      excludedWalletKeys:this.config.operations.upstreamManagement.quotaMonitor?.excludedWalletKeys ?? [],
+      now:window.end,window,previousWindow});
+    return {
+      ...report,
+      sources:{queryStartedAt:query.queryStartedAt,queryCompletedAt:query.queryCompletedAt,
+        queueDurationMs:query.queueDurationMs,queryDurationMs:query.queryDurationMs,walletAsOf:observedAt},
+    };
+  }
   async report(start?: string | null,end?: string | null) {
     if (!this.config.observability) throw new Error("observability is not configured in owning YAML");
     const window=observationWindow(start,end);
@@ -286,6 +323,7 @@ export class OperationalObservability {
       sourceCoverage={...taskScopeSourceCoverage(null),status:"unavailable",complete:false,error:"source_coverage_query_failed"};
     }
     const capturedAt=new Date().toISOString();
+    const consumptionStalls=await this.consumptionStalls(window.start,window.end);
     const coverage=observerCoverage(http.instances,window.start,window.end);
     const settings=this.config.observability;
     const total=Number(facts.succeeded)+Number(facts.failed);
@@ -314,6 +352,7 @@ export class OperationalObservability {
         latencySlo:slo(finite(http.latency_p95_ms),settings.api2businessLatencyP95Ms,"max",coverage.complete) },
       wallets:walletGovernance(facts.accounts ?? [],cache,this.config,capturedAt),
       cost:costGovernance(facts,cache,this.config,window.end,readUpstreamValuationPolicy(this.config.operations.ledgerYamlPath),statSync(this.config.operations.ledgerYamlPath).mtime.toISOString()),
+      consumptionStalls,
     };
     await this.store.completeSnapshot(`observability:${id}`,"observability.v1",payload,capturedAt);
     return payload;
