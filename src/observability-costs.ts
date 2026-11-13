@@ -6,7 +6,7 @@ export const dailyCostSql = `WITH ${observedRateEventsSql}, probe_keys AS (
   SELECT k.id FROM api_keys k LEFT JOIN users u ON u.id=k.user_id
   WHERE u.email='monitor-user@sub2api.platform-infra.local'
     OR LOWER(COALESCE(k.name,'')) LIKE 'api2business-probe-%'
-), usage AS (
+), usage AS MATERIALIZED (
   SELECT u.account_id,u.created_at,u.actual_cost,u.rate_multiplier,
     (u.created_at AT TIME ZONE $4)::date::text AS day,
     u.created_at >= $2::timestamptz - INTERVAL '24 hours' AS recent_24h
@@ -14,12 +14,36 @@ export const dailyCostSql = `WITH ${observedRateEventsSql}, probe_keys AS (
   LEFT JOIN groups g ON g.id=u.group_id
   WHERE u.created_at >= $1::timestamptz AND u.created_at < $2::timestamptz
     AND p.id IS NULL AND LOWER(COALESCE(g.name,'')) NOT LIKE 'api2business-probe-%'
+), rate_intervals AS MATERIALIZED (
+  -- Resolve rate history as bounded intervals instead of a per-row LATERAL.
+  -- A million in-window usage rows made the correlated lookup alone exceed
+  -- the 15s read budget on the seven-day costs report.
+  SELECT account_id,at,rate_cny,wallet_rate_cny,
+    LEAD(at) OVER (PARTITION BY account_id ORDER BY at,rate_cny) AS next_at
+  FROM rate_events
+), first_rates AS MATERIALIZED (
+  SELECT account_id,MIN(at) AS first_at FROM rate_intervals GROUP BY account_id
+), matched_usage AS MATERIALIZED (
+  -- Drive from the small rate-interval set and use the usage_logs
+  -- (account_id,created_at) index for each interval. Driving from one million
+  -- usage rows made the range join exceed the 15s read budget.
+  SELECT u.*,COALESCE(rate.rate_cny,u.rate_multiplier*rate.wallet_rate_cny) AS rate_cny,rate.at AS rate_at
+  FROM rate_intervals rate
+  JOIN LATERAL (
+    SELECT u.account_id,u.created_at,u.actual_cost,u.rate_multiplier,u.day,u.recent_24h
+    FROM usage u
+    WHERE u.account_id=rate.account_id
+      AND u.created_at>=rate.at
+      AND (rate.next_at IS NULL OR u.created_at<rate.next_at)
+  ) u ON true
+), unmatched_usage AS MATERIALIZED (
+  -- Only usage before an account's first observed rate is unmatched; every
+  -- later row is covered by the final open-ended interval.
+  SELECT u.*,NULL::double precision AS rate_cny,NULL::timestamptz AS rate_at
+  FROM usage u LEFT JOIN first_rates f ON f.account_id=u.account_id
+  WHERE f.first_at IS NULL OR u.created_at<f.first_at
 ), cost_usage AS (
-  SELECT u.*,COALESCE(rate.rate_cny,u.rate_multiplier*rate.wallet_rate_cny) AS rate_cny,rate.at AS rate_at FROM usage u
-  LEFT JOIN LATERAL (
-    SELECT r.rate_cny,r.wallet_rate_cny,r.at FROM rate_events r WHERE r.account_id=u.account_id AND r.at<=u.created_at
-    ORDER BY r.at DESC LIMIT 1
-  ) rate ON true
+  SELECT * FROM matched_usage UNION ALL SELECT * FROM unmatched_usage
 ), costs AS (
   SELECT day,account_id,recent_24h,COUNT(*)::int AS records,
     COUNT(*) FILTER (WHERE actual_cost>=0 AND rate_multiplier>0 AND rate_cny IS NULL)::int AS valid_records,
@@ -29,9 +53,16 @@ export const dailyCostSql = `WITH ${observedRateEventsSql}, probe_keys AS (
     MIN(created_at) AS first_at,MIN(rate_at) AS first_rate_at,MAX(rate_at) AS last_rate_at
   FROM cost_usage GROUP BY day,account_id,recent_24h
 ), account_rows AS (
+  -- An OR over the account filter makes the planner give up on the accounts
+  -- indexes and fall back to a full scan joined to every cost row. Split it
+  -- into two indexable branches and de-duplicate with UNION.
   SELECT id,name,platform,type,RTRIM(COALESCE(credentials->>'base_url',''),'/') AS base_url,
     deleted_at IS NULL AS active,status,schedulable,priority
-  FROM accounts WHERE (deleted_at IS NULL AND type='apikey') OR id IN (SELECT account_id FROM costs)
+  FROM accounts WHERE deleted_at IS NULL AND type='apikey'
+  UNION
+  SELECT a.id,a.name,a.platform,a.type,RTRIM(COALESCE(a.credentials->>'base_url',''),'/'),
+    a.deleted_at IS NULL,a.status,a.schedulable,a.priority
+  FROM accounts a WHERE a.id IN (SELECT account_id FROM costs)
 )
 SELECT jsonb_build_object(
   'costAccounts',COALESCE((SELECT jsonb_agg(c) FROM costs c),'[]'::jsonb),
