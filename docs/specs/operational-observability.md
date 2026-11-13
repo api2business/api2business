@@ -169,6 +169,9 @@
 ## 余额存在但消耗停滞
 
 - 自动巡检必须把“余额有、需求有、消耗停”作为独立的供给健康信号，不能只看低余额或欠费。
+- 可执行读模型由 `observability consumption-stalls` 和报告 `consumptionStalls` 提供；阈值只由 owning YAML 的
+  `observability.consumptionStallDropPercent`、`consumptionStallMinimumDemandRequests` 和
+  `consumptionStallMaxTrafficDropPercent` 决定，不得在巡检提示词中另写固定数值。
 - 强触发同时满足：
   - 钱包存在新鲜、可调度的正余额，关联账号未删除且目标作用域仍允许使用；
   - 当前与上一同口径窗口都有可归因的兼容模型用户需求；

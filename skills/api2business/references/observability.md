@@ -23,6 +23,7 @@
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability --help
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability check --rounds 3 --over-api <absolute-http(s)-URL> --json
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability report --over-api <absolute-http(s)-URL> --json
+bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability consumption-stalls --over-api <absolute-http(s)-URL> --json
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability costs --over-api <absolute-http(s)-URL> --json
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability probe-costs --days 7 --over-api <absolute-http(s)-URL> --json
 bun skills/api2business/scripts/api2business-cli.ts --config config/api2business.yaml observability get --id <报告ID> --over-api <absolute-http(s)-URL> --json
@@ -39,6 +40,11 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
 - `report` 保存观测结果；`get` 不重新计算历史报告。
   - 改目标后用新报告验收，不覆盖旧报告，也不使用当前规则改写旧标签。
   - 严格比较在舍入前完成；页面只负责显示报告已保存的目标与比较符。
+- `consumption-stalls` 独立读取当前与上一同口径窗口，只返回真实用户请求和实际成本口径下的停滞读模型。
+  - 报告同时包含 `consumptionStalls`；强触发按钱包和平台聚合为稳定 `alertId`/`fingerprint`。
+  - 逐账号保留 `healthy`、`consumption-stalled`、`watch`、`demand-insufficient` 和排除原因，不把低优先级回填解释为健康。
+  - owning YAML 字段为 `observability.consumptionStallDropPercent`、`consumptionStallMinimumDemandRequests` 和
+    `consumptionStallMaxTrafficDropPercent`；缺省值分别为 90、1、50。
 - `costs` 默认独立读取过去 168 小时的逐日成本与共享钱包余额。
   - 绕开错误日志、SLO 和用户归因查询，避免服务质量长窗口失败同时阻断充值分析。
   - 保留钱包关联账号、优先级、余额来源时间、逐日已知成本和缺失记录数。

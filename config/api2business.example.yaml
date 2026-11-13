@@ -780,3 +780,6 @@ observability:
   retentionDays: 30
   probeCostDailyBudgetCny: null
   probeCostTrendFactor: 1.5
+  consumptionStallDropPercent: 90
+  consumptionStallMinimumDemandRequests: 1
+  consumptionStallMaxTrafficDropPercent: 50

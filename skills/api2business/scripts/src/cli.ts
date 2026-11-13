@@ -863,6 +863,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   if (parsed.command[0] === "observability") {
     if (parsed.command[1] === "verify") return await verifyObservationWindow(client, config);
     if (parsed.command[1] === "report") return compactObservation(await client.observationReport(parsed.start,parsed.end),parsed.includeRecords);
+    if (parsed.command[1] === "consumption-stalls") return await client.observationConsumptionStalls(parsed.start,parsed.end);
     if (parsed.command[1] === "costs") return compactObservation(await client.observationCosts(parsed.start,parsed.end),parsed.includeRecords);
     if (parsed.command[1] === "probe-costs") {
       const days = parsed.days ?? 7;
@@ -871,7 +872,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     }
     if (parsed.command[1] === "get" && parsed.id) return compactObservation(await client.observationGet(parsed.id),parsed.includeRecords);
     if (parsed.command[1] === "check") return await checkObservability(client,parsed.rounds ?? 3);
-    throw new Error("observability requires report, costs, probe-costs, get --id, check, verify or configure --file");
+    throw new Error("observability requires report, consumption-stalls, costs, probe-costs, get --id, check, verify or configure --file");
   }
   const [group, action] = parsed.command;
   if (group === "web" && action === "screenshot") return await runWebScreenshot(parsed, config, target);
