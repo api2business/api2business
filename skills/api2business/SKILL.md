@@ -399,6 +399,10 @@ bun skills/api2business/scripts/api2business-cli.ts \
   [运维观测规格](../../docs/specs/operational-observability.md#余额存在但消耗停滞)。
 - QQ 渠道的新上游发现、零余额上游复活建议和官方核验见
   [上游与调度](references/upstream-scheduling.md#qq-渠道上游发现与零余额复活建议)。
+- 两小时报告固定包含“OpenCode Go 与 CommandCode 三窗口额度”一节，按平台聚合。
+  - 用 `upstreams usage` 或 `upstreams usage-cache` 一次批量取账号、分组、五小时/周/月剩余百分比与重置时间。
+  - 只报可调度账号的合计供给和最早重置；不可调度账号单列原因，不并入可承流额度。
+  - 缺失窗口写 unknown；额度低、探测失败和探活异常只作巡检证据，不升事故、不触发暂停。
 
 ## 自动运维工具与技能自助改进
 

@@ -54,7 +54,9 @@ test("math probe cache prefix is deterministic, long enough, and process-indepen
   expect(PROBE_CACHE_PREFIX_FINGERPRINT).toBe(expected);
   expect(PROBE_CACHE_HISTORY.length).toBeGreaterThanOrEqual(256);
   const totalCharacters = PROBE_CACHE_HISTORY.reduce((total, message) => total + message.content.length, 0);
-  expect(totalCharacters).toBeGreaterThanOrEqual(6000);
+  // 约 1K token 的目标长度：既明显高于 1024 token 的最小缓存长度，也不再维持原来的 2K+ 前缀。
+  expect(totalCharacters).toBeGreaterThanOrEqual(3000);
+  expect(totalCharacters).toBeLessThanOrEqual(4000);
 });
 
 test("math probe cache prefix contains no dynamic or sensitive markers", () => {
@@ -99,7 +101,7 @@ test("math probe request body appends the variable question after the fixed pref
   expect((chat.body.messages as Array<{ role: string; content: string }>)[0]).toEqual({ role: "system", content: MATH_PROBE_SYSTEM_PROMPT });
 });
 
-test("compact probe prefix is a strict deterministic truncation of the cached prefix", () => {
+test("compact probe prefix stays cacheable and matches the shortened standard prefix", () => {
   expect(PROBE_COMPACT_CACHE_HISTORY.length).toBe(128 * 2 + 2);
   expect(PROBE_COMPACT_CACHE_HISTORY).toEqual(PROBE_CACHE_HISTORY.slice(0, PROBE_COMPACT_CACHE_HISTORY.length));
   const characters = PROBE_COMPACT_CACHE_HISTORY.reduce((total, message) => total + message.content.length, 0);
@@ -109,7 +111,8 @@ test("compact probe prefix is a strict deterministic truncation of the cached pr
     .toBe(createHash("sha256")
       .update(JSON.stringify({ system: MATH_PROBE_SYSTEM_PROMPT, history: PROBE_COMPACT_CACHE_HISTORY }))
       .digest("hex"));
-  expect(PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT).not.toBe(PROBE_CACHE_PREFIX_FINGERPRINT);
+  // The standard prefix is already shortened to ~1K tokens, so compact and full payloads are identical.
+  expect(PROBE_COMPACT_CACHE_PREFIX_FINGERPRINT).toBe(PROBE_CACHE_PREFIX_FINGERPRINT);
   const serialized = JSON.stringify(PROBE_COMPACT_CACHE_HISTORY);
   expect(serialized).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u);
   expect(serialized).not.toMatch(/sk-[A-Za-z0-9_-]+/u);

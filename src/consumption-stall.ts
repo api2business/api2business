@@ -41,6 +41,8 @@ export type ConsumptionStallAccountFact = {
   previousCostUsd: number | null;
   currentCostKnownRecords: number;
   previousCostKnownRecords: number;
+  currentProbeUsage: number;
+  currentProbeErrors: number;
   currentLastUsedAt: string | null;
   previousLastUsedAt: string | null;
 };
@@ -80,6 +82,7 @@ export type ConsumptionStallRecord = {
   platformDemand: { currentRequests: number; previousRequests: number };
   consumptionDropPercent: number | null;
   platformTrafficDropPercent: number | null;
+  probe: { usage: number; errors: number };
 };
 
 export type ConsumptionStallAlert = {
@@ -135,6 +138,26 @@ WITH probe_keys AS (
   SELECT k.id FROM api_keys k LEFT JOIN users u ON u.id=k.user_id
   WHERE u.email='monitor-user@sub2api.platform-infra.local'
     OR LOWER(COALESCE(k.name,'')) LIKE 'api2business-probe-%'
+), probe_accounts AS (
+  SELECT k.id AS api_key_id,
+    SUBSTRING(k.name FROM '^api2business-probe-([0-9]+)$')::int AS account_id
+  FROM api_keys k LEFT JOIN users u ON u.id=k.user_id
+  WHERE (u.email='monitor-user@sub2api.platform-infra.local'
+    OR LOWER(COALESCE(k.name,'')) LIKE 'api2business-probe-%')
+    AND k.name ~ '^api2business-probe-[0-9]+$'
+), probe_window AS (
+  SELECT p.account_id,
+    COUNT(*) FILTER (WHERE w.kind='usage')::int AS usage_count,
+    COUNT(*) FILTER (WHERE w.kind='error')::int AS error_count
+  FROM (
+    SELECT api_key_id,'usage' AS kind FROM usage_logs
+    WHERE created_at >= $2::timestamptz AND created_at < $3::timestamptz
+    UNION ALL
+    SELECT api_key_id,'error' AS kind FROM ops_error_logs
+    WHERE created_at >= $2::timestamptz AND created_at < $3::timestamptz
+  ) w
+  JOIN probe_accounts p ON p.api_key_id=w.api_key_id
+  GROUP BY p.account_id
 ), real_usage AS (
   SELECT u.account_id, u.group_id, u.created_at, u.actual_cost,
     COALESCE(NULLIF(TRIM(u.requested_model),''),NULLIF(TRIM(u.model),''),NULLIF(TRIM(u.upstream_model),''),'unknown') AS model,
@@ -184,12 +207,15 @@ WITH probe_keys AS (
     'previousCostUsd',CASE WHEN COALESCE(au.previous_records,0)=0 THEN 0 ELSE au.previous_cost_usd END,
     'currentCostKnownRecords',COALESCE(au.current_cost_known_records,0),
     'previousCostKnownRecords',COALESCE(au.previous_cost_known_records,0),
+    'currentProbeUsage',COALESCE(pw.usage_count,0),
+    'currentProbeErrors',COALESCE(pw.error_count,0),
     'currentLastUsedAt',au.current_last_used_at,
     'previousLastUsedAt',au.previous_last_used_at
   ) AS row
   FROM accounts a
   LEFT JOIN account_usage au ON au.account_id=a.id
   LEFT JOIN account_group_ids ag ON ag.account_id=a.id
+  LEFT JOIN probe_window pw ON pw.account_id=a.id
   WHERE a.deleted_at IS NULL AND LOWER(a.type)='apikey'
 ), demand_rows AS (
   SELECT jsonb_build_object(
@@ -361,6 +387,11 @@ export function evaluateConsumptionStalls(input: {
       classification = "demand-insufficient";
       reasonCodes.push("platform-traffic-dropped");
     }
+    if (classification === "healthy" && currentCost === 0
+      && account.currentProbeUsage === 0 && account.currentProbeErrors > 0) {
+      classification = "watch";
+      reasonCodes.push("probe-unhealthy");
+    }
     if (classification === "healthy" && (currentCost === null || previousCost === null)) {
       classification = "watch";
       reasonCodes.push("cost-incomplete");
@@ -401,6 +432,7 @@ export function evaluateConsumptionStalls(input: {
       platformDemand,
       consumptionDropPercent,
       platformTrafficDropPercent,
+      probe: { usage: account.currentProbeUsage, errors: account.currentProbeErrors },
     });
   }
 
@@ -497,6 +529,8 @@ export function parseConsumptionStallAccountFacts(value: unknown): ConsumptionSt
     previousCostUsd: item.previousCostUsd === null || item.previousCostUsd === undefined ? null : number(item.previousCostUsd),
     currentCostKnownRecords: number(item.currentCostKnownRecords),
     previousCostKnownRecords: number(item.previousCostKnownRecords),
+    currentProbeUsage: number(item.currentProbeUsage),
+    currentProbeErrors: number(item.currentProbeErrors),
     currentLastUsedAt: typeof item.currentLastUsedAt === "string" ? item.currentLastUsedAt : null,
     previousLastUsedAt: typeof item.previousLastUsedAt === "string" ? item.previousLastUsedAt : null,
   }));

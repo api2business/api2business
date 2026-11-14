@@ -56,6 +56,9 @@ docker compose ps
   - 从已提交树构建镜像，再用 `--no-build` 替换对应服务。
 - 使用 `API2BUSINESS_SECRET_ROOT` 指定仓库外 Secret 目录。
 - 使用 `API2BUSINESS_INTEGRATION_ROOT` 挂载可选的外部集成文件。
+- Compose Web 只允许按 owning 配置绑定 `127.0.0.1`；不得用 `--host 0.0.0.0` 覆盖。
+  - 公开业务只经 `api2business.hwpod.com` 的 Caddy/TLS 入口，上游端口必须做旁路核验。
+  - HTTPS 生产目标的 `secureCookies` 必须为 `true`；本地 native HTTP 调试可单独关闭。
 
 ## Kubernetes
 

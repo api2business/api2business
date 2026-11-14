@@ -499,17 +499,16 @@ export class ProbeIsolationService {
       const allowedGroups = [...new Set([...ids(user?.allowed_groups), groupId])];
       const needsUpdate = !ids(user?.allowed_groups).includes(groupId)
         || Number(user?.concurrency) !== this.config.sub2api.idleProbe.concurrency
-        || Number(user?.rpm_limit ?? 0) !== 0
-        || !funded;
+        || Number(user?.rpm_limit ?? 0) !== 0;
       if (needsUpdate) {
         await this.admin.mutate("PUT", `/admin/users/${userId}`, {
           password,
           allowed_groups: allowedGroups,
           concurrency: this.config.sub2api.idleProbe.concurrency,
           rpm_limit: 0,
-          ...(!funded ? { balance: this.config.sub2api.idleProbe.isolation.userBalance } : {}),
         }, undefined, this.remainingTimeout(deadline));
       }
+      if (!funded) await this.replenishMonitorBalance(userId, observedBalance, deadline);
       funded = true;
     }
     if (userId === null) throw new Error("创建 monitor-user 后未返回稳定 ID");
@@ -517,6 +516,25 @@ export class ProbeIsolationService {
     file.monitor = monitor;
     this.writeFile(file);
     return monitor;
+  }
+
+  /**
+   * Sub2API ignores `balance` on PUT /admin/users/:id; wallet changes must go
+   * through the dedicated balance endpoint. A PUT here silently left the probe
+   * wallet negative and every probe round failed with 403 insufficient.
+   */
+  private async replenishMonitorBalance(userId: number, observedBalance: number, deadline?: number): Promise<number> {
+    const targetBalanceUsd = this.config.sub2api.idleProbe.isolation.userBalance;
+    const delta = targetBalanceUsd - (Number.isFinite(observedBalance) ? observedBalance : 0);
+    if (delta > 0) {
+      await this.admin.addBalance(userId, delta, "Api2Business probe wallet replenishment");
+    }
+    const verified = row(await this.admin.request<Row>(`/admin/users/${userId}`, {}, true, this.remainingTimeout(deadline)));
+    const balanceUsd = Number(verified.balance);
+    if (!Number.isFinite(balanceUsd) || balanceUsd <= 0) {
+      throw new Error(`monitor-user ${userId} 余额补充后未恢复为正数`);
+    }
+    return balanceUsd;
   }
 
   /**
@@ -538,13 +556,7 @@ export class ProbeIsolationService {
       let balanceUsd = before;
       let replenished = false;
       if (before <= 0) {
-        const updated = row(await this.admin.mutate<Row>("PUT", `/admin/users/${monitor.userId}`, {
-          balance: targetBalanceUsd,
-        }, undefined, this.remainingTimeout(deadline)));
-        balanceUsd = Number(updated.balance);
-        if (!Number.isFinite(balanceUsd) || balanceUsd <= 0) {
-          throw new Error(`monitor-user ${monitor.userId} 余额补充后未恢复为正数`);
-        }
+        balanceUsd = await this.replenishMonitorBalance(monitor.userId, before, deadline);
         replenished = true;
       }
       if (file.monitor?.funded !== true) {

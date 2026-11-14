@@ -219,6 +219,13 @@ test("usage target discovery uses one queued database read", async () => {
   }
 });
 
+test("usage target query pre-aggregates usage before joining accounts", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  expect(source).toContain("WITH usage_totals AS (");
+  expect(source).toContain("GROUP BY usage.account_id");
+  expect(source).not.toContain("LEFT JOIN usage_logs usage ON usage.account_id = a.id");
+});
+
 test("rolling upstream output excludes OAuth usage", async () => {
   const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
   expect(source).toMatch(/LOWER\(a\.type\)\s*=\s*'apikey'/u);
@@ -344,6 +351,15 @@ test("wallet recovery query filters the normalized wallet in SQL", async () => {
   const wallet = source.slice(source.indexOf("  private async walletAccounts("), source.indexOf("  private async resolveCreatedAccount("));
   expect(wallet).toContain("regexp_replace(RTRIM(a.credentials->>'base_url', '/'), '/v1$', '') = $1::text");
   expect(wallet).toContain("parameters: [normalizeUpstreamWallet(baseUrl)]");
+});
+
+test("pause sets schedulable=false and verifies the native readback", async () => {
+  const source = await Bun.file(new URL("./upstream-management.ts", import.meta.url)).text();
+  const pauseBody = source.slice(source.indexOf("  async pause(accountIds:"), source.indexOf("  async submitTemplate("));
+  expect(pauseBody).toContain("await this.runtime.setSchedulableAccounts(ids, false");
+  expect(pauseBody).toContain("account.schedulable === false");
+  expect(pauseBody).toContain("上游暂停回读不一致");
+  expect(pauseBody).not.toContain("delete");
 });
 
 test("new upstream runtime settings and failover template use one bulk update", async () => {

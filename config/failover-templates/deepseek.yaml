@@ -51,6 +51,7 @@ rules:
   - rate_limit_exceeded
   - too many requests
   - request rate exceeded
+  - openai.forward_failed
   durationMinutes: 3
   description: DeepSeek 上游限流
 - errorCode: 500

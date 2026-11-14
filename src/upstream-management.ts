@@ -23,6 +23,7 @@ import {
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
 import { providerActualCostUsd, upstreamCostBasisSql } from "./upstream-cost-sql";
+import { summarizeQuotaProviderCoverage, summarizeQuotaWindowCoverage } from "./upstream-usage";
 import { configuredWalletKey } from "./upstream-wallet";
 import { initializeUpstreams } from "./upstream-onboarding";
 
@@ -110,6 +111,7 @@ export type UpstreamWorkerOperation =
   | { action: "update"; input: { id: number; baseUrl?: string; suffix?: string; rateCnyPerApiUsd?: number; groupIds?: number[] } }
   | { action: "recharge"; input: { id: number; amountCny: number; operationId: string; description?: string } }
   | { action: "recover"; input: { accountIds: number[] } }
+  | { action: "pause"; input: { accountIds: number[] } }
   | { action: "isolation"; input: { accountIds: number[] } }
   | { action: "template"; input: { accountIds: number[] } }
   | { action: "initialize"; input: { accountIds: number[] } }
@@ -611,6 +613,14 @@ export class UpstreamManagementService {
     return await this.runtime.syncUpstreamModels(accountIds, this.config.operations.upstreamManagement.mutationTimeoutMs);
   }
 
+  async updateModelAlias(accountId: number, model: string, target: string): Promise<Record<string, unknown>> {
+    if (!this.runtime) throw new Error("Api2Business Sub2API runtime mutation service 不可用");
+    if (!positiveInteger(accountId)) throw new Error("upstreams model-alias requires a positive --id");
+    return await this.runtime.updateModelAlias(
+      accountId, model, target, this.config.operations.upstreamManagement.mutationTimeoutMs,
+    );
+  }
+
   async submitRecovery(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
     const ids = [...new Set(accountIds.map(Number))].sort((left, right) => left - right);
     if (ids.length === 0 || ids.some((id) => !positiveInteger(id))) throw new Error("上游恢复需要至少一个有效账号 ID");
@@ -625,6 +635,24 @@ export class UpstreamManagementService {
     await this.runtime.recoverAccounts(ids, this.config.operations.upstreamManagement.mutationTimeoutMs);
     const accounts = await Promise.all(ids.map((id) => this.accountQuery(id)));
     return { ok: true, operation: "recover", recoveredAccountIds: ids, accounts: accounts.filter(Boolean), recovered: ids.length };
+  }
+
+  async submitPause(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds.map(Number))].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !positiveInteger(id))) throw new Error("上游暂停需要至少一个有效账号 ID");
+    const idempotency = operationId(operationIdValue, "upstream-pause");
+    return await this.submitOperation(idempotency, { action: "pause", input: { accountIds: ids } });
+  }
+
+  async pause(accountIds: number[]): Promise<Record<string, unknown>> {
+    const ids = [...new Set(accountIds)].sort((left, right) => left - right);
+    if (ids.length === 0 || ids.some((id) => !positiveInteger(id))) throw new Error("上游暂停需要至少一个有效账号 ID");
+    if (!this.runtime) throw new UpstreamManagementError("Api2Business Sub2API runtime mutation service 不可用", 503, { operation: "pause" });
+    await this.runtime.setSchedulableAccounts(ids, false, this.config.operations.upstreamManagement.mutationTimeoutMs);
+    const accounts = await Promise.all(ids.map((id) => this.accountQuery(id)));
+    const verified = accounts.filter((account) => account && account.schedulable === false).length;
+    if (verified !== ids.length) throw new Error(`上游暂停回读不一致：${verified}/${ids.length}`);
+    return { ok: true, operation: "pause", pausedAccountIds: ids, accounts: accounts.filter(Boolean), paused: ids.length, verifiedCount: verified };
   }
 
   async submitTemplate(accountIds: number[], operationIdValue?: string | null): Promise<Record<string, unknown>> {
@@ -1050,7 +1078,23 @@ export class UpstreamManagementService {
       kind: "upstream-usage-targets",
       priority: "manual",
       cacheMode: "bypass-cache",
-      sql: `WITH targets AS (
+      sql: `WITH usage_totals AS (
+        -- 先按账号预聚合用量，再左连接账号元数据。此前的 accounts 与
+        -- usage_logs 直接连接会迫使规划器对每个账号做全表历史聚合，
+        -- 在 157 个账号上耗时 11s 以上并触发 15s 读超时。
+        -- actual_cost is the user/API-key charge and includes the
+        -- downstream billing multiplier.  It is not the provider's
+        -- standard API-USD output used as the denominator for CNY/API-USD
+        -- procurement cost.  Keep this query on the canonical standard
+        -- amount so the quota sampler does not mix customer billing with
+        -- upstream cost.
+        SELECT
+          usage.account_id,
+          COALESCE(SUM(${upstreamCostBasisSql("usage")}), 0)::numeric AS account_api_amount_usd_total
+        FROM usage_logs usage
+        GROUP BY usage.account_id
+      ),
+      targets AS (
         SELECT
           a.id,
           a.name,
@@ -1058,21 +1102,14 @@ export class UpstreamManagementService {
           COALESCE(a.credentials->>'api_key', '') AS api_key,
           a.status,
           COALESCE(a.schedulable, false) AS schedulable,
-          -- actual_cost is the user/API-key charge and includes the
-          -- downstream billing multiplier.  It is not the provider's
-          -- standard API-USD output used as the denominator for CNY/API-USD
-          -- procurement cost.  Keep this query on the canonical standard
-          -- amount so the quota sampler does not mix customer billing with
-          -- upstream cost.
-          COALESCE(SUM(${upstreamCostBasisSql("usage")}), 0)::numeric AS account_api_amount_usd_total
+          COALESCE(usage_totals.account_api_amount_usd_total, 0)::numeric AS account_api_amount_usd_total
         FROM accounts a
-        LEFT JOIN usage_logs usage ON usage.account_id = a.id
+        LEFT JOIN usage_totals ON usage_totals.account_id = a.id
         WHERE a.deleted_at IS NULL
           AND LOWER(a.type) = 'apikey'
           AND NULLIF(a.credentials->>'base_url', '') IS NOT NULL
           AND NULLIF(a.credentials->>'api_key', '') IS NOT NULL
           AND ($1::text = '' OR a.id = ANY(string_to_array($1::text, $2::text)::bigint[]))
-        GROUP BY a.id
       )
       SELECT targets.*,
         SUM(account_api_amount_usd_total) OVER()::numeric AS api_amount_usd_total
@@ -1115,6 +1152,14 @@ export class UpstreamManagementService {
       queryDurationMs: query.queryDurationMs,
       upstreamConcurrency: settings.usageConcurrency,
       apiAmountUsdTotal: Number(query.rows[0]?.api_amount_usd_total ?? 0),
+      quotaWindowCoverage: summarizeQuotaWindowCoverage(results),
+      quotaProviderCoverage: summarizeQuotaProviderCoverage(results),
+      lowQuotaWarnings: results.flatMap((result) => result.lowQuotaWarnings.map((warning) => ({
+        accountId: result.accountId,
+        accountName: result.accountName,
+        baseUrl: result.baseUrl,
+        ...warning,
+      }))).slice(0, 50),
       results,
       valuesRedacted: true,
     };

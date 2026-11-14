@@ -22,11 +22,11 @@ WITH bounded_probe_facts AS MATERIALIZED (
     SELECT account_id, request_id, client_request_id,
       COALESCE(NULLIF(request_id, ''), NULLIF(client_request_id, ''),
         CONCAT('probe:', account_id::text, ':', completed_at::text)) AS request_key,
-      completed_at, quality_ok, ttft_ms,
+      completed_at, quality_ok, ttft_ms, error_marker,
       ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY completed_at DESC) AS fact_rank
     FROM jsonb_to_recordset($9::jsonb) AS p(
       account_id bigint, request_id text, client_request_id text,
-      completed_at timestamptz, quality_ok boolean, ttft_ms numeric
+      completed_at timestamptz, quality_ok boolean, ttft_ms numeric, error_marker text
     )
     WHERE account_id IS NOT NULL
       AND completed_at IS NOT NULL
@@ -63,9 +63,30 @@ WITH bounded_probe_facts AS MATERIALIZED (
   FROM failed_probe_requests
   GROUP BY account_id
 ), failed_probe_facts AS MATERIALIZED (
-  SELECT account_id, request_key, completed_at
-  FROM bounded_probe_facts
-  WHERE quality_ok IS DISTINCT FROM true
+  SELECT probe.account_id, probe.request_key, probe.completed_at,
+    CASE
+      WHEN o.id IS NULL THEN COALESCE(probe.error_marker, '') <> 'no-available-account'
+      WHEN COALESCE(o.is_business_limited, false) THEN false
+      WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
+        o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${nonScoreableBillingErrorPatternsSql})
+        AND NOT ${explicitUpstreamErrorSql("o")} THEN false
+      WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
+        o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${modelRoutingPatternsSql}) THEN false
+      WHEN ${attributedInternalUpstreamFailureSql("o")} THEN true
+      WHEN LOWER(COALESCE(o.error_phase, '')) IN ('internal', 'client', 'business') THEN false
+      WHEN o.error_phase = 'upstream' OR LOWER(COALESCE(o.error_type, '')) LIKE '%upstream%' THEN true
+      WHEN LOWER(CONCAT_WS(' ', o.error_message, o.error_body,
+        o.upstream_error_message, o.upstream_error_detail)) LIKE ANY (${stableUpstreamErrorPatternsSql}) THEN true
+      ELSE false
+    END AS scoreable
+  FROM bounded_probe_facts probe
+  LEFT JOIN LATERAL (
+    SELECT o.* FROM ops_error_logs o
+    WHERE o.request_id = probe.request_key
+    ORDER BY o.created_at DESC
+    LIMIT 1
+  ) o ON true
+  WHERE probe.quality_ok IS DISTINCT FROM true
 ), target_accounts AS (
   SELECT
     a.id AS account_id,
@@ -312,9 +333,10 @@ account_stats AS (
           NULL::int AS client_status_code,
           NULL::int AS upstream_status_code,
           NULL::boolean AS business_limited,
-          true AS scoreable
+          probe.scoreable
         FROM failed_probe_facts probe
         WHERE probe.account_id = a.account_id
+          AND probe.scoreable
         ORDER BY probe.completed_at DESC
         LIMIT $1
       )
@@ -694,22 +716,30 @@ export async function collectRecentCallScoresFromDatabase(
       || String(row.account_name) === accountSelector);
     if (accountSelector !== null && selected.length !== 1) throw new Error(`account selector did not resolve exactly once: ${accountSelector}`);
     if (groupSelector !== null && selected.length === 0) throw new Error(`group selector resolved no scoreable accounts: ${groupSelector}`);
+    const scorePolicyFor = (platform: string) => platform === "grok"
+      ? config.sub2api.grokScorePolicy
+      : platform === "deepseek"
+        ? (config.sub2api.deepseekScorePolicy ?? config.sub2api.scorePolicy)
+        : platform === "opencode_go"
+          ? (config.sub2api.opencodeScorePolicy ?? config.sub2api.poolScorePolicy ?? config.sub2api.scorePolicy)
+          : config.sub2api.scorePolicy;
+    const priorityPlanFor = (platform: string) => platform === "grok"
+      ? config.sub2api.grokPriorityPlan
+      : platform === "deepseek"
+        ? (config.sub2api.deepseekPriorityPlan ?? config.sub2api.priorityPlan)
+        : platform === "anthropic"
+          ? (config.sub2api.claudePriorityPlan ?? config.sub2api.priorityPlan)
+          : platform === "opencode_go"
+            ? (config.sub2api.opencodePriorityPlan ?? config.sub2api.priorityPlan)
+            : config.sub2api.priorityPlan;
     const accounts = sortScores(selected
       .filter((row) => !isOAuthAccount(row))
       .map((row) => scoreRecentDatabaseRow(
         row,
         recentCallLimit,
-        String(row.platform) === "grok" ? config.sub2api.grokScorePolicy
-          : String(row.platform) === "deepseek" ? (config.sub2api.deepseekScorePolicy ?? config.sub2api.scorePolicy)
-            : config.sub2api.scorePolicy,
+        scorePolicyFor(String(row.platform)),
         Date.now(),
-        (String(row.platform) === "grok"
-          ? config.sub2api.grokPriorityPlan
-          : String(row.platform) === "deepseek"
-            ? (config.sub2api.deepseekPriorityPlan ?? config.sub2api.priorityPlan)
-          : String(row.platform) === "anthropic"
-            ? (config.sub2api.claudePriorityPlan ?? config.sub2api.priorityPlan)
-            : config.sub2api.priorityPlan).procurementAdvice.billingErrorPatterns,
+        priorityPlanFor(String(row.platform)).procurementAdvice.billingErrorPatterns,
       )));
   return {
       ok: true,

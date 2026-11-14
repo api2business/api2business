@@ -165,6 +165,7 @@ export function createWorkerOperationExecutor(services: WorkerOperationServices)
       else if (pending.action === "update") result = await services.upstreams.update(pending.input.id, pending.input);
       else if (pending.action === "recharge") result = await services.upstreams.recharge(pending.input.id, pending.input);
       else if (pending.action === "recover") result = await services.upstreams.recover(pending.input.accountIds);
+      else if (pending.action === "pause") result = await services.upstreams.pause(pending.input.accountIds);
       else if (pending.action === "isolation") result = await services.upstreams.ensureProbeIsolation(pending.input.accountIds);
       else if (pending.action === "template") result = await services.upstreams.applyTemplate(pending.input.accountIds);
       else {

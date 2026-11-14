@@ -640,6 +640,10 @@ temporal:
 
 runtime:
   secretsRoot: /etc/api2business/secrets
+  # Host state directory for sqlite/caches; Compose receives it as
+  # API2BUSINESS_STATE_ROOT. Keep it stable or a rebuild will start from an
+  # empty directory.
+  stateRoot: /var/lib/api2business
   secretSourcePaths:
     secrets/admin-password.txt: /etc/api2business/secrets/admin-password.txt
     secrets/sub2api.env: /etc/api2business/secrets/sub2api.env
@@ -734,7 +738,7 @@ runtime:
       webListenPort: 15173
       webAllowedHosts: [ api2business.example.com ]
       webApiBaseUrl: http://127.0.0.1:8080
-      secureCookies: false
+      secureCookies: true
       databasePath: .state/api2business.sqlite
       scoreCachePath: .state/account-scores.json
       monitorWorkDir: /integrations

@@ -99,3 +99,21 @@ test("billing timeout and key unlimited never replace numeric wallet history", (
       quota: { unit: null, remaining: null, unlimited: true } })).toBeFalse();
   }
 });
+
+test("adds pool quality platform check after column rewrites", async () => {
+  let schema = "";
+  const sql = Object.assign(async () => [], {
+    unsafe: async (text: string) => { schema = text; return []; },
+    close: async () => undefined,
+  });
+  const store = new OperationsStore("postgres://unused", (() => sql) as never);
+  try {
+    await store.migrate();
+  } finally {
+    await store.close();
+  }
+  const add = schema.indexOf("ADD CONSTRAINT api2business_pool_quality_samples_platform_check");
+  const rewrite = schema.indexOf("ALTER COLUMN error_unattributed TYPE numeric");
+  expect(add).toBeGreaterThan(rewrite);
+  expect(schema.slice(add)).toContain("NOT VALID");
+});

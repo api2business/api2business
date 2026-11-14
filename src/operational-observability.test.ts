@@ -40,6 +40,10 @@ test('fixed window is half-open and never silently accepts a partial or future w
  expect(()=>observationWindow(at,null)).toThrow();
  expect(()=>observationWindow(at,'2040-01-01')).toThrow();
 });
+test('rejected windows explain whether the range is invalid or the end is in the future',()=>{
+ expect(()=>observationWindow('2026-10-07T04:00:00Z','2026-10-07T03:00:00Z',Date.parse(at))).toThrow(/start must be before end/u);
+ expect(()=>observationWindow('2026-10-07T03:00:00Z','2026-10-07T05:00:00Z',Date.parse(at))).toThrow(/end 2026-10-07T05:00:00\.000Z is in the future/u);
+});
 test('30-second TTFT target and incomplete or empty evidence remain distinct',()=>{
  expect(parseObservabilityConfig(settings)?.sub2apiTtftP95Ms).toBe(30000);
  expect(slo(30000,30000,'max').status).toBe('met');
@@ -63,14 +67,19 @@ test('observability report keeps user balance and TTFT attribution for diagnosis
 test('explicit upstream failures survive a recorded HTTP 200 without overriding exact success',()=>{
  expect(observabilitySql).toContain('OR COALESCE(upstream_status_code,0)>=400');
  expect(observabilitySql).toContain("LOWER(COALESCE(error_type,'')) <> 'failover_event'");
- expect(observabilitySql).toContain('NOT EXISTS (SELECT 1 FROM success s WHERE (s.request_id = e.request_id');
+ expect(observabilitySql).toContain('e.request_id NOT IN (SELECT request_id FROM recovery_request_keys)');
+ expect(observabilitySql).toContain('SELECT request_id FROM success_request_ids');
+ expect(observabilitySql).toContain('JOIN success_request_ids s ON s.request_id=l.linked_id');
 });
 test('native terminal policy refusals do not become successes through zero-token usage',()=>{
  expect(observabilitySql).toContain("OR (error_phase='request' AND error_type='cyber_policy')");
- expect(observabilitySql).toContain('u.request_id = terminal.request_id');
- expect(observabilitySql).toContain("terminal.error_phase='request' AND terminal.error_type='cyber_policy'");
+ expect(observabilitySql).toContain('u.request_id NOT IN (SELECT request_id FROM terminal_policy_ids)');
+ expect(observabilitySql).toContain("t.error_phase='request' AND t.error_type='cyber_policy'");
+ expect(observabilitySql).toContain('JOIN ops_system_logs identity_log ON identity_log.request_id=t.request_id');
  // Attempt errors still permit a later exact success; only request-final events override it.
  expect(observabilitySql).not.toContain("terminal.error_phase='upstream'");
+ // The correlated OR-subquery per row is replaced by materialized request IDs.
+ expect(observabilitySql).not.toContain('IN (%s');
 });
 test('observer failures are scoped to the half-open window without erasing legacy uncertainty',()=>{
  const start='2026-10-07T02:00:00Z',end='2026-10-07T04:00:00Z';

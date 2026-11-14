@@ -156,7 +156,7 @@ function errorResponse(error: unknown, request?: Request): Response {
   }
   const status = isRecoverableDatabaseConnectionError(error)
     ? 503
-    : /does not exist|no draw chance|no eligible/u.test(message)
+    : /does not exist|no draw chance|no eligible|selector resolved no recent errors/u.test(message)
     ? 409
     : /base_url|API key|后缀|费率|充值金额|幂等键|字段不能为空|当前账号缺少|JSON|ZIP|去重后的账号数量|账号数量/u.test(message)
     ? 400
@@ -557,6 +557,20 @@ export function createHandler(
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }
       }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/model-alias") {
+        const input = await body(request);
+        try {
+          const accountId = normalizeAccountIds([input.accountId])[0];
+          const model = typeof input.model === "string" ? input.model : "";
+          const target = typeof input.target === "string" ? input.target : "";
+          if (!accountId || !model.trim() || !target.trim()) {
+            return json({ ok: false, error: "model-alias 需要 accountId、model 和 target" }, 400);
+          }
+          return json(await upstreams.updateModelAlias(accountId, model, target));
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
       if (request.method === "POST" && url.pathname === "/api/upstreams/quota-monitor/sample") {
         return json(await dispatcher.submit({ kind: "upstream.quota.sample" }), 202);
       }
@@ -646,6 +660,15 @@ export function createHandler(
         try {
           const accountIds = normalizeAccountIds(input.accountIds);
           return json(await upstreams.submitRecovery(accountIds, typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key")), 202);
+        } catch (error) {
+          return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+        }
+      }
+      if (request.method === "POST" && url.pathname === "/api/upstreams/pause") {
+        const input = await body(request);
+        try {
+          const accountIds = normalizeAccountIds(input.accountIds);
+          return json(await upstreams.submitPause(accountIds, typeof input.operationId === "string" ? input.operationId : request.headers.get("idempotency-key")), 202);
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
         }

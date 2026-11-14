@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assertSchedulingRuntimeQuery, normalizeCliArgs, parseArgs, poolQualityScope, priorityHistoryDiagnostics, selectPriorityHistory, summarizeWorkflowStatus } from "./cli";
+import { assertErrorsQueryBounds, assertObservationWindow, assertSchedulingRuntimeQuery, normalizeCliArgs, parseArgs, poolQualityScope, priorityHistoryDiagnostics, selectPriorityHistory, summarizeWorkflowStatus } from "./cli";
 import { operationHelp } from "./operation-help";
 import { webProbeElementArgs } from "./web-screenshot";
 
@@ -36,6 +36,26 @@ test("CLI uses the repository config only when --config is omitted", () => {
     .toThrow("run from the Api2Business repository root");
 });
 
+test("errors CLI rejects out-of-range limit and top before the API call", () => {
+  expect(() => assertErrorsQueryBounds(200, 60)).not.toThrow();
+  expect(() => assertErrorsQueryBounds(undefined, 100)).not.toThrow();
+  expect(() => assertErrorsQueryBounds(undefined, 200)).toThrow("errors --top 必须是 1–100 的整数");
+  expect(() => assertErrorsQueryBounds(10001, 10)).toThrow("errors --limit 必须是 1–10000 的整数");
+  expect(() => assertErrorsQueryBounds(0, 10)).toThrow("errors --limit 必须是 1–10000 的整数");
+});
+
+test("errors CLI rejects invalid or future observation windows locally", () => {
+  const now = Date.parse("2026-11-13T19:44:30Z");
+  expect(() => assertObservationWindow("2026-11-13T19:30:00Z", "2026-11-13T19:44:00Z", now)).not.toThrow();
+  expect(() => assertObservationWindow(null, null, now)).not.toThrow();
+  expect(() => assertObservationWindow("2026-11-13T19:30:00Z", "2026-11-13T19:46:00Z", now))
+    .toThrow("errors --end 不能晚于当前时间");
+  expect(() => assertObservationWindow("2026-11-13T19:44:00Z", "2026-11-13T19:30:00Z", now))
+    .toThrow("errors --start 必须早于 --end");
+  expect(() => assertObservationWindow("not-a-time", null, now))
+    .toThrow("errors --start 必须是可解析的 ISO 时间");
+});
+
 test("operation help returns action-specific contracts without loading config", () => {
   const reconcile = operationHelp(["accounts", "idle-probe", "--scope", "codex", "reconcile", "--confirm", "--help"]);
   expect(reconcile).toMatchObject({ ok: true, command: "accounts idle-probe reconcile" });
@@ -65,20 +85,22 @@ test("operation help returns action-specific contracts without loading config", 
 });
 
 test("priority history scope keeps matching rounds and discloses omissions", () => {
-  const selected = selectPriorityHistory({
-    ok: true,
-    records: [
-      { id: "ds", profile: "deepseek", profiles: ["deepseek"], created_by: "v2-scheduler:deepseek" },
-      { id: "mixed", profile: "combined", profiles: ["codex", "deepseek"] },
-      { id: "cx", profile: "codex", profiles: ["codex"] },
-    ],
-  }, "deepseek");
+  const records = [
+    { id: "ds", profile: "deepseek", profiles: ["deepseek"], created_by: "v2-scheduler:deepseek" },
+    { id: "mixed", profile: "combined", profiles: ["codex", "deepseek"] },
+    { id: "cx", profile: "codex", profiles: ["codex"] },
+    { id: "oc", profile: "opencode", profiles: ["opencode"], created_by: "v2-scheduler:opencode" },
+  ];
+  const selected = selectPriorityHistory({ ok: true, records }, "deepseek");
   expect(selected.records).toEqual([
     { id: "ds", profile: "deepseek", profiles: ["deepseek"], created_by: "v2-scheduler:deepseek" },
     { id: "mixed", profile: "combined", profiles: ["codex", "deepseek"] },
   ]);
-  expect(selected).toMatchObject({ scope: "deepseek", matchedCount: 2, omittedCount: 1 });
-  expect(() => selectPriorityHistory({ records: [] }, "openai")).toThrow("codex, claude, grok, or deepseek");
+  expect(selected).toMatchObject({ scope: "deepseek", matchedCount: 2, omittedCount: 2 });
+  expect(selectPriorityHistory({ records }, "opencode").records).toEqual([
+    { id: "oc", profile: "opencode", profiles: ["opencode"], created_by: "v2-scheduler:opencode" },
+  ]);
+  expect(() => selectPriorityHistory({ records: [] }, "openai")).toThrow("codex, claude, grok, deepseek, or opencode");
 });
 
 test("priority history human diagnostics expose query, snapshot age, block and recovery", () => {

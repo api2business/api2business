@@ -16,6 +16,7 @@ interface FakeState {
   groupCreates: Row[];
   keyCreates: Row[];
   userUpdates: Row[];
+  balanceAdds: Array<{ userId: number; amountUsd: number; notes: string }>;
   accountUpdates: Row[];
   requestTimeouts: Array<{ path: string; timeoutMs: number }>;
   rejectKeyCreateOnce?: string;
@@ -108,6 +109,13 @@ class FakeClient {
     throw new Error(`unexpected mutation ${method} ${path}`);
   }
 
+  async addBalance(userId: number, amountUsd: number, notes: string) {
+    this.state.balanceAdds.push({ userId, amountUsd, notes });
+    const user = this.state.users.find((item) => Number(item.id) === userId);
+    if (user) user.balance = Number(user.balance ?? 0) + amountUsd;
+    return user as never;
+  }
+
   async getAccount(_accountId?: number, timeoutMs?: number) {
     if (timeoutMs !== undefined) this.state.requestTimeouts.push({ path: "get-account", timeoutMs });
     return this.state.account;
@@ -131,6 +139,7 @@ function fixture() {
     groupCreates: [],
     keyCreates: [],
     userUpdates: [],
+    balanceAdds: [],
     accountUpdates: [],
     requestTimeouts: [],
   };
@@ -541,7 +550,8 @@ test("an exhausted monitor user is replenished to the configured target", async 
       replenished: true,
     });
     expect(state.users[0]?.balance).toBe(100);
-    expect(state.userUpdates).toEqual([expect.objectContaining({ balance: 100 })]);
+    expect(state.userUpdates).toEqual([]);
+    expect(state.balanceAdds).toEqual([expect.objectContaining({ userId: 61, amountUsd: 100 })]);
     expect(service.get(42)).toMatchObject({ accountId: 42, groupId: 51 });
   } finally {
     globalThis.fetch = originalFetch;
@@ -561,6 +571,7 @@ test("a funded monitor user is not topped up again", async () => {
   });
   expect(state.users[0]?.balance).toBe(12.5);
   expect(state.userUpdates).toEqual([]);
+  expect(state.balanceAdds).toEqual([]);
 });
 
 test("probe isolation persists generated credentials before a remote credential-stage failure", async () => {

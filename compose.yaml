@@ -11,7 +11,16 @@ services:
       - ${API2BUSINESS_INTEGRATION_ROOT:-./.state/integrations}:/integrations:ro
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
-      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
+      # 最小权限：只挂载 config/api2business.yaml secretSourcePaths 实际引用的文件，
+      # 不再把整个 Secret 根目录暴露给容器；增删引用需同步本清单。绑定单文件后
+      # 轮换 Secret 需重启容器才能生效（readSecret 每次调用重读文件）。
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/unified-admin-password.txt:/root/.unidesk/.env/unified-admin-password.txt:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/api2business/sub2api.env:/root/.unidesk/.env/api2business/sub2api.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/api2business/sub2api-nc01-native.env:/root/.unidesk/.env/api2business/sub2api-nc01-native.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/sheapi.env:/root/.unidesk/.env/sheapi.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/apibase.env:/root/.unidesk/.env/apibase.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/api2business/api2business.env:/root/.unidesk/.env/api2business/api2business.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/api2business/api2business-nc01-l1-db.env:/root/.unidesk/.env/api2business/api2business-nc01-l1-db.env:ro
     command: ["bun", "src/api.ts", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}", "--runtime", "compose"]
     mem_limit: 2g
     memswap_limit: 3g
@@ -34,7 +43,14 @@ services:
       - ${API2BUSINESS_INTEGRATION_ROOT:-./.state/integrations}:/integrations:ro
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}:${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}
       - ${API2BUSINESS_STATE_ROOT:-/var/lib/api2business}/idle-probe:/app/.state/idle-probe
-      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}:ro
+      # 与 api 服务相同的 Secret 最小权限清单。
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/unified-admin-password.txt:/root/.unidesk/.env/unified-admin-password.txt:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/api2business/sub2api.env:/root/.unidesk/.env/api2business/sub2api.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/api2business/sub2api-nc01-native.env:/root/.unidesk/.env/api2business/sub2api-nc01-native.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/sheapi.env:/root/.unidesk/.env/sheapi.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/apibase.env:/root/.unidesk/.env/apibase.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/api2business/api2business.env:/root/.unidesk/.env/api2business/api2business.env:ro
+      - ${API2BUSINESS_SECRET_ROOT:-/etc/api2business/secrets}/api2business/api2business-nc01-l1-db.env:/root/.unidesk/.env/api2business/api2business-nc01-l1-db.env:ro
     command: ["/usr/local/bin/api2business-temporal-worker", "--config", "${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}", "--runtime", "compose"]
     mem_limit: 2g
     memswap_limit: 3g
@@ -58,7 +74,7 @@ services:
     environment:
       API2BUSINESS_CONFIG_PATH: ${API2BUSINESS_CONFIG_PATH:-config/api2business.yaml}
       API2BUSINESS_RUNTIME_ID: compose
-    command: ["bunx", "vite", "--config", "vite.config.ts", "--host", "0.0.0.0"]
+    command: ["bunx", "vite", "--config", "vite.config.ts"]
     mem_limit: 2g
     memswap_limit: 3g
     pids_limit: 256

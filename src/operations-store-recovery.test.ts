@@ -142,6 +142,51 @@ test("a permanently hung database returns a bounded error and retires the retry 
   } finally { await store.close(); }
 });
 
+test("历史费率读取只扫描窗口前 30 天锚点，不扫描全部历史", async () => {
+  let queryText = "";
+  const store = new OperationsStore("postgres://fixture", () => sqlClient(async (sql) => {
+    queryText = sql;
+    return [];
+  }));
+  try {
+    await store.observedCostRates("2026-10-16T08:44:00Z", "2026-10-16T10:44:00Z");
+    expect(queryText).toContain("sampled_at>=?::timestamptz - interval '30 days'");
+    expect(queryText).toContain("sampled_at<?");
+  } finally { await store.close(); }
+});
+
+test("历史费率锚点用哈希反连接排除已有账号，不对物化 CTE 逐行嵌套扫描", async () => {
+  let queryText = "";
+  const store = new OperationsStore("postgres://fixture", () => sqlClient(async (sql) => {
+    queryText = sql;
+    return [];
+  }));
+  try {
+    await store.observedCostRates("2026-10-16T08:44:00Z", "2026-10-16T10:44:00Z");
+    expect(queryText).toContain("raw_accounts AS MATERIALIZED");
+    expect(queryText).toContain("LEFT JOIN raw_accounts r USING (account_id)");
+    expect(queryText).not.toContain("NOT EXISTS (SELECT 1 FROM raw r");
+  } finally { await store.close(); }
+});
+
+test("历史费率只展开窗口轮次与有界锚点轮次，不展开 30 天全部样本", async () => {
+  let queryText = "";
+  const store = new OperationsStore("postgres://fixture", () => sqlClient(async (sql) => {
+    queryText = sql;
+    return [];
+  }));
+  try {
+    await store.observedCostRates("2026-10-16T08:44:00Z", "2026-10-16T10:44:00Z");
+    expect(queryText).toContain("selected_rounds AS MATERIALIZED");
+    expect(queryText).toContain("JOIN selected_rounds USING (sampled_at)");
+    expect(queryText).toContain("DISTINCT ON (wallet_key) sampled_at");
+    expect(queryText).toContain("interval '4 days'");
+    expect(queryText).toContain("interval '30 days'");
+    expect(queryText).toMatch(/WHERE s\.sampled_at<\? AND s\.sampled_at>=\?::timestamptz - interval '4 days'/);
+    expect(queryText).not.toContain("FROM api2business_upstream_quota_samples s,");
+  } finally { await store.close(); }
+});
+
 test("历史费率读取挂起后重建连接并重试，不阻断观测报告", async () => {
   let pools = 0;
   const store = new OperationsStore("postgres://fixture", (_url, max) => {

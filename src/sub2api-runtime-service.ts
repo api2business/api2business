@@ -202,6 +202,67 @@ export class Sub2ApiRuntimeService {
     return { ok: true, accountIds: ids, results, persisted: true, writeMode: "native-bulk-merge", valuesPrinted: true };
   }
 
+  // 只合并单个模型映射键，用于纠正指向无真实供给的上游目标名。
+  // 走 native bulk-update 的 JSONB 顶层合并，保留其余映射键与所有非映射凭据；
+  // 回读校验失败时把该键恢复为调用前取值，避免留下半完成状态。
+  async updateModelAlias(
+    accountId: number, model: string, target: string, timeoutMs?: number,
+  ): Promise<Record<string, unknown>> {
+    if (!Number.isSafeInteger(accountId) || accountId < 1) throw new Error("model alias update requires a stable positive account ID");
+    const key = model.trim();
+    const value = target.trim();
+    if (!key || !value) throw new Error("model alias update requires non-empty --model and --target");
+    if (key === value) throw new Error(`model alias ${key} already maps to itself; refusing a no-op write`);
+    const before = await this.client.getAccount(accountId, timeoutMs);
+    const beforeCredentials = record(before?.credentials) ?? {};
+    const beforeMapping = record(beforeCredentials.model_mapping) ?? {};
+    const hadPreviousKey = Object.prototype.hasOwnProperty.call(beforeMapping, key);
+    if (!hadPreviousKey && Object.values(beforeMapping).includes(value) === false) {
+      throw new Error(`account ${accountId} has no model mapping key ${key} and no existing alias points to ${value}`);
+    }
+    const beforeStableCredentials = { ...beforeCredentials };
+    delete beforeStableCredentials.model_mapping;
+    const previous = hadPreviousKey ? String(beforeMapping[key] ?? "") : null;
+    const merged: Record<string, string> = {};
+    for (const [entryKey, entryValue] of Object.entries(beforeMapping)) {
+      if (typeof entryValue === "string") merged[entryKey] = entryValue;
+    }
+    merged[key] = value;
+    const write = async (mapping: Record<string, string>) => {
+      const result = await this.client.mutate<BulkUpdateResult>("POST", "/admin/accounts/bulk-update",
+        { account_ids: [accountId], credentials: { model_mapping: mapping } }, undefined, timeoutMs);
+      const failed = Number(result.failed ?? 0);
+      const successIds = Array.isArray(result.success_ids) ? result.success_ids.map(Number).filter(Number.isSafeInteger) : [];
+      const success = Number(result.success ?? (successIds.includes(accountId) ? 1 : 0));
+      if (failed > 0 || (successIds.length > 0 ? !successIds.includes(accountId) : success < 1)) {
+        throw new Error(`model alias update failed for account ${accountId}`);
+      }
+    };
+    await write(merged);
+    const after = await this.client.getAccount(accountId, timeoutMs);
+    const afterCredentials = record(after?.credentials) ?? {};
+    const afterStableCredentials = { ...afterCredentials };
+    delete afterStableCredentials.model_mapping;
+    const afterMapping = record(afterCredentials.model_mapping) ?? {};
+    const verified = afterMapping[key] === value
+      && canonicalJson(beforeStableCredentials) === canonicalJson(afterStableCredentials);
+    if (!verified) {
+      const rollbackMapping: Record<string, string> = {};
+      for (const [entryKey, entryValue] of Object.entries(afterMapping)) {
+        if (typeof entryValue === "string") rollbackMapping[entryKey] = entryValue;
+      }
+      if (previous === null) delete rollbackMapping[key];
+      else rollbackMapping[key] = previous;
+      await write(rollbackMapping);
+      throw new Error(`model alias readback mismatch for account ${accountId}; rolled back ${key} to ${previous ?? "<absent>"}`);
+    }
+    return {
+      ok: true, accountId, model: key, previousTarget: previous, created: !hadPreviousKey, target: value,
+      mappingKeyCount: Object.keys(afterMapping).length, writeMode: "native-bulk-merge",
+      rollback: previous === null ? { deleteModel: key } : { model: key, target: previous }, persisted: true, valuesPrinted: true,
+    };
+  }
+
   async importAccounts(input: {
     operationKey: string;
     content: string;

@@ -1,5 +1,4 @@
 import { audioRequestSql } from "./scoring-error-policy";
-import { terminalPolicyExistsSql, usageRequestMatchesSql } from "./request-terminal-policy";
 
 // Keep only changes in the evidenced rate. Repeated quota samples are not new
 // billing epochs; scanning all of them for every usage row makes week-long reads slow.
@@ -45,14 +44,35 @@ errors AS (
     AND (NOT (COALESCE(status_code,upstream_status_code,0) BETWEEN 200 AND 399)
       OR COALESCE(upstream_status_code,0)>=400
       OR (error_phase='request' AND error_type='cyber_policy'))
+), terminal_policy_ids AS MATERIALIZED (
+  SELECT t.request_id FROM errors t WHERE t.error_phase='request' AND t.error_type='cyber_policy'
+  UNION
+  SELECT 'client:' || NULLIF(identity_log.extra->>'client_request_id','')
+  FROM errors t JOIN ops_system_logs identity_log ON identity_log.request_id=t.request_id
+  WHERE t.error_phase='request' AND t.error_type='cyber_policy'
+    AND NULLIF(identity_log.extra->>'client_request_id','') IS NOT NULL
 ), success AS (
   SELECT DISTINCT ON (request_id) request_id, account_id, requested_model, model, upstream_model, stream, first_token_ms
   FROM usage u WHERE NULLIF(TRIM(request_id),'') IS NOT NULL
     AND NOT ${audioRequestSql("u")}
     -- Native request-level policy events are terminal, even when HTTP 200 and a
     -- zero-token usage row were persisted. Upstream attempt errors are not final.
-    AND NOT ${terminalPolicyExistsSql("u.request_id", "errors")}
+    AND u.request_id NOT IN (SELECT request_id FROM terminal_policy_ids)
   ORDER BY request_id,created_at DESC,id DESC
+), success_request_ids AS MATERIALIZED (
+  SELECT request_id FROM success
+), request_links AS MATERIALIZED (
+  -- One pass over the windowed request IDs instead of a correlated OR-subquery per row.
+  SELECT e.request_id AS gateway_id,
+    'client:' || NULLIF(identity_log.extra->>'client_request_id','') AS linked_id
+  FROM errors e JOIN ops_system_logs identity_log ON identity_log.request_id=e.request_id
+  WHERE NULLIF(identity_log.extra->>'client_request_id','') IS NOT NULL
+), recovered_request_ids AS MATERIALIZED (
+  SELECT DISTINCT l.gateway_id FROM request_links l
+  JOIN success_request_ids s ON s.request_id=l.linked_id
+), recovery_request_keys AS MATERIALIZED (
+  SELECT request_id FROM success_request_ids
+  UNION SELECT gateway_id FROM recovered_request_ids
 ), customer_billing AS (
   SELECT DISTINCT ON (e.request_id) e.* FROM errors e
   WHERE e.api_user_id IS NOT NULL AND NULLIF(TRIM(e.request_id),'') IS NOT NULL
@@ -79,7 +99,7 @@ errors AS (
       WHEN e.error_phase IN ('internal','network') THEN 'infrastructure_other'
       ELSE 'unknown' END AS family
   FROM errors e WHERE NULLIF(TRIM(e.request_id),'') IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM success s WHERE ${usageRequestMatchesSql("s.request_id", "e.request_id")})
+    AND e.request_id NOT IN (SELECT request_id FROM recovery_request_keys)
     AND NOT EXISTS (SELECT 1 FROM customer_billing b WHERE b.request_id=e.request_id)
   ORDER BY e.request_id,e.created_at DESC,e.id DESC
 ), task_scope_luna_requests AS (
@@ -90,12 +110,20 @@ errors AS (
   ) models
   WHERE NULLIF(TRIM(request_id),'') IS NOT NULL
     AND CONCAT_WS('/',requested_model,model,upstream_model) ILIKE '%luna%'
+), task_scope_luna_ids AS MATERIALIZED (
+  SELECT DISTINCT request_id FROM task_scope_luna_requests
+), task_scope_luna_success_ids AS MATERIALIZED (
+  SELECT l.request_id FROM task_scope_luna_ids l
+    WHERE l.request_id IN (SELECT request_id FROM success_request_ids)
+  UNION
+  SELECT linked_id FROM request_links
+    WHERE gateway_id IN (SELECT request_id FROM task_scope_luna_ids)
 ), task_scope_success AS (
   SELECT s.* FROM success s
-  WHERE NOT EXISTS (SELECT 1 FROM task_scope_luna_requests l WHERE ${usageRequestMatchesSql("s.request_id", "l.request_id")})
+  WHERE s.request_id NOT IN (SELECT request_id FROM task_scope_luna_success_ids)
 ), task_scope_failure AS (
   SELECT f.* FROM failure f
-  WHERE NOT EXISTS (SELECT 1 FROM task_scope_luna_requests l WHERE l.request_id=f.request_id)
+  WHERE f.request_id NOT IN (SELECT request_id FROM task_scope_luna_ids)
 ), cost_usage AS (
   SELECT u.*,COALESCE(rate.rate_cny,u.rate_multiplier*rate.wallet_rate_cny) AS rate_cny,rate.at AS rate_at FROM usage u
   LEFT JOIN LATERAL (
@@ -140,7 +168,7 @@ SELECT jsonb_build_object(
   'excludedAudioRecords',(SELECT COUNT(*) FROM usage_source u WHERE NOT probe AND ${audioRequestSql("u")})
     +(SELECT COUNT(*) FROM error_source e WHERE NOT probe AND ${audioRequestSql("e", true)}),
   'excludedProbeRecords',(SELECT COUNT(*) FROM usage_source WHERE probe)+(SELECT COUNT(*) FROM error_source WHERE probe),
-  'recoveredRequests',(SELECT COUNT(DISTINCT e.request_id) FROM errors e JOIN success s ON ${usageRequestMatchesSql("s.request_id", "e.request_id")}),
+  'recoveredRequests',(SELECT COUNT(*) FROM recovered_request_ids),
   'errorFamilies',COALESCE((SELECT jsonb_agg(t) FROM (SELECT family,COUNT(*)::int AS requests FROM failure GROUP BY family ORDER BY COUNT(*) DESC) t),'[]'::jsonb),
   'businessLimitBreakdown',COALESCE((SELECT jsonb_agg(t) FROM (
     SELECT api_user_id AS user_id,api_user_email AS user_email,api_key_id,api_key_name,

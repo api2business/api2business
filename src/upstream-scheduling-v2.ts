@@ -7,6 +7,7 @@ import {
   upstreamBalanceRateByWallet,
 } from "./upstream-valuation";
 import { configuredWalletKey, preferSharedWalletBalance, usageBalanceSourceAt, usageWalletKey } from "./upstream-wallet";
+import { exhaustedQuotaWindows, quotaWindowsExhausted } from "./upstream-quota-window";
 
 type Row = Record<string, unknown>;
 
@@ -53,6 +54,10 @@ interface V2SnapshotPayload {
 }
 
 const readModelSchemaVersion = "upstream-scheduling-v2-read-model-v1";
+
+function applicableSections(sections: Record<string, { state: string }>): Array<{ state: string }> {
+  return Object.values(sections).filter((section) => section.state !== "unsupported");
+}
 
 function records(value: unknown): Row[] {
   return Array.isArray(value)
@@ -211,8 +216,24 @@ function enrichAccountsWithQuotaCache(accounts: Row[], usageRows: unknown[], con
     if (effective.status === "cached") numericAccountCount += 1;
     if (effective.status === "unlimited") unlimitedAccountCount += 1;
     if (effective.status === "unavailable") unavailableAccountIds.push(accountId);
+    const ownResult = cached?.result ?? effective.result;
+    const exhaustedWindows = exhaustedQuotaWindows(ownResult);
+    const quotaExhausted = exhaustedWindows.length > 0 || quotaWindowsExhausted(ownResult);
+    const currentAvailable = quotaExhausted ? false : account.currentAvailable;
     return {
       ...account,
+      currentAvailable,
+      currentlyAvailable: currentAvailable,
+      availabilityReason: quotaExhausted
+        ? {
+            code: "quota-window",
+            label: "额度窗口已用尽",
+            detail: `已耗尽窗口：${exhaustedWindows.join(",") || "unknown"}`,
+            resetAt: null,
+          }
+        : account.availabilityReason,
+      quotaWindows: records(ownResult.quotaWindows),
+      quotaWindowsExhausted: quotaExhausted,
       accountBalanceCny,
       quota: {
         limit: quota.limit ?? null,
@@ -339,7 +360,7 @@ export class UpstreamSchedulingV2Service {
 
   private withCache(payload: V2SnapshotPayload, capturedAt: string, state: "hit" | "stale" | "refreshed", error: string | null = null): V2SnapshotPayload & { cache: Row } {
     const sections = payload.data.sectionStatus ?? {};
-    const failedSections = Object.entries(sections).filter(([, section]) => section.state !== "fresh").map(([name]) => name);
+    const failedSections = Object.entries(sections).filter(([, section]) => section.state !== "fresh" && section.state !== "unsupported").map(([name]) => name);
     return { ...projectCachedQuotaBalances(payload, this.config), cache: {
       ...this.cacheMetadata(capturedAt, state, error),
       complete: payload.data.complete === true,
@@ -382,8 +403,8 @@ export class UpstreamSchedulingV2Service {
         && scope.features.upstreamWrite !== true,
       data: {
         sectionStatus: source.sectionStatus,
-        complete: Object.values(source.sectionStatus).every((section) => section.state === "fresh"),
-        lastCompleteAt: Object.values(source.sectionStatus).every((section) => section.state === "fresh")
+        complete: applicableSections(source.sectionStatus).every((section) => section.state === "fresh"),
+        lastCompleteAt: applicableSections(source.sectionStatus).every((section) => section.state === "fresh")
           ? new Date().toISOString() : fallbackData?.lastCompleteAt ?? null,
         refreshedAt: source.scoreSnapshot.refreshedAt == null ? null : String(source.scoreSnapshot.refreshedAt),
         recentCallLimit: Number(source.scoreSnapshot.recentCallLimit ?? this.config.monitor.recentCallLimit),
@@ -520,13 +541,27 @@ export class UpstreamSchedulingV2Service {
       ? "codex"
       : scope.platform === "anthropic"
         ? "claude"
-        : scope.platform === "deepseek"
-          ? "deepseek"
-          : "grok";
+        : scope.platform === "grok"
+          ? "grok"
+          : scope.platform === "deepseek"
+            ? "deepseek"
+            : null;
+    const unsupportedQualityProfile = qualityProfile === null
+      ? { ok: false, platform: scopeName, groupIds: scope.eligibleGroupIds,
+        error: `pool-quality is not supported for ${scope.platform}` }
+      : null;
+    const unsupportedErrorsProfile = unsupportedQualityProfile === null
+      ? null
+      : { ...unsupportedQualityProfile, error: `error list is not supported for ${scope.platform}` };
     const accountIds = accounts.map((row) => Number(row.accountId));
     const results = await Promise.allSettled([
-      timed("pool-quality", () => this.readSection(() => this.operations.poolQualitySummary(qualityProfile), "pool-quality")),
-      timed("errors", () => this.readSection(() => this.operations.poolQualityErrors({ platform: qualityProfile, page: 1, pageSize: 20, filter: "all", priority: "automatic" }), "errors")),
+      unsupportedQualityProfile
+        ? Promise.resolve(unsupportedQualityProfile)
+        : timed("pool-quality", () => this.readSection(() => this.operations.poolQualitySummary(qualityProfile!), "pool-quality")),
+      unsupportedQualityProfile
+        ? Promise.resolve({ ...unsupportedErrorsProfile!, rows: [], modelDistribution: [],
+          pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 } })
+        : timed("errors", () => this.readSection(() => this.operations.poolQualityErrors({ platform: qualityProfile!, page: 1, pageSize: 20, filter: "all", priority: "automatic" }), "errors")),
       timed("priority-history", () => this.readSection(() => this.operations.priorityHistory(), "priority-history")),
       timed("quota", () => this.readSection(() => this.operations.upstreamQuotaSummary(accountIds), "quota")),
       timed("usage-cache", () => this.readSection(() => accountIds.length ? this.operations.getUpstreamUsageCache([]) : Promise.resolve([]), "usage-cache")),
@@ -542,6 +577,12 @@ export class UpstreamSchedulingV2Service {
         observedAt: scoreSnapshot.refreshedAt == null ? null : String(scoreSnapshot.refreshedAt),
         error: scoreSnapshot.ok === false ? String(scoreSnapshot.error ?? "score snapshot unavailable") : null, durationMs: durations.get("scores") },
     };
+    for (const name of ["pool-quality", "errors"]) {
+      if (unsupportedQualityProfile) sectionStatus[name] = {
+        state: "unsupported", observedAt: new Date().toISOString(),
+        error: name === "errors" ? unsupportedErrorsProfile!.error : unsupportedQualityProfile.error, durationMs: 0,
+      };
+    }
     const section = <T>(index: number, fallback: T, name: string): T => {
       const result = results[index];
       if (result?.status === "fulfilled" && object(result.value).ok !== false) {
@@ -568,8 +609,12 @@ export class UpstreamSchedulingV2Service {
       }
       return fallback;
     };
-    const poolQualityRaw = section(0, fallbackData?.poolQuality ?? { ok: false, platform: qualityProfile, groupIds: scope.eligibleGroupIds, score: null, error: "pool quality unavailable" }, "pool-quality");
-    const errorsRaw = section(1, fallbackData?.errors ?? { ok: false, platform: qualityProfile, rows: [], modelDistribution: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 }, error: "error list unavailable" }, "errors");
+    const poolQualityRaw = unsupportedQualityProfile
+      ?? section(0, fallbackData?.poolQuality ?? { ok: false, platform: qualityProfile ?? scopeName, groupIds: scope.eligibleGroupIds, score: null, error: "pool quality unavailable" }, "pool-quality");
+    const errorsRaw = (unsupportedQualityProfile
+      ? { ...unsupportedErrorsProfile!, rows: [], modelDistribution: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 } }
+      : null)
+      ?? section(1, fallbackData?.errors ?? { ok: false, platform: qualityProfile ?? scopeName, groupIds: scope.eligibleGroupIds, rows: [], modelDistribution: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 }, error: "error list unavailable" }, "errors");
     const priorityHistoryRaw = section(2, fallbackData?.priorityHistory ? { ok: true, records: fallbackData.priorityHistory } : { ok: false, records: [], error: "priority history unavailable" }, "priority-history");
     const quotaRaw = section(3, fallbackData?.quota ?? { ok: false, history: [], error: "quota summary unavailable" }, "quota");
     const usageRows = section(4, fallbackData?.usage ?? [], "usage-cache");

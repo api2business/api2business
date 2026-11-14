@@ -230,6 +230,7 @@ export interface AppConfig {
     poolScorePolicy: ScorePolicy;
     grokScorePolicy: ScorePolicy;
     deepseekScorePolicy: ScorePolicy;
+    opencodeScorePolicy?: ScorePolicy;
     scoreSamplePolicy: {
       retentionHours: number;
       decayBucketSize: number;
@@ -263,6 +264,7 @@ export interface AppConfig {
     grokPriorityPlan: PriorityPlanPolicy;
     deepseekPriorityPlan: PriorityPlanPolicy;
     claudePriorityPlan: PriorityPlanPolicy;
+    opencodePriorityPlan?: PriorityPlanPolicy;
     adminCredentials: { sourceRef: string; emailKey: string; passwordKey: string };
   };
   lottery: {
@@ -363,6 +365,7 @@ export interface AppConfig {
   runtime: {
     httpIdleTimeoutSeconds?: number;
     secretsRoot: string;
+    stateRoot: string;
     secretSourcePaths: Record<string, string>;
     defaultCliTarget: string;
     overApiTarget: string;
@@ -995,6 +998,9 @@ export function loadConfig(path: string): AppConfig {
       poolScorePolicy: readScorePolicy(sub2api.poolScorePolicy, "sub2api.poolScorePolicy"),
       grokScorePolicy: readScorePolicy(sub2api.grokScorePolicy, "sub2api.grokScorePolicy"),
       deepseekScorePolicy: readScorePolicy(sub2api.deepseekScorePolicy, "sub2api.deepseekScorePolicy"),
+      ...(sub2api.opencodeScorePolicy === undefined
+        ? {}
+        : { opencodeScorePolicy: readScorePolicy(sub2api.opencodeScorePolicy, "sub2api.opencodeScorePolicy") }),
       scoreSamplePolicy: {
         retentionHours: integerValue(scoreSamplePolicy, "retentionHours", "sub2api.scoreSamplePolicy", 1, 168),
         decayBucketSize: integerValue(scoreSamplePolicy, "decayBucketSize", "sub2api.scoreSamplePolicy", 1, 1000),
@@ -1064,6 +1070,9 @@ export function loadConfig(path: string): AppConfig {
       grokPriorityPlan: readPriorityPlanPolicy(sub2api.grokPriorityPlan, "sub2api.grokPriorityPlan"),
       claudePriorityPlan: readPriorityPlanPolicy(sub2api.claudePriorityPlan, "sub2api.claudePriorityPlan"),
       deepseekPriorityPlan: readPriorityPlanPolicy(sub2api.deepseekPriorityPlan, "sub2api.deepseekPriorityPlan"),
+      ...(sub2api.opencodePriorityPlan === undefined
+        ? {}
+        : { opencodePriorityPlan: readPriorityPlanPolicy(sub2api.opencodePriorityPlan, "sub2api.opencodePriorityPlan") }),
       adminCredentials: {
         sourceRef: stringValue(adminCredentials, "sourceRef", "sub2api.adminCredentials"),
         emailKey: stringValue(adminCredentials, "emailKey", "sub2api.adminCredentials"),
@@ -1274,6 +1283,7 @@ export function loadConfig(path: string): AppConfig {
         ? Math.min(255, Math.ceil(integerValue(monitorCli, "timeoutMs", "monitor.cli", 1000) / 1000))
         : integerValue(runtime, "httpIdleTimeoutSeconds", "runtime", 1, 255),
       secretsRoot: stringValue(runtime, "secretsRoot", "runtime"),
+      stateRoot: runtime.stateRoot === undefined ? "/var/lib/api2business" : stringValue(runtime, "stateRoot", "runtime"),
       secretSourcePaths: Object.fromEntries(Object.entries(secretSourcePathsRaw).map(([ref, value]) => {
         if (typeof value !== "string" || value.trim() === "") throw new Error(`runtime.secretSourcePaths.${ref} must be a non-empty string`);
         return [ref, value];

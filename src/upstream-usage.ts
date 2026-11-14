@@ -900,6 +900,31 @@ function quotaCoverageProvider(result: UpstreamUsageResult): QuotaProviderCovera
   return null;
 }
 
+export interface QuotaWindowCoverage {
+  window: QuotaWindowName;
+  accounts: number;
+  observed: number;
+  unknown: number;
+  lowQuotaWarnings: number;
+}
+
+/**
+ * Aggregate the three quota windows across every account whose provider
+ * exposes them. Window completeness is judged per account and per window;
+ * a missing window stays unknown and is never back-filled from another
+ * window or from zero.
+ */
+export function summarizeQuotaWindowCoverage(results: UpstreamUsageResult[]): QuotaWindowCoverage[] {
+  const scoped = results.filter((result) => quotaCoverageProvider(result) !== null);
+  return (["five_hour", "weekly", "monthly"] as const).map((window) => ({
+    window,
+    accounts: scoped.length,
+    observed: scoped.filter((result) => result.quotaWindows.some((item) => item.window === window && item.complete)).length,
+    unknown: scoped.filter((result) => !result.quotaWindows.some((item) => item.window === window && item.complete)).length,
+    lowQuotaWarnings: scoped.filter((result) => result.lowQuotaWarnings.some((item) => item.window === window)).length,
+  }));
+}
+
 export function summarizeQuotaProviderCoverage(results: UpstreamUsageResult[]): QuotaProviderCoverage[] {
   return (["opencode-go", "command-code"] as const).flatMap((provider) => {
     const matches = results.filter((result) => quotaCoverageProvider(result) === provider);

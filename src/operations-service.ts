@@ -3,6 +3,7 @@ import { parse } from "yaml";
 import type { AppConfig, UpstreamSchedulingV2Scope } from "./config";
 import { collectRecentCallScoresFromDatabase } from "./account-score-database";
 import { buildAccountPriorityPlan } from "./account-priority-plan";
+import { exhaustedQuotaWindows } from "./upstream-quota-window";
 import { collectErrorAggregateFromDatabase } from "./error-aggregate-database";
 import { collectErrorDiagnosisFromDatabase } from "./error-diagnose-database";
 import {
@@ -1355,6 +1356,21 @@ export class OperationsService {
       const sharedUsage = usageByWallet.get(wallet)?.result;
       const usage = Number.isFinite(directRemaining) ? directUsage : sharedUsage ?? directUsage;
       if (!usage || usage.ok !== true) return row;
+      const ownUsage = directUsage ?? usage;
+      const exhaustedWindows = exhaustedQuotaWindows(ownUsage);
+      const quotaUnavailable = exhaustedWindows.length > 0
+        ? {
+            currentAvailable: false,
+            currentlyAvailable: false,
+            availabilityReason: {
+              code: "quota-window",
+              label: "额度窗口已用尽",
+              detail: `已耗尽窗口：${exhaustedWindows.join(",")}`,
+              resetAt: null,
+            },
+            quotaWindowsExhausted: true,
+          }
+        : {};
       const quota = object((sharedUsage ?? usage).quota);
       const remaining = quota.unit === "USD" && quota.remaining !== null && quota.remaining !== undefined
         ? Number(quota.remaining)
@@ -1367,6 +1383,7 @@ export class OperationsService {
       const multiplier = Number(object(usage.billingMultiplier).value);
       return {
         ...row,
+        ...quotaUnavailable,
         accountBalanceCny: Number.isFinite(remaining) ? remaining * walletRate : null,
         detectedCostRateCnyPerApiUsd: Number.isFinite(multiplier) && multiplier > 0 ? multiplier * walletRate : null,
       };
@@ -1724,12 +1741,19 @@ export class OperationsService {
         const changes = records(object(result).changes);
         const accountChange = accountId === null ? null : accountPriorityTransition(changes, accountId);
         const profileSummary = object(object(result).profiles);
+        const operatorScope = String(row.created_by ?? row.operator ?? "")
+          .match(/^v2-scheduler:([a-z0-9_-]+)$/)?.[1] ?? null;
+        const defaultProfile = operatorScope !== null
+          && ["codex", "claude", "grok", "deepseek", "opencode"].includes(operatorScope)
+          ? operatorScope
+          : "codex";
         const discoveredProfiles = new Set([
           ...Object.keys(profileSummary),
-          ...changes.map((change) => String(change.profile ?? "")).filter(Boolean),
+          ...changes.map((change) => String(change.profile ?? defaultProfile)).filter(Boolean),
         ]);
-        const profiles = ["codex", "claude", "grok", "deepseek"].filter((profile) => discoveredProfiles.has(profile));
-        if (profiles.length === 0) profiles.push("codex");
+        const profiles = ["codex", "claude", "grok", "deepseek", "opencode"]
+          .filter((profile) => discoveredProfiles.has(profile));
+        if (profiles.length === 0) profiles.push(defaultProfile);
         const startedAt = row.execution_started_at ?? row.created_at;
         const completedAt = row.completed_at;
         const startedAtMs = startedAt instanceof Date
@@ -1750,7 +1774,7 @@ export class OperationsService {
         const profileWriteBatchCounts: Record<string, number> = {};
         const profileStatuses: Record<string, unknown> = {};
         for (const profile of profiles) {
-          const profileChanges = changes.filter((change) => String(change.profile ?? "codex") === profile);
+          const profileChanges = changes.filter((change) => String(change.profile ?? defaultProfile) === profile);
           const changedCount = profileChanges.filter((change) =>
             priorityIds.has(String(change.accountId ?? change.account_id ?? "")),
           ).length;

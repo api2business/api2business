@@ -254,6 +254,7 @@ async function executeWorkerOperation(operation: OperationRequest): Promise<unkn
     else if (pending.action === "update") result = await upstreams.update(pending.input.id, pending.input);
     else if (pending.action === "recharge") result = await upstreams.recharge(pending.input.id, pending.input);
     else if (pending.action === "recover") result = await upstreams.recover(pending.input.accountIds);
+    else if (pending.action === "pause") result = await upstreams.pause(pending.input.accountIds);
     else if (pending.action === "isolation") result = await upstreams.ensureProbeIsolation(pending.input.accountIds);
     else if (pending.action === "template") result = await upstreams.applyTemplate(pending.input.accountIds);
     else {

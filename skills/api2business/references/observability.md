@@ -65,6 +65,9 @@ bun skills/api2business/scripts/api2business-cli.ts --config config/api2business
   - 正式页面的“探活成本”区块读取同一 API；刷新按钮同时刷新报告和探活成本。
   - 指标、未知处理、预算与趋势语义只引用
     [探活成本](../../../docs/specs/operational-observability.md#探活成本)，不在本文复制公式。
+  - 2026-11-14 用户批准的成本控制基线：探活固定前缀缩短到 128 个示例（约 1K token，
+    仍高于 1024 token 的最小缓存长度）；作用域周期为 codex 180 秒、claude 900 秒、
+    grok 180 秒、deepseek 120 秒。调整时按作用域显式设置，不整体回退到旧的 90/300 秒。
 - 成本范围、非 API-key 的“不需对账”和覆盖率分母只见
   [钱包与实际成本](../../../docs/specs/operational-observability.md#钱包与实际成本)。
 - `upstream-scheduling-v2 snapshot` 的缓存读取、刷新与互斥参数只见

@@ -103,6 +103,16 @@ const config = {
   platform: "anthropic",
   eligibleGroupIds: [119],
 };
+(config.sub2api as AppConfig["sub2api"]).opencodeScorePolicy = {
+  ...config.sub2api.scorePolicy,
+  ttftZeroScoreMs: 90_000,
+};
+(config.sub2api as AppConfig["sub2api"]).opencodePriorityPlan = {
+  ...config.sub2api.priorityPlan,
+  platform: "opencode_go",
+  eligibleGroupIds: [191],
+  procurementAdvice: { ...config.sub2api.priorityPlan.procurementAdvice, enabled: false },
+};
 
 function account(id: number, name: string, score: number, available = true, error = ""): Record<string, any> {
   return {
@@ -214,6 +224,169 @@ test("Grok can force a canonical top-k distribution that starts at the configure
   expect(changes.every((row) => row.priorityRebalanced === true)).toBeTrue();
   expect(new Set(changes.map((row) => row.desiredPriority)).size).toBe(changes.length);
   expect(plan.priorities).toMatchObject({ "101": 100, "102": 111, "103": 121, "104": 132 });
+});
+
+test("OpenCode priority planning uses its own platform and group scope", () => {
+  const rows = [
+    { ...account(201, "opencode-a", 95), platform: "opencode_go", groupIds: [191], priority: 200 },
+    { ...account(202, "opencode-b", 90), platform: "opencode_go", groupIds: [191], priority: 200 },
+  ];
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, config);
+  const changes = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.profile === "opencode");
+  expect(plan.profiles).toMatchObject({ opencode: { eligibleCount: 2 } });
+  expect(changes).toHaveLength(2);
+  expect(changes.map((row) => row.accountId).sort()).toEqual([201, 202]);
+  expect(changes.every((row) => row.profile === "opencode")).toBeTrue();
+});
+
+test("cost-free scopes keep costless accounts eligible instead of sending them to the tail", () => {
+  const costFreeConfig = structuredClone(config);
+  const opencodePolicy = (costFreeConfig.sub2api as AppConfig["sub2api"]).opencodePriorityPlan!;
+  opencodePolicy.costWeight = 0;
+  opencodePolicy.explorationWeight = 0;
+  const rows = [
+    { ...account(301, "user011", 96.8), platform: "opencode_go", groupIds: [191], priority: 200 },
+    { ...account(302, "user012", 100), platform: "opencode_go", groupIds: [191], priority: 200 },
+  ];
+  for (const row of rows) delete (row as Record<string, unknown>).usage;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, costFreeConfig);
+  const changes = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.profile === "opencode");
+
+  expect(plan.profiles).toMatchObject({ opencode: { eligibleCount: 2 } });
+  expect(changes).toHaveLength(2);
+  expect(changes.every((row) => row.priorityMode !== "topk-tail")).toBeTrue();
+  const byAccount = new Map(changes.map((row) => [row.accountId, row]));
+  expect(Number(byAccount.get(302)!.desiredPriority))
+    .toBeLessThan(Number(byAccount.get(301)!.desiredPriority));
+  expect(Number(byAccount.get(301)!.desiredPriority)).toBeLessThan(300);
+  expect(changes.every((row) => row.costPenalty === 0)).toBeTrue();
+  expect(changes.every((row) => row.costRateCnyPerApiUsd === null)).toBeTrue();
+  expect((plan.profiles as Record<string, Record<string, unknown>>).opencode.costRange).toBeNull();
+});
+
+test("zero-sample accounts inherit the average non-tail priority in the OpenCode scope", () => {
+  const rows: Array<Record<string, any>> = [
+    { ...account(501, "scored", 96), platform: "opencode_go", groupIds: [191], priority: 100 },
+    { ...account(502, "new-a", 0), platform: "opencode_go", groupIds: [191], priority: 300 },
+    { ...account(503, "new-b", 0), platform: "opencode_go", groupIds: [191], priority: 300 },
+  ];
+  for (const row of rows.slice(1)) {
+    row.score = null;
+    row.observedAttempts = 0;
+    delete row.scoreComponents;
+  }
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, config);
+  const changes = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.profile === "opencode");
+  const byAccount = new Map(changes.map((row) => [row.accountId, row]));
+
+  expect(byAccount.get(502)).toMatchObject({
+    priorityMode: "zero-sample-average",
+    desiredPriority: 100,
+  });
+  expect(byAccount.get(503)).toMatchObject({
+    priorityMode: "zero-sample-average",
+    desiredPriority: 100,
+  });
+  expect(plan.priorities).toMatchObject({ "502": 100, "503": 100 });
+});
+
+test("zero-sample warm start rounds the average and excludes the tail priority", () => {
+  const rows: Array<Record<string, any>> = [
+    { ...account(511, "scored-a", 96), platform: "opencode_go", groupIds: [191], priority: 100 },
+    { ...account(512, "scored-b", 90), platform: "opencode_go", groupIds: [191], priority: 201 },
+    { ...account(513, "new", 0), platform: "opencode_go", groupIds: [191], priority: 300 },
+  ];
+  rows[2]!.score = null;
+  rows[2]!.observedAttempts = 0;
+  delete rows[2]!.scoreComponents;
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, config);
+  const change = (plan.changes as Array<Record<string, unknown>>)
+    .find((row) => row.profile === "opencode" && row.accountId === 513);
+
+  expect(change).toMatchObject({ priorityMode: "zero-sample-average", desiredPriority: 151 });
+});
+
+test("zero-sample accounts use 150 when every non-fixed account is already at the tail", () => {
+  const rows: Array<Record<string, any>> = [
+    { ...account(521, "new-a", 0), platform: "opencode_go", groupIds: [191], priority: 300 },
+    { ...account(522, "new-b", 0), platform: "opencode_go", groupIds: [191], priority: 300 },
+  ];
+  for (const row of rows) {
+    row.score = null;
+    row.observedAttempts = 0;
+    delete row.scoreComponents;
+  }
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, config);
+  const changes = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.profile === "opencode");
+
+  expect((plan.profiles as Record<string, Record<string, unknown>>).opencode.eligibleCount).toBe(0);
+  expect(changes.map((row) => row.priorityMode)).toEqual([
+    "zero-sample-fallback",
+    "zero-sample-fallback",
+  ]);
+  expect(changes.map((row) => row.desiredPriority)).toEqual([150, 150]);
+  expect(plan.priorities).toMatchObject({ "521": 150, "522": 150 });
+});
+
+test("zero-sample fallback also applies when cost weighting has no cost evidence", () => {
+  const costConfig = structuredClone(config);
+  costConfig.sub2api.priorityPlan.costWeight = 20;
+  costConfig.sub2api.priorityPlan.explorationWeight = 0;
+  const rows: Array<Record<string, any>> = [
+    { ...account(531, "codex-new-a", 0), priority: 300 },
+    { ...account(532, "codex-new-b", 0), priority: 300 },
+  ];
+  for (const row of rows) {
+    row.score = null;
+    row.observedAttempts = 0;
+    delete row.scoreComponents;
+    delete row.usage;
+  }
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, costConfig);
+  const changes = plan.changes as Array<Record<string, unknown>>;
+
+  expect(changes.map((row) => row.priorityMode)).toEqual([
+    "zero-sample-fallback",
+    "zero-sample-fallback",
+  ]);
+  expect(changes.map((row) => row.desiredPriority)).toEqual([150, 150]);
+});
+
+test("unavailable zero-sample accounts stay at the tail and fixed accounts do not affect the average", () => {
+  const scopedConfig = structuredClone(config);
+  scopedConfig.sub2api.opencodePriorityPlan!.fixedPriorities = { "601": 50 };
+  const rows: Array<Record<string, any>> = [
+    { ...account(601, "fixed-new", 0), platform: "opencode_go", groupIds: [191], priority: 200 },
+    { ...account(602, "scored", 96), platform: "opencode_go", groupIds: [191], priority: 100 },
+    { ...account(603, "new", 0), platform: "opencode_go", groupIds: [191], priority: 300 },
+    {
+      ...account(604, "unavailable-new", 0),
+      platform: "opencode_go",
+      groupIds: [191],
+      priority: 300,
+      currentAvailable: false,
+    },
+  ];
+  for (const row of [rows[0]!, rows[2]!, rows[3]!]) {
+    row.score = null;
+    row.observedAttempts = 0;
+    delete row.scoreComponents;
+  }
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, scopedConfig);
+  const changes = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.profile === "opencode");
+  const byAccount = new Map(changes.map((row) => [row.accountId, row]));
+
+  expect(byAccount.get(601)).toMatchObject({ priorityMode: "fixed", desiredPriority: 50 });
+  expect(byAccount.get(603)).toMatchObject({
+    priorityMode: "zero-sample-average",
+    desiredPriority: 100,
+  });
+  expect(byAccount.get(604)).toMatchObject({ priorityMode: "topk-tail", desiredPriority: 300 });
 });
 
 test("missing Claude account cost uses the eligible-candidate average instead of the tail priority", () => {
@@ -920,4 +1093,29 @@ test("cost normalization ignores a low-confidence failed cheap account when trus
     minimumCostRateCnyPerApiUsd: 0.1,
     maximumCostRateCnyPerApiUsd: 0.2,
   });
+});
+
+test("available zero-sample accounts use 150 when every current priority is the tail", () => {
+  const fallbackConfig = structuredClone(config);
+  const opencodePolicy = (fallbackConfig.sub2api as AppConfig["sub2api"]).opencodePriorityPlan!;
+  opencodePolicy.requireCurrentAvailable = true;
+  const rows: Array<Record<string, any>> = [
+    { ...account(401, "exhausted", 0), platform: "opencode_go", groupIds: [191], priority: 300, currentAvailable: false },
+    { ...account(402, "healthy-unscored", 0), platform: "opencode_go", groupIds: [191], priority: 300, currentAvailable: true },
+    { ...account(403, "also-unscored", 0), platform: "opencode_go", groupIds: [191], priority: 300, currentAvailable: true },
+  ];
+  for (const row of rows) {
+    row.score = null;
+    row.observedAttempts = 0;
+    delete row.scoreComponents;
+  }
+  const plan = buildAccountPriorityPlan({ recentCallLimit: 1000, accounts: rows }, fallbackConfig);
+  const changes = (plan.changes as Array<Record<string, unknown>>)
+    .filter((row) => row.profile === "opencode");
+  expect((plan.profiles as Record<string, Record<string, unknown>>).opencode.eligibleCount).toBe(0);
+  const scored = changes.filter((row) => row.priorityMode !== "topk-tail");
+  expect(scored.map((row) => row.accountId).sort()).toEqual([402, 403]);
+  expect(scored.every((row) => row.priorityMode === "zero-sample-fallback")).toBeTrue();
+  expect(scored.every((row) => row.desiredPriority === 150)).toBeTrue();
+  expect(changes.find((row) => row.accountId === 401)?.priorityMode).toBe("topk-tail");
 });

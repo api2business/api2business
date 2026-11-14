@@ -490,6 +490,25 @@
 - 按模型排障使用 `errors diagnose --model <exact-model-id> --limit <N> --top <N> --over-api <absolute-http(s)-URL>`。返回的模型 × 账号 × 链矩阵与样本链均来自已持久化尝试；运行面未记录的候选排除原因必须标记为未知，不能反推。
 - 精确诊断中的 `responseEvidence` 只展示限长脱敏摘要；`available=false` 表示运行面没有持久化可读正文，不能把包装层错误文本当作供应商业务原因。
 
+### 零样本账号暖启动优先级
+
+- 本规则统一适用于 Codex、Claude、Grok、DeepSeek 和 OpenCode 优先级作用域。
+- 零样本账号指同一 `platform` 与 `eligibleGroupIds` 内、`score=null` 且
+  `observedAttempts=0` 的账号。
+- 仅当作用域 `explorationWeight=0` 时启用暖启动：
+  - 账号必须 `currentAvailable=true`，并排除 `fixedPriorities`。
+  - 暖启动优先级取本轮同作用域、当前可用、非固定、且当前 priority 不等于
+    `maximumPriority` 的账号优先级算术平均，再四舍五入。
+  - 平均值必须排除 `maximumPriority`；不得把已经处于最低档的账号计入分母。
+  - 排除最低档后没有可平均账号时，固定使用 `150`。
+  - 暖启动不得因四舍五入落到 `maximumPriority`；结果限制在配置优先级范围内且低于该值。
+- 计划行使用 `priorityMode=zero-sample-average` 或
+  `priorityMode=zero-sample-fallback`，便于回读本轮依据。
+- `fixedPriorities` 账号不参与平均值，也不被暖启动改写；不可用零样本账号和已评分但未进入
+  top-k 的账号仍保持 `priorityMode=topk-tail`。
+- 作用域启用 `explorationWeight>0` 时保留既有探索排名，不重复套用暖启动。
+- `150` 是零样本空池回退保护值，不是新账号默认优先级，也不得写入 `fixedPriorities`。
+
 ## 稳定性观察与用户报错
 
 - 先固定查询来源：

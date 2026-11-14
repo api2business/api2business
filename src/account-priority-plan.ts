@@ -38,7 +38,7 @@ type LatencyNormalization = {
   maximumTtftP95Ms: number | null;
 };
 
-type PriorityProfile = "codex" | "claude" | "grok" | "deepseek";
+type PriorityProfile = "codex" | "claude" | "grok" | "deepseek" | "opencode";
 
 function latencyBounds(config: AppConfig, profile: PriorityProfile): {
   minimumTtftP95Ms: number;
@@ -46,6 +46,7 @@ function latencyBounds(config: AppConfig, profile: PriorityProfile): {
 } {
   const scorePolicy = profile === "grok" ? config.sub2api.grokScorePolicy
     : profile === "deepseek" ? (config.sub2api.deepseekScorePolicy ?? config.sub2api.scorePolicy)
+      : profile === "opencode" ? (config.sub2api.opencodeScorePolicy ?? config.sub2api.poolScorePolicy ?? config.sub2api.scorePolicy)
       : config.sub2api.scorePolicy;
   return {
     minimumTtftP95Ms: scorePolicy.ttftFullScoreMs,
@@ -157,6 +158,43 @@ function linearLatencyPenalty(ttftP95Ms: number, minimumTtftP95Ms: number, maxim
   if (maximumTtftP95Ms === minimumTtftP95Ms) return 0;
   return 100 * (Math.min(maximumTtftP95Ms, Math.max(minimumTtftP95Ms, ttftP95Ms)) - minimumTtftP95Ms)
     / (maximumTtftP95Ms - minimumTtftP95Ms);
+}
+
+const ZERO_SAMPLE_FALLBACK_PRIORITY = 150;
+
+function isZeroSample(row: ScoreRow): boolean {
+  return number(row.score) === null && Math.max(0, number(row.observedAttempts) ?? 0) === 0;
+}
+
+function priorityChange(
+  profile: PriorityProfile,
+  row: ScoreRow,
+  desired: number,
+  priorityMode: string,
+): Record<string, unknown> {
+  const before = number(row.priority);
+  if (before === null) throw new Error("planned priority row is missing priority");
+  return {
+    profile,
+    accountId: number(row.accountId),
+    accountName: row.accountName,
+    score: number(row.score),
+    costRateCnyPerApiUsd: costRate(row),
+    confidence: row.confidence,
+    observedAttempts: row.observedAttempts,
+    failureRate: row.failureRate,
+    failoverRate: row.failoverRate,
+    ttftP95Ms: row.ttftP95Ms,
+    beforePriority: before,
+    calculatedPriority: desired,
+    normalizedPriority: desired,
+    configuredPriorityFloor: null,
+    priorityFloorApplied: false,
+    reservePolicy: null,
+    desiredPriority: desired,
+    priorityMode,
+    change: before === desired ? "noop" : "update",
+  };
 }
 
 function buildStableRankPriorities(
@@ -313,17 +351,48 @@ function buildPriorityProfile(
       .filter((row) => row.change === "update")
       .map((row) => [String(row.accountId), row.desiredPriority]),
   );
-  const candidateRows = rows.filter((row) => {
+  const scopedRows = rows.filter((row) => {
     const accountId = number(row.accountId);
+    return profileRow(row)
+      && accountId !== null
+      && !fixedAccountIds.has(String(accountId));
+  });
+  const availableScopedRows = scopedRows.filter((row) =>
+    !policy.requireCurrentAvailable || row.currentAvailable === true);
+  const scoredRows = availableScopedRows.filter((row) => {
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
     const hasExplorationEvidence = policy.explorationWeight > 0
       && attempts < policy.explorationTargetAttempts;
-    return profileRow(row)
-      && accountId !== null
-      && !fixedAccountIds.has(String(accountId))
-      && (!policy.requireCurrentAvailable || row.currentAvailable === true)
-      && (number(row.score) !== null || hasExplorationEvidence);
+    return number(row.score) !== null || hasExplorationEvidence;
   });
+  // 关闭探索时，可用零样本账号按当前号池的非尾部均值暖启动；没有可平均账号时回退 150。
+  const zeroSampleRows = policy.explorationWeight > 0
+    ? []
+    : availableScopedRows.filter((row) => row.currentAvailable === true && isZeroSample(row));
+  const zeroSampleReferencePriorities = availableScopedRows
+    .filter((row) => row.currentAvailable === true)
+    .map((row) => number(row.priority))
+    .filter((priority): priority is number => priority !== null && priority !== policy.maximumPriority);
+  const zeroSampleWarmStart = zeroSampleRows.length === 0
+    ? null
+    : zeroSampleReferencePriorities.length === 0
+      ? { priority: ZERO_SAMPLE_FALLBACK_PRIORITY, mode: "zero-sample-fallback" }
+      : {
+          priority: Math.max(
+            policy.minimumPriority,
+            Math.min(
+              policy.maximumPriority - 1,
+              Math.round(zeroSampleReferencePriorities.reduce((sum, priority) => sum + priority, 0)
+                / zeroSampleReferencePriorities.length),
+            ),
+          ),
+          mode: "zero-sample-average",
+        };
+  const zeroSampleAccountIds = new Set(zeroSampleRows.flatMap((row) => {
+    const accountId = number(row.accountId);
+    return accountId === null ? [] : [accountId];
+  }));
+  const candidateRows = scoredRows;
   const knownCandidateCosts = candidateRows
     .map((row) => costRate(row))
     .filter((value): value is number => value !== null);
@@ -333,11 +402,17 @@ function buildPriorityProfile(
   const resolvedCost = (row: ScoreRow): number | null => costRate(row) ?? averageCandidateCost;
   const resolvedCostSource = (row: ScoreRow): "detected" | "manual" | "imputed-average" | null =>
     costSource(row) ?? (averageCandidateCost === null ? null : "imputed-average");
-  const eligible = candidateRows.filter((row) => resolvedCost(row) !== null);
+  const costWeighted = policy.costWeight > 0;
+  const eligible = costWeighted
+    ? candidateRows.filter((row) => resolvedCost(row) !== null)
+    : candidateRows;
   const trustedCosts = eligible
     .filter((row) => row.confidence === policy.requiredConfidence)
-    .map((row) => resolvedCost(row)!);
-  const fallbackCosts = eligible.map((row) => resolvedCost(row)!);
+    .map((row) => resolvedCost(row))
+    .filter((value): value is number => value !== null);
+  const fallbackCosts = eligible
+    .map((row) => resolvedCost(row))
+    .filter((value): value is number => value !== null);
   const trustedCostHasRange = trustedCosts.length > 1
     && Math.min(...trustedCosts) < Math.max(...trustedCosts);
   const costEvidence = trustedCostHasRange ? trustedCosts : fallbackCosts;
@@ -345,35 +420,21 @@ function buildPriorityProfile(
   const costEvidenceFallbackReason = trustedCostHasRange
     ? null
     : trustedCosts.length === 0 ? "no-trusted-costs" : "trusted-cost-range-degenerate";
-  if (costEvidence.length === 0) {
+  if (costWeighted && costEvidence.length === 0) {
     const tailChanges = rows.flatMap((row) => {
       const accountId = number(row.accountId);
       if (accountId === null || !profileRow(row) || fixedAccountIds.has(String(accountId))) return [];
       const before = number(row.priority);
       if (before === null) return [];
-      const desired = policy.maximumPriority;
+      const warmStart = zeroSampleAccountIds.has(accountId);
+      const desired = warmStart ? zeroSampleWarmStart!.priority : policy.maximumPriority;
       if (before !== desired) priorities[String(accountId)] = desired;
-      return [{
+      return [priorityChange(
         profile,
-        accountId,
-        accountName: row.accountName,
-        score: number(row.score),
-        costRateCnyPerApiUsd: costRate(row),
-        confidence: row.confidence,
-        observedAttempts: row.observedAttempts,
-        failureRate: row.failureRate,
-        failoverRate: row.failoverRate,
-        ttftP95Ms: row.ttftP95Ms,
-        beforePriority: before,
-        calculatedPriority: desired,
-        normalizedPriority: desired,
-        configuredPriorityFloor: null,
-        priorityFloorApplied: false,
-        reservePolicy: null,
-        desiredPriority: desired,
-        priorityMode: "topk-tail",
-        change: before === desired ? "noop" : "update",
-      }];
+        row,
+        desired,
+        warmStart ? zeroSampleWarmStart!.mode : "topk-tail",
+      )];
     });
     return {
       ok: true,
@@ -404,8 +465,8 @@ function buildPriorityProfile(
         : { enabled: false, statusAlerts: [], recommendations: [] },
     };
   }
-  const minimumCost = Math.min(...costEvidence);
-  const maximumCost = Math.max(...costEvidence);
+  const minimumCost = costEvidence.length === 0 ? null : Math.min(...costEvidence);
+  const maximumCost = costEvidence.length === 0 ? null : Math.max(...costEvidence);
   const trustedLatencies = eligible
     .filter((row) => row.confidence === policy.requiredConfidence)
     .map((row) => number(row.ttftP95Ms))
@@ -441,10 +502,14 @@ function buildPriorityProfile(
   const baseEconomicScore = (row: ScoreRow): number => {
     const dimensions = qualityDimensions(row, policy, latencyNormalization);
     const evidence = evidenceDimensions(row, policy);
-    const cost = resolvedCost(row)!;
-    const costPenalty = linearCostPenalty(cost, minimumCost, maximumCost);
+    const cost = resolvedCost(row);
+    const costPenalty = cost !== null && minimumCost !== null && maximumCost !== null
+      ? linearCostPenalty(cost, minimumCost, maximumCost)
+      : 0;
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
-    const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
+    const explorationScore = policy.explorationTargetAttempts > 0
+      ? 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts)
+      : 0;
     return (dimensions.reliabilityScore * policy.reliabilityWeight
       + dimensions.latencyScore * policy.latencyWeight
       + evidence.score * policy.evidenceWeight
@@ -472,8 +537,10 @@ function buildPriorityProfile(
     const score = number(row.score);
     const dimensions = qualityDimensions(row, policy, latencyNormalization);
     const evidence = evidenceDimensions(row, policy);
-    const cost = resolvedCost(row)!;
-    const costPenalty = linearCostPenalty(cost, minimumCost, maximumCost);
+    const cost = resolvedCost(row);
+    const costPenalty = cost !== null && minimumCost !== null && maximumCost !== null
+      ? linearCostPenalty(cost, minimumCost, maximumCost)
+      : 0;
     const latencyValue = number(row.ttftP95Ms);
     const latencyPenalty = latencyValue !== null
       && dimensions.latencyEvidence === "observed"
@@ -486,7 +553,9 @@ function buildPriorityProfile(
         )
       : null;
     const attempts = Math.max(0, number(row.observedAttempts) ?? 0);
-    const explorationScore = 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts);
+    const explorationScore = policy.explorationTargetAttempts > 0
+      ? 100 * Math.max(0, 1 - attempts / policy.explorationTargetAttempts)
+      : 0;
     const weightedBalanceScore = balanceScore(row);
     const before = number(row.priority);
     if (accountId === null || before === null) throw new Error("eligible score row is missing accountId or priority");
@@ -580,32 +649,21 @@ function buildPriorityProfile(
       || rankedAccountIds.has(accountId)) return [];
     const before = number(row.priority);
     if (before === null) return [];
-    const desired = policy.maximumPriority;
+    const warmStart = zeroSampleAccountIds.has(accountId);
+    const desired = warmStart ? zeroSampleWarmStart!.priority : policy.maximumPriority;
     if (before !== desired) priorities[String(accountId)] = desired;
-    return [{
+    return [priorityChange(
       profile,
-      accountId,
-      accountName: row.accountName,
-      score: number(row.score),
-      costRateCnyPerApiUsd: costRate(row),
-      confidence: row.confidence,
-      observedAttempts: row.observedAttempts,
-      failureRate: row.failureRate,
-      failoverRate: row.failoverRate,
-      ttftP95Ms: row.ttftP95Ms,
-      beforePriority: before,
-      calculatedPriority: desired,
-      normalizedPriority: desired,
-      configuredPriorityFloor: null,
-      priorityFloorApplied: false,
-      reservePolicy: null,
-      desiredPriority: desired,
-      priorityMode: "topk-tail",
-      change: before === desired ? "noop" : "update",
-    }];
+      row,
+      desired,
+      warmStart ? zeroSampleWarmStart!.mode : "topk-tail",
+    )];
   });
   const procurementAdvice = profile === "codex"
-    ? buildProcurementAdvice(rows.filter((row) => !isOAuthAccount(row)), config, { minimum: minimumCost, maximum: maximumCost })
+    ? buildProcurementAdvice(rows.filter((row) => !isOAuthAccount(row)), config, {
+      minimum: minimumCost ?? 0,
+      maximum: maximumCost ?? 0,
+    })
     : { enabled: false, statusAlerts: [], recommendations: [] };
   return {
     ok: true,
@@ -618,7 +676,9 @@ function buildPriorityProfile(
     anchorScore: eligible.length === 0 ? null : priorityReferenceScore,
     observedAnchorScore,
     priorityReferenceScore,
-    costRange: { minimumCostRateCnyPerApiUsd: minimumCost, maximumCostRateCnyPerApiUsd: maximumCost },
+    costRange: minimumCost === null || maximumCost === null
+      ? null
+      : { minimumCostRateCnyPerApiUsd: minimumCost, maximumCostRateCnyPerApiUsd: maximumCost },
     costNormalizationRange: {
       strategy: "linear-penalty",
       evidenceSource: costEvidenceSource,
@@ -663,6 +723,13 @@ export function buildAccountPriorityPlan(
     eligibleGroupIds: [],
   };
   const claude = buildPriorityProfile(ranking, config, "claude", claudePolicy);
+  const opencode = config.sub2api.opencodePriorityPlan
+    ? buildPriorityProfile(ranking, config, "opencode", config.sub2api.opencodePriorityPlan)
+    : {
+        eligibleCount: 0, fixedCount: 0, changedCount: 0, anchorScore: null,
+        observedAnchorScore: null, priorityReferenceScore: null, costRange: null,
+        priorities: {}, changes: [],
+      };
   const claudeReadOnly = config.operations.writePolicy?.claudeEnabled === true ? claude : {
     // owning YAML 关闭 Claude 写入时只保留资格统计，不把排序结果转成变更。
     ...claude,
@@ -678,16 +745,18 @@ export function buildAccountPriorityPlan(
     ...(claudeReadOnly.priorities as Record<string, number>),
     ...(grok.priorities as Record<string, number>),
     ...(deepseek.priorities as Record<string, number>),
+    ...(opencode.priorities as Record<string, number>),
   };
   const changes = [
     ...(codex.changes as Array<Record<string, unknown>>),
     ...(claudeReadOnly.changes as Array<Record<string, unknown>>),
     ...(grok.changes as Array<Record<string, unknown>>),
     ...(deepseek.changes as Array<Record<string, unknown>>),
+    ...(opencode.changes as Array<Record<string, unknown>>),
   ];
   return {
     ...codex,
-    policy: { codex: config.sub2api.priorityPlan, claude: claudePolicy, grok: config.sub2api.grokPriorityPlan, ...(config.sub2api.deepseekPriorityPlan ? { deepseek: config.sub2api.deepseekPriorityPlan } : {}) },
+    policy: { codex: config.sub2api.priorityPlan, claude: claudePolicy, grok: config.sub2api.grokPriorityPlan, ...(config.sub2api.deepseekPriorityPlan ? { deepseek: config.sub2api.deepseekPriorityPlan } : {}), ...(config.sub2api.opencodePriorityPlan ? { opencode: config.sub2api.opencodePriorityPlan } : {}) },
     profiles: {
       codex: {
         eligibleCount: codex.eligibleCount,
@@ -726,8 +795,17 @@ export function buildAccountPriorityPlan(
         priorityReferenceScore: deepseek.priorityReferenceScore,
         costRange: deepseek.costRange,
       },
+      opencode: {
+        eligibleCount: opencode.eligibleCount,
+        fixedCount: opencode.fixedCount,
+        changedCount: opencode.changedCount,
+        anchorScore: opencode.anchorScore,
+        observedAnchorScore: opencode.observedAnchorScore,
+        priorityReferenceScore: opencode.priorityReferenceScore,
+        costRange: opencode.costRange,
+      },
     },
-    eligibleCount: Number(codex.eligibleCount) + Number(claudeReadOnly.eligibleCount) + Number(grok.eligibleCount) + Number(deepseek.eligibleCount),
+    eligibleCount: Number(codex.eligibleCount) + Number(claudeReadOnly.eligibleCount) + Number(grok.eligibleCount) + Number(deepseek.eligibleCount) + Number(opencode.eligibleCount),
     changedCount: Object.keys(priorities).length,
     priorities,
     changes,

@@ -9,11 +9,11 @@ export function priorityHistoryHelp(): Record<string, unknown> {
   return {
     ok: true,
     command: "priority history",
-    usage: `${entry} --config <owning-YAML> priority history --over-api <absolute-http(s)-URL> [--scope codex|claude|grok|deepseek] [--account <positive-id>] [--json]`,
+    usage: `${entry} --config <owning-YAML> priority history --over-api <absolute-http(s)-URL> [--scope codex|claude|grok|deepseek|opencode] [--account <positive-id>] [--json]`,
     options: {
       "--config": "实际查询使用的 owning YAML；查看帮助不加载配置",
       "--over-api": "实际查询必填；owning YAML 声明的绝对 HTTP(S) URL，不接受别名或布尔开关",
-      "--scope": "可选；只保留 profile 或 profiles 含该作用域的轮次。取值 codex、claude、grok、deepseek",
+      "--scope": "可选；只保留 profile 或 profiles 含该作用域的轮次。取值 codex、claude、grok、deepseek、opencode",
       "--account": "可选；正整数账号 ID。给出后只返回该账号的前后优先级，不返回其他账号或原始 priorities",
       "--json": "展开匹配轮次的完整回执，包括作用域、触发方式、终态及实际变更数",
     },

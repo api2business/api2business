@@ -16,6 +16,8 @@
 - 自动优先级调度按作用域功能开关独立运行，计划生成、写入和回读分开验收。
   - 查询预算与保持评分语义的性能验收见
     [评分查询性能与自动调度](../../skills/api2business/references/upstream-scheduling.md#评分查询性能与自动调度)。
+- 零样本账号的暖启动均值、最低档排除和 `150` 空池回退只定义于
+  [零样本账号暖启动优先级](../../skills/api2business/references/upstream-scheduling.md#零样本账号暖启动优先级)。
 - 自动巡检主动分析低分的调度与供给原因，修复调度异常，供给整体质量不足时邮件说明。
   - 证据比较和处置边界只见
     [自动巡检低分归因与处置](../../skills/api2business/references/upstream-scheduling.md#自动巡检低分归因与处置)。

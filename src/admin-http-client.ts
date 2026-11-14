@@ -174,6 +174,9 @@ export class AdminHttpClient {
   upstreamRecover(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/recover", { method: "POST", headers: { "Idempotency-Key": operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000);
   }
+  upstreamPause(accountIds: number[], operationId: string): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/pause", { method: "POST", headers: { "Idempotency-Key": operationId }, body: JSON.stringify({ accountIds, operationId }) }, 30000);
+  }
   upstreamJob(id: string): Promise<Record<string, unknown>> {
     return this.request(`/api/upstreams/jobs/${encodeURIComponent(id)}`);
   }
@@ -202,6 +205,11 @@ export class AdminHttpClient {
   upstreamModelsSync(accountIds: number[]): Promise<Record<string, unknown>> {
     return this.request("/api/upstreams/models-sync", {
       method: "POST", body: JSON.stringify({ accountIds }),
+    }, 120000);
+  }
+  upstreamModelAlias(input: { accountId: number; model: string; target: string }): Promise<Record<string, unknown>> {
+    return this.request("/api/upstreams/model-alias", {
+      method: "POST", body: JSON.stringify(input),
     }, 120000);
   }
   upstreamUsageCache(results: Array<Record<string, unknown>>, apiAmountUsdTotal: number | null = null, recordSample = false): Promise<Record<string, unknown>> {

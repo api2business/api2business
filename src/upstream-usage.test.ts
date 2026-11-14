@@ -3,6 +3,7 @@ import {
   queryUpstreamUsage,
   queryUpstreamUsageConcurrently,
   summarizeQuotaProviderCoverage,
+  summarizeQuotaWindowCoverage,
   type QuotaWindowObservation,
   type UpstreamUsageResult,
 } from "./upstream-usage";
@@ -65,6 +66,21 @@ function coverageResult(
     error: windows.length > 0 ? null : "quota endpoint denied",
   };
 }
+
+test("summarizes the three quota windows without inferring unknown windows", () => {
+  const coverage = summarizeQuotaWindowCoverage([
+    coverageResult(1, "opencode-go", "https://opencode.ai/zen/go/v1", [
+      quotaWindow("five_hour", 100), quotaWindow("weekly", 0),
+    ]),
+    coverageResult(2, "command-code", "https://api.commandcode.ai/provider/v1", []),
+    coverageResult(3, "unknown", "https://unrelated.example.com/v1", [quotaWindow("weekly", 5)]),
+  ]);
+  expect(coverage).toEqual([
+    { window: "five_hour", accounts: 2, observed: 1, unknown: 1, lowQuotaWarnings: 0 },
+    { window: "weekly", accounts: 2, observed: 1, unknown: 1, lowQuotaWarnings: 1 },
+    { window: "monthly", accounts: 2, observed: 0, unknown: 2, lowQuotaWarnings: 0 },
+  ]);
+});
 
 test("summarizes OpenCode and CommandCode coverage including failed accounts inferred from exact endpoints", () => {
   const openCodeTarget = "https://opencode.ai/zen/go/v1";

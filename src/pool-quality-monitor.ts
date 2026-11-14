@@ -22,7 +22,27 @@ export interface PoolParticipation {
   costSource: "detected" | "manual" | null;
 }
 
-function poolQualityEventsSql(boundParameter: number | null = null): string { return `
+function poolQualityEventsSql(boundParameter: number | null = null): string {
+  const boundUsageFilter = boundParameter === null ? "" : `AND u.created_at >= $${boundParameter}::timestamptz`;
+  const boundErrorFilter = boundParameter === null ? "" : `AND o.created_at >= $${boundParameter}::timestamptz`;
+  const preBoundaryCte = boundParameter === null ? "" : `pre_boundary_usage AS MATERIALIZED (
+  SELECT DISTINCT u.request_id
+  FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
+  WHERE u.request_id IS NOT NULL
+    AND u.created_at < $${boundParameter}::timestamptz
+    AND u.request_id IN (SELECT request_id FROM eligible_errors)
+    AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
+    AND NOT ${audioRequestSql("u", false)}
+    AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
+    AND u.request_id NOT IN (SELECT policy.request_id FROM pool_terminal_ids policy)
+)`;
+  const rawRequests = boundParameter === null
+    ? `SELECT * FROM eligible_usage
+  UNION ALL SELECT * FROM eligible_errors`
+    : `SELECT * FROM eligible_usage
+  UNION ALL SELECT e.* FROM eligible_errors e
+  WHERE NOT EXISTS (SELECT 1 FROM pre_boundary_usage u WHERE u.request_id = e.request_id)`;
+  return `
 WITH internal_probe_keys AS (
   SELECT k.id
   FROM api_keys k
@@ -58,11 +78,12 @@ WITH internal_probe_keys AS (
   FROM usage_logs u JOIN target_accounts a ON a.id = u.account_id
     WHERE u.request_id IS NOT NULL
       AND u.created_at <= $3::timestamptz
+      ${boundUsageFilter}
       AND LOWER(CONCAT_WS(' ', u.requested_model, u.model, u.upstream_model)) NOT LIKE '%luna%'
       AND NOT ${audioRequestSql("u", false)}
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = u.api_key_id)
       AND u.request_id NOT IN (SELECT policy.request_id FROM pool_terminal_ids policy)
-), eligible_errors AS NOT MATERIALIZED (
+), eligible_errors AS MATERIALIZED (
   SELECT 'error'::text AS kind, o.id, COALESCE((
     SELECT 'client:' || NULLIF(identity_log.extra->>'client_request_id','')
     FROM ops_system_logs identity_log
@@ -79,6 +100,7 @@ WITH internal_probe_keys AS (
       AND o.request_id IS NOT NULL
       AND o.group_id = ANY(string_to_array($2, ',')::bigint[])
       AND o.created_at <= $3::timestamptz
+      ${boundErrorFilter}
       AND LOWER(CONCAT_WS(' ', o.requested_model, o.model, o.upstream_model)) NOT LIKE '%luna%'
       AND NOT ${audioRequestSql("o", true)}
       -- HTTP 200 不能证明流式业务成功；精确 usage 在 final_requests 中优先。
@@ -90,15 +112,8 @@ WITH internal_probe_keys AS (
         '/v1/messages', '/v1/responses', '/v1/chat/completions', '/responses/compact', '/v1/responses/compact'
       )
       AND NOT EXISTS (SELECT 1 FROM internal_probe_keys p WHERE p.id = o.api_key_id)
-), raw_requests AS (
-  SELECT * FROM eligible_usage ${boundParameter === null ? "" : `WHERE created_at >= $${boundParameter}::timestamptz`}
-  UNION ALL SELECT * FROM eligible_errors e ${boundParameter === null ? "" : `
-  WHERE e.created_at >= $${boundParameter}::timestamptz
-    -- A success before the fast-path boundary still supersedes a later error.
-    AND NOT EXISTS (
-      SELECT 1 FROM eligible_usage u
-      WHERE u.request_id = e.request_id AND u.created_at < $${boundParameter}::timestamptz
-    )`}
+), ${preBoundaryCte === "" ? "" : `${preBoundaryCte},`} raw_requests AS (
+  ${rawRequests}
 ), final_requests AS (
   SELECT event.*, ROW_NUMBER() OVER (
     PARTITION BY event.request_id
@@ -107,17 +122,6 @@ WITH internal_probe_keys AS (
 ), recent_requests AS MATERIALIZED (
   SELECT * FROM final_requests WHERE request_rank = 1
   ORDER BY created_at DESC, id DESC LIMIT $1
-), pool_failover_ids AS MATERIALIZED (
-  SELECT s.request_id FROM ops_system_logs s
-  WHERE s.message LIKE '%upstream_failover_switching'
-    AND s.created_at <= $3::timestamptz
-    ${boundParameter === null ? "" : `AND s.created_at >= $${boundParameter}::timestamptz`}
-  UNION
-  SELECT 'client:' || NULLIF(s.extra->>'client_request_id','') FROM ops_system_logs s
-  WHERE s.message LIKE '%upstream_failover_switching'
-    AND s.created_at <= $3::timestamptz
-    ${boundParameter === null ? "" : `AND s.created_at >= $${boundParameter}::timestamptz`}
-    AND NULLIF(s.extra->>'client_request_id','') IS NOT NULL
 ), usage_events AS (
     SELECT 'usage'::text AS kind, u.id, u.request_id, u.created_at, u.account_id,
       u.user_id, requester.email AS user_email,
@@ -194,12 +198,22 @@ WITH internal_probe_keys AS (
 )
 `; }
 
+// 切号日志关联必须逐行走 request_id / client_request_id 索引。
+// 物化 7 天全部 failover 日志会退化为 ops_system_logs 全表扫描，
+// 在 claude/grok 池质量采样里稳定触发 15s 读超时。
+const poolFailoverExistsSql = `EXISTS (
+    SELECT 1 FROM ops_system_logs s
+    WHERE (
+      s.request_id = e.request_id
+      OR (e.request_id LIKE 'client:%' AND s.client_request_id = substr(e.request_id, 8))
+    )
+      AND s.message LIKE '%upstream_failover_switching'
+  )`;
+
 function poolQualitySampleSql(boundParameter: number | null): string {
   return `${poolQualityEventsSql(boundParameter)}
 SELECT e.*,
-  EXISTS (
-    SELECT 1 FROM pool_failover_ids s WHERE s.request_id=e.request_id
-  ) AS failover_triggered
+  ${poolFailoverExistsSql} AS failover_triggered
 FROM recent_events e ORDER BY e.created_at DESC, e.id DESC
 `;
 }
@@ -211,9 +225,7 @@ export type PoolQualityErrorFilter = "scoreable" | "excluded" | "all";
 
 function poolQualityErrorsQuery(bounded = false): string { return `${poolQualityEventsSql(bounded ? 8 : null)}, filtered_errors AS (
   SELECT e.*,
-    EXISTS (
-      SELECT 1 FROM pool_failover_ids s WHERE s.request_id=e.request_id
-    ) AS failover_triggered
+    ${poolFailoverExistsSql} AS failover_triggered
   FROM recent_events e
   WHERE e.kind = 'error'
     AND (NOT (COALESCE(e.client_status_code, e.upstream_status_code, 0) BETWEEN 200 AND 399)

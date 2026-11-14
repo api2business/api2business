@@ -32,7 +32,8 @@ test("database aggregate uses bounded account indexes and current state is displ
   expect(recentAccountAggregateQuery).toContain("AND e.kind = 'usage'");
   expect(recentAccountAggregateQuery).toContain("e.kind = 'usage' AND e.first_token_ms IS NOT NULL");
   expect(recentAccountAggregateQuery).not.toContain("e.kind = 'usage' AND e.stream AND e.first_token_ms IS NOT NULL");
-  expect(recentAccountAggregateQuery).toContain("completed_at, quality_ok, ttft_ms");
+  expect(recentAccountAggregateQuery).toContain("completed_at, quality_ok, ttft_ms, error_marker");
+  expect(recentAccountAggregateQuery).toContain("completed_at timestamptz, quality_ok boolean, ttft_ms numeric, error_marker text");
   expect(recentAccountAggregateQuery).toContain("WITH bounded_probe_facts AS MATERIALIZED");
   expect(recentAccountAggregateQuery).toContain("ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY completed_at DESC) AS fact_rank");
   expect(recentAccountAggregateQuery).toContain("WHERE fact_rank <= $1");
@@ -52,7 +53,10 @@ test("database aggregate uses bounded account indexes and current state is displ
     .toBeLessThan(recentAccountAggregateQuery.indexOf("UNION ALL\n      (\n        SELECT\n          'error'::text"));
   expect(recentAccountAggregateQuery).toContain("AND ($10::text IS NULL OR a.platform = $10::text)");
   expect(recentAccountAggregateQuery).toContain("scoped_g.id = ANY(string_to_array($11::text, ',')::bigint[])");
-  expect(recentAccountAggregateQuery).toContain("true AS scoreable");
+  expect(recentAccountAggregateQuery).toContain("probe.scoreable");
+  expect(recentAccountAggregateQuery).toContain("WHERE probe.quality_ok IS DISTINCT FROM true");
+  expect(recentAccountAggregateQuery).toContain("FROM ops_error_logs o\n    WHERE o.request_id = probe.request_key");
+  expect(recentAccountAggregateQuery).toContain("WHEN o.id IS NULL THEN COALESCE(probe.error_marker, '') <> 'no-available-account'");
   expect(recentAccountAggregateQuery).toContain("AND (e.client_status_code >= 400 OR e.upstream_status_code >= 400)");
   expect(recentAccountAggregateQuery).toContain("o.status_code::int AS client_status_code");
   expect(recentAccountAggregateQuery).toContain("o.upstream_status_code::int AS upstream_status_code");

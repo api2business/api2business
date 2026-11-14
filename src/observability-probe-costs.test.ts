@@ -45,6 +45,20 @@ test('probe costs resolve rates through bounded intervals instead of per-row res
   expect(probeCostSql).not.toContain("LEFT JOIN LATERAL");
 });
 
+test('daily costs resolve rates through bounded intervals instead of per-row rescans',()=>{
+  expect(dailyCostSql).toContain("usage AS MATERIALIZED");
+  expect(dailyCostSql).toContain("rate_intervals AS MATERIALIZED");
+  expect(dailyCostSql).toContain("LEAD(at) OVER (PARTITION BY account_id ORDER BY at,rate_cny)");
+  expect(dailyCostSql).toContain("AND (rate.next_at IS NULL OR u.created_at<rate.next_at)");
+  expect(dailyCostSql).toContain("JOIN LATERAL");
+  expect(dailyCostSql).toContain("first_rates AS MATERIALIZED");
+  expect(dailyCostSql).toContain("unmatched_usage AS MATERIALIZED");
+  expect(dailyCostSql).not.toContain("LEFT JOIN LATERAL");
+  // Account fan-out must stay indexable; the OR form scanned every account.
+  expect(dailyCostSql).toContain("WHERE deleted_at IS NULL AND type='apikey'");
+  expect(dailyCostSql).not.toMatch(/FROM accounts WHERE \(deleted_at IS NULL AND type='apikey'\) OR/u);
+});
+
 test('daily buckets use configured timezone boundaries, tokens and partial-day flag',()=>{
   const data=report({probeCosts:[cost('2026-11-14',1,2,'gpt-probe',{records:2,input_tokens:100,output_tokens:20,historical_records:2,historical_cost_cny:8})]});
   expect(data.days).toHaveLength(7);

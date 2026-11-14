@@ -32,7 +32,9 @@ export function observationWindow(start?: string | null, end?: string | null, no
   if ([start,end].some(value => value && !/T.*(?:Z|[+-]\d{2}:\d{2})$/u.test(value))) throw new Error("invalid observation window: timezone is required");
   const until = end ? Date.parse(end) : now;
   const since = start ? Date.parse(start) : until - 7200000;
-  if (!Number.isFinite(since) || !Number.isFinite(until) || since >= until || until > now + 1000) throw new Error("invalid observation window");
+  if (!Number.isFinite(since) || !Number.isFinite(until)) throw new Error("invalid observation window: start and end must be valid ISO timestamps");
+  if (since >= until) throw new Error("invalid observation window: start must be before end");
+  if (until > now + 1000) throw new Error(`invalid observation window: end ${new Date(until).toISOString()} is in the future; use an end no later than ${new Date(now).toISOString()}`);
   return { start: new Date(since).toISOString(), end: new Date(until).toISOString(), boundary: "[start,end)", seconds: (until - since) / 1000 };
 }
 

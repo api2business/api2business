@@ -166,6 +166,22 @@ test("rank refreshes the shared snapshot and both reads return the policy score"
           failover_requests: 0,
           first_token_samples: 0,
           selected_calls: 12,
+        }, {
+          account_id: 480,
+          account_name: "opencode-a",
+          platform: "opencode_go",
+          account_type: "apikey",
+          status: "active",
+          schedulable: true,
+          priority: 300,
+          group_ids: [191],
+          group_names: ["opencode 自用"],
+          success_requests: 5,
+          failure_requests: 0,
+          attributed_requests: 5,
+          failover_requests: 0,
+          first_token_samples: 0,
+          selected_calls: 5,
         }],
         cached: false,
         queueDurationMs: 1,
@@ -181,8 +197,9 @@ test("rank refreshes the shared snapshot and both reads return the policy score"
   const snapshot = await service.state();
   expect(queriedLimit).toBe(1000);
   expect(ranked.recentCallLimit).toBe(1000);
-  expect(ranked.accountCount).toBe(2);
+  expect(ranked.accountCount).toBe(3);
   expect((ranked.accounts as Array<Record<string, unknown>>).some((row) => row.platform === "anthropic")).toBe(true);
+  expect((ranked.accounts as Array<Record<string, unknown>>).some((row) => row.platform === "opencode_go")).toBe(true);
   expect((ranked.accounts as Array<Record<string, unknown>>)[0]?.score).toBe(72.3);
   expect(snapshot.accounts[0]?.score).toBe(72.3);
   expect(snapshot.accounts[0]?.score).toBe((ranked.accounts as Array<Record<string, unknown>>)[0]?.score);

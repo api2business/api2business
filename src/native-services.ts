@@ -5,6 +5,8 @@ import type { AppConfig, NativeServiceId } from "./config";
 import { readSecret } from "./secrets";
 
 const nativeComponents: NativeServiceId[] = ["api", "worker", "web"];
+export const COMPOSE_UP_TIMEOUT_MS = 600_000;
+export const COMPOSE_READ_TIMEOUT_MS = 120_000;
 
 function composeArgs(config: AppConfig, action: string, component?: NativeServiceId): string[] {
   const n = config.runtime.native;
@@ -34,6 +36,9 @@ function composeRun(config: AppConfig, action: string, component?: NativeService
     // Keep the configured host Secret root available at the same absolute path
     // inside Compose containers so YAML SecretRef values remain authoritative.
     lines.push(`API2BUSINESS_SECRET_ROOT=${config.runtime.secretsRoot}`);
+    // Pin the state root explicitly: without it Compose falls back to the image
+    // default and a rebuild can silently relocate the application database.
+    lines.push(`API2BUSINESS_STATE_ROOT=${config.runtime.stateRoot}`);
     writeFileSync(envPath, `${lines.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
     chmodSync(envPath, 0o600);
   }
@@ -42,7 +47,7 @@ function composeRun(config: AppConfig, action: string, component?: NativeService
   const result = spawnSync("docker", args, {
     cwd: config.rootDirectory,
     encoding: "utf8",
-    timeout: 120_000,
+    timeout: action === "up" ? COMPOSE_UP_TIMEOUT_MS : COMPOSE_READ_TIMEOUT_MS,
     env: { ...process.env, API2BUSINESS_SECRET_ROOT: config.runtime.secretsRoot },
   });
   if (result.status !== 0) throw new Error((result.stderr || result.stdout || `docker compose ${action} failed`).trim());

@@ -35,6 +35,61 @@ test("syncs upstream models through native bulk merge without replacing account 
   expect(output.results).toEqual([expect.objectContaining({ accountId: 1520, modelCount: 2, persisted: true, writeMode: "native-bulk-merge", persistedModelCount: 2 })]);
 });
 
+test("merges a single model alias and preserves the other mapping keys and credentials", async () => {
+  const calls: Array<{ path: string; body?: Record<string, unknown> }> = [];
+  let mapping: Record<string, string> = { "kiro-opus-5-5": "kiro-opus-5-5", "claude-opus-5-5": "claude-opus-5-5" };
+  const client = {
+    getAccount: async () => ({ credentials: { base_url: "https://api.laoliimage2.win", model_mapping: { ...mapping } } }),
+    mutate: async (_method: string, path: string, body?: Record<string, unknown>) => {
+      calls.push({ path, body });
+      mapping = ((body?.credentials as Record<string, unknown>).model_mapping ?? {}) as Record<string, string>;
+      return { success: 1, failed: 0, success_ids: [1524] };
+    },
+  } as unknown as Sub2ApiClient;
+  const output = await new Sub2ApiRuntimeService(client).updateModelAlias(1524, "kiro-opus-5-5", "claude-opus-5-5", 120000);
+  expect(calls).toEqual([{ path: "/admin/accounts/bulk-update", body: {
+    account_ids: [1524],
+    credentials: { model_mapping: { "claude-opus-5-5": "claude-opus-5-5", "kiro-opus-5-5": "claude-opus-5-5" } },
+  } }]);
+  expect(output).toEqual(expect.objectContaining({
+    ok: true, accountId: 1524, model: "kiro-opus-5-5",
+    previousTarget: "kiro-opus-5-5", target: "claude-opus-5-5", mappingKeyCount: 2,
+    rollback: { model: "kiro-opus-5-5", target: "kiro-opus-5-5" },
+  }));
+});
+
+test("adds a missing alias key when the same upstream model is already mapped", async () => {
+  const calls: Array<{ path: string; body?: Record<string, unknown> }> = [];
+  let mapping: Record<string, string> = { "DeepSeek-V4.1-Flash": "DeepSeek-V4.1-Flash" };
+  const client = {
+    getAccount: async () => ({ credentials: { base_url: "https://qianfan.baidubce.com/v2", model_mapping: { ...mapping } } }),
+    mutate: async (_method: string, path: string, body?: Record<string, unknown>) => {
+      calls.push({ path, body });
+      mapping = ((body?.credentials as Record<string, unknown>).model_mapping ?? {}) as Record<string, string>;
+      return { success: 1, failed: 0, success_ids: [1554] };
+    },
+  } as unknown as Sub2ApiClient;
+  const output = await new Sub2ApiRuntimeService(client).updateModelAlias(1554, "deepseek-v4.1-flash", "DeepSeek-V4.1-Flash", 120000);
+  expect(calls).toEqual([{ path: "/admin/accounts/bulk-update", body: {
+    account_ids: [1554],
+    credentials: { model_mapping: { "DeepSeek-V4.1-Flash": "DeepSeek-V4.1-Flash", "deepseek-v4.1-flash": "DeepSeek-V4.1-Flash" } },
+  } }]);
+  expect(output).toEqual(expect.objectContaining({
+    ok: true, accountId: 1554, model: "deepseek-v4.1-flash", previousTarget: null, created: true,
+    target: "DeepSeek-V4.1-Flash", mappingKeyCount: 2, rollback: { deleteModel: "deepseek-v4.1-flash" },
+  }));
+});
+
+test("refuses to invent an alias for an upstream model the account never mapped", async () => {
+  let mapping: Record<string, string> = { "gpt-6.1-sol": "gpt-6.1-sol" };
+  const client = {
+    getAccount: async () => ({ credentials: { model_mapping: { ...mapping } } }),
+    mutate: async () => ({ success: 1, failed: 0, success_ids: [479] }),
+  } as unknown as Sub2ApiClient;
+  await expect(new Sub2ApiRuntimeService(client).updateModelAlias(479, "deepseek-v4.1-flash", "DeepSeek-V4.1-Flash", 120000))
+    .rejects.toThrow("no model mapping key");
+});
+
 test("failed upstream model discovery preserves the last available model mapping", async () => {
   const mapping = { "gpt-6.1-sol": "gpt-6.1-sol" };
   const writes: string[] = [];

@@ -90,6 +90,7 @@ interface Parsed {
   accountId: number | null;
   stage: string | null;
   suffix: string | null;
+  upstreamModel: string | null;
   rate: number | null;
   rechargeCny: number | null;
   amountCny: number | null;
@@ -153,6 +154,31 @@ export function assertSchedulingRuntimeQuery(group: string | null, platform: str
   return { group, platform: platform! };
 }
 
+export function assertErrorsQueryBounds(limit: number | undefined, top: number | undefined): void {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 10000)) {
+    throw new Error("errors --limit 必须是 1–10000 的整数");
+  }
+  if (top !== undefined && (!Number.isInteger(top) || top < 1 || top > 100)) {
+    throw new Error("errors --top 必须是 1–100 的整数；更大窗口请缩小 --start/--end 后分批查询");
+  }
+}
+
+export function assertObservationWindow(start: string | null | undefined, end: string | null | undefined, now = Date.now()): void {
+  const parse = (value: string, flag: string): number => {
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) throw new Error(`errors ${flag} 必须是可解析的 ISO 时间`);
+    return timestamp;
+  };
+  const startMs = start ? parse(start, "--start") : null;
+  const endMs = end ? parse(end, "--end") : null;
+  if (startMs !== null && endMs !== null && startMs >= endMs) {
+    throw new Error("errors --start 必须早于 --end");
+  }
+  if (endMs !== null && endMs > now + 5_000) {
+    throw new Error("errors --end 不能晚于当前时间；请改用已结束的窗口");
+  }
+}
+
 export function retirementSelectionMode(selection: string | null, scope: string, planType: string): "database-dead" | "database-all" {
   const selected = selection ?? "dead";
   if (selected !== "dead" && selected !== "all") throw new Error("--selection must be dead or all");
@@ -188,7 +214,7 @@ export function parseArgs(args: string[]): Parsed {
   }
   const configPath = value(args, "--config");
   if (!configPath) throw new Error("--config is required; run from the Api2Business repository root (where config/api2business.yaml exists) or pass --config <owning-YAML>");
-  const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--days", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--click-selector", "--selector", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode"]);
+  const optionNames = new Set(["--over-api", "--config", "--target", "--id", "--request-id", "--limit", "--top", "--draws", "--component", "--tail", "--calls", "--days", "--account", "--accounts", "--group", "--start", "--end", "--since", "--until", "--day", "--period", "--cost-cny", "--unit-cost-cny", "--amount-cny", "--direction", "--category", "--description", "--plan-type", "--scope", "--selection", "--profile", "--session-ttl-seconds", "--burst-count", "--burst-interval", "--manifest", "--click-selector", "--selector", "--model", "--file", "--output", "--priority", "--capacity", "--rate-multiplier", "--groups", "--proxy-id", "--external-costs-json", "--base-url", "--mode", "--account-id", "--stage", "--suffix", "--rate", "--recharge-cny", "--remaining-usd", "--rounds", "--window-minutes", "--page", "--search", "--product", "--quantity", "--format", "--hub-id", "--state", "--before-id", "--idempotency-key", "--platform", "--pool-mode", "--upstream-model"]);
   const flags = new Set(["--confirm", "--include-records", "--json", "--cache-only", "--refresh", "--affected-only", "--api-key-stdin", "--template-only", "--ticket-stdin", "--code-stdin", "--card-code-stdin"]);
   const command: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -272,7 +298,7 @@ export function parseArgs(args: string[]): Parsed {
     })(),
     groups: value(args, "--groups"), proxyId: integer("--proxy-id"),
     externalCostsJson: value(args, "--external-costs-json"),
-    baseUrl: value(args, "--base-url"), mode: value(args, "--mode"), accountId: integer("--account-id"), stage: value(args, "--stage"), suffix: value(args, "--suffix"),
+    baseUrl: value(args, "--base-url"), mode: value(args, "--mode"), accountId: integer("--account-id"), stage: value(args, "--stage"), suffix: value(args, "--suffix"), upstreamModel: value(args, "--upstream-model"),
     rate: decimal("--rate"), rechargeCny: decimal("--recharge-cny"),
     amountCny: decimal("--amount-cny"), direction: value(args, "--direction"),
     category: value(args, "--category"), description: value(args, "--description"),
@@ -304,7 +330,7 @@ function help(): Record<string, unknown> {
       "scores pool-quality [--scope codex|claude|grok|deepseek] [--platform <same scope>] --over-api <absolute-http(s)-URL> (default codex)",
       "upstream-scheduling-v2 scopes|plan [--scope codex|claude|grok|deepseek] --over-api <absolute-http(s)-URL> (read-only; Codex phase first)",
       "upstream-scheduling-v2 snapshot [--scope codex|claude|grok|deepseek] [--refresh|--cache-only] --over-api <absolute-http(s)-URL> (read-only read-model query; default cache with background refresh)",
-      "upstream-scheduling-v2 priority-run --scope codex|claude|grok|deepseek [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
+      "upstream-scheduling-v2 priority-run --scope codex|claude|grok|deepseek|opencode [--confirm] --over-api <absolute-http(s)-URL> (manual priority adjustment)",
       "upstream-scheduling-v2 model-sync plan|run|history [--scope codex|claude|grok|deepseek] [--accounts id,...] [--confirm] --over-api <absolute-http(s)-URL>",
       "reads status --over-api <absolute-http(s)-URL>",
       "reads runtime --group <positive-id> --platform openai|anthropic|grok|deepseek --over-api <absolute-http(s)-URL> (read-only live availability/concurrency/native version)",
@@ -327,7 +353,7 @@ function help(): Record<string, unknown> {
       "api smoke --over-api <absolute-http(s)-URL>",
       "web screenshot [--profile <owning smoke profile>] [--scope <enabled scope>] [--selector <css>] [--click-selector <css>] [--session-ttl-seconds N] [--burst-count 1..30] [--burst-interval 200ms..10s] [--manifest <absolute path>] --over-api <absolute-http(s)-URL>",
       "workflow status --id <workflow-id>",
-      "priority history --over-api <absolute-http(s)-URL> [--scope codex|claude|grok|deepseek] [--account <positive-id>]",
+      "priority history --over-api <absolute-http(s)-URL> [--scope codex|claude|grok|deepseek|opencode] [--account <positive-id>]",
       "accounts import --file <json|ndjson|zip> --unit-cost-cny <CNY> [--plan-type k12|plus|team|free] [--priority 1 --capacity 3 --rate-multiplier 1000 --groups 2,3 --proxy-id 0] [--confirm] --over-api <absolute-http(s)-URL>",
       "accounts status --id <job-id> --over-api <absolute-http(s)-URL>",
       "accounts inspect --accounts <id-or-range,...> [--over-api <absolute-http(s)-URL>]",
@@ -352,6 +378,7 @@ function help(): Record<string, unknown> {
       "upstreams list [--page N --search <text>] --over-api <absolute-http(s)-URL>",
       "upstreams usage [--accounts <id-or-range,...>] --over-api <absolute-http(s)-URL>",
       "upstreams models sync --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams model-alias --id <account-id> --model <alias> --upstream-model <upstream-model> [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams usage-cache [--accounts <id-or-range,...>] --over-api <absolute-http(s)-URL>",
       "upstreams quota-summary --over-api <absolute-http(s)-URL>",
       "upstreams quota-monitor snapshot|measure [--mode source|snapshot --rounds N] --over-api <absolute-http(s)-URL>",
@@ -368,6 +395,7 @@ function help(): Record<string, unknown> {
       "upstreams recharge --base-url <https-url> --recharge-cny <CNY> [--idempotency-key <key>] [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams recharge-status --id <workflow-id> --over-api <absolute-http(s)-URL>",
       "upstreams recover --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
+      "upstreams pause --accounts <id-or-range,...> [--confirm] --over-api <absolute-http(s)-URL>",
       "upstreams status --id <workflow-id> --over-api <absolute-http(s)-URL>",
       "payments alipay-revenue (--day YYYY-MM-DD | --period YYYY-MM) [--over-api <absolute-http(s)-URL>]",
       "cash ledger [--period YYYY-MM --page N] --over-api <absolute-http(s)-URL>",
@@ -513,12 +541,12 @@ async function bugTeamCommand(parsed: Parsed, config: ReturnType<typeof loadConf
   throw new Error(`unknown command: ${parsed.command.join(" ")}`);
 }
 
-const priorityHistoryScopes = new Set(["codex", "claude", "grok", "deepseek"]);
+const priorityHistoryScopes = new Set(["codex", "claude", "grok", "deepseek", "opencode"]);
 const priorityHistoryDisplayLimit = 20;
 
 export function assertPriorityHistoryScope(scope: string | null): void {
   if (scope !== null && !priorityHistoryScopes.has(scope)) {
-    throw new Error("--scope must be codex, claude, grok, or deepseek");
+    throw new Error("--scope must be codex, claude, grok, deepseek, or opencode");
   }
 }
 
@@ -931,6 +959,14 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-models-sync", accountIds, hint: "add --confirm to execute" };
     return await client.upstreamModelsSync(accountIds);
   }
+  if (group === "upstreams" && action === "model-alias") {
+    if (!parsed.id || !parsed.model || !parsed.upstreamModel) throw new Error("upstreams model-alias requires --id, --model, and --upstream-model");
+    const accountId = Number(parsed.id);
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error("upstreams model-alias requires a positive --id");
+    const input = { accountId, model: parsed.model, target: parsed.upstreamModel };
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-model-alias", ...input, hint: "add --confirm to execute" };
+    return await client.upstreamModelAlias(input);
+  }
   if (group === "upstreams" && action === "usage-cache") {
     if (parsed.command[2] === "restore") {
       const accountId = Number(parsed.id);
@@ -1125,6 +1161,12 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     const accountIds = parseAccountIdSelector(parsed.accounts);
     if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-recover", accountIds, hint: "add --confirm to execute" };
     return await client.upstreamRecover(accountIds, `upstream-recover-${crypto.randomUUID()}`);
+  }
+  if (group === "upstreams" && action === "pause") {
+    if (!parsed.accounts) throw new Error("upstreams pause requires --accounts");
+    const accountIds = parseAccountIdSelector(parsed.accounts);
+    if (!parsed.confirm) return { ok: true, mutation: false, action: "upstream-pause", accountIds, hint: "add --confirm to set schedulable=false without deleting the accounts" };
+    return await client.upstreamPause(accountIds, `upstream-pause-${crypto.randomUUID()}`);
   }
   if (group === "payments" && action === "alipay-revenue") {
     return await client.alipayRevenue({ day: parsed.day, period: parsed.period });
@@ -1324,8 +1366,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     if (action === "plan") return await client.upstreamSchedulingV2Plan(parsed.scope);
     if (action === "priority-run") {
       const scope = parsed.scope;
-      if (scope !== "codex" && scope !== "claude" && scope !== "grok" && scope !== "deepseek") {
-        throw new Error("upstream-scheduling-v2 priority-run requires --scope codex|claude|grok|deepseek");
+      if (scope !== "codex" && scope !== "claude" && scope !== "grok" && scope !== "deepseek" && scope !== "opencode") {
+        throw new Error("upstream-scheduling-v2 priority-run requires --scope codex|claude|grok|deepseek|opencode");
       }
       const recentCallLimit = config.operations.upstreamSchedulingV2?.automation.recentCallLimit
         ?? config.monitor.recentCallLimit;
@@ -1378,6 +1420,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     return { ok: true, mode: "sub2api-read-broker", ...result, valuesPrinted: false };
   }
   if (group === "errors" && action === "aggregate") {
+    assertErrorsQueryBounds(parsed.limit ?? undefined, parsed.top ?? undefined);
+    assertObservationWindow(parsed.start, parsed.end);
     return await client.errorAggregate(
       parsed.limit ?? config.monitor.errorAggregateLimit,
       parsed.top ?? config.monitor.errorAggregateTop,
@@ -1388,6 +1432,8 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
     );
   }
   if (group === "errors" && action === "diagnose") {
+    assertErrorsQueryBounds(parsed.requestId ? undefined : parsed.limit ?? undefined, parsed.top ?? undefined);
+    assertObservationWindow(parsed.start, parsed.end);
     return await client.errorDiagnose(
       parsed.requestId ? 1 : (parsed.limit ?? config.monitor.errorAggregateLimit),
       parsed.top ?? config.monitor.errorAggregateTop,
@@ -1406,6 +1452,7 @@ async function remote(parsed: Parsed, config: ReturnType<typeof loadConfig>, tar
   }
   if (group === "errors" && action === "inspect") {
     if (!parsed.requestId) throw new Error("errors inspect requires --request-id");
+    assertErrorsQueryBounds(undefined, parsed.top ?? undefined);
     const [diagnosis, detail] = await Promise.all([
       client.errorDiagnose(1, parsed.top ?? config.monitor.errorAggregateTop, null, null, null, [parsed.requestId], null, null),
       client.errorRequest(parsed.requestId),

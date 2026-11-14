@@ -11,6 +11,20 @@ function fixture(usageRows: unknown[] = [{
   last_success_result: { ok: true, quota: { unit: "USD", remaining: 12.5, limit: 20, used: 7.5, unlimited: false } },
 }]) {
   const config = loadConfig("config/api2business.example.yaml");
+  config.operations.upstreamSchedulingV2!.scopes.opencode = {
+    enabled: true,
+    platform: "opencode_go",
+    eligibleGroupIds: [191],
+    features: {
+      scoreRead: true,
+      planRead: true,
+      planWrite: false,
+      priorityAutomation: true,
+      idleProbe: false,
+      upstreamWrite: false,
+      modelSyncAutomation: false,
+    },
+  };
   config.operations.ledgerYamlPath = join(mkdtempSync(join(tmpdir(), "api2business-v2-")), "ledger.yaml");
   writeFileSync(config.operations.ledgerYamlPath, "profit:\n  upstreamBalanceCnyPerApiUsd: 1\n", { mode: 0o600 });
   const row = {
@@ -53,6 +67,16 @@ function fixture(usageRows: unknown[] = [{
     score: 86,
     grade: "B",
   };
+  const opencodeRow = {
+    ...row,
+    accountId: 404,
+    accountName: "opencode-a",
+    platform: "opencode_go",
+    groupIds: [191],
+    groupNames: ["opencode"],
+    score: 84,
+    grade: "B",
+  };
   const calls = { dispatch: 0, save: 0 };
   const dispatcher = {
     dispatch: async () => {
@@ -62,7 +86,7 @@ function fixture(usageRows: unknown[] = [{
       status: "ready",
       recentCallLimit: 1000,
       refreshedAt: "2026-10-03T00:00:00.000Z",
-        accounts: [row, claudeRow, grokRow],
+        accounts: [row, claudeRow, grokRow, opencodeRow],
       };
     },
   } as never;
@@ -83,7 +107,7 @@ function fixture(usageRows: unknown[] = [{
     getReadModelSnapshot: async () => null,
     saveReadModelSnapshot: async () => { calls.save += 1; },
   };
-  return { config, row, claudeRow, grokRow, calls, operations, service: new UpstreamSchedulingV2Service(config, dispatcher, operations as never) };
+  return { config, row, claudeRow, grokRow, opencodeRow, calls, operations, service: new UpstreamSchedulingV2Service(config, dispatcher, operations as never) };
 }
 
 describe("upstream scheduling v2", () => {
@@ -328,6 +352,34 @@ describe("upstream scheduling v2", () => {
     expect(plan.apply).toEqual({ enabled: false, mutation: false, reason: "grok.features.planWrite=false" });
   });
 
+  test("does not project Grok pool quality into an unsupported OpenCode scope", async () => {
+    const { service, opencodeRow } = fixture();
+    const snapshot = await service.snapshot("opencode");
+    expect(snapshot.scope).toBe("opencode");
+    expect(snapshot.platform).toBe("opencode_go");
+    expect(snapshot.data.accounts).toHaveLength(1);
+    expect(snapshot.data.accounts[0]).toMatchObject(opencodeRow);
+    expect(snapshot.data.poolQuality).toMatchObject({
+      ok: false,
+      platform: "opencode",
+      groupIds: [191],
+      error: "pool-quality is not supported for opencode_go",
+    });
+    expect(snapshot.data.errors).toMatchObject({
+      ok: false,
+      platform: "opencode",
+      groupIds: [191],
+      rows: [],
+      error: "error list is not supported for opencode_go",
+    });
+    expect(snapshot.data.poolQuality.platform).not.toBe("grok");
+    expect(snapshot.cache.complete).toBe(true);
+    expect(snapshot.cache.failedSections).toEqual([]);
+    const sections = snapshot.cache.sections as Record<string, { state: string }>;
+    expect(sections["pool-quality"]).toMatchObject({ state: "unsupported" });
+    expect(sections.errors).toMatchObject({ state: "unsupported" });
+  });
+
   test("serves a warm V2 snapshot from the read-model cache", async () => {
     const { service, calls } = fixture();
     const first = await service.snapshot("codex");
@@ -397,4 +449,69 @@ test("partial refresh preserves successful sections and their timestamps without
   operations.poolQualityErrors = async () => ({ ok: true, total: 0, rows: [] });
   const restored = await service.snapshot("codex", true);
   expect(restored.cache).toMatchObject({ complete: true, failedSections: [] });
+});
+
+describe("opencode quota window availability", () => {
+  test("marks an account unavailable when any complete quota window is exhausted", async () => {
+    const { service } = fixture([{
+      account_id: 404,
+      last_success_at: "2026-11-13T21:36:39.000Z",
+      last_success_result: {
+        ok: true,
+        baseUrl: "https://opencode.ai/zen/go/v1",
+        queriedAt: "2026-11-13T21:36:39.000Z",
+        quota: { unit: null, remaining: null },
+        quotaWindows: [
+          { window: "five_hour", remainingPercent: 100, complete: true, status: "ok" },
+          { window: "weekly", remainingPercent: 0, complete: true, status: "rate-limited" },
+          { window: "monthly", remainingPercent: 50, complete: true, status: "ok" },
+        ],
+      },
+    }]);
+    const snapshot = await service.snapshot("opencode");
+    const account = snapshot.data.accounts.find((row) => Number(row.accountId) === 404);
+    expect(account).toMatchObject({
+      currentAvailable: false,
+      quotaWindowsExhausted: true,
+    });
+    expect((account?.availabilityReason as Record<string, unknown>).code).toBe("quota-window");
+  });
+
+  test("keeps an account available when all quota windows have remaining balance", async () => {
+    const { service } = fixture([{
+      account_id: 404,
+      last_success_at: "2026-11-13T21:36:39.000Z",
+      last_success_result: {
+        ok: true,
+        baseUrl: "https://opencode.ai/zen/go/v1",
+        quota: { unit: null, remaining: null },
+        quotaWindows: [
+          { window: "five_hour", remainingPercent: 100, complete: true, status: "ok" },
+          { window: "weekly", remainingPercent: 100, complete: true, status: "ok" },
+          { window: "monthly", remainingPercent: 100, complete: true, status: "ok" },
+        ],
+      },
+    }]);
+    const snapshot = await service.snapshot("opencode");
+    const account = snapshot.data.accounts.find((row) => Number(row.accountId) === 404);
+    expect(account).toMatchObject({ currentAvailable: true, quotaWindowsExhausted: false });
+  });
+
+  test("does not treat incomplete windows as exhausted", async () => {
+    const { service } = fixture([{
+      account_id: 404,
+      last_success_at: "2026-11-13T21:36:39.000Z",
+      last_success_result: {
+        ok: true,
+        baseUrl: "https://opencode.ai/zen/go/v1",
+        quota: { unit: null, remaining: null },
+        quotaWindows: [
+          { window: "five_hour", remainingPercent: 0, complete: false, missingReason: "provider_timeout" },
+        ],
+      },
+    }]);
+    const snapshot = await service.snapshot("opencode");
+    const account = snapshot.data.accounts.find((row) => Number(row.accountId) === 404);
+    expect(account).toMatchObject({ currentAvailable: true, quotaWindowsExhausted: false });
+  });
 });

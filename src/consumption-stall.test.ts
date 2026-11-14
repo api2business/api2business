@@ -40,6 +40,8 @@ function account(overrides: Partial<ConsumptionStallAccountFact> = {}): Consumpt
     previousCostUsd: 0,
     currentCostKnownRecords: 0,
     previousCostKnownRecords: 0,
+    currentProbeUsage: 0,
+    currentProbeErrors: 0,
     currentLastUsedAt: null,
     previousLastUsedAt: null,
     ...overrides,
@@ -128,8 +130,22 @@ test("停滞查询显式排除探活与语音，并只读取当前和上一窗�
   expect(consumptionStallSql).toContain("NOT (");
   expect(consumptionStallSql).toContain("u.created_at >= $1::timestamptz");
   expect(consumptionStallSql).toContain("u.created_at < $3::timestamptz");
+  expect(consumptionStallSql).toContain("probe_window");
+  expect(consumptionStallSql).toContain("currentProbeErrors");
   expect(parseConsumptionStallDemandFacts([{ groupId: 2, platform: "openai", window: "current", model: "gpt", requests: 7 }]))
     .toEqual([{ groupId: 2, platform: "openai", window: "current", model: "gpt", requests: 7 }]);
+});
+
+test("探活全部失败且零消耗归类为 watch，不伪造消耗停滞告警", () => {
+  const result = evaluate([account({ currentProbeErrors: 70 })], [wallet()]);
+  expect(result.summary).toMatchObject({ consumptionStalled: 0, watch: 1, alerts: 0 });
+  expect(result.records[0]).toMatchObject({
+    classification: "watch",
+    reasonCodes: ["probe-unhealthy"],
+    probe: { usage: 0, errors: 70 },
+  });
+  const healthyProbe = evaluate([account({ currentProbeUsage: 16 })], [wallet()]);
+  expect(healthyProbe.records[0]).toMatchObject({ classification: "consumption-stalled" });
 });
 
 test("停滞配置有明确默认值并拒绝越界", () => {

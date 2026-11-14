@@ -71,8 +71,9 @@ test("pool sample keeps one query when the 24 hour window is full", async () => 
     boundedPoolQualitySql.indexOf("eligible_usage AS NOT MATERIALIZED"),
     boundedPoolQualitySql.indexOf("eligible_errors AS NOT MATERIALIZED"),
   );
-  expect(usageClause).not.toContain("$5");
-  expect(boundedPoolQualitySql).toContain("SELECT * FROM eligible_usage WHERE created_at >= $5::timestamptz");
+  expect(usageClause).toContain("AND u.created_at >= $5::timestamptz");
+  expect(boundedPoolQualitySql).not.toContain("SELECT * FROM eligible_usage WHERE created_at >= $5::timestamptz");
+  expect(boundedPoolQualitySql).toContain("pre_boundary_usage AS MATERIALIZED");
   expect(boundedPoolQualitySql).toContain("u.created_at < $5::timestamptz");
   expect(sample.rawCallCount).toBe(1000);
 });
@@ -105,6 +106,12 @@ test("pool sample widens a short window and stops after a bounded timeout", asyn
   } as unknown as Sub2ApiReadClient;
   await expect(collectPoolQualitySample(config, failing, "2026-08-03T00:00:00.000Z")).rejects.toThrow("sub2api_read_query_timeout");
   expect(timedOut).toBe(1);
+});
+
+test("pool quality failover attribution stays indexable per request", () => {
+  expect(poolQualitySql).not.toContain("pool_failover_ids");
+  expect(poolQualitySql).toContain("s.client_request_id = substr(e.request_id, 8)");
+  expect(boundedPoolQualitySql).not.toContain("pool_failover_ids");
 });
 
 test("pool quality applies the same recent-call decay buckets as account scoring", async () => {
@@ -252,7 +259,7 @@ test("pool quality errors use the same bounded window and expose paginated model
   expect(request?.sql).toContain("requested_model");
   expect(request?.sql).toContain("requester.email AS user_email");
   expect(request?.sql).toContain("'userEmail', user_email");
-  expect(request?.sql.match(/NOT LIKE '%luna%'/gu)?.length).toBe(2);
+  expect(request?.sql.match(/NOT LIKE '%luna%'/gu)?.length).toBe(3);
   expect(request?.sql).toContain("AND (NOT (COALESCE(e.client_status_code, e.upstream_status_code, 0) BETWEEN 200 AND 399)");
   expect(request?.sql).toContain("OR COALESCE(e.upstream_status_code, 0) >= 400");
   expect(result.pagination).toEqual({ page: 2, pageSize: 20, total: 107, totalPages: 6 });
@@ -273,7 +280,8 @@ test("pool error fast path widens to seven days while preserving old success pre
   });
   expect(requests).toHaveLength(2);
   expect(requests[0]!.sql).toBe(boundedPoolQualityErrorsSql);
-  expect(requests[0]!.sql).toContain("u.request_id = e.request_id AND u.created_at < $8::timestamptz");
+  expect(requests[0]!.sql).toContain("pre_boundary_usage AS MATERIALIZED");
+  expect(requests[0]!.sql).toContain("u.request_id = e.request_id");
   expect(requests[0]!.sql).toContain("eligible_usage AS NOT MATERIALIZED");
   expect(requests[1]!.sql).toBe(boundedPoolQualityErrorsSql);
   expect(requests[1]!.parameters.at(-1)).toBe("2026-07-29T22:12:43.000Z");

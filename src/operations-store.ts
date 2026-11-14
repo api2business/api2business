@@ -184,6 +184,8 @@ export class OperationsStore {
       CREATE INDEX IF NOT EXISTS api2business_upstream_quota_samples_success_wallet_time_idx
         ON api2business_upstream_quota_samples(wallet_key, sampled_at DESC)
         WHERE probe_ok=true AND remaining_usd IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS api2business_upstream_quota_samples_time_idx
+        ON api2business_upstream_quota_samples(sampled_at);
       CREATE TABLE IF NOT EXISTS api2business_oauth_runtime_samples (
         sampled_at timestamptz NOT NULL,
         profile text NOT NULL CHECK (profile IN ('codex','grok')),
@@ -229,9 +231,6 @@ export class OperationsStore {
         ADD COLUMN IF NOT EXISTS platform text NOT NULL DEFAULT 'codex';
       ALTER TABLE api2business_pool_quality_samples
         DROP CONSTRAINT IF EXISTS api2business_pool_quality_samples_platform_check;
-      ALTER TABLE api2business_pool_quality_samples
-        ADD CONSTRAINT api2business_pool_quality_samples_platform_check
-        CHECK (platform IN ('codex','claude','grok','deepseek','opencode')) NOT VALID;
       ALTER TABLE api2business_pool_quality_samples
         DROP CONSTRAINT IF EXISTS api2business_pool_quality_samples_pkey;
       ALTER TABLE api2business_pool_quality_samples
@@ -282,6 +281,9 @@ export class OperationsStore {
         ADD COLUMN IF NOT EXISTS raw_failover_recovered integer NOT NULL DEFAULT 0;
       ALTER TABLE api2business_pool_quality_samples
         ADD COLUMN IF NOT EXISTS sample_weighting text NOT NULL DEFAULT 'recent-call-decay-buckets';
+      ALTER TABLE api2business_pool_quality_samples
+        ADD CONSTRAINT api2business_pool_quality_samples_platform_check
+        CHECK (platform IN ('codex','claude','grok','deepseek','opencode')) NOT VALID;
       CREATE INDEX IF NOT EXISTS api2business_pool_quality_samples_time_idx
         ON api2business_pool_quality_samples(sampled_at DESC);
       CREATE TABLE IF NOT EXISTS api2business_bugteam_cost_samples (
@@ -570,14 +572,30 @@ export class OperationsStore {
 
   async observedCostRates(start: string, end: string) {
     return await this.readQuery(() => this.sql`
-      WITH raw AS MATERIALIZED (
+      WITH selected_rounds AS MATERIALIZED (
+        -- Only the requested window plus a 4-day pad and one index-served anchor round per
+        -- wallet. Expanding 30 days of sample JSON made the window functions
+        -- alone exceed the 15s read budget on the seven-day probe-cost report.
+        SELECT sampled_at FROM api2business_upstream_quota_samples
+        WHERE sampled_at<${end} AND sampled_at>=${start}::timestamptz - interval '4 days'
+        UNION
+        SELECT sampled_at FROM (
+          SELECT DISTINCT ON (wallet_key) sampled_at
+          FROM api2business_upstream_quota_samples
+          WHERE sampled_at<${start} AND sampled_at>=${start}::timestamptz - interval '30 days'
+          ORDER BY wallet_key,sampled_at DESC
+        ) anchor_rounds
+      ), raw AS MATERIALIZED (
         SELECT s.sampled_at AS at, (i->>'accountId')::bigint AS account_id,
           CASE WHEN (i->>'costRateCnyPerApiUsd')::numeric>0
             THEN (i->>'costRateCnyPerApiUsd')::double precision END AS rate_cny,
           CASE WHEN s.cny_per_usd>0 THEN s.cny_per_usd::double precision END AS wallet_rate_cny
-        FROM api2business_upstream_quota_samples s,
+        FROM api2business_upstream_quota_samples s
+        JOIN selected_rounds USING (sampled_at),
           LATERAL jsonb_array_elements(s.account_cost_inputs) i
-        WHERE s.sampled_at<${end} AND s.sampled_at>=${start}::timestamptz - interval '30 days'
+        WHERE s.sampled_at<${end} AND s.sampled_at>=${start}::timestamptz - interval '4 days'
+      ), raw_accounts AS MATERIALIZED (
+        SELECT DISTINCT account_id FROM raw
       ), anchored AS MATERIALIZED (
         SELECT account_id,at,rate_cny,wallet_rate_cny FROM raw
         UNION ALL
@@ -588,7 +606,8 @@ export class OperationsStore {
           WHERE s.wallet_key=COALESCE(c.result->>'walletKey','') AND s.cny_per_usd>0
           ORDER BY s.sampled_at LIMIT 1
         ) w ON true
-        WHERE NOT EXISTS (SELECT 1 FROM raw r WHERE r.account_id=c.account_id)
+        LEFT JOIN raw_accounts r USING (account_id)
+        WHERE r.account_id IS NULL
       ), per_sample AS (
         SELECT account_id,at,MAX(rate_cny) AS rate_cny,MAX(wallet_rate_cny) AS wallet_rate_cny
         FROM anchored GROUP BY account_id,at
@@ -607,10 +626,14 @@ export class OperationsStore {
       ), events AS MATERIALIZED (
         SELECT account_id,at,rate_cny,wallet_rate_cny FROM changes
         WHERE previous_rate IS DISTINCT FROM rate_cny OR previous_wallet_rate IS DISTINCT FROM wallet_rate_cny
-      ), anchor AS (
-        SELECT DISTINCT ON (account_id) * FROM events WHERE at<${start}
+      ), carried_before_window AS (
+        -- Emit the last known rate at the window edge so consumers can carry
+        -- it across the boundary without needing the full prior history.
+        SELECT DISTINCT ON (account_id) account_id,${start}::timestamptz AS at,rate_cny,wallet_rate_cny
+        FROM events WHERE at<${start}
         ORDER BY account_id,at DESC
-      ) SELECT * FROM anchor UNION ALL SELECT * FROM events WHERE at>=${start}
+      ) SELECT * FROM carried_before_window
+        UNION ALL SELECT * FROM events WHERE at>=${start}
       ORDER BY account_id,at
     `);
   }
@@ -1016,7 +1039,8 @@ export class OperationsStore {
           'client_request_id', NULLIF(evidence->>'clientRequestId', ''),
           'completed_at', NULLIF(evidence->>'completedAt', '')::timestamptz,
           'quality_ok', COALESCE((evidence->>'qualityOk')::boolean, false),
-          'ttft_ms', NULLIF(evidence->>'ttftMs', '')::numeric
+          'ttft_ms', NULLIF(evidence->>'ttftMs', '')::numeric,
+          'error_marker', NULLIF(evidence->>'errorMarker', '')
         ) AS fact,
         ROW_NUMBER() OVER (
           PARTITION BY NULLIF(evidence->>'accountId', '')::bigint
